@@ -4,10 +4,15 @@
   "description": "",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "prestart": "npm run build",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
-    "test": "vitest run"
+    "dev": "tsx watch src/index.ts",
+    "generate-types": "codex app-server generate-ts --out src/app-server",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +25,8 @@
     "vitest": "^4.0.10"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.5.1"
+    "@agentclientprotocol/sdk": "^0.5.1",
+    "diff": "^8.0.2",
+    "vscode-jsonrpc": "^8.2.1"
   }
 }
