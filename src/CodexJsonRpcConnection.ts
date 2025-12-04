@@ -7,27 +7,12 @@ import fs from "node:fs";
 import path from "node:path";
 import {createJSONRPCReader, createJSONRPCWriter} from "./StdUtils";
 
+export function startCodexConnection(codexPath: string, logPath?: string): MessageConnection {
+    const codex: ChildProcessWithoutNullStreams = spawn(codexPath, ["app-server"]);
 
-export function startCodexConnection(): MessageConnection {
-    //TODO: parametrize path to log
-    //TODO: parametrize path to codex executable
-    const logDir = path.join("/home/alex/.codex/jetbrains/");
-    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir);
-
-    const logFile = path.join(logDir, "app-server.log");
-
-    function log(message: string) {
-        const timestamp = new Date().toISOString();
-        fs.appendFileSync(logFile, `[${timestamp}] ${message}\n`);
+    if (logPath) {
+        attachLogs(codex, logPath);
     }
-
-    const codex: ChildProcessWithoutNullStreams = spawn("/home/alex/.codex/jetbrains/codex-latest", ["app-server"]);
-    codex.stderr.on("data", (data) => {
-        log("[STDERR] " + data.toString());
-    });
-    codex.stdout.on("data", (data: Buffer) => {
-        log("[STDOUT] " + data.toString());
-    });
 
     const reader = createJSONRPCReader(codex.stdout);
     const writer = createJSONRPCWriter(codex.stdin);
@@ -37,4 +22,21 @@ export function startCodexConnection(): MessageConnection {
     connection.listen();
 
     return connection;
+}
+
+function attachLogs(proc: ChildProcessWithoutNullStreams, logPath: string) {
+    function log(message: string) {
+        const logDir = path.join(logPath);
+        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir);
+        const logFile = path.join(logPath, "app-server.log");
+        const timestamp = new Date().toISOString();
+        fs.appendFileSync(logFile, `[${timestamp}] ${message}\n`);
+    }
+
+    proc.stderr.on("data", (data) => {
+        log("[STDERR] " + data.toString());
+    });
+    proc.stdout.on("data", (data: Buffer) => {
+        log("[STDOUT] " + data.toString());
+    });
 }

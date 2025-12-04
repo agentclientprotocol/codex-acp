@@ -15,7 +15,7 @@ async function main() {
 }
 
 async function startJSONRPCCommunication() {
-    const connection = startCodexConnection();
+    const connection = startCodexConnection("codex");
 
     const initRequest: Omit<ClientRequest, "id"> = {
         method: "initialize",
@@ -85,7 +85,6 @@ async function startJSONRPCCommunication() {
     console.log(sendUserMessageResponse);
 }
 
-// @ts-ignore
 async function startRawCommunication() {
     const codex: ChildProcessWithoutNullStreams = spawn("codex", ["app-server"]);
     codex.stderr.on("data", (data) => {
