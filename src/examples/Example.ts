@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import {ChildProcessWithoutNullStreams, spawn} from "node:child_process";
-import {
-    AddConversationSubscriptionResponse,
-    ClientRequest, InitializeResponse, NewConversationResponse, SendUserMessageResponse, TaskCompleteEvent
+import type {ChildProcessWithoutNullStreams} from "node:child_process";
+import {spawn} from "node:child_process";
+import type {
+    AddConversationSubscriptionResponse, ClientRequest, InitializeResponse, NewConversationResponse,
+    SendUserMessageResponse
 } from "../app-server";
 import {startCodexConnection} from "../CodexJsonRpcConnection";
 
@@ -58,12 +59,12 @@ async function startJSONRPCCommunication() {
     const subscriptionResponse: AddConversationSubscriptionResponse = await connection.sendRequest(addListenerRequest.method, addListenerRequest.params)
     console.log(subscriptionResponse);
 
-    connection.onNotification("codex/event/task_complete", (event: TaskCompleteEvent) => {
+    connection.onNotification("codex/event/task_complete", () => {
         console.log("[EVENT] Task complete")
         connection.end()
     });
 
-    connection.onNotification("codex/event/conversation_ended", (event: { conversationId: string }) => {})
+    connection.onNotification("codex/event/conversation_ended", () => {})
     connection.onUnhandledNotification((data) => console.log("[UNHANDLED NOTIFICATION]", data))
 
     const sendUserMessage: Omit<ClientRequest, "id"> = {
@@ -84,6 +85,7 @@ async function startJSONRPCCommunication() {
     console.log(sendUserMessageResponse);
 }
 
+// @ts-ignore
 async function startRawCommunication() {
     const codex: ChildProcessWithoutNullStreams = spawn("codex", ["app-server"]);
     codex.stderr.on("data", (data) => {

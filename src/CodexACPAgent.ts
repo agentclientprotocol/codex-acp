@@ -1,14 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk";
-import {PlanEntry, ToolCallContent} from "@agentclientprotocol/sdk";
-import {MessageConnection} from "vscode-jsonrpc/node";
-import {
-    AddConversationSubscriptionResponse,
-    ClientRequest,
-    EventMsg,
-    type FileChange,
-    InitializeResponse,
-    NewConversationResponse, PlanItemArg,
-    TaskCompleteEvent
+import type {PlanEntry, ToolCallContent} from "@agentclientprotocol/sdk";
+import type {MessageConnection} from "vscode-jsonrpc/node";
+import type {
+    ClientRequest, EventMsg, FileChange, NewConversationResponse, PlanItemArg, TaskCompleteEvent
 } from "./app-server";
 
 import {applyPatch} from "diff";
@@ -53,7 +47,7 @@ export class CodexACPAgent implements acp.Agent {
             }
         }
 
-        const initResponse: InitializeResponse = await this.codexConnection.sendRequest(initRequest.method, initRequest.params)
+        await this.codexConnection.sendRequest(initRequest.method, initRequest.params)
 
         const newConversationRequest: Omit<ClientRequest, "id"> = {
             method: "newConversation",
@@ -112,7 +106,7 @@ export class CodexACPAgent implements acp.Agent {
             .join(" ");
 
         try {
-            await this.processMessage(params.sessionId, session.pendingPrompt.signal, prompt);
+            await this.processMessage(params.sessionId, prompt);
         } catch (err) {
             if (session.pendingPrompt.signal.aborted) {
                 return {stopReason: "cancelled"};
@@ -130,7 +124,6 @@ export class CodexACPAgent implements acp.Agent {
 
     private async processMessage(
         sessionId: string,
-        abortSignal: AbortSignal,
         prompt: string
     ): Promise<void> {
 
@@ -141,7 +134,7 @@ export class CodexACPAgent implements acp.Agent {
                 conversationId: sessionId
             }
         }
-        const subscriptionResponse: AddConversationSubscriptionResponse = await this.codexConnection.sendRequest(addListenerRequest.method, addListenerRequest.params)
+        await this.codexConnection.sendRequest(addListenerRequest.method, addListenerRequest.params)
 
         this.codexConnection.onUnhandledNotification((data) => {
             const params = data.params;

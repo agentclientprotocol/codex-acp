@@ -1,6 +1,7 @@
 import * as rpc from "vscode-jsonrpc/node";
-import {Emitter, Message, MessageConnection, DataCallback} from "vscode-jsonrpc/node";
-import {ChildProcessWithoutNullStreams, spawn} from "node:child_process";
+import type {MessageConnection} from "vscode-jsonrpc/node";
+import type {ChildProcessWithoutNullStreams} from "node:child_process";
+import {spawn} from "node:child_process";
 
 import fs from "node:fs";
 import path from "node:path";
