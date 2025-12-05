@@ -16,12 +16,14 @@ jobs:
       - run: bun install
       - run: npm run typecheck
       - run: npm run bundle:all
+      - run: npm run package:all
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/bin/codex-acp-x64-linux
-            dist/bin/codex-acp-arm64-linux
-            dist/bin/codex-acp-x64-darwin
-            dist/bin/codex-acp-x64-windows.exe
+            dist/bin/codex-acp-x64-linux.zip
+            dist/bin/codex-acp-arm64-linux.zip
+            dist/bin/codex-acp-x64-darwin.zip
+            dist/bin/codex-acp-arm64-darwin.zip
+            dist/bin/codex-acp-x64-windows.zip
           generate_release_notes: true
