@@ -6,7 +6,6 @@
     "module": "ES2022",
     "moduleResolution": "Bundler",
     "target": "ES2022",
-    "types": ["bun"],
 
     "sourceMap": true,
     "declaration": true,
