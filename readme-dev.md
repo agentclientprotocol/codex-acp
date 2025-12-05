@@ -30,8 +30,12 @@ Run from sources
 ```
 
 Run from binaries
-1. Download acp-server binary from https://github.com/JetBrains/codex-acp/tags
-2. Adjust acp config for IDE
+1. Download acp-server binary archive from https://github.com/JetBrains/codex-acp/tags
+2. Unzip the archive:
+   ```bash
+   unzip codex-acp-<platform>.zip
+   ```
+3. Adjust acp config for IDE
 ```json
 {
   "agent_servers": {
@@ -49,9 +53,17 @@ Optionally, set a path to log directory via env variable `APP_SERVER_LOGS`.
 
 ### Build binaries
 
-Build single executables in `dest/bin` directory:
+Build single executables in `dist/bin` directory:
 
-`npm run bundle:all`
+```bash
+npm run bundle:all
+```
+
+Package binaries into zip archives:
+
+```bash
+npm run package:all
+```
 
 ### Generate codex-specific types
 
