@@ -1,0 +1,26 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: npm run bundle:all
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/bin/codex-acp-x64-linux
+            dist/bin/codex-acp-arm64-linux
+            dist/bin/codex-acp-x64-darwin
+            dist/bin/codex-acp-x64-windows.exe
+          generate_release_notes: true
