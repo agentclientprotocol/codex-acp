@@ -176,11 +176,11 @@ export class CodexACPAgent implements acp.Agent {
                 await this.connection.sessionUpdate({
                     sessionId: sessionId,
                     update: {
-                        sessionUpdate: "tool_call",
-                        kind: "think",
-                        title: event.text,
-                        status: "in_progress", //TODO why in_progress status ignored
-                        toolCallId: this.generateRandomId(),
+                        sessionUpdate: "agent_thought_chunk",
+                        content: {
+                            type: "text",
+                            text: event.text
+                        }
                     }
                 });
                 break;
