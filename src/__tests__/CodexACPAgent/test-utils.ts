@@ -74,9 +74,14 @@ export async function testEventHandling(
     agent: CodexACPAgent,
     sessionId: string,
     mocks: MockConnections,
-    event: any
+    events: any | any[]
 ): Promise<void> {
     const completePrompt = await startPromptForEventHandlers(agent, sessionId, mocks);
-    await triggerEvent(mocks, event);
+
+    const eventArray = Array.isArray(events) ? events : [events];
+    for (const event of eventArray) {
+        await triggerEvent(mocks, event);
+    }
+
     await completePrompt();
 }

@@ -8,6 +8,7 @@ import type {
 import {applyPatch} from "diff";
 
 interface AgentSession {
+    seenReasoningDeltas: boolean;
     pendingPrompt: AbortController | null;
 }
 
@@ -69,6 +70,7 @@ export class CodexACPAgent implements acp.Agent {
 
         const sessionId = newConversationResponse.conversationId;
         this.sessions.set(sessionId, {
+            seenReasoningDeltas: false,
             pendingPrompt: null,
         });
 
@@ -172,18 +174,65 @@ export class CodexACPAgent implements acp.Agent {
 
     private async onAgentMessage(sessionId: string, event: EventMsg) {
         switch (event.type) {
-            case "agent_reasoning":
+            case "agent_reasoning": {
+                const session = this.sessions.get(sessionId);
+                if (!session) break;
+                
+                // Only send if we haven't seen delta events (non-streaming mode)
+                if (!session.seenReasoningDeltas) {
+                    await this.connection.sessionUpdate({
+                        sessionId: sessionId,
+                        update: {
+                            sessionUpdate: "agent_thought_chunk",
+                            content: {
+                                type: "text",
+                                text: event.text
+                            }
+                        }
+                    });
+                }
+                // Reset the flag for next turn
+                session.seenReasoningDeltas = false;
+                break;
+            }
+
+            case "reasoning_content_delta":
+            case "reasoning_raw_content_delta": {
+                const session = this.sessions.get(sessionId);
+                if (!session) break;
+                
+                session.seenReasoningDeltas = true;
                 await this.connection.sessionUpdate({
                     sessionId: sessionId,
                     update: {
                         sessionUpdate: "agent_thought_chunk",
                         content: {
                             type: "text",
-                            text: event.text
+                            text: event.delta
                         }
                     }
                 });
                 break;
+            }
+
+            case "agent_reasoning_section_break": {
+                const session = this.sessions.get(sessionId);
+                if (!session) break;
+                
+                session.seenReasoningDeltas = true;
+                // Send spacing for section break
+                await this.connection.sessionUpdate({
+                    sessionId: sessionId,
+                    update: {
+                        sessionUpdate: "agent_thought_chunk",
+                        content: {
+                            type: "text",
+                            text: "\n\n"
+                        }
+                    }
+                });
+                break;
+            }
 
             case "exec_command_begin":
                 if (event.command[0] === "bash" || event.command[0] === "/bin/bash") {
@@ -276,8 +325,6 @@ export class CodexACPAgent implements acp.Agent {
             case "item_started":
             case "item_completed":
             case "agent_message_content_delta":
-            case "reasoning_content_delta":
-            case "reasoning_raw_content_delta":
             case "shutdown_complete":
             case "warning":
             case "task_started":
@@ -288,7 +335,6 @@ export class CodexACPAgent implements acp.Agent {
             case "agent_reasoning_delta":
             case "agent_reasoning_raw_content":
             case "agent_reasoning_raw_content_delta":
-            case "agent_reasoning_section_break":
             case "session_configured":
             case "mcp_tool_call_begin":
             case "mcp_tool_call_end":
