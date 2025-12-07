@@ -1,10 +1,11 @@
-import { vi } from 'vitest';
+import { vi, expect } from 'vitest';
+import type { CodexACPAgent } from '../../CodexACPAgent';
 
 export interface MockConnections {
     mockAcpConnection: any;
     mockCodexConnection: any;
     notificationHandlers: Map<string, Function>;
-    unhandledNotificationHandler: Function | null;
+    getUnhandledNotificationHandler: () => Function | null;
 }
 
 export function createMockConnections(): MockConnections {
@@ -31,6 +32,51 @@ export function createMockConnections(): MockConnections {
         mockAcpConnection,
         mockCodexConnection,
         notificationHandlers,
-        unhandledNotificationHandler,
+        getUnhandledNotificationHandler: () => unhandledNotificationHandler,
     };
+}
+
+export async function startPromptForEventHandlers(
+    agent: CodexACPAgent,
+    sessionId: string,
+    mocks: MockConnections
+): Promise<() => Promise<void>> {
+    mocks.mockCodexConnection.sendRequest.mockResolvedValue(undefined);
+
+    const promptPromise = agent.prompt({
+        sessionId,
+        prompt: [{ type: 'text', text: 'test' }],
+    });
+
+    // wait for handlers to be registered
+    await vi.waitFor(() => {
+        expect(mocks.getUnhandledNotificationHandler()).not.toBeNull();
+    }, { timeout: 1000 });
+
+    return async () => {
+        const taskCompleteHandler = mocks.notificationHandlers.get('codex/event/task_complete');
+        if (taskCompleteHandler) {
+            taskCompleteHandler({ type: 'task_complete' });
+        }
+        await promptPromise;
+    };
+}
+
+export async function triggerEvent(mocks: MockConnections, event: any): Promise<void> {
+    const handler = mocks.getUnhandledNotificationHandler();
+    if (!handler) {
+        throw new Error('No unhandled notification handler registered. Did you call startPromptForEventHandlers?');
+    }
+    await handler({ params: { msg: event } });
+}
+
+export async function testEventHandling(
+    agent: CodexACPAgent,
+    sessionId: string,
+    mocks: MockConnections,
+    event: any
+): Promise<void> {
+    const completePrompt = await startPromptForEventHandlers(agent, sessionId, mocks);
+    await triggerEvent(mocks, event);
+    await completePrompt();
 }
