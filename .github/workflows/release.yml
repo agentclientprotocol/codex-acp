@@ -15,6 +15,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - run: npm run typecheck
+      - run: npm test
       - run: npm run bundle:all
       - run: npm run package:all
       - name: Create Release
