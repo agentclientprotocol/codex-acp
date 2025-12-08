@@ -46,14 +46,14 @@ export class CodexACPAgent implements acp.Agent {
             model: null,
             modelProvider: null,
             profile: null,
-            cwd: null,
+            cwd: _params.cwd,
             approvalPolicy: "never",
             sandbox: null,
             config: null,
             baseInstructions: null,
             developerInstructions: null,
             compactPrompt: null,
-            includeApplyPatchTool: false,
+            includeApplyPatchTool: null,
         })
 
         const sessionId = newConversationResponse.conversationId;
