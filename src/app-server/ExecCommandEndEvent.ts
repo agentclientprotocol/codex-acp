@@ -10,6 +10,10 @@ export type ExecCommandEndEvent = {
  */
 call_id: string, 
 /**
+ * Identifier for the underlying PTY process (when available).
+ */
+process_id?: string, 
+/**
  * Turn ID that this command belongs to.
  */
 turn_id: string, 
