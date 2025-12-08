@@ -12,9 +12,9 @@ describe('CodexACPAgent - reasoning events', () => {
 
         agent = new CodexACPAgent(mocks.mockAcpConnection, mocks.mockCodexConnection);
 
-        mocks.mockCodexConnection.sendRequest
-            .mockResolvedValueOnce(undefined)
-            .mockResolvedValueOnce({ conversationId: sessionId });
+        mocks.mockCodexConnection.sendRequest.mockResolvedValueOnce(
+            { conversationId: sessionId }
+        );
         await agent.newSession({
             cwd: "",
             mcpServers: []
