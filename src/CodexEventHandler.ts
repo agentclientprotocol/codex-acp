@@ -80,6 +80,9 @@ export class CodexEventHandler {
             case "undo_started":
             case "undo_completed":
             case "turn_diff":
+            case "mcp_startup_update":
+            case "mcp_startup_complete":
+            case "elicitation_request":
                 break;
         }
     }
