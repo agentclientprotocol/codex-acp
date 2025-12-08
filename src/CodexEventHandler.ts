@@ -1,241 +1,218 @@
-import type {
-    AgentMessageEvent,
-    AgentReasoningEvent, AgentReasoningSectionBreakEvent, EventMsg, ExecCommandBeginEvent,
-    ExecCommandEndEvent, FileChange, PatchApplyBeginEvent, PatchApplyEndEvent,
-    ReasoningContentDeltaEvent, ReasoningRawContentDeltaEvent, UpdatePlanArgs
-} from "./app-server";
+import type {ServerNotification} from "./app-server";
 import type {SessionState} from "./CodexACPAgent";
-import  {type PlanEntry, type ToolCallContent} from "@agentclientprotocol/sdk";
-
-import {applyPatch} from "diff";
-import {ACPSessionConnection} from "./ACPSessionConnection";
 import * as acp from "@agentclientprotocol/sdk";
+import {type PlanEntry, type ToolCallContent} from "@agentclientprotocol/sdk";
+import {applyPatch} from "diff";
+import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
+import type {
+    AgentMessageDeltaNotification,
+    CommandAction,
+    FileUpdateChange,
+    ItemCompletedNotification,
+    ItemStartedNotification,
+    ThreadItem,
+    TurnPlanUpdatedNotification
+} from "./app-server/v2";
 
 export class CodexEventHandler {
 
     private readonly connection: acp.AgentSideConnection;
+    private readonly sessionState: SessionState;
 
-    constructor(connection: acp.AgentSideConnection) {
+    constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
+        this.sessionState = sessionState;
     }
 
-    async handleEvent(sessionState: SessionState, event: EventMsg) {
-        const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
+    async handleNotification(notification: ServerNotification) {
+        const session = new ACPSessionConnection(this.connection, this.sessionState.sessionId);
+        const updateEvent = await this.createUpdateEvent(notification);
+        if (updateEvent) {
+            await session.update(updateEvent);
+        }
+    }
 
-        switch (event.type) {
-            case "agent_reasoning":
-                return this.handleAgentReasoning(session, sessionState, event);
-            case "reasoning_content_delta":
-            case "reasoning_raw_content_delta":
-                return this.handleReasoningDelta(session, sessionState, event)
-            case "agent_reasoning_section_break":
-                return this.handleReasoningSectionBreak(session, sessionState, event)
-            case "exec_command_begin":
-                return this.handleCommandBegin(session, event);
-            case "exec_command_end":
-                return this.handleCommandEnd(session, event);
-            case "patch_apply_begin":
-                return await this.handlePatchApplyBegin(session, event);
-            case "patch_apply_end":
-                return await this.handlePatchApplyEnd(session, event);
-            case "agent_message":
-                return await this.handleAgentMessage(session, event);
-            case "plan_update":
-                return await this.handleUpdatePlan(session, event);
-            //TODO handle other events
-            case "error":
-            case "stream_error":
-            case "exec_approval_request":
-            case "apply_patch_approval_request":
-            case "token_count":
-            case "agent_message_content_delta":
+    async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
+        //TODO should take flow and return flow
+        switch (notification.method) {
+            case "item/agentMessage/delta":
+                return await this.createTextEvent(notification.params);
+            case "item/started":
+                return await this.createItemEvent(notification.params);
+            case "item/completed":
+                return await this.completeItemEvent(notification.params);
+            case "turn/plan/updated":
+                return await this.updatePlan(notification.params);
+            case "item/reasoning/summaryTextDelta": //TODO streaming reasoning?
+            case "item/reasoning/summaryPartAdded":
             //skipped events
-            case "get_history_entry_response":
-            case "mcp_list_tools_response":
-            case "list_custom_prompts_response":
-            case "turn_aborted":
-            case "entered_review_mode":
-            case "exited_review_mode":
-            case "raw_response_item":
-            case "item_started":
-            case "item_completed":
-            case "shutdown_complete":
-            case "warning":
-            case "task_started":
-            case "task_complete":
-            case "user_message":
-            case "agent_message_delta":
-            case "agent_reasoning_delta":
-            case "agent_reasoning_raw_content":
-            case "agent_reasoning_raw_content_delta":
-            case "session_configured":
-            case "mcp_tool_call_begin":
-            case "mcp_tool_call_end":
-            case "web_search_begin":
-            case "web_search_end":
-            case "exec_command_output_delta":
-            case "view_image_tool_call":
-            case "deprecation_notice":
-            case "background_event":
-            case "undo_started":
-            case "undo_completed":
-            case "turn_diff":
-            case "mcp_startup_update":
-            case "mcp_startup_complete":
-            case "elicitation_request":
-                break;
+            case "item/reasoning/textDelta": //for raw output
+            case "turn/started":
+            case "turn/completed":
+            case "turn/diff/updated":
+            case "item/commandExecution/outputDelta":
+            case "item/fileChange/outputDelta":
+            case "error":
+            case "thread/tokenUsage/updated":
+            case "item/mcpToolCall/progress":
+            case "account/updated":
+            case "account/rateLimits/updated":
+            case "thread/compacted":
+            case "windows/worldWritableWarning":
+            case "account/login/completed":
+            case "authStatusChange":
+            case "loginChatGptComplete":
+            case "sessionConfigured":
+            case "thread/started":
+                return null;
         }
     }
 
-    private async handleAgentReasoning(session: ACPSessionConnection, sessionState: SessionState, event: AgentReasoningEvent){
-        // Only send if we haven't seen delta events (non-streaming mode)
-        if (!sessionState.seenReasoningDeltas) {
-            await session.update({
-                sessionUpdate: "agent_thought_chunk",
-                content: {
-                    type: "text",
-                    text: event.text
-                }
-            });
-        }
-        // Reset the flag for next turn
-        sessionState.seenReasoningDeltas = false;
-    }
-
-    private async handleReasoningDelta(session: ACPSessionConnection, sessionState: SessionState, event: ReasoningRawContentDeltaEvent | ReasoningContentDeltaEvent) {
-        sessionState.seenReasoningDeltas = true;
-        await session.update({
-            sessionUpdate: "agent_thought_chunk",
+    async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
+        return {
+            sessionUpdate: "agent_message_chunk",
             content: {
                 type: "text",
                 text: event.delta
             }
-        });
+        }
     }
 
-    private async handleReasoningSectionBreak(session: ACPSessionConnection, sessionState: SessionState, event: AgentReasoningSectionBreakEvent) {
-        sessionState.seenReasoningDeltas = true;
-        // Send spacing for section break
-        await session.update({
-            sessionUpdate: "agent_thought_chunk",
-            content: {
-                type: "text",
-                text: "\n\n"
-            }
-        });
+    async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
+        switch (event.item.type) {
+            case "fileChange":
+                return await this.createFileChangeEvent(event.item)
+            case "commandExecution":
+                return await this.createCommandEvent(event.item)
+            case "userMessage":
+            case "agentMessage":
+            case "reasoning":
+            case "mcpToolCall":
+            case "webSearch":
+            case "imageView":
+            case "enteredReviewMode":
+            case "exitedReviewMode":
+                return null;
+        }
     }
 
-    private async handleCommandBegin(session: ACPSessionConnection, event: ExecCommandBeginEvent) {
-        if (event.command[0] === "bash" || event.command[0] === "/bin/bash") {
-            const cmd = event.command[event.command.length - 1]!;
-            event.command = cmd.split(" "); //TODO probably will fail with quoted parameters
+    async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
+        switch (event.item.type) {
+            case "fileChange":
+            case "commandExecution":
+                return {
+                    sessionUpdate: "tool_call_update",
+                    toolCallId: event.item.id,
+                    status: event.item.status === "completed" ? "completed" : "failed"
+                }
+            case "reasoning":
+                const summary = event.item.summary[0];
+                if (!summary) return null;
+                return {
+                    sessionUpdate: "agent_thought_chunk",
+                    content: {
+                        type: "text",
+                        text: summary
+                    }
+                }
+            case "userMessage":
+            case "agentMessage":
+            case "mcpToolCall":
+            case "webSearch":
+            case "imageView":
+            case "enteredReviewMode":
+            case "exitedReviewMode":
+                return null;
         }
-        if (event.command[0] === "sed") {
-            const filePath = event.command[event.command.length - 1]!;
-            return await session.update({
-                sessionUpdate: "tool_call",
-                toolCallId: event.call_id,
-                title: "Reading project files",
-                kind: "read",
-                status: "in_progress",
-                locations: [{path: filePath}],
-            });
+    }
+
+    async createFileChangeEvent(item: ThreadItem & { "type": "fileChange" }): Promise<UpdateSessionEvent | null> {
+        const patches: ToolCallContent[] = [];
+        for (const change of item.changes) {
+            const content = await this.createPatchContent(change);
+            if (content) patches.push(content);
+            //TODO handle errors (nulls)
         }
-        return await session.update({
+        return {
             sessionUpdate: "tool_call",
+            toolCallId: item.id,
+            title: "Editing files",
+            kind: "edit",
+            status: "completed",
+            content: patches,
+        };
+    }
+
+    private async createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
+        const textResponse = await this.connection.readTextFile({
+            sessionId: this.sessionState.sessionId,
+            path: change.path
+        });
+
+        const oldContent = textResponse.content;
+        const newContent = applyPatch(oldContent, change.diff);
+        if (!newContent) {
+            return null
+        }
+        return {
+            type: "diff",
+            oldText: oldContent,
+            newText: newContent,
+            path: change.path,
+        }
+    }
+
+    async createCommandEvent(item: ThreadItem & { "type": "commandExecution" }): Promise<UpdateSessionEvent> {
+        const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
+        if (commandAction) {
+            return this.createCommandActionEvent(item.id, commandAction);
+        }
+        const command = item.command.replace(/^(?:\/bin\/)?bash\s+/, "");
+        return {
+            sessionUpdate: "tool_call",
+            toolCallId: item.id,
             kind: "execute",
-            title: event.command.join(" "),
-            toolCallId: event.call_id,
+            title: command,
+            status: "in_progress"
+        }
+    }
+
+    private createCommandActionEvent(id: string, commandAction: CommandAction): UpdateSessionEvent {
+        if (commandAction.type === "read") {
+            return {
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: "in_progress",
+                kind: "read",
+                title: "Read file",
+                locations: [{path: commandAction.path}],
+            };
+        } else if (commandAction.type === "search" && commandAction.query) return {
+            sessionUpdate: "tool_call",
+            toolCallId: id,
             status: "in_progress",
-            content: [ {type:"terminal", terminalId: event.call_id}]
-        });
+            kind: "search",
+            title: `Search '${commandAction.query}'`,
+        }
+        return {
+            sessionUpdate: "tool_call",
+            toolCallId: id,
+            status: "in_progress",
+            kind: "execute",
+            title: commandAction.command,
+        }
     }
 
-    private async handleCommandEnd(session: ACPSessionConnection, event: ExecCommandEndEvent) {
-        return await session.update({
-            sessionUpdate: "tool_call_update",
-            toolCallId: event.call_id,
-            status: "completed"
-        });
-    }
-
-    private async handleUpdatePlan(session: ACPSessionConnection, event: UpdatePlanArgs) {
+    private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {
         const plan: PlanEntry[] = event.plan.map(value => ({
-                status: value.status,
+                status: value.status == "inProgress" ? "in_progress" : value.status,
                 content: value.step,
                 priority: "medium"
             })
         );
-        return await session.update({
-            sessionUpdate: "plan",
-            entries: plan
-        });
-    }
-
-    private async handlePatchApplyBegin(session: ACPSessionConnection, event: PatchApplyBeginEvent) {
-        const diffs: ToolCallContent[] = [];
-        for (const [path, change] of Object.entries(event.changes)) {
-            if (!change) continue;
-            const content = await this.createFileDiff(session.sessionId, path, change);
-            diffs.push(content);
-        }
-        return await session.update({
-            sessionUpdate: "tool_call",
-            toolCallId: event.call_id,
-            title: "Editing files",
-            kind: "edit",
-            status: "completed",
-            content: diffs,
-        });
-    }
-
-    private async handlePatchApplyEnd(session: ACPSessionConnection, event: PatchApplyEndEvent) {
-        return await session.update({
-            sessionUpdate: "tool_call_update",
-            toolCallId: event.call_id,
-            status: event.success ? "completed" : "failed"
-        });
-    }
-
-    private async handleAgentMessage(session: ACPSessionConnection, event: AgentMessageEvent) {
-        await session.update({
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: event.message,
-            },
-        })
-    }
-
-    private async createFileDiff(sessionId: string, filePath: string, change: FileChange): Promise<ToolCallContent> {
-        const oldContent = await this.connection.readTextFile({
-            sessionId: sessionId,
-            path: filePath
-        });
-
-        let newContent
-        switch (change.type) {
-            case "delete":
-                newContent = "";
-                break;
-            case "update":
-                const patched = applyPatch(oldContent.content, change.unified_diff);
-                if (patched === false) {
-                    newContent = change.unified_diff;
-                } else {
-                    newContent = patched;
-                }
-                break;
-            case "add":
-                newContent = change.content;
-                break;
-        }
-
         return {
-            type: "diff",
-            oldText: oldContent.content,
-            newText: newContent,
-            path: filePath,
+            sessionUpdate: "plan",
+            entries: plan,
         }
     }
 }

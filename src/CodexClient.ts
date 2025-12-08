@@ -5,8 +5,15 @@ import type {
     InitializeParams,
     InitializeResponse,
     NewConversationParams,
-    NewConversationResponse, SendUserMessageParams, SendUserMessageResponse, TaskCompleteEvent
+    NewConversationResponse, SendUserMessageParams, SendUserMessageResponse, ServerNotification, TaskCompleteEvent
 } from "./app-server";
+import type {
+    ThreadStartParams,
+    ThreadStartResponse,
+    TurnCompletedNotification,
+    TurnStartParams,
+    TurnStartResponse
+} from "./app-server/v2";
 
 export class CodexClient {
     readonly connection: MessageConnection;
@@ -15,39 +22,31 @@ export class CodexClient {
         this.connection = connection;
     }
 
-    async initialize(params: InitializeParams) {
-        const response: InitializeResponse = await this.connection.sendRequest("initialize", params)
-        return response;
+    async initialize(params: InitializeParams): Promise<InitializeResponse> {
+        return await this.sendRequest({ method: "initialize", params: params });
     }
 
-    async newConversation(params: NewConversationParams){
-        const response: NewConversationResponse = await this.connection.sendRequest("newConversation", params)
-        return response;
+    async turnStart(params: TurnStartParams): Promise<TurnStartResponse> {
+        return await this.sendRequest({ method: "turn/start", params: params });
     }
 
-    async sendUserMessage(params: SendUserMessageParams) {
-        const response: SendUserMessageResponse = await this.connection.sendRequest("sendUserMessage", params)
-        return response;
+    async threadStart(params: ThreadStartParams): Promise<ThreadStartResponse> {
+        return await this.sendRequest({ method: "thread/start", params: params });
     }
 
-    async addConversationListener(params: AddConversationListenerParams){
-        const response: AddConversationSubscriptionResponse = await this.connection.sendRequest("addConversationListener", params)
-        return response;
-    }
-
-    async waitForCompletion(){
-        await new Promise((resolve) => {
-            this.connection.onNotification("codex/event/task_complete", (event: TaskCompleteEvent) => {
+    async waitForCompletion(): Promise<TurnCompletedNotification> {
+        return await new Promise((resolve) => {
+            this.connection.onNotification("turn/completed", (event: TurnCompletedNotification) => {
                 resolve(event);
             });
         });
     }
 
-    onMessageEvent(callback: (event: EventMsg) => void){
+    onServerNotification(callback: (event: ServerNotification) => void){
         this.connection.onUnhandledNotification((data) => {
-            const event = this.getEventMessage(data);
-            if (event) {
-                callback(event)
+            const serverNotification = data as ServerNotification ?? null;
+            if (serverNotification) {
+                callback(serverNotification)
             }
         });
     }
@@ -70,4 +69,9 @@ export class CodexClient {
         this.connection.end();
     }
 
+    private async sendRequest<R>(request: CodexRequest): Promise<R> {
+        return await this.connection.sendRequest(request.method, request.params);
+    }
 }
+
+type CodexRequest = Omit<ClientRequest, "id">;

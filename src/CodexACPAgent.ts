@@ -13,12 +13,12 @@ export interface SessionState {
 export class CodexACPAgent implements acp.Agent {
     private readonly sessions: Map<string, SessionState>;
     private readonly codexClient: CodexClient;
-    private readonly messageHandler: CodexEventHandler;
+    private readonly connection: acp.AgentSideConnection;
 
     constructor(connection: acp.AgentSideConnection, codexConnection: MessageConnection) {
         this.sessions = new Map();
         this.codexClient = new CodexClient(codexConnection);
-        this.messageHandler = new CodexEventHandler(connection);
+        this.connection = connection;
     }
 
     async initialize(
@@ -42,21 +42,18 @@ export class CodexACPAgent implements acp.Agent {
     async newSession(
         _params: acp.NewSessionRequest,
     ): Promise<acp.NewSessionResponse> {
-        const newConversationResponse: NewConversationResponse = await this.codexClient.newConversation({
+         const threadStartResponse = await this.codexClient.threadStart({
             model: null,
             modelProvider: null,
-            profile: null,
             cwd: _params.cwd,
             approvalPolicy: "never",
             sandbox: null,
             config: null,
             baseInstructions: null,
             developerInstructions: null,
-            compactPrompt: null,
-            includeApplyPatchTool: null,
         })
 
-        const sessionId = newConversationResponse.conversationId;
+        const sessionId = threadStartResponse.thread.id;
         this.sessions.set(sessionId, {
             sessionId: sessionId,
             seenReasoningDeltas: false,
@@ -116,23 +113,21 @@ export class CodexACPAgent implements acp.Agent {
         sessionState: SessionState,
         prompt: string
     ): Promise<void> {
-        await this.codexClient.addConversationListener({
-            conversationId: sessionState.sessionId,
-            experimentalRawEvents: false,
-        })
+        const messageHandler = new CodexEventHandler(this.connection, sessionState);
 
-        this.codexClient.onMessageEvent(event => this.messageHandler.handleEvent(sessionState, event));
+        this.codexClient.onServerNotification(notification => {
+            messageHandler.handleNotification(notification);
+        });
 
-        await this.codexClient.sendUserMessage({
-            conversationId: sessionState.sessionId,
-            items: [
-                {
-                    type: "text",
-                    data: {
-                        text: prompt
-                    }
-                }
-            ]
+        await this.codexClient.turnStart({
+            threadId: sessionState.sessionId,
+            input: [ {type: "text", text: prompt} ],
+            approvalPolicy: null,
+            sandboxPolicy: null,
+            summary: null,
+            cwd: null,
+            effort: null,
+            model: null,
         })
 
         await this.codexClient.waitForCompletion()
