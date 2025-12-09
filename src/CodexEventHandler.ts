@@ -187,12 +187,14 @@ export class CodexEventHandler {
                 title: "Read file",
                 locations: [{path: commandAction.path}],
             };
-        } else if (commandAction.type === "search" && commandAction.query) return {
-            sessionUpdate: "tool_call",
-            toolCallId: id,
-            status: "in_progress",
-            kind: "search",
-            title: `Search '${commandAction.query}'`,
+        } else if (commandAction.type === "search" && commandAction.query) {
+            return {
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: "in_progress",
+                kind: "search",
+                title: `Search '${commandAction.query}'`,
+            }
         }
         return {
             sessionUpdate: "tool_call",
