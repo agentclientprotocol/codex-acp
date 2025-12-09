@@ -62,11 +62,11 @@ jobs:
           SERVICE_ACCOUNT_TOKEN: ${{ secrets.SERVICE_ACCOUNT_TOKEN }}
         run: |
           ./codesign-client-linux-amd64 \
-            -denoted-content-type="content-type=application/x-mach-binary" \
+            -denoted-content-type="application/x-mac-app-bin" \
             -extensions "mac_codesign_force=true,mac_codesign_options=runtime" \
             dist/bin/codex-acp-x64-darwin
           ./codesign-client-linux-amd64 \
-            -denoted-content-type="content-type=application/x-mach-binary" \
+            -denoted-content-type="application/x-mac-app-bin" \
             -extensions "mac_codesign_force=true,mac_codesign_options=runtime" \
             dist/bin/codex-acp-arm64-darwin
 
