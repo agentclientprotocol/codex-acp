@@ -13,6 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - name: Install zip
+        run: sudo apt-get update && sudo apt-get install -y zip
       - run: bun install
       - run: bun run typecheck
       - run: bun test
