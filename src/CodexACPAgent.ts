@@ -1,8 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk";
 import type {MessageConnection} from "vscode-jsonrpc/node";
-import type {NewConversationResponse} from "./app-server";
 import {CodexClient} from "./CodexClient";
 import {CodexEventHandler} from "./CodexEventHandler";
+import type {JsonValue} from "./app-server/serde_json/JsonValue";
 
 export interface SessionState {
     sessionId: string,
@@ -11,14 +11,19 @@ export interface SessionState {
 }
 
 export class CodexACPAgent implements acp.Agent {
-    private readonly sessions: Map<string, SessionState>;
     private readonly codexClient: CodexClient;
     private readonly connection: acp.AgentSideConnection;
+    private readonly config: JsonObject | null;
+    private readonly modelProvider: string | null;
 
-    constructor(connection: acp.AgentSideConnection, codexConnection: MessageConnection) {
+    private readonly sessions: Map<string, SessionState>;
+
+    constructor(connection: acp.AgentSideConnection, codexConnection: MessageConnection, codexConfig?: JsonObject, modelProvider?: string) {
         this.sessions = new Map();
         this.codexClient = new CodexClient(codexConnection);
         this.connection = connection;
+        this.config = codexConfig ?? null;
+        this.modelProvider = modelProvider ?? null;
     }
 
     async initialize(
@@ -26,9 +31,9 @@ export class CodexACPAgent implements acp.Agent {
     ): Promise<acp.InitializeResponse> {
         await this.codexClient.initialize({
             clientInfo: {
-                name: "CodexConsoleClient",
-                version: "0.1.0",
-                title: "Codex ACP"
+                name: _params.clientInfo?.name ?? "CodexACPAgent",
+                version: _params.clientInfo?.version ?? "0.1.0",
+                title: _params.clientInfo?.title ?? "Codex ACP"
             }
         });
         return {
@@ -42,13 +47,13 @@ export class CodexACPAgent implements acp.Agent {
     async newSession(
         _params: acp.NewSessionRequest,
     ): Promise<acp.NewSessionResponse> {
-         const threadStartResponse = await this.codexClient.threadStart({
+        const threadStartResponse = await this.codexClient.threadStart({
+            config: this.config,
+            modelProvider: this.modelProvider,
             model: null,
-            modelProvider: null,
             cwd: _params.cwd,
             approvalPolicy: "never",
             sandbox: null,
-            config: null,
             baseInstructions: null,
             developerInstructions: null,
         })
@@ -121,7 +126,7 @@ export class CodexACPAgent implements acp.Agent {
 
         await this.codexClient.turnStart({
             threadId: sessionState.sessionId,
-            input: [ {type: "text", text: prompt} ],
+            input: [{type: "text", text: prompt}],
             approvalPolicy: null,
             sandboxPolicy: null,
             summary: null,
@@ -139,3 +144,5 @@ export class CodexACPAgent implements acp.Agent {
         this.sessions.get(params.sessionId)?.pendingPrompt?.abort();
     }
 }
+
+export type JsonObject = { [key in string]?: JsonValue }

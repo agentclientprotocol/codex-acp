@@ -11,7 +11,11 @@ const logPath = process.env["APP_SERVER_LOGS"];
 const appServerConnection = startCodexConnection(codexPath, logPath)
 const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
-new acp.AgentSideConnection(
-    (acpConnection) => new CodexACPAgent(acpConnection, appServerConnection),
-    acpJsonStream
-);
+function createAgent(connection: acp.AgentSideConnection): CodexACPAgent {
+    const configString = process.env["CODEX_CONFIG"];
+    const config = configString ? JSON.parse(configString) : undefined;
+    const modelProvider = process.env["MODEL_PROVIDER"];
+    return new CodexACPAgent(connection, appServerConnection, config, modelProvider);
+}
+
+new acp.AgentSideConnection(createAgent, acpJsonStream);
