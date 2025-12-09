@@ -20,6 +20,46 @@ jobs:
       - run: bun test
       - run: bun run bundle:all
       - run: bun run package:all
+
+      - name: Download Codesign Client and signatures
+        run: |
+          curl -L -o codesign-client \
+            https://codesign-distribution.labs.jb.gg/codesign-client-linux-amd64
+          curl -L -o codesign-client.sha256 \
+            https://codesign-distribution.labs.jb.gg/codesign-client-linux-amd64.sha256
+          curl -L -o codesign-client.sha256.asc \
+            https://codesign-distribution.labs.jb.gg/codesign-client-linux-amd64.sha256.asc
+          chmod +x codesign-client
+
+      - name: Import GPG public key
+        run: |
+          curl -o - https://download-cdn.jetbrains.com/KEYS | gpg --import -
+
+      - name: Verify SHA256 file signature
+        run: |
+          gpg --batch --verify codesign-client.sha256.asc codesign-client.sha256
+
+      - name: Verify SHA256 checksum
+        run: |
+          sha256sum -c codesign-client.sha256
+
+      - name: Sign Windows binary
+        run: |
+          unzip dist/bin/codex-acp-x64-windows.zip -d dist/bin/windows-x64
+          ./codesign-client -extensions "jsign_replace=true" dist/bin/windows-x64/codex-acp.exe
+          cd dist/bin/windows-x64 && zip -r ../codex-acp-x64-windows.zip codex-acp.exe && cd -
+
+      - name: Sign macOS binaries
+        run: |
+          ./codesign-client \
+            -denoted-content-type="content-type=application/x-mac-zip" \
+            -extensions "mac_codesign_force=true,mac_codesign_options=runtime" \
+            dist/bin/codex-acp-x64-darwin.zip
+          ./codesign-client \
+            -denoted-content-type="content-type=application/x-mac-zip" \
+            -extensions "mac_codesign_force=true,mac_codesign_options=runtime" \
+            dist/bin/codex-acp-arm64-darwin.zip
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
