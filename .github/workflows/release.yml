@@ -34,14 +34,15 @@ jobs:
       - name: Import GPG public key
         run: |
           mkdir -p ~/.gnupg
-          echo "batch" >> ~/.gnupg/gpg.conf
+          chmod 700 ~/.gnupg
+          echo "batch" > ~/.gnupg/gpg.conf
           echo "no-tty" >> ~/.gnupg/gpg.conf
-          echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
-          curl -o - https://download-cdn.jetbrains.com/KEYS | gpg --batch --no-tty --import -
+          echo "no-autostart" >> ~/.gnupg/gpg.conf
+          curl -o - https://download-cdn.jetbrains.com/KEYS | gpg --batch --no-tty --no-autostart --import -
 
       - name: Verify SHA256 file signature
         run: |
-          gpg --batch --no-tty --verify codesign-client.sha256.asc codesign-client.sha256
+          gpg --batch --no-tty --no-autostart --verify codesign-client.sha256.asc codesign-client.sha256
 
       - name: Verify SHA256 checksum
         run: |
