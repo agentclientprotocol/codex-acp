@@ -24,7 +24,6 @@ jobs:
       - run: bun run typecheck
       - run: bun test
       - run: bun run bundle:all
-      - run: bun run package:all
 
       - name: Download Codesign Client and signatures
         run: |
@@ -55,9 +54,7 @@ jobs:
           SERVICE_ACCOUNT_NAME: ${{ vars.SERVICE_ACCOUNT_NAME }}
           SERVICE_ACCOUNT_TOKEN: ${{ secrets.SERVICE_ACCOUNT_TOKEN }}
         run: |
-          unzip dist/bin/codex-acp-x64-windows.zip -d dist/bin/windows-x64
-          ./codesign-client-linux-amd64 -extensions "jsign_replace=true" dist/bin/windows-x64/codex-acp-x64-windows.exe
-          cd dist/bin/windows-x64 && zip -r ../codex-acp-x64-windows.zip codex-acp-x64-windows.exe && cd -
+          ./codesign-client-linux-amd64 -extensions "jsign_replace=true" dist/bin/codex-acp-x64-windows.exe
 
       - name: Sign macOS binaries
         env:
@@ -65,13 +62,15 @@ jobs:
           SERVICE_ACCOUNT_TOKEN: ${{ secrets.SERVICE_ACCOUNT_TOKEN }}
         run: |
           ./codesign-client-linux-amd64 \
-            -denoted-content-type="content-type=application/x-mac-zip" \
+            -denoted-content-type="content-type=application/x-mach-binary" \
             -extensions "mac_codesign_force=true,mac_codesign_options=runtime" \
-            dist/bin/codex-acp-x64-darwin.zip
+            dist/bin/codex-acp-x64-darwin
           ./codesign-client-linux-amd64 \
-            -denoted-content-type="content-type=application/x-mac-zip" \
+            -denoted-content-type="content-type=application/x-mach-binary" \
             -extensions "mac_codesign_force=true,mac_codesign_options=runtime" \
-            dist/bin/codex-acp-arm64-darwin.zip
+            dist/bin/codex-acp-arm64-darwin
+
+      - run: bun run package:all
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
