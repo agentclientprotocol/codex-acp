@@ -35,6 +35,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.5.1",
     "diff": "^8.0.2",
+    "open": "^11.0.0",
     "vscode-jsonrpc": "^8.2.1"
   }
 }

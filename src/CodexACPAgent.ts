@@ -3,6 +3,9 @@ import type {MessageConnection} from "vscode-jsonrpc/node";
 import {CodexClient} from "./CodexClient";
 import {CodexEventHandler} from "./CodexEventHandler";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
+import {CodexAuthMethods, type CodexAuthRequest, isCodexAuthRequest} from "./CodexAuthMethod";
+import {RequestError} from "@agentclientprotocol/sdk";
+
 
 export interface SessionState {
     sessionId: string,
@@ -11,19 +14,31 @@ export interface SessionState {
 }
 
 export class CodexACPAgent implements acp.Agent {
+    private readonly name: string = "codex-appserver-acp";
+    private readonly version: string = "0.1.0";
+    private readonly title: string = "Codex ACP";
+
     private readonly codexClient: CodexClient;
     private readonly connection: acp.AgentSideConnection;
     private readonly config: JsonObject | null;
     private readonly modelProvider: string | null;
+    private readonly defaultAuthRequest: CodexAuthRequest | null;
 
     private readonly sessions: Map<string, SessionState>;
 
-    constructor(connection: acp.AgentSideConnection, codexConnection: MessageConnection, codexConfig?: JsonObject, modelProvider?: string) {
+    constructor(
+        connection: acp.AgentSideConnection,
+        codexConnection: MessageConnection,
+        codexConfig?: JsonObject,
+        modelProvider?: string,
+        defaultAuthRequest?: CodexAuthRequest,
+    ) {
         this.sessions = new Map();
         this.codexClient = new CodexClient(codexConnection);
         this.connection = connection;
         this.config = codexConfig ?? null;
         this.modelProvider = modelProvider ?? null;
+        this.defaultAuthRequest = defaultAuthRequest ?? null;
     }
 
     async initialize(
@@ -31,9 +46,9 @@ export class CodexACPAgent implements acp.Agent {
     ): Promise<acp.InitializeResponse> {
         await this.codexClient.initialize({
             clientInfo: {
-                name: _params.clientInfo?.name ?? "CodexACPAgent",
-                version: _params.clientInfo?.version ?? "0.1.0",
-                title: _params.clientInfo?.title ?? "Codex ACP"
+                name: _params.clientInfo?.name ?? this.name,
+                version: _params.clientInfo?.version ?? this.version,
+                title: _params.clientInfo?.title ?? this.title,
             }
         });
         return {
@@ -41,12 +56,21 @@ export class CodexACPAgent implements acp.Agent {
             agentCapabilities: {
                 loadSession: false,
             },
+            authMethods: CodexAuthMethods,
         };
     }
 
     async newSession(
         _params: acp.NewSessionRequest,
     ): Promise<acp.NewSessionResponse> {
+        if (!await this.codexClient.loginStatus()) {
+            if (this.defaultAuthRequest) {
+                await this.authenticate(this.defaultAuthRequest)
+            } else {
+                throw RequestError.authRequired();
+            }
+        }
+
         const threadStartResponse = await this.codexClient.threadStart({
             config: this.config,
             modelProvider: this.modelProvider,
@@ -72,9 +96,23 @@ export class CodexACPAgent implements acp.Agent {
 
     async authenticate(
         _params: acp.AuthenticateRequest,
-    ): Promise<acp.AuthenticateResponse | void> {
-        //TODO
-        return {};
+    ): Promise<acp.AuthenticateResponse> {
+        if (!isCodexAuthRequest(_params)) {
+            throw RequestError.invalidRequest();
+        }
+        let authResult: Boolean;
+        switch (_params.methodId) {
+            case "api-key":
+                authResult = await this.codexClient.loginWithApiKey(_params._meta.apiKey);
+                break;
+            case "chat-gpt":
+                authResult = await this.codexClient.loginWithChatGpt();
+                break;
+        }
+        if (!authResult) {
+            throw RequestError.invalidParams();
+        }
+        return { };
     }
 
     async setSessionMode(

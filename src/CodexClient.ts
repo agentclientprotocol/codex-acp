@@ -1,19 +1,23 @@
 import type {MessageConnection, NotificationMessage} from "vscode-jsonrpc/node";
 import type {
-    AddConversationListenerParams, AddConversationSubscriptionResponse,
-    ClientRequest, EventMsg,
+    ClientRequest,
+    EventMsg,
     InitializeParams,
     InitializeResponse,
-    NewConversationParams,
-    NewConversationResponse, SendUserMessageParams, SendUserMessageResponse, ServerNotification, TaskCompleteEvent
+    LoginChatGptResponse,
+    ServerNotification
 } from "./app-server";
 import type {
+    AccountLoginCompletedNotification,
+    GetAccountParams,
+    GetAccountResponse,
     ThreadStartParams,
     ThreadStartResponse,
     TurnCompletedNotification,
     TurnStartParams,
     TurnStartResponse
 } from "./app-server/v2";
+import open from "open";
 
 export class CodexClient {
     readonly connection: MessageConnection;
@@ -32,6 +36,42 @@ export class CodexClient {
 
     async threadStart(params: ThreadStartParams): Promise<ThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
+    }
+
+    async loginWithApiKey(apiKey: string): Promise<Boolean> {
+        await this.sendRequest({
+            method: "account/login/start",
+            params: { type: "apiKey", apiKey: apiKey }
+        });
+        const result = await this.awaitLogin();
+        return result.success
+    }
+
+    async loginWithChatGpt(): Promise<Boolean> {
+        const response: LoginChatGptResponse = await this.sendRequest({
+            method: "account/login/start",
+            params: { type: "chatgpt" }
+        });
+        await open(response.authUrl);
+        const result = await this.awaitLogin();
+        return result.success
+
+}
+    private async awaitLogin(): Promise<AccountLoginCompletedNotification> {
+        return await new Promise((resolve) => {
+            this.connection.onNotification("account/login/completed", (event: AccountLoginCompletedNotification) => {
+                resolve(event);
+            });
+        });
+    }
+
+    private async accountRead(params: GetAccountParams): Promise<GetAccountResponse> {
+        return await this.sendRequest({ method: "account/read", params: params });
+    }
+
+    async loginStatus(): Promise<Boolean> {
+        const response = await this.accountRead({refreshToken: false})
+        return !response.requiresOpenaiAuth || response.account !== null;
     }
 
     async waitForCompletion(): Promise<TurnCompletedNotification> {
