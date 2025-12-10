@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CodexACPAgent } from '../../CodexACPAgent';
 import * as acp from '@agentclientprotocol/sdk';
 import { createMockConnections } from './test-utils';
+import {CodexAuthMethods} from "../../CodexAuthMethod";
 
 describe('CodexACPAgent - initialize', () => {
     let agent: CodexACPAgent;
@@ -31,6 +32,7 @@ describe('CodexACPAgent - initialize', () => {
             agentCapabilities: {
                 loadSession: false,
             },
+            authMethods: CodexAuthMethods,
         });
     });
 });
