@@ -29,7 +29,6 @@ describe('CodexACPAgent - initialize', () => {
             protocolVersion: acp.PROTOCOL_VERSION
         };
         const result = await agent.initialize(params);
-
         expect(result).toEqual({
             protocolVersion: acp.PROTOCOL_VERSION,
             agentCapabilities: {

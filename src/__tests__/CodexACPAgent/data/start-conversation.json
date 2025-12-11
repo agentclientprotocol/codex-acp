@@ -1,0 +1,64 @@
+{
+  "eventType": "request",
+  "method": "initialize",
+  "params": {
+    "clientInfo": {
+      "name": "codex-acp",
+      "version": "0.0.5",
+      "title": "Codex ACP"
+    }
+  }
+}
+{
+  "eventType": "response",
+  "userAgent": "userAgent"
+}
+{
+  "eventType": "request",
+  "method": "thread/start",
+  "params": {
+    "config": null,
+    "modelProvider": null,
+    "model": null,
+    "cwd": "cwd",
+    "approvalPolicy": "never",
+    "sandbox": null,
+    "baseInstructions": null,
+    "developerInstructions": null
+  }
+}
+{
+  "eventType": "response",
+  "thread": "thread",
+  "model": "gpt-5.1-codex-max",
+  "modelProvider": "openai",
+  "cwd": "cwd",
+  "approvalPolicy": "never",
+  "sandbox": {
+    "type": "workspaceWrite",
+    "writableRoots": [],
+    "networkAccess": false,
+    "excludeTmpdirEnvVar": false,
+    "excludeSlashTmp": false
+  },
+  "reasoningEffort": "medium"
+}
+{
+  "eventType": "request",
+  "method": "turn/start",
+  "params": {
+    "threadId": "threadId",
+    "input": [
+      {
+        "type": "text",
+        "text": "Hi!"
+      }
+    ],
+    "approvalPolicy": null,
+    "sandboxPolicy": null,
+    "summary": null,
+    "cwd": "cwd",
+    "effort": null,
+    "model": null
+  }
+}

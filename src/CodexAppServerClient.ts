@@ -7,9 +7,9 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
-    AccountLoginCompletedNotification,
+    AccountLoginCompletedNotification, AccountUpdatedNotification,
     GetAccountParams,
-    GetAccountResponse, LoginAccountParams, LoginAccountResponse,
+    GetAccountResponse, LoginAccountParams, LoginAccountResponse, LogoutAccountResponse,
     ThreadStartParams,
     ThreadStartResponse,
     TurnCompletedNotification,
@@ -26,6 +26,11 @@ export class CodexAppServerClient {
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
+        this.onServerNotification((notification) => {
+            for (const callback of this.transportEventHandlers) {
+                callback({ eventType: "notification", ...notification});
+            }
+        });
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
@@ -44,9 +49,21 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "account/login/start", params: params });
     }
 
+    async accountLogout(): Promise<LogoutAccountResponse> {
+        return await this.sendRequest({ method: "account/logout", params: undefined });
+    }
+
     async awaitLoginCompleted(): Promise<AccountLoginCompletedNotification> {
         return await new Promise((resolve) => {
             this.connection.onNotification("account/login/completed", (event: AccountLoginCompletedNotification) => {
+                resolve(event);
+            });
+        });
+    }
+
+    async awaitAccountUpdated(): Promise<AccountUpdatedNotification> {
+        return await new Promise((resolve) => {
+            this.connection.onNotification("account/updated", (event: AccountUpdatedNotification) => {
                 resolve(event);
             });
         });
@@ -87,10 +104,30 @@ export class CodexAppServerClient {
         return (params as { msg?: EventMsg })?.msg ?? null;
     }
 
+    private transportEventHandlers: Array<(event: ClientTransportEvent) => void> = [];
+    onClientTransportEvent(callback: (event: ClientTransportEvent) => void){
+        this.transportEventHandlers.push(callback);
+    }
+
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
-        return await this.connection.sendRequest(request.method, request.params);
+        for (const callback of this.transportEventHandlers) {
+            callback({ eventType: "request", ...request});
+        }
+        let result: any;
+        if (request.params) {
+            result = await this.connection.sendRequest<R>(request.method, request.params)
+        }
+        else {
+            await this.connection.sendRequest<R>(request.method);
+        }
+        for (const callback of this.transportEventHandlers) {
+            callback({ eventType: "response", ...result});
+        }
+        return result;
     }
 }
+
+export type ClientTransportEvent = { eventType: "request" } & CodexRequest | { eventType: "response" } & unknown | { eventType: "notification" } & ServerNotification;
 
 type CodexRequest = DistributiveOmit<ClientRequest, "id">
 

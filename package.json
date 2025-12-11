@@ -17,7 +17,7 @@
     "package:darwin-arm64": "cd dist/bin && zip codex-acp-arm64-darwin.zip codex-acp-arm64-darwin",
     "package:win-x64": "cd dist/bin && zip codex-acp-x64-windows.zip codex-acp-x64-windows.exe",
     "start": "bun run src/index.ts",
-    "generate-types": "codex app-server generate-ts --out src/app-server",
+    "generate-types": "./node_modules/.bin/codex app-server generate-ts --out src/app-server",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -28,6 +28,7 @@
   "type": "module",
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "@openai/codex": "^0.65.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.0.10"

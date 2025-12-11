@@ -58,9 +58,14 @@ export class CodexAcpClient {
         return result.success;
     }
 
+    async logout(): Promise<void> {
+        await this.codexClient.accountLogout();
+        await this.codexClient.awaitAccountUpdated();
+    }
+
     async authRequired(): Promise<Boolean> {
         const response = await this.codexClient.accountRead({refreshToken: false})
-        return response.requiresOpenaiAuth || !response.account;
+        return response.requiresOpenaiAuth && !response.account;
     }
 
     /**

@@ -11,7 +11,7 @@ import {CodexAppServerClient} from "./CodexAppServerClient";
 const codexPath = process.env["CODEX_PATH"] ?? "codex";
 const logPath = process.env["APP_SERVER_LOGS"];
 
-const appServerConnection = startCodexConnection(codexPath, logPath)
+const appServerConnection = startCodexConnection(codexPath, logPath);
 const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
 function createAgent(connection: acp.AgentSideConnection): CodexACPAgent {

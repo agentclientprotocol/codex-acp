@@ -1,0 +1,56 @@
+{
+  "eventType": "request",
+  "method": "account/login/start",
+  "params": {
+    "type": "apiKey",
+    "apiKey": "TOKEN"
+  }
+}
+{
+  "eventType": "response",
+  "type": "apiKey"
+}
+{
+  "eventType": "request",
+  "method": "account/read",
+  "params": {
+    "refreshToken": false
+  }
+}
+{
+  "eventType": "response",
+  "account": {
+    "type": "apiKey"
+  },
+  "requiresOpenaiAuth": true
+}
+{
+  "eventType": "request",
+  "method": "thread/start",
+  "params": {
+    "config": null,
+    "modelProvider": null,
+    "model": null,
+    "cwd": "cwd",
+    "approvalPolicy": "never",
+    "sandbox": null,
+    "baseInstructions": null,
+    "developerInstructions": null
+  }
+}
+{
+  "eventType": "response",
+  "thread": "thread",
+  "model": "gpt-5.1-codex-max",
+  "modelProvider": "openai",
+  "cwd": "cwd",
+  "approvalPolicy": "never",
+  "sandbox": {
+    "type": "workspaceWrite",
+    "writableRoots": [],
+    "networkAccess": false,
+    "excludeTmpdirEnvVar": false,
+    "excludeSlashTmp": false
+  },
+  "reasoningEffort": "medium"
+}
