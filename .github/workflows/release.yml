@@ -56,18 +56,18 @@ jobs:
         run: |
           ./codesign-client-linux-amd64 -extensions "jsign_replace=true" dist/bin/codex-acp-x64-windows.exe
 
-      - name: Sign macOS binaries
+      - name: Sign, notarize and staple macOS binaries
         env:
           SERVICE_ACCOUNT_NAME: ${{ vars.SERVICE_ACCOUNT_NAME }}
           SERVICE_ACCOUNT_TOKEN: ${{ secrets.SERVICE_ACCOUNT_TOKEN }}
         run: |
           ./codesign-client-linux-amd64 \
             -denoted-content-type="application/x-mac-app-bin" \
-            -extensions "mac_codesign_force=true,mac_codesign_options=runtime" \
+            -extensions "mac_codesign_force=true,mac_codesign_options=runtime,mac_notarize=true,mac_staple=true" \
             dist/bin/codex-acp-x64-darwin
           ./codesign-client-linux-amd64 \
             -denoted-content-type="application/x-mac-app-bin" \
-            -extensions "mac_codesign_force=true,mac_codesign_options=runtime" \
+            -extensions "mac_codesign_force=true,mac_codesign_options=runtime,mac_notarize=true,mac_staple=true" \
             dist/bin/codex-acp-arm64-darwin
 
       - run: bun run package:all
