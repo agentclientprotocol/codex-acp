@@ -123,3 +123,78 @@ jobs:
             dist/bin/codex-acp-arm64-darwin.zip
             dist/bin/codex-acp-x64-windows.zip
           generate_release_notes: true
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: dist/bin/*.zip
+          retention-days: 1
+
+  deploy-to-s3:
+    name: Deploy to S3
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+          path: release-assets
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          ls -lh release-assets/
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::379565177229:role/resources-codex-acp-deployer
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: eu-west-1
+
+      - name: Upload to S3
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          S3_PATH="s3://download-prod-cdn.jetbrains.com/resources/acp/${VERSION}/"
+          LATEST_PATH="s3://download-prod-cdn.jetbrains.com/resources/acp/latest/"
+
+          echo "Uploading version: $VERSION"
+          echo "Destinations:"
+          echo "  - ${S3_PATH}"
+          echo "  - ${LATEST_PATH}"
+
+          # Upload to versioned path
+          echo ""
+          echo "Uploading to versioned path..."
+          aws s3 cp release-assets/ "${S3_PATH}" --recursive \
+            --cache-control "max-age=31536000, public"
+
+          # Upload to latest path
+          echo ""
+          echo "Uploading to latest path..."
+          aws s3 cp release-assets/ "${LATEST_PATH}" --recursive \
+            --cache-control "max-age=300, public"
+
+          BASE_URL="https://download.jetbrains.com/resources/acp"
+
+          echo ""
+          echo "Artifacts uploaded to S3"
+          echo ""
+          echo "Download URLs (versioned):"
+          for file in release-assets/*.zip; do
+            filename=$(basename "$file")
+            echo "  ${BASE_URL}/${VERSION}/${filename}"
+          done
+
+          echo ""
+          echo "Download URLs (latest):"
+          for file in release-assets/*.zip; do
+            filename=$(basename "$file")
+            echo "  ${BASE_URL}/latest/${filename}"
+          done
