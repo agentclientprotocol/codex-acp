@@ -32,7 +32,7 @@ export class CodexEventHandler {
         }
     }
 
-    async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
+    private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
         //TODO should take flow and return flow
         switch (notification.method) {
             case "item/agentMessage/delta":
@@ -68,7 +68,7 @@ export class CodexEventHandler {
         }
     }
 
-    async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
+    private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
         return {
             sessionUpdate: "agent_message_chunk",
             content: {
@@ -78,7 +78,7 @@ export class CodexEventHandler {
         }
     }
 
-    async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
+    private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
                 return await this.createFileChangeEvent(event.item)
@@ -96,7 +96,7 @@ export class CodexEventHandler {
         }
     }
 
-    async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
+    private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
             case "commandExecution":
@@ -126,7 +126,7 @@ export class CodexEventHandler {
         }
     }
 
-    async createFileChangeEvent(item: ThreadItem & { "type": "fileChange" }): Promise<UpdateSessionEvent | null> {
+    private async createFileChangeEvent(item: ThreadItem & { "type": "fileChange" }): Promise<UpdateSessionEvent | null> {
         const patches: ToolCallContent[] = [];
         for (const change of item.changes) {
             const content = await this.createPatchContent(change);
@@ -162,7 +162,7 @@ export class CodexEventHandler {
         }
     }
 
-    async createCommandEvent(item: ThreadItem & { "type": "commandExecution" }): Promise<UpdateSessionEvent> {
+    private async createCommandEvent(item: ThreadItem & { "type": "commandExecution" }): Promise<UpdateSessionEvent> {
         const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
         if (commandAction) {
             return this.createCommandActionEvent(item.id, commandAction);
