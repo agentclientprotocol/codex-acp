@@ -61,6 +61,29 @@ jobs:
           zip -j dist/bin/codex-acp-x64-darwin.zip dist/bin/codex-acp-x64-darwin
           zip -j dist/bin/codex-acp-arm64-darwin.zip dist/bin/codex-acp-arm64-darwin
 
+      - name: Create entitlements for macOS
+        run: |
+          cat > entitlements.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>com.apple.security.cs.allow-jit</key>
+              <true/>
+              <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+              <true/>
+              <key>com.apple.security.cs.disable-executable-page-protection</key>
+              <true/>
+              <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+              <true/>
+              <key>com.apple.security.cs.disable-library-validation</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+          ENTITLEMENTS_BASE64=$(gzip -c entitlements.plist | base64 -w 0)
+          echo "ENTITLEMENTS_BASE64=$ENTITLEMENTS_BASE64" >> $GITHUB_ENV
+
       - name: Sign macOS binaries
         env:
           SERVICE_ACCOUNT_NAME: ${{ vars.SERVICE_ACCOUNT_NAME }}
@@ -68,12 +91,12 @@ jobs:
         run: |
           ./codesign-client-linux-amd64 \
             -denoted-content-type="application/x-mac-app-zip" \
-            -extensions "mac_codesign_identity=Developer ID Application: JetBrains s.r.o. (2ZEFAR8TH3),mac_codesign_force=true,mac_codesign_options=runtime" \
+            -extensions "mac_codesign_identity=Developer ID Application: JetBrains s.r.o. (2ZEFAR8TH3),mac_codesign_force=true,mac_codesign_options=runtime,mac_codesign_entitlements=$ENTITLEMENTS_BASE64" \
             -log-format json \
             dist/bin/codex-acp-x64-darwin.zip
           ./codesign-client-linux-amd64 \
             -denoted-content-type="application/x-mac-app-zip" \
-            -extensions "mac_codesign_identity=Developer ID Application: JetBrains s.r.o. (2ZEFAR8TH3),mac_codesign_force=true,mac_codesign_options=runtime" \
+            -extensions "mac_codesign_identity=Developer ID Application: JetBrains s.r.o. (2ZEFAR8TH3),mac_codesign_force=true,mac_codesign_options=runtime,mac_codesign_entitlements=$ENTITLEMENTS_BASE64" \
             -log-format json \
             dist/bin/codex-acp-arm64-darwin.zip
 
