@@ -61,21 +61,51 @@ jobs:
           zip -j dist/bin/codex-acp-x64-darwin.zip dist/bin/codex-acp-x64-darwin
           zip -j dist/bin/codex-acp-arm64-darwin.zip dist/bin/codex-acp-arm64-darwin
 
-      - name: Sign, notarize and staple macOS binaries
+      - name: Sign macOS binaries
         env:
           SERVICE_ACCOUNT_NAME: ${{ vars.SERVICE_ACCOUNT_NAME }}
           SERVICE_ACCOUNT_TOKEN: ${{ secrets.SERVICE_ACCOUNT_TOKEN }}
         run: |
           ./codesign-client-linux-amd64 \
             -denoted-content-type="application/x-mac-app-zip" \
-            -extensions "mac_codesign_force=true,mac_codesign_options=runtime,mac_notarize=true,mac_staple=true" \
+            -extensions "mac_codesign_identity=Developer ID Application: JetBrains s.r.o. (2ZEFAR8TH3),mac_codesign_force=true,mac_codesign_options=runtime" \
+            -log-format json \
             dist/bin/codex-acp-x64-darwin.zip
           ./codesign-client-linux-amd64 \
             -denoted-content-type="application/x-mac-app-zip" \
-            -extensions "mac_codesign_force=true,mac_codesign_options=runtime,mac_notarize=true,mac_staple=true" \
+            -extensions "mac_codesign_identity=Developer ID Application: JetBrains s.r.o. (2ZEFAR8TH3),mac_codesign_force=true,mac_codesign_options=runtime" \
+            -log-format json \
             dist/bin/codex-acp-arm64-darwin.zip
 
-      - name: Repackage macOS binaries
+      - name: Move signed binaries
+        run: |
+          mv signed/codex-acp-x64-darwin.zip dist/bin/codex-acp-x64-darwin.zip
+          mv signed/codex-acp-arm64-darwin.zip dist/bin/codex-acp-arm64-darwin.zip
+
+      - name: Notarize macOS binaries
+        env:
+          SERVICE_ACCOUNT_NAME: ${{ vars.SERVICE_ACCOUNT_NAME }}
+          SERVICE_ACCOUNT_TOKEN: ${{ secrets.SERVICE_ACCOUNT_TOKEN }}
+        run: |
+          ./codesign-client-linux-amd64 \
+            -denoted-content-type="application/x-mac-app-zip" \
+            -extensions "mac_notarize=true" \
+            -log-format json \
+            -max-wait 60m \
+            dist/bin/codex-acp-x64-darwin.zip
+          ./codesign-client-linux-amd64 \
+            -denoted-content-type="application/x-mac-app-zip" \
+            -extensions "mac_notarize=true" \
+            -log-format json \
+            -max-wait 60m \
+            dist/bin/codex-acp-arm64-darwin.zip
+
+      - name: Move notarized binaries
+        run: |
+          mv signed/codex-acp-x64-darwin.zip dist/bin/codex-acp-x64-darwin.zip
+          mv signed/codex-acp-arm64-darwin.zip dist/bin/codex-acp-arm64-darwin.zip
+
+      - name: Extract notarized binaries for packaging
         run: |
           unzip -o dist/bin/codex-acp-x64-darwin.zip -d dist/bin/
           unzip -o dist/bin/codex-acp-arm64-darwin.zip -d dist/bin/
