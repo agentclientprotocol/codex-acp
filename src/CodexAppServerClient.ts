@@ -4,22 +4,24 @@ import type {
     EventMsg,
     InitializeParams,
     InitializeResponse,
-    LoginChatGptResponse,
     ServerNotification
 } from "./app-server";
 import type {
     AccountLoginCompletedNotification,
     GetAccountParams,
-    GetAccountResponse,
+    GetAccountResponse, LoginAccountParams, LoginAccountResponse,
     ThreadStartParams,
     ThreadStartResponse,
     TurnCompletedNotification,
     TurnStartParams,
     TurnStartResponse
 } from "./app-server/v2";
-import open from "open";
 
-export class CodexClient {
+/**
+ * A type-safe client over the Codex App Server's JSON-RPC API.
+ * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
+ */
+export class CodexAppServerClient {
     readonly connection: MessageConnection;
 
     constructor(connection: MessageConnection) {
@@ -38,26 +40,11 @@ export class CodexClient {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
-    async loginWithApiKey(apiKey: string): Promise<Boolean> {
-        await this.sendRequest({
-            method: "account/login/start",
-            params: { type: "apiKey", apiKey: apiKey }
-        });
-        const result = await this.awaitLogin();
-        return result.success
+    async accountLogin(params: LoginAccountParams): Promise<LoginAccountResponse> {
+        return await this.sendRequest({ method: "account/login/start", params: params });
     }
 
-    async loginWithChatGpt(): Promise<Boolean> {
-        const response: LoginChatGptResponse = await this.sendRequest({
-            method: "account/login/start",
-            params: { type: "chatgpt" }
-        });
-        await open(response.authUrl);
-        const result = await this.awaitLogin();
-        return result.success
-
-}
-    private async awaitLogin(): Promise<AccountLoginCompletedNotification> {
+    async awaitLoginCompleted(): Promise<AccountLoginCompletedNotification> {
         return await new Promise((resolve) => {
             this.connection.onNotification("account/login/completed", (event: AccountLoginCompletedNotification) => {
                 resolve(event);
@@ -65,16 +52,11 @@ export class CodexClient {
         });
     }
 
-    private async accountRead(params: GetAccountParams): Promise<GetAccountResponse> {
+    async accountRead(params: GetAccountParams): Promise<GetAccountResponse> {
         return await this.sendRequest({ method: "account/read", params: params });
     }
 
-    async loginStatus(): Promise<Boolean> {
-        const response = await this.accountRead({refreshToken: false})
-        return !response.requiresOpenaiAuth || response.account !== null;
-    }
-
-    async waitForCompletion(): Promise<TurnCompletedNotification> {
+    async awaitTurnCompleted(): Promise<TurnCompletedNotification> {
         return await new Promise((resolve) => {
             this.connection.onNotification("turn/completed", (event: TurnCompletedNotification) => {
                 resolve(event);
@@ -105,13 +87,13 @@ export class CodexClient {
         return (params as { msg?: EventMsg })?.msg ?? null;
     }
 
-    async close(){
-        this.connection.end();
-    }
-
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
         return await this.connection.sendRequest(request.method, request.params);
     }
 }
 
-type CodexRequest = Omit<ClientRequest, "id">;
+type CodexRequest = DistributiveOmit<ClientRequest, "id">
+
+type DistributiveOmit<T, K extends keyof any> = T extends any
+    ? Omit<T, K>
+    : never;

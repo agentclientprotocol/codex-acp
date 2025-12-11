@@ -1,56 +1,37 @@
 import * as acp from "@agentclientprotocol/sdk";
-import type {MessageConnection} from "vscode-jsonrpc/node";
-import {CodexClient} from "./CodexClient";
 import {CodexEventHandler} from "./CodexEventHandler";
-import type {JsonValue} from "./app-server/serde_json/JsonValue";
-import {CodexAuthMethods, type CodexAuthRequest, isCodexAuthRequest} from "./CodexAuthMethod";
+import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
 import {RequestError} from "@agentclientprotocol/sdk";
+import {CodexAcpClient} from "./CodexAcpClient";
 
 
 export interface SessionState {
     sessionId: string,
-    seenReasoningDeltas: boolean;
     pendingPrompt: AbortController | null;
 }
 
 export class CodexACPAgent implements acp.Agent {
-    private readonly name: string = "codex-appserver-acp";
-    private readonly version: string = "0.1.0";
-    private readonly title: string = "Codex ACP";
-
-    private readonly codexClient: CodexClient;
+    private readonly codexAcpClient: CodexAcpClient;
     private readonly connection: acp.AgentSideConnection;
-    private readonly config: JsonObject | null;
-    private readonly modelProvider: string | null;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
 
     private readonly sessions: Map<string, SessionState>;
 
     constructor(
         connection: acp.AgentSideConnection,
-        codexConnection: MessageConnection,
-        codexConfig?: JsonObject,
-        modelProvider?: string,
+        codexAcpClient: CodexAcpClient,
         defaultAuthRequest?: CodexAuthRequest,
     ) {
         this.sessions = new Map();
-        this.codexClient = new CodexClient(codexConnection);
         this.connection = connection;
-        this.config = codexConfig ?? null;
-        this.modelProvider = modelProvider ?? null;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
+        this.codexAcpClient = codexAcpClient;
     }
 
     async initialize(
         _params: acp.InitializeRequest,
     ): Promise<acp.InitializeResponse> {
-        await this.codexClient.initialize({
-            clientInfo: {
-                name: _params.clientInfo?.name ?? this.name,
-                version: _params.clientInfo?.version ?? this.version,
-                title: _params.clientInfo?.title ?? this.title,
-            }
-        });
+        await this.codexAcpClient.initialize(_params);
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
             agentCapabilities: {
@@ -63,7 +44,7 @@ export class CodexACPAgent implements acp.Agent {
     async newSession(
         _params: acp.NewSessionRequest,
     ): Promise<acp.NewSessionResponse> {
-        if (!await this.codexClient.loginStatus()) {
+        if (await this.codexAcpClient.authRequired()) {
             if (this.defaultAuthRequest) {
                 await this.authenticate(this.defaultAuthRequest)
             } else {
@@ -71,45 +52,22 @@ export class CodexACPAgent implements acp.Agent {
             }
         }
 
-        const threadStartResponse = await this.codexClient.threadStart({
-            config: this.config,
-            modelProvider: this.modelProvider,
-            model: null,
-            cwd: _params.cwd,
-            approvalPolicy: "never",
-            sandbox: null,
-            baseInstructions: null,
-            developerInstructions: null,
-        })
-
-        const sessionId = threadStartResponse.thread.id;
+        const sessionId = await this.codexAcpClient.newSession(_params);
         this.sessions.set(sessionId, {
             sessionId: sessionId,
-            seenReasoningDeltas: false,
             pendingPrompt: null,
         });
 
         return {
-            sessionId,
+            sessionId: sessionId,
         };
     }
 
     async authenticate(
         _params: acp.AuthenticateRequest,
     ): Promise<acp.AuthenticateResponse> {
-        if (!isCodexAuthRequest(_params)) {
-            throw RequestError.invalidRequest();
-        }
-        let authResult: Boolean;
-        switch (_params.methodId) {
-            case "api-key":
-                authResult = await this.codexClient.loginWithApiKey(_params._meta.apiKey);
-                break;
-            case "chat-gpt":
-                authResult = await this.codexClient.loginWithChatGpt();
-                break;
-        }
-        if (!authResult) {
+        const isAuthenticated = await this.codexAcpClient.authenticate(_params);
+        if (!isAuthenticated) {
             throw RequestError.invalidParams();
         }
         return { };
@@ -131,12 +89,9 @@ export class CodexACPAgent implements acp.Agent {
         sessionState.pendingPrompt?.abort();
         sessionState.pendingPrompt = new AbortController();
 
-        const prompt = params.prompt.filter(b => b.type === "text")
-            .map(b => b.text)
-            .join(" ");
-
         try {
-            await this.processMessage(sessionState, prompt);
+            const messageHandler = new CodexEventHandler(this.connection, sessionState);
+            await this.codexAcpClient.sendPrompt(params, (event) => messageHandler.handleNotification(event));
         } catch (err) {
             if (sessionState.pendingPrompt.signal.aborted) {
                 return {stopReason: "cancelled"};
@@ -152,35 +107,8 @@ export class CodexACPAgent implements acp.Agent {
         };
     }
 
-    private async processMessage(
-        sessionState: SessionState,
-        prompt: string
-    ): Promise<void> {
-        const messageHandler = new CodexEventHandler(this.connection, sessionState);
-
-        this.codexClient.onServerNotification(notification => {
-            messageHandler.handleNotification(notification);
-        });
-
-        await this.codexClient.turnStart({
-            threadId: sessionState.sessionId,
-            input: [{type: "text", text: prompt}],
-            approvalPolicy: null,
-            sandboxPolicy: null,
-            summary: null,
-            cwd: null,
-            effort: null,
-            model: null,
-        })
-
-        await this.codexClient.waitForCompletion()
-    }
-
     async cancel(params: acp.CancelNotification): Promise<void> {
         //TODO not supported yet
-        await this.codexClient.close()
         this.sessions.get(params.sessionId)?.pendingPrompt?.abort();
     }
 }
-
-export type JsonObject = { [key in string]?: JsonValue }

@@ -5,6 +5,8 @@ import {startCodexConnection} from "./CodexJsonRpcConnection";
 import {CodexACPAgent} from "./CodexACPAgent";
 import {createJsonStream} from "./StdUtils";
 import {isCodexAuthRequest} from "./CodexAuthMethod";
+import {CodexAcpClient} from "./CodexAcpClient";
+import {CodexAppServerClient} from "./CodexAppServerClient";
 
 const codexPath = process.env["CODEX_PATH"] ?? "codex";
 const logPath = process.env["APP_SERVER_LOGS"];
@@ -19,7 +21,9 @@ function createAgent(connection: acp.AgentSideConnection): CodexACPAgent {
     const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
     const parsedRequest = authRequestString ? JSON.parse(authRequestString) : undefined;
     const defaultAuthRequest = parsedRequest && isCodexAuthRequest(parsedRequest) ? parsedRequest : undefined;
-    return new CodexACPAgent(connection, appServerConnection, config, modelProvider, defaultAuthRequest);
+    const appServerClient = new CodexAppServerClient(appServerConnection);
+    const codexClient = new CodexAcpClient(appServerClient, config, modelProvider)
+    return new CodexACPAgent(connection, codexClient, defaultAuthRequest);
 }
 
 new acp.AgentSideConnection(createAgent, acpJsonStream);
