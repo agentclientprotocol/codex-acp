@@ -3,6 +3,8 @@ import { CodexACPAgent } from '../../CodexACPAgent';
 import * as acp from '@agentclientprotocol/sdk';
 import { createMockConnections } from './test-utils';
 import {CodexAuthMethods} from "../../CodexAuthMethod";
+import {CodexAcpClient} from "../../CodexAcpClient";
+import {CodexAppServerClient} from "../../CodexAppServerClient";
 
 describe('CodexACPAgent - initialize', () => {
     let agent: CodexACPAgent;
@@ -13,8 +15,9 @@ describe('CodexACPAgent - initialize', () => {
         const mocks = createMockConnections();
         mockAcpConnection = mocks.mockAcpConnection;
         mockCodexConnection = mocks.mockCodexConnection;
-
-        agent = new CodexACPAgent(mockAcpConnection, mockCodexConnection);
+        const codexAppServerClient = new CodexAppServerClient(mockCodexConnection);
+        const codexAcpClient = new CodexAcpClient(codexAppServerClient);
+        agent = new CodexACPAgent(mockAcpConnection, codexAcpClient);
     });
 
     afterEach(() => {
