@@ -22,7 +22,7 @@
     "model": null,
     "cwd": "cwd",
     "approvalPolicy": "never",
-    "sandbox": null,
+    "sandbox": "sandbox",
     "baseInstructions": null,
     "developerInstructions": null
   }
@@ -34,14 +34,8 @@
   "modelProvider": "openai",
   "cwd": "cwd",
   "approvalPolicy": "never",
-  "sandbox": {
-    "type": "workspaceWrite",
-    "writableRoots": [],
-    "networkAccess": false,
-    "excludeTmpdirEnvVar": false,
-    "excludeSlashTmp": false
-  },
-  "reasoningEffort": "medium"
+  "sandbox": "sandbox",
+  "reasoningEffort": "reasoningEffort"
 }
 {
   "eventType": "request",

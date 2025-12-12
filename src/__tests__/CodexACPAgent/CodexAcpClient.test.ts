@@ -10,7 +10,7 @@ describe('ACP server test', () => {
         vi.clearAllMocks();
     });
 
-    const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent"];
+    const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox", "reasoningEffort"];
 
     it('should start conversation', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
