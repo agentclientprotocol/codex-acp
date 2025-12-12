@@ -10,7 +10,7 @@ export interface SessionState {
     pendingPrompt: AbortController | null;
 }
 
-export class CodexACPAgent implements acp.Agent {
+export class CodexAcpServer implements acp.Agent {
     private readonly codexAcpClient: CodexAcpClient;
     private readonly connection: acp.AgentSideConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;

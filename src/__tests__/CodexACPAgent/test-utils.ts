@@ -1,5 +1,5 @@
 import { vi, expect } from 'vitest';
-import type { CodexACPAgent } from '../../CodexACPAgent';
+import type { CodexAcpServer } from '../../CodexAcpServer';
 
 export interface MockConnections {
     mockAcpConnection: any;
@@ -37,7 +37,7 @@ export function createMockConnections(): MockConnections {
 }
 
 export async function startPromptForEventHandlers(
-    agent: CodexACPAgent,
+    agent: CodexAcpServer,
     sessionId: string,
     mocks: MockConnections
 ): Promise<() => Promise<void>> {
@@ -71,7 +71,7 @@ export async function triggerEvent(mocks: MockConnections, event: any): Promise<
 }
 
 export async function testEventHandling(
-    agent: CodexACPAgent,
+    agent: CodexAcpServer,
     sessionId: string,
     mocks: MockConnections,
     events: any | any[]

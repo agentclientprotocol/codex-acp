@@ -1,7 +1,7 @@
 import {CodexAcpClient} from '../CodexAcpClient';
 import {type CodexConnectionEvent, CodexAppServerClient} from '../CodexAppServerClient';
 import {startCodexConnection} from "../CodexJsonRpcConnection";
-import {CodexACPAgent} from "../CodexACPAgent";
+import {CodexAcpServer} from "../CodexAcpServer";
 import type {AgentSideConnection} from "@agentclientprotocol/sdk";
 
 export type MethodCallEvent = { method: string; args: any[] };
@@ -20,7 +20,7 @@ function createSmartMock<T extends object>(onCall: (event: MethodCallEvent) => v
 export interface TestFixture {
     getCodexAppServerClient(): CodexAppServerClient,
     getCodexAcpClient(): CodexAcpClient,
-    getCodexAcpAgent(): CodexACPAgent,
+    getCodexAcpAgent(): CodexAcpServer,
 
     onCodexConnectionEvent(handler: (event: CodexConnectionEvent) => void): void,
     getCodexConnectionDump(ignoredFields: string[]): string,
@@ -42,7 +42,7 @@ export function createTestFixture(): TestFixture {
     const codexAppServerClient = new CodexAppServerClient(startCodexConnection(pathToCodex));
 
     const codexAcpClient = new CodexAcpClient(codexAppServerClient);
-    const codexAcpAgent = new CodexACPAgent(acpConnection, codexAcpClient);
+    const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient);
 
     const transportEvents: CodexConnectionEvent[] = []
     const codexEventHandlers: ((event: CodexConnectionEvent) => void)[] = [];
@@ -52,7 +52,7 @@ export function createTestFixture(): TestFixture {
     });
 
     return {
-        getCodexAcpAgent(): CodexACPAgent {
+        getCodexAcpAgent(): CodexAcpServer {
             return codexAcpAgent;
         },
         getCodexAcpClient(): CodexAcpClient {

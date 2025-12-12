@@ -1,5 +1,5 @@
 import type {ServerNotification} from "./app-server";
-import type {SessionState} from "./CodexACPAgent";
+import type {SessionState} from "./CodexAcpServer";
 import * as acp from "@agentclientprotocol/sdk";
 import {type PlanEntry, type ToolCallContent} from "@agentclientprotocol/sdk";
 import {applyPatch} from "diff";

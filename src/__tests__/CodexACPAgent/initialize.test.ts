@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { CodexACPAgent } from '../../CodexACPAgent';
+import { CodexAcpServer } from '../../CodexAcpServer';
 import * as acp from '@agentclientprotocol/sdk';
 import { createMockConnections } from './test-utils';
 import {CodexAuthMethods} from "../../CodexAuthMethod";
@@ -7,7 +7,7 @@ import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 
 describe('CodexACPAgent - initialize', () => {
-    let agent: CodexACPAgent;
+    let agent: CodexAcpServer;
     let mockAcpConnection: any;
     let mockCodexConnection: any;
 
@@ -17,7 +17,7 @@ describe('CodexACPAgent - initialize', () => {
         mockCodexConnection = mocks.mockCodexConnection;
         const codexAppServerClient = new CodexAppServerClient(mockCodexConnection);
         const codexAcpClient = new CodexAcpClient(codexAppServerClient);
-        agent = new CodexACPAgent(mockAcpConnection, codexAcpClient);
+        agent = new CodexAcpServer(mockAcpConnection, codexAcpClient);
     });
 
     afterEach(() => {

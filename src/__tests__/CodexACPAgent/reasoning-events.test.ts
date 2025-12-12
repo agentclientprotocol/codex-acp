@@ -1,17 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { CodexACPAgent } from '../../CodexACPAgent';
+import { CodexAcpServer } from '../../CodexAcpServer';
 import { createMockConnections, testEventHandling, type MockConnections } from './test-utils';
 
 //TODO rewrite to more stable version
 describe.skip('CodexACPAgent - reasoning events', () => {
-    let agent: CodexACPAgent;
+    let agent: CodexAcpServer;
     let mocks: MockConnections;
     const sessionId = 'test-session-id';
 
     beforeEach(async () => {
         mocks = createMockConnections();
 
-        agent = new CodexACPAgent(mocks.mockAcpConnection, mocks.mockCodexConnection);
+        agent = new CodexAcpServer(mocks.mockAcpConnection, mocks.mockCodexConnection);
 
         mocks.mockCodexConnection.sendRequest.mockResolvedValueOnce(
             { conversationId: sessionId }

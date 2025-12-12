@@ -2,7 +2,7 @@ import {describe, expect, it, vi, beforeEach, afterEach} from 'vitest';
 import type {CodexAuthRequest} from "../../CodexAuthMethod";
 import {createTestFixture, type TestFixture} from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
-import type {SessionState} from "../../CodexACPAgent";
+import type {SessionState} from "../../CodexAcpServer";
 
 describe('ACP server test', () => {
 
