@@ -34,6 +34,13 @@ export class CodexEventHandler {
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
+        /*
+        TODO split UpdateSessionEvent to improve completion
+        createUpdateEvent({
+            sessionUpdate: "" , <- completion of UpdateSessionEvent["sessionUpdate"]
+            params: {}, <- quickfix to generate required fields (rest of)
+        });
+         */
         switch (notification.method) {
             case "item/agentMessage/delta":
                 return await this.createTextEvent(notification.params);

@@ -58,7 +58,7 @@ describe('ACP server test', () => {
     });
 
     function loadNotifications(){
-        //TODO load from file
+        //TODO collect logs form dev run and then load them from file to speedup
         const serverNotifications: ServerNotification[] = [
             { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "He", }},
             { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "ll", }},

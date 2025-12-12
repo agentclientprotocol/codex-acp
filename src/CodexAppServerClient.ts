@@ -77,6 +77,7 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "account/read", params: params });
     }
 
+    //TODO create type-safe helper
     async awaitTurnCompleted(): Promise<TurnCompletedNotification> {
         return await new Promise((resolve) => {
             this.connection.onNotification("turn/completed", (event: TurnCompletedNotification) => {
@@ -85,6 +86,7 @@ export class CodexAppServerClient {
         });
     }
 
+    //TODO support removal (leads to duplicated processing of follow-ups)
     onServerNotification(callback: (event: ServerNotification) => void){
         this.notificationHandlers.push(callback);
     }
