@@ -13,6 +13,7 @@ import type {
     ThreadItem,
     TurnPlanUpdatedNotification
 } from "./app-server/v2";
+import {readFile} from "node:fs/promises";
 
 export class CodexEventHandler {
 
@@ -33,7 +34,6 @@ export class CodexEventHandler {
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
-        //TODO should take flow and return flow
         switch (notification.method) {
             case "item/agentMessage/delta":
                 return await this.createTextEvent(notification.params);
@@ -144,12 +144,7 @@ export class CodexEventHandler {
     }
 
     private async createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
-        const textResponse = await this.connection.readTextFile({
-            sessionId: this.sessionState.sessionId,
-            path: change.path
-        });
-
-        const oldContent = textResponse.content;
+        const oldContent = await readFile(change.path, { encoding: "utf8" });
         const newContent = applyPatch(oldContent, change.diff);
         if (!newContent) {
             return null

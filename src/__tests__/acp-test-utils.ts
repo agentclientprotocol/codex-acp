@@ -1,28 +1,54 @@
 import {CodexAcpClient} from '../CodexAcpClient';
-import {type ClientTransportEvent, CodexAppServerClient} from '../CodexAppServerClient';
+import {type CodexConnectionEvent, CodexAppServerClient} from '../CodexAppServerClient';
 import {startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexACPAgent} from "../CodexACPAgent";
+import type {AgentSideConnection} from "@agentclientprotocol/sdk";
+
+export type MethodCallEvent = { method: string; args: any[] };
+
+function createSmartMock<T extends object>(onCall: (event: MethodCallEvent) => void) {
+    return new Proxy({} as T, {
+        get(_, prop) {
+            return (...args: any[]) => {
+                onCall({ method: String(prop), args });
+                return { mock: "Mocked return" };
+            };
+        }
+    });
+}
 
 export interface TestFixture {
     getCodexAppServerClient(): CodexAppServerClient,
     getCodexAcpClient(): CodexAcpClient,
     getCodexAcpAgent(): CodexACPAgent,
-    getTransportEvents(): ClientTransportEvent[],
-    getTransportDump(ignoredFields: string[]): string,
-    clearTransportDump(): void
+
+    onCodexConnectionEvent(handler: (event: CodexConnectionEvent) => void): void,
+    getCodexConnectionDump(ignoredFields: string[]): string,
+    clearCodexConnectionDump(): void,
+
+    onAcpConnectionEvent(handler: (event: MethodCallEvent) => void): void,
+    getAcpConnectionDump(ignoredFields: string[]): string,
+    clearAcpConnectionDump(): void,
 }
 
 export function createTestFixture(): TestFixture {
     const pathToCodex = "././node_modules/.bin/codex"
-    const mockedAcpConnection = { } as any;
+    const acpConnectionEvents: MethodCallEvent[] = []
+    const acpEventHandlers: ((event: MethodCallEvent) => void)[] = [];
+    const acpConnection = createSmartMock<AgentSideConnection>((event) => {
+        acpConnectionEvents.push(event);
+        acpEventHandlers.forEach(handler => handler(event));
+    });
     const codexAppServerClient = new CodexAppServerClient(startCodexConnection(pathToCodex));
 
     const codexAcpClient = new CodexAcpClient(codexAppServerClient);
-    const codexAcpAgent = new CodexACPAgent(mockedAcpConnection, codexAcpClient);
+    const codexAcpAgent = new CodexACPAgent(acpConnection, codexAcpClient);
 
-    const transportEvents: ClientTransportEvent[] = []
+    const transportEvents: CodexConnectionEvent[] = []
+    const codexEventHandlers: ((event: CodexConnectionEvent) => void)[] = [];
     codexAppServerClient.onClientTransportEvent((event) => {
         transportEvents.push(event);
+        codexEventHandlers.forEach(handler => handler(event));
     });
 
     return {
@@ -32,23 +58,38 @@ export function createTestFixture(): TestFixture {
         getCodexAcpClient(): CodexAcpClient {
             return codexAcpClient;
         },
-        getTransportDump(ignoredFields: string[]): string {
-            function stringify(obj: any, anonymizedFields: string[] = []) {
-                function fieldAnonymizer(key: string, value: any): any {
-                    return anonymizedFields.includes(key) ? key : value;
-                }
-                return JSON.stringify(obj, fieldAnonymizer, 2);
-            }
-            return this.getTransportEvents().map(event => stringify(event, ignoredFields)).join("\n");
+        getCodexConnectionDump(ignoredFields: string[]): string {
+            return createArrayDump(transportEvents, ignoredFields);
         },
-        getTransportEvents(): ClientTransportEvent[] {
-            return transportEvents;
+        onCodexConnectionEvent(handler: (event: CodexConnectionEvent) => void): void {
+            codexEventHandlers.push(handler);
         },
         getCodexAppServerClient(): CodexAppServerClient {
             return codexAppServerClient;
         },
-        clearTransportDump(): void {
+        clearCodexConnectionDump(): void {
             transportEvents.splice(0, transportEvents.length);
+        },
+        onAcpConnectionEvent(handler: (event: MethodCallEvent) => void): void {
+            acpEventHandlers.push(handler);
+        },
+        getAcpConnectionDump(ignoredFields: string[]): string {
+            return createArrayDump(acpConnectionEvents, ignoredFields);
+        },
+        clearAcpConnectionDump(){
+            acpConnectionEvents.splice(0, acpConnectionEvents.length);
         }
     };
+}
+
+
+function createObjectDump(obj: any, anonymizedFields: string[] = []) {
+    function fieldAnonymizer(key: string, value: any): any {
+        return anonymizedFields.includes(key) ? key : value;
+    }
+    return JSON.stringify(obj, fieldAnonymizer, 2);
+}
+
+function createArrayDump(objects: any[], anonymizedFields: string[]): string {
+    return objects.map(event => createObjectDump(event, anonymizedFields)).join("\n");
 }

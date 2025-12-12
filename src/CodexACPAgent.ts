@@ -80,11 +80,16 @@ export class CodexACPAgent implements acp.Agent {
         return {};
     }
 
-    async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
-        const sessionState = this.sessions.get(params.sessionId);
+    getSessionState(sessionId: string): SessionState {
+        const sessionState = this.sessions.get(sessionId);
         if (!sessionState) {
-            throw new Error(`Session ${params.sessionId} not found`);
+            throw new Error(`Session ${sessionId} not found`);
         }
+        return sessionState;
+    }
+
+    async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
+        const sessionState = this.getSessionState(params.sessionId);
 
         sessionState.pendingPrompt?.abort();
         sessionState.pendingPrompt = new AbortController();

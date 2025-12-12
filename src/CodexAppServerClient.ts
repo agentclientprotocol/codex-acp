@@ -26,9 +26,13 @@ export class CodexAppServerClient {
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
-        this.onServerNotification((notification) => {
-            for (const callback of this.transportEventHandlers) {
-                callback({ eventType: "notification", ...notification});
+        this.connection.onUnhandledNotification((data) => {
+            const serverNotification = data as ServerNotification ?? null;
+            if (serverNotification) {
+                this.notify(serverNotification);
+            }
+            for (const callback of this.codexEventHandlers) {
+                callback({ eventType: "notification", ...serverNotification});
             }
         });
     }
@@ -82,35 +86,23 @@ export class CodexAppServerClient {
     }
 
     onServerNotification(callback: (event: ServerNotification) => void){
-        this.connection.onUnhandledNotification((data) => {
-            const serverNotification = data as ServerNotification ?? null;
-            if (serverNotification) {
-                callback(serverNotification)
-            }
-        });
+        this.notificationHandlers.push(callback);
     }
 
-    onUnhandledNotification(callback: (data: NotificationMessage) => void){
-        this.connection.onUnhandledNotification((data) => {
-            const event = this.getEventMessage(data);
-            if (!event) {
-                callback(data)
-            }
-        });
+    private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
+    onClientTransportEvent(callback: (event: CodexConnectionEvent) => void){
+        this.codexEventHandlers.push(callback);
     }
 
-    private getEventMessage(data: NotificationMessage): EventMsg | null {
-        const params = data.params;
-        return (params as { msg?: EventMsg })?.msg ?? null;
-    }
-
-    private transportEventHandlers: Array<(event: ClientTransportEvent) => void> = [];
-    onClientTransportEvent(callback: (event: ClientTransportEvent) => void){
-        this.transportEventHandlers.push(callback);
+    private notificationHandlers: Array<(event: ServerNotification) => void> = [];
+    private notify(notification: ServerNotification) {
+        for (const notificationHandler of this.notificationHandlers) {
+            notificationHandler(notification);
+        }
     }
 
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
-        for (const callback of this.transportEventHandlers) {
+        for (const callback of this.codexEventHandlers) {
             callback({ eventType: "request", ...request});
         }
         let result: any;
@@ -120,14 +112,14 @@ export class CodexAppServerClient {
         else {
             await this.connection.sendRequest<R>(request.method);
         }
-        for (const callback of this.transportEventHandlers) {
+        for (const callback of this.codexEventHandlers) {
             callback({ eventType: "response", ...result});
         }
         return result;
     }
 }
 
-export type ClientTransportEvent = { eventType: "request" } & CodexRequest | { eventType: "response" } & unknown | { eventType: "notification" } & ServerNotification;
+export type CodexConnectionEvent = { eventType: "request" } & CodexRequest | { eventType: "response" } & unknown | { eventType: "notification" } & ServerNotification;
 
 type CodexRequest = DistributiveOmit<ClientRequest, "id">
 
