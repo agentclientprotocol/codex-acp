@@ -47,13 +47,13 @@ export class CodexAcpServer implements acp.Agent {
     async newSession(
         _params: acp.NewSessionRequest,
     ): Promise<acp.NewSessionResponse> {
-        // if (await this.codexAcpClient.authRequired()) {
-        //     if (this.defaultAuthRequest) {
-        //         await this.authenticate(this.defaultAuthRequest)
-        //     } else {
-        //         throw RequestError.authRequired();
-        //     }
-        // }
+        if (await this.codexAcpClient.authRequired()) {
+            if (this.defaultAuthRequest) {
+                await this.authenticate(this.defaultAuthRequest)
+            } else {
+                throw RequestError.authRequired();
+            }
+        }
 
         const sessionMetadata = await this.codexAcpClient.newSession(_params);
         const {sessionId, currentModelId, models} = sessionMetadata;
