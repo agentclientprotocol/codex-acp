@@ -2,6 +2,7 @@
   "method": "sessionUpdate",
   "args": [
     {
+      "sessionId": "id",
       "update": {
         "sessionUpdate": "agent_message_chunk",
         "content": {
@@ -16,6 +17,7 @@
   "method": "sessionUpdate",
   "args": [
     {
+      "sessionId": "id",
       "update": {
         "sessionUpdate": "agent_message_chunk",
         "content": {
@@ -30,6 +32,7 @@
   "method": "sessionUpdate",
   "args": [
     {
+      "sessionId": "id",
       "update": {
         "sessionUpdate": "agent_message_chunk",
         "content": {

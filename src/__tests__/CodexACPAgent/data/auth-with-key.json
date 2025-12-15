@@ -28,7 +28,7 @@
   "eventType": "request",
   "method": "thread/start",
   "params": {
-    "config": null,
+    "config": {},
     "modelProvider": null,
     "model": null,
     "cwd": "cwd",
@@ -47,4 +47,129 @@
   "approvalPolicy": "never",
   "sandbox": "sandbox",
   "reasoningEffort": "reasoningEffort"
+}
+{
+  "eventType": "request",
+  "method": "model/list",
+  "params": {
+    "cursor": null,
+    "limit": null
+  }
+}
+{
+  "eventType": "notification",
+  "method": "thread/started",
+  "params": {
+    "thread": "thread"
+  },
+  "jsonrpc": "2.0"
+}
+{
+  "eventType": "notification",
+  "method": "codex/event/mcp_startup_complete",
+  "params": {
+    "id": "id",
+    "msg": {
+      "type": "mcp_startup_complete",
+      "ready": [],
+      "failed": [],
+      "cancelled": []
+    },
+    "conversationId": "conversationId"
+  },
+  "jsonrpc": "2.0"
+}
+{
+  "eventType": "response",
+  "data": [
+    {
+      "id": "id",
+      "model": "gpt-5.1-codex-max",
+      "displayName": "gpt-5.1-codex-max",
+      "description": "Latest Codex-optimized flagship for deep and fast reasoning.",
+      "supportedReasoningEfforts": [
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Fast responses with lighter reasoning"
+        },
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Balances speed and reasoning depth for everyday tasks"
+        },
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Maximizes reasoning depth for complex problems"
+        },
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Extra high reasoning depth for complex problems"
+        }
+      ],
+      "defaultReasoningEffort": "medium",
+      "isDefault": true
+    },
+    {
+      "id": "id",
+      "model": "gpt-5.1-codex",
+      "displayName": "gpt-5.1-codex",
+      "description": "Optimized for codex.",
+      "supportedReasoningEfforts": [
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Fastest responses with limited reasoning"
+        },
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Dynamically adjusts reasoning based on the task"
+        },
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Maximizes reasoning depth for complex or ambiguous problems"
+        }
+      ],
+      "defaultReasoningEffort": "medium",
+      "isDefault": false
+    },
+    {
+      "id": "id",
+      "model": "gpt-5.1-codex-mini",
+      "displayName": "gpt-5.1-codex-mini",
+      "description": "Optimized for codex. Cheaper, faster, but less capable.",
+      "supportedReasoningEfforts": [
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Dynamically adjusts reasoning based on the task"
+        },
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Maximizes reasoning depth for complex or ambiguous problems"
+        }
+      ],
+      "defaultReasoningEffort": "medium",
+      "isDefault": false
+    },
+    {
+      "id": "id",
+      "model": "gpt-5.1",
+      "displayName": "gpt-5.1",
+      "description": "Broad world knowledge with strong general reasoning.",
+      "supportedReasoningEfforts": [
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Balances speed with some reasoning; useful for straightforward queries and short explanations"
+        },
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Provides a solid balance of reasoning depth and latency for general-purpose tasks"
+        },
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Maximizes reasoning depth for complex or ambiguous problems"
+        }
+      ],
+      "defaultReasoningEffort": "medium",
+      "isDefault": false
+    }
+  ],
+  "nextCursor": null
 }
