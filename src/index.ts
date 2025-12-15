@@ -7,6 +7,12 @@ import {createJsonStream} from "./StdUtils";
 import {isCodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient} from "./CodexAcpClient";
 import {CodexAppServerClient} from "./CodexAppServerClient";
+import packageJson from "../package.json";
+
+if (process.argv.includes("--version")) {
+    console.log(`${packageJson.name} ${packageJson.version}`);
+    process.exit(0);
+}
 
 const codexPath = process.env["CODEX_PATH"] ?? "codex";
 const logPath = process.env["APP_SERVER_LOGS"];
