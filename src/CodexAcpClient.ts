@@ -3,8 +3,15 @@ import * as acp from "@agentclientprotocol/sdk";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import {RequestError} from "@agentclientprotocol/sdk";
 import open from "open";
-import type {ClientInfo, ServerNotification} from "./app-server";
+import type {
+    ClientInfo,
+    ServerNotification,
+    SetDefaultModelParams,
+    SetDefaultModelResponse
+} from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
+import type {Model} from "./app-server/v2";
+import {ModelId} from "./ModelId";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -13,12 +20,12 @@ import type {JsonValue} from "./app-server/serde_json/JsonValue";
 export class CodexAcpClient {
 
     private readonly codexClient: CodexAppServerClient;
-    private readonly config: JsonObject | null;
+    private readonly config: JsonObject;
     private readonly modelProvider: string | null;
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
         this.codexClient = codexClient;
-        this.config = codexConfig ?? null;
+        this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
     }
 
@@ -71,8 +78,8 @@ export class CodexAcpClient {
     /**
      * Returns a new session ID.
      */
-    async newSession(request: acp.NewSessionRequest): Promise<string> {
-        const response = await this.codexClient.threadStart({
+    async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
+        const threadStartResponse = await this.codexClient.threadStart({
             config: this.config,
             modelProvider: this.modelProvider,
             model: null,
@@ -82,7 +89,16 @@ export class CodexAcpClient {
             baseInstructions: null,
             developerInstructions: null,
         });
-        return response.thread.id;
+        const codexModels = await this.fetchAvailableModels();
+        if (codexModels.length === 0) {
+            throw new Error("Codex did not return any models");
+        }
+        const currentModelId = ModelId.fromThreadResponse(threadStartResponse).toString();
+        return {
+            sessionId: threadStartResponse.thread.id,
+            currentModelId: currentModelId,
+            models: codexModels
+        };
     }
 
     async sendPrompt(request: acp.PromptRequest, eventHandler: (result: ServerNotification) => void): Promise<void> {
@@ -106,6 +122,28 @@ export class CodexAcpClient {
         await this.codexClient.awaitTurnCompleted();
     }
 
+    async setModel(params: SetDefaultModelParams): Promise<SetDefaultModelResponse> {
+        return this.codexClient.setModelRequest(params);
+    }
+
+    private async fetchAvailableModels(): Promise<Model[]> {
+        const models: Model[] = [];
+        let cursor: string | null = null;
+
+        do {
+            const response = await this.codexClient.listModels({ cursor, limit: null });
+            models.push(...response.data);
+            cursor = response.nextCursor;
+        } while (cursor);
+
+        return models;
+    }
 }
 
 export type JsonObject = { [key in string]?: JsonValue }
+
+export type SessionMetadata = {
+    sessionId: string,
+    currentModelId: string,
+    models: Model[]
+}

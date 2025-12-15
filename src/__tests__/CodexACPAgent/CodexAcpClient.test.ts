@@ -1,4 +1,4 @@
-import {describe, expect, it, vi, beforeEach, afterEach} from 'vitest';
+import {describe, expect, it, vi, beforeEach} from 'vitest';
 import type {CodexAuthRequest} from "../../CodexAuthMethod";
 import {createTestFixture, type TestFixture} from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
@@ -12,7 +12,7 @@ describe('ACP server test', () => {
         vi.clearAllMocks();
     });
 
-    const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox", "reasoningEffort"];
+    const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox", "reasoningEffort", "conversationId"];
 
     it('should start conversation', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -79,7 +79,15 @@ describe('ACP server test', () => {
 
         fixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue(undefined);
         fixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue(undefined);
-        fixture.getCodexAcpAgent().getSessionState = vi.fn().mockResolvedValue({ pendingPrompt: null, sessionId: "id" });
+        const sessionState: SessionState = {
+            pendingPrompt: null,
+            sessionMetadata: {
+                sessionId: "id",
+                currentModelId: "model-id",
+                models: [],
+            }
+        };
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
 
         await codexAcpAgent.prompt({ sessionId: "id", prompt: [{type: "text", text: ""}] });
 

@@ -1,12 +1,15 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
-import {RequestError} from "@agentclientprotocol/sdk";
-import {CodexAcpClient} from "./CodexAcpClient";
+import {type ModelInfo, RequestError, type SessionModelState} from "@agentclientprotocol/sdk";
+import {CodexAcpClient, type SessionMetadata} from "./CodexAcpClient";
+import type {Model} from "./app-server/v2";
+import type {ReasoningEffort} from "./app-server";
+import {ModelId} from "./ModelId";
 
 
 export interface SessionState {
-    sessionId: string,
+    sessionMetadata: SessionMetadata;
     pendingPrompt: AbortController | null;
 }
 
@@ -52,14 +55,21 @@ export class CodexAcpServer implements acp.Agent {
             }
         }
 
-        const sessionId = await this.codexAcpClient.newSession(_params);
+        const sessionMetadata = await this.codexAcpClient.newSession(_params);
+        const {sessionId, currentModelId, models} = sessionMetadata;
         this.sessions.set(sessionId, {
-            sessionId: sessionId,
-            pendingPrompt: null,
+            sessionMetadata: sessionMetadata,
+            pendingPrompt: null
         });
 
+        const availableModels = this.buildAvailableModels(models);
+        const sessionModelState: SessionModelState = {
+            availableModels: availableModels,
+            currentModelId: currentModelId,
+        }
         return {
             sessionId: sessionId,
+            models: sessionModelState,
         };
     }
 
@@ -78,6 +88,55 @@ export class CodexAcpServer implements acp.Agent {
     ): Promise<acp.SetSessionModeResponse> {
         //TODO
         return {};
+    }
+
+    async setSessionModel(params: acp.SetSessionModelRequest): Promise<acp.SetSessionModelResponse> {
+        const sessionState = this.sessions.get(params.sessionId);
+        if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
+
+        const requestedModelId= ModelId.fromString(params.modelId);
+        const requestedModelName = requestedModelId.model;
+        const requestedEffort = requestedModelId.effort;
+
+        const model = sessionState.sessionMetadata.models.find(m => m.id === requestedModelName);
+        if (!model) throw new Error(`Unknown model ${params.modelId}`);
+
+        const requestedEffortValue = requestedEffort as ReasoningEffort | undefined;
+        let reasoningEffort: ReasoningEffort;
+        if (requestedEffortValue) {
+            const matchedEffort = model.supportedReasoningEfforts.find(
+                (option) => option.reasoningEffort === requestedEffortValue
+            )?.reasoningEffort;
+
+            if (!matchedEffort) {
+                throw new Error(`Unsupported reasoning effort ${requestedEffortValue} for model ${requestedModelName}`);
+            }
+
+            reasoningEffort = matchedEffort;
+        } else {
+            reasoningEffort = model.defaultReasoningEffort;
+        }
+
+
+        await this.codexAcpClient.setModel({
+            model: model.model,
+            reasoningEffort,
+        });
+        sessionState.sessionMetadata.currentModelId = ModelId.fromComponents(model, reasoningEffort).toString();
+
+        return {};
+    }
+
+
+
+    private buildAvailableModels(models: Model[]): ModelInfo[] {
+        return models.flatMap((model) =>
+            model.supportedReasoningEfforts.map((effort) => ({
+                modelId: ModelId.fromComponents(model, effort.reasoningEffort).toString(),
+                name: `${model.displayName} (${effort.reasoningEffort})`,
+                description: `${model.description} ${effort.description}`,
+            }))
+        );
     }
 
     getSessionState(sessionId: string): SessionState {
