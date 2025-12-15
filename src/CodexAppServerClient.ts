@@ -1,15 +1,15 @@
-import type {MessageConnection, NotificationMessage} from "vscode-jsonrpc/node";
+import type {MessageConnection} from "vscode-jsonrpc/node";
 import type {
     ClientRequest,
-    EventMsg,
     InitializeParams,
     InitializeResponse,
-    ServerNotification
+    ServerNotification, SetDefaultModelParams, SetDefaultModelResponse
 } from "./app-server";
 import type {
     AccountLoginCompletedNotification, AccountUpdatedNotification,
     GetAccountParams,
-    GetAccountResponse, LoginAccountParams, LoginAccountResponse, LogoutAccountResponse,
+    GetAccountResponse, LoginAccountParams, LoginAccountResponse, LogoutAccountResponse, ModelListParams,
+    ModelListResponse,
     ThreadStartParams,
     ThreadStartResponse,
     TurnCompletedNotification,
@@ -84,6 +84,15 @@ export class CodexAppServerClient {
                 resolve(event);
             });
         });
+    }
+
+
+    async setModelRequest(params: SetDefaultModelParams): Promise<SetDefaultModelResponse> {
+        return await this.sendRequest({ method: "setDefaultModel", params });
+    }
+
+    async listModels(params: ModelListParams = {cursor: null, limit: null}): Promise<ModelListResponse> {
+        return await this.sendRequest({ method: "model/list", params });
     }
 
     //TODO support removal (leads to duplicated processing of follow-ups)
