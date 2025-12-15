@@ -22,7 +22,7 @@ jobs:
           done
       - run: bun install
       - run: bun run typecheck
-      - run: bun test
+      - run: bun run test
       - run: bun run bundle:all
 
       - name: Download Codesign Client and signatures
