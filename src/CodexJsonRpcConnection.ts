@@ -23,6 +23,11 @@ export function startCodexConnection(codexPath: string, logPath?: string): Messa
 
     connection.listen();
 
+    // Terminate all current activities on process termination
+    codex.on("exit", _ => {
+        connection.dispose();
+    });
+
     return connection;
 }
 
