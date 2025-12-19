@@ -46,4 +46,7 @@ function attachLogs(proc: ChildProcessWithoutNullStreams, logPath: string) {
     proc.stdout.on("data", (data: Buffer) => {
         log("[STDOUT] " + data.toString());
     });
+    proc.on("exit", (code) => {
+        log("[EXIT] " + code?.toString());
+    });
 }
