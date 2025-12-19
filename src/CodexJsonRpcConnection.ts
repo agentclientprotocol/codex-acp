@@ -7,7 +7,12 @@ import fs from "node:fs";
 import path from "node:path";
 import {createJSONRPCReader, createJSONRPCWriter} from "./StdUtils";
 
-export function startCodexConnection(codexPath: string, logPath?: string): MessageConnection {
+export interface CodexConnection {
+    readonly connection: MessageConnection
+    readonly process: ChildProcessWithoutNullStreams;
+}
+
+export function startCodexConnection(codexPath: string, logPath?: string): CodexConnection {
     const codex: ChildProcessWithoutNullStreams = spawn(`"${codexPath}" app-server`, {
         shell: process.platform === 'win32'
     });
@@ -28,7 +33,7 @@ export function startCodexConnection(codexPath: string, logPath?: string): Messa
         connection.dispose();
     });
 
-    return connection;
+    return {connection: connection, process: codex};
 }
 
 function attachLogs(proc: ChildProcessWithoutNullStreams, logPath: string) {

@@ -41,10 +41,10 @@ export function createTestFixture(): TestFixture {
         acpEventHandlers.forEach(handler => handler(event));
     });
     const codexConnection = startCodexConnection(pathToCodex);
-    const codexAppServerClient = new CodexAppServerClient(codexConnection);
+    const codexAppServerClient = new CodexAppServerClient(codexConnection.connection);
 
     const codexAcpClient = new CodexAcpClient(codexAppServerClient);
-    const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient);
+    const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient, undefined, () => codexConnection.process.exitCode);
 
     const transportEvents: CodexConnectionEvent[] = []
     const codexEventHandlers: ((event: CodexConnectionEvent) => void)[] = [];

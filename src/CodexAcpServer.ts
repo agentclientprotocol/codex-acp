@@ -17,6 +17,7 @@ export class CodexAcpServer implements acp.Agent {
     private readonly codexAcpClient: CodexAcpClient;
     private readonly connection: acp.AgentSideConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
+    private readonly getExitCode: () => number | null;
 
     private readonly sessions: Map<string, SessionState>;
 
@@ -24,17 +25,19 @@ export class CodexAcpServer implements acp.Agent {
         connection: acp.AgentSideConnection,
         codexAcpClient: CodexAcpClient,
         defaultAuthRequest?: CodexAuthRequest,
+        getExitCode?: () => number | null,
     ) {
         this.sessions = new Map();
         this.connection = connection;
-        this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.codexAcpClient = codexAcpClient;
+        this.defaultAuthRequest = defaultAuthRequest ?? null;
+        this.getExitCode = getExitCode ?? (() => null);
     }
 
     async initialize(
         _params: acp.InitializeRequest,
     ): Promise<acp.InitializeResponse> {
-        await this.codexAcpClient.initialize(_params);
+        await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
             agentCapabilities: {
@@ -47,7 +50,7 @@ export class CodexAcpServer implements acp.Agent {
     async newSession(
         _params: acp.NewSessionRequest,
     ): Promise<acp.NewSessionResponse> {
-        if (await this.codexAcpClient.authRequired()) {
+        if (await this.runWithProcessCheck(() => this.codexAcpClient.authRequired())) {
             if (this.defaultAuthRequest) {
                 await this.authenticate(this.defaultAuthRequest)
             } else {
@@ -55,7 +58,7 @@ export class CodexAcpServer implements acp.Agent {
             }
         }
 
-        const sessionMetadata = await this.codexAcpClient.newSession(_params);
+        const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(_params));
         const {sessionId, currentModelId, models} = sessionMetadata;
         this.sessions.set(sessionId, {
             sessionMetadata: sessionMetadata,
@@ -76,7 +79,7 @@ export class CodexAcpServer implements acp.Agent {
     async authenticate(
         _params: acp.AuthenticateRequest,
     ): Promise<acp.AuthenticateResponse> {
-        const isAuthenticated = await this.codexAcpClient.authenticate(_params);
+        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params));
         if (!isAuthenticated) {
             throw RequestError.invalidParams();
         }
@@ -118,10 +121,10 @@ export class CodexAcpServer implements acp.Agent {
         }
 
 
-        await this.codexAcpClient.setModel({
+        await this.runWithProcessCheck(() => this.codexAcpClient.setModel({
             model: model.model,
             reasoningEffort,
-        });
+        }));
         sessionState.sessionMetadata.currentModelId = ModelId.fromComponents(model, reasoningEffort).toString();
 
         return {};
@@ -155,7 +158,7 @@ export class CodexAcpServer implements acp.Agent {
 
         try {
             const messageHandler = new CodexEventHandler(this.connection, sessionState);
-            await this.codexAcpClient.sendPrompt(params, (event) => messageHandler.handleNotification(event));
+            await this.runWithProcessCheck(() => this.codexAcpClient.sendPrompt(params, (event) => messageHandler.handleNotification(event)));
         } catch (err) {
             if (sessionState.pendingPrompt.signal.aborted) {
                 return {stopReason: "cancelled"};
@@ -169,6 +172,22 @@ export class CodexAcpServer implements acp.Agent {
         return {
             stopReason: "end_turn",
         };
+    }
+
+    private async runWithProcessCheck<T>(operation: () => Promise<T>): Promise<T> {
+        try {
+            return await operation();
+        } catch (err) {
+            const exitCode = this.getExitCode();
+            const requestErrorCode = 1001 // Just some magic number
+            if (exitCode == 3221225781) {
+                throw new RequestError(requestErrorCode, `VC++ redistributable should be installed`);
+            }
+            if (exitCode !== null) {
+                throw new RequestError(requestErrorCode, `Codex process has exited with code ${exitCode}`);
+            }
+            throw err;
+        }
     }
 
     async cancel(params: acp.CancelNotification): Promise<void> {
