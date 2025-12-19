@@ -8,7 +8,9 @@ import path from "node:path";
 import {createJSONRPCReader, createJSONRPCWriter} from "./StdUtils";
 
 export function startCodexConnection(codexPath: string, logPath?: string): MessageConnection {
-    const codex: ChildProcessWithoutNullStreams = spawn(codexPath, ["app-server"]);
+    const codex: ChildProcessWithoutNullStreams = spawn(`"${codexPath}" app-server`, {
+        shell: process.platform === 'win32'
+    });
 
     if (logPath) {
         attachLogs(codex, logPath);

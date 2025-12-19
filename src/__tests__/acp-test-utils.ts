@@ -3,6 +3,7 @@ import {type CodexConnectionEvent, CodexAppServerClient} from '../CodexAppServer
 import {startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexAcpServer} from "../CodexAcpServer";
 import type {AgentSideConnection} from "@agentclientprotocol/sdk";
+import path from "node:path";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -32,14 +33,15 @@ export interface TestFixture {
 }
 
 export function createTestFixture(): TestFixture {
-    const pathToCodex = "././node_modules/.bin/codex"
+    const pathToCodex = path.resolve(process.cwd(), "node_modules", ".bin", process.platform === 'win32' ? "codex.cmd" : "codex");
     const acpConnectionEvents: MethodCallEvent[] = []
     const acpEventHandlers: ((event: MethodCallEvent) => void)[] = [];
     const acpConnection = createSmartMock<AgentSideConnection>((event) => {
         acpConnectionEvents.push(event);
         acpEventHandlers.forEach(handler => handler(event));
     });
-    const codexAppServerClient = new CodexAppServerClient(startCodexConnection(pathToCodex));
+    const codexConnection = startCodexConnection(pathToCodex);
+    const codexAppServerClient = new CodexAppServerClient(codexConnection);
 
     const codexAcpClient = new CodexAcpClient(codexAppServerClient);
     const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient);
