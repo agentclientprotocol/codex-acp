@@ -4,6 +4,10 @@
 
 Last checked version: `codex-cli 0.64.0-alpha.9`)
 
+###### Develop on Windows?
+- Download and install [bum](https://bun.com/docs/installation#windows)
+- Download and install [C++ redistributable package](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version)
+
 #### Adjust acp config for IDE
 
 Run from sources
