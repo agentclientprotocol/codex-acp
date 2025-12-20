@@ -1,0 +1,30 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Hello"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-2",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Hello"
+        }
+      }
+    }
+  ]
+}

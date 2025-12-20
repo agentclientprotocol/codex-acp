@@ -102,7 +102,7 @@ export class CodexAcpClient {
     }
 
     async sendPrompt(request: acp.PromptRequest, eventHandler: (result: ServerNotification) => void): Promise<void> {
-        this.codexClient.onServerNotification(eventHandler);
+        this.codexClient.onServerNotification(request.sessionId, eventHandler);
 
         const input = request.prompt.filter(b => b.type === "text")
             .map(b => b.text)

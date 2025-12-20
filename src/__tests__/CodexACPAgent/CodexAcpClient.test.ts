@@ -1,6 +1,6 @@
 import {describe, expect, it, vi, beforeEach} from 'vitest';
 import type {CodexAuthRequest} from "../../CodexAuthMethod";
-import {createTestFixture, type TestFixture} from "../acp-test-utils";
+import {createTestFixture, createCodexMockTestFixture, type TestFixture} from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 
@@ -64,7 +64,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "ll", }},
             { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "o!", }},
         ];
-        function onServerNotification(callback: (event: ServerNotification) => void){
+        function onServerNotification(_sessionId: string, callback: (event: ServerNotification) => void){
             for (const notification of serverNotifications) {
                 callback(notification);
             }
@@ -93,6 +93,102 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/output-acp-events.json");
 
+    });
+
+    it('should not duplicate messages on follow-up prompts', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue(undefined);
+        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue(undefined);
+
+        const sessionState: SessionState = {
+            pendingPrompt: null,
+            sessionMetadata: {
+                sessionId: "id",
+                currentModelId: "model-id",
+                models: [],
+            }
+        };
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+        // First prompt - registers first notification handler
+        await codexAcpAgent.prompt({ sessionId: "id", prompt: [{type: "text", text: "First message"}] });
+
+        // Follow-up prompt - should NOT accumulate handlers
+        await codexAcpAgent.prompt({ sessionId: "id", prompt: [{type: "text", text: "Follow-up message"}] });
+
+        mockFixture.clearAcpConnectionDump();
+
+        // Trigger notifications after both prompts - should produce only 3 events, not 6
+        const serverNotifications: ServerNotification[] = [
+            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "He", }},
+            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "ll", }},
+            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "o!", }},
+        ];
+        for (const notification of serverNotifications) {
+            mockFixture.sendServerNotification(notification);
+        }
+
+        // Wait for async handlers to complete
+        await vi.waitFor(() => {
+            const dump = mockFixture.getAcpConnectionDump([]);
+            expect(dump.length).toBeGreaterThan(0);
+        });
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/follow-up-no-duplicates.json");
+    });
+
+    it('should handle multiple sessions independently', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue(undefined);
+        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue(undefined);
+
+        const sessionState1: SessionState = {
+            pendingPrompt: null,
+            sessionMetadata: {
+                sessionId: "session-1",
+                currentModelId: "model-id",
+                models: [],
+            }
+        };
+        const sessionState2: SessionState = {
+            pendingPrompt: null,
+            sessionMetadata: {
+                sessionId: "session-2",
+                currentModelId: "model-id",
+                models: [],
+            }
+        };
+
+        vi.spyOn(codexAcpAgent, "getSessionState").mockImplementation((sessionId: string) => {
+            return sessionId === "session-1" ? sessionState1 : sessionState2;
+        });
+
+        // Start prompts for two different sessions
+        await codexAcpAgent.prompt({ sessionId: "session-1", prompt: [{type: "text", text: "Message to session 1"}] });
+        await codexAcpAgent.prompt({ sessionId: "session-2", prompt: [{type: "text", text: "Message to session 2"}] });
+
+        mockFixture.clearAcpConnectionDump();
+
+        // Trigger notifications - both session handlers should receive them
+        const serverNotifications: ServerNotification[] = [
+            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "Hello", }},
+        ];
+        for (const notification of serverNotifications) {
+            mockFixture.sendServerNotification(notification);
+        }
+
+        // Wait for async handlers to complete
+        await vi.waitFor(() => {
+            const dump = mockFixture.getAcpConnectionDump([]);
+            expect(dump.length).toBeGreaterThan(0);
+        });
+
+        // Should have 2 events - one for each session's handler
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/multiple-sessions.json");
     });
 
     //dev-time test
