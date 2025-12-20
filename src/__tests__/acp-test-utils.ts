@@ -4,6 +4,7 @@ import {startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexAcpServer} from "../CodexAcpServer";
 import type {AgentSideConnection} from "@agentclientprotocol/sdk";
 import path from "node:path";
+import fs from "node:fs";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -34,6 +35,10 @@ export interface TestFixture {
 
 export function createTestFixture(): TestFixture {
     const pathToCodex = path.resolve(process.cwd(), "node_modules", ".bin", process.platform === 'win32' ? "codex.cmd" : "codex");
+    if (!fs.existsSync(pathToCodex)) {
+        throw new Error(`Codex binary not found at ${pathToCodex}. Did you run 'npm install'?`);
+    }
+    
     const acpConnectionEvents: MethodCallEvent[] = []
     const acpEventHandlers: ((event: MethodCallEvent) => void)[] = [];
     const acpConnection = createSmartMock<AgentSideConnection>((event) => {
