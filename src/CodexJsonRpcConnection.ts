@@ -13,9 +13,9 @@ export interface CodexConnection {
 }
 
 export function startCodexConnection(codexPath: string, logPath?: string): CodexConnection {
-    const codex: ChildProcessWithoutNullStreams = spawn(`"${codexPath}" app-server`, {
-        shell: process.platform === 'win32'
-    });
+    const codex: ChildProcessWithoutNullStreams = process.platform === 'win32'
+        ? spawn(`"${codexPath}" app-server`, { shell: true })
+        : spawn(codexPath, ['app-server']);
 
     if (logPath) {
         attachLogs(codex, logPath);
