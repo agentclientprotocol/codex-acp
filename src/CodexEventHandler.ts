@@ -7,6 +7,7 @@ import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnect
 import type {
     AgentMessageDeltaNotification,
     CommandAction,
+    ErrorNotification,
     FileUpdateChange,
     ItemCompletedNotification,
     ItemStartedNotification,
@@ -50,6 +51,8 @@ export class CodexEventHandler {
                 return await this.completeItemEvent(notification.params);
             case "turn/plan/updated":
                 return await this.updatePlan(notification.params);
+            case "error":
+                return await this.createErrorEvent(notification.params);
             case "item/reasoning/summaryTextDelta": //TODO streaming reasoning?
             case "item/reasoning/summaryPartAdded":
             //skipped events
@@ -59,7 +62,6 @@ export class CodexEventHandler {
             case "turn/diff/updated":
             case "item/commandExecution/outputDelta":
             case "item/fileChange/outputDelta":
-            case "error":
             case "thread/tokenUsage/updated":
             case "item/mcpToolCall/progress":
             case "account/updated":
@@ -217,6 +219,16 @@ export class CodexEventHandler {
         return {
             sessionUpdate: "plan",
             entries: plan,
+        }
+    }
+
+    private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent> {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `❌ ${params.error.message}\n\n`
+            }
         }
     }
 }
