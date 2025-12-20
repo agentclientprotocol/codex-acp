@@ -4,7 +4,7 @@ import {createTestFixture, type TestFixture} from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 
-describe('ACP server test', () => {
+describe('ACP server test', { timeout: 40_000 }, () => {
 
     let fixture: TestFixture;
     beforeEach(() => {
@@ -20,7 +20,7 @@ describe('ACP server test', () => {
 
         fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
-        codexAcpAgent.prompt({ sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "Hi!"}] });
+        codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "Hi!"}]});
 
         const transportDump = fixture.getCodexConnectionDump(ignoredFields);
         await expect(transportDump).toMatchFileSnapshot("data/start-conversation.json");
@@ -93,7 +93,7 @@ describe('ACP server test', () => {
 
         expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/output-acp-events.json");
 
-    }, 90_000);
+    });
 
     //dev-time test
     it.skip('should convert session notification to acp events', async () => {
@@ -105,5 +105,5 @@ describe('ACP server test', () => {
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "/home/alex/work/spring-petclinic/", mcpServers: []});
         fixture.clearCodexConnectionDump();
         await codexAcpAgent.prompt({ sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "Add method `minus` to Math Utils."}] });
-    }, 90_000);
+    });
 });

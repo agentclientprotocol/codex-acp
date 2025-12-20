@@ -17,7 +17,7 @@ if (process.argv.includes("--version")) {
 const codexPath = process.env["CODEX_PATH"] ?? "codex";
 const logPath = process.env["APP_SERVER_LOGS"];
 
-const appServerConnection = startCodexConnection(codexPath, logPath);
+const codexConnection = startCodexConnection(codexPath, logPath);
 const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
 function createAgent(connection: acp.AgentSideConnection): CodexAcpServer {
@@ -27,9 +27,9 @@ function createAgent(connection: acp.AgentSideConnection): CodexAcpServer {
     const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
     const parsedRequest = authRequestString ? JSON.parse(authRequestString) : undefined;
     const defaultAuthRequest = parsedRequest && isCodexAuthRequest(parsedRequest) ? parsedRequest : undefined;
-    const appServerClient = new CodexAppServerClient(appServerConnection);
+    const appServerClient = new CodexAppServerClient(codexConnection.connection);
     const codexClient = new CodexAcpClient(appServerClient, config, modelProvider)
-    return new CodexAcpServer(connection, codexClient, defaultAuthRequest);
+    return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.process.exitCode);
 }
 
 new acp.AgentSideConnection(createAgent, acpJsonStream);

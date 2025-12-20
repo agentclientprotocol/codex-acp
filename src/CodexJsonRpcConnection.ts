@@ -7,8 +7,15 @@ import fs from "node:fs";
 import path from "node:path";
 import {createJSONRPCReader, createJSONRPCWriter} from "./StdUtils";
 
-export function startCodexConnection(codexPath: string, logPath?: string): MessageConnection {
-    const codex: ChildProcessWithoutNullStreams = spawn(codexPath, ["app-server"]);
+export interface CodexConnection {
+    readonly connection: MessageConnection
+    readonly process: ChildProcessWithoutNullStreams;
+}
+
+export function startCodexConnection(codexPath: string, logPath?: string): CodexConnection {
+    const codex: ChildProcessWithoutNullStreams = process.platform === 'win32'
+        ? spawn(`"${codexPath}" app-server`, { shell: true })
+        : spawn(codexPath, ['app-server']);
 
     if (logPath) {
         attachLogs(codex, logPath);
@@ -21,7 +28,12 @@ export function startCodexConnection(codexPath: string, logPath?: string): Messa
 
     connection.listen();
 
-    return connection;
+    // Terminate all current activities on process termination
+    codex.on("exit", _ => {
+        connection.dispose();
+    });
+
+    return {connection: connection, process: codex};
 }
 
 function attachLogs(proc: ChildProcessWithoutNullStreams, logPath: string) {
@@ -38,5 +50,8 @@ function attachLogs(proc: ChildProcessWithoutNullStreams, logPath: string) {
     });
     proc.stdout.on("data", (data: Buffer) => {
         log("[STDOUT] " + data.toString());
+    });
+    proc.on("exit", (code) => {
+        log("[EXIT] " + code?.toString());
     });
 }
