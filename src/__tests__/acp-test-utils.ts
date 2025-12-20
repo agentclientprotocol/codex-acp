@@ -3,12 +3,14 @@ import {type CodexConnectionEvent, CodexAppServerClient} from '../CodexAppServer
 import {startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexAcpServer} from "../CodexAcpServer";
 import type {AgentSideConnection} from "@agentclientprotocol/sdk";
+import type {ServerNotification} from "../app-server";
+import type {MessageConnection} from "vscode-jsonrpc/node";
 import path from "node:path";
 import fs from "node:fs";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
-function createSmartMock<T extends object>(onCall: (event: MethodCallEvent) => void) {
+export function createSmartMock<T extends object>(onCall: (event: MethodCallEvent) => void) {
     return new Proxy({} as T, {
         get(_, prop) {
             return (...args: any[]) => {
@@ -33,25 +35,24 @@ export interface TestFixture {
     clearAcpConnectionDump(): void,
 }
 
-export function createTestFixture(): TestFixture {
-    const pathToCodex = path.resolve(process.cwd(), "node_modules", ".bin", process.platform === 'win32' ? "codex.cmd" : "codex");
-    if (!fs.existsSync(pathToCodex)) {
-        throw new Error(`Codex binary not found at ${pathToCodex}. Did you run 'npm install'?`);
-    }
-    
-    const acpConnectionEvents: MethodCallEvent[] = []
+export interface ConnectionConfig {
+    connection: MessageConnection;
+    getExitCode: () => number | null;
+}
+
+export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
+    const acpConnectionEvents: MethodCallEvent[] = [];
     const acpEventHandlers: ((event: MethodCallEvent) => void)[] = [];
     const acpConnection = createSmartMock<AgentSideConnection>((event) => {
         acpConnectionEvents.push(event);
         acpEventHandlers.forEach(handler => handler(event));
     });
-    const codexConnection = startCodexConnection(pathToCodex);
-    const codexAppServerClient = new CodexAppServerClient(codexConnection.connection);
 
+    const codexAppServerClient = new CodexAppServerClient(config.connection);
     const codexAcpClient = new CodexAcpClient(codexAppServerClient);
-    const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient, undefined, () => codexConnection.process.exitCode);
+    const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient, undefined, config.getExitCode);
 
-    const transportEvents: CodexConnectionEvent[] = []
+    const transportEvents: CodexConnectionEvent[] = [];
     const codexEventHandlers: ((event: CodexConnectionEvent) => void)[] = [];
     codexAppServerClient.onClientTransportEvent((event) => {
         transportEvents.push(event);
@@ -83,20 +84,73 @@ export function createTestFixture(): TestFixture {
         getAcpConnectionDump(ignoredFields: string[]): string {
             return createArrayDump(acpConnectionEvents, ignoredFields);
         },
-        clearAcpConnectionDump(){
+        clearAcpConnectionDump() {
             acpConnectionEvents.splice(0, acpConnectionEvents.length);
         }
     };
 }
 
+/**
+ * Creates a test fixture with a real Codex connection.
+ * Use for integration tests that need to interact with the actual Codex binary.
+ */
+export function createTestFixture(): TestFixture {
+    const pathToCodex = path.resolve(process.cwd(), "node_modules", ".bin", process.platform === 'win32' ? "codex.cmd" : "codex");
+    if (!fs.existsSync(pathToCodex)) {
+        throw new Error(`Codex binary not found at ${pathToCodex}. Did you run 'npm install'?`);
+    }
 
-function createObjectDump(obj: any, anonymizedFields: string[] = []) {
+    const codexConnection = startCodexConnection(pathToCodex);
+
+    return createBaseTestFixture({
+        connection: codexConnection.connection,
+        getExitCode: () => codexConnection.process.exitCode
+    });
+}
+
+export interface CodexMockTestFixture extends TestFixture {
+    sendServerNotification(notification: ServerNotification): void,
+}
+
+/**
+ * Creates a test fixture with a mock Codex connection.
+ * Use for unit tests that don't need a real Codex binary.
+ * Provides `sendServerNotification()` to simulate server notifications.
+ */
+export function createCodexMockTestFixture(): CodexMockTestFixture {
+    let unhandledNotificationHandler: ((notification: any) => void) | null = null;
+
+    const mockCodexConnection = {
+        sendRequest: () => Promise.resolve(undefined),
+        onUnhandledNotification: (handler: (notification: any) => void) => {
+            unhandledNotificationHandler = handler;
+        },
+        onNotification: () => {},
+        end: () => {},
+    } as unknown as MessageConnection;
+
+    const baseFixture = createBaseTestFixture({
+        connection: mockCodexConnection,
+        getExitCode: () => null
+    });
+
+    return {
+        ...baseFixture,
+        sendServerNotification(notification: ServerNotification): void {
+            if (unhandledNotificationHandler) {
+                unhandledNotificationHandler(notification);
+            }
+        }
+    };
+}
+
+export function createObjectDump(obj: any, anonymizedFields: string[] = []) {
     function fieldAnonymizer(key: string, value: any): any {
         return anonymizedFields.includes(key) ? key : value;
     }
     return JSON.stringify(obj, fieldAnonymizer, 2);
 }
 
-function createArrayDump(objects: any[], anonymizedFields: string[]): string {
+export function createArrayDump(objects: any[], anonymizedFields: string[]): string {
     return objects.map(event => createObjectDump(event, anonymizedFields)).join("\n");
 }

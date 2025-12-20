@@ -95,9 +95,12 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "model/list", params });
     }
 
-    //TODO support removal (leads to duplicated processing of follow-ups)
-    onServerNotification(callback: (event: ServerNotification) => void){
-        this.notificationHandlers.push(callback);
+    /**
+     * Registers a notification handler for a specific session.
+     * Replaces any existing handler for the same session, preventing handler accumulation.
+     */
+    onServerNotification(sessionId: string, callback: (event: ServerNotification) => void) {
+        this.notificationHandlers.set(sessionId, callback);
     }
 
     private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
@@ -105,9 +108,9 @@ export class CodexAppServerClient {
         this.codexEventHandlers.push(callback);
     }
 
-    private notificationHandlers: Array<(event: ServerNotification) => void> = [];
+    private notificationHandlers = new Map<string, (event: ServerNotification) => void>();
     private notify(notification: ServerNotification) {
-        for (const notificationHandler of this.notificationHandlers) {
+        for (const notificationHandler of this.notificationHandlers.values()) {
             notificationHandler(notification);
         }
     }
