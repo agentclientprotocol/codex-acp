@@ -9,6 +9,7 @@ import type {
     SetDefaultModelParams,
     SetDefaultModelResponse
 } from "./app-server";
+import type {TurnCompletedNotification } from "./app-server/v2";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import type {Model} from "./app-server/v2";
 import {ModelId} from "./ModelId";
@@ -101,7 +102,10 @@ export class CodexAcpClient {
         };
     }
 
-    async sendPrompt(request: acp.PromptRequest, eventHandler: (result: ServerNotification) => void): Promise<void> {
+    async sendPrompt(
+        request: acp.PromptRequest, 
+        eventHandler: (result: ServerNotification) => void
+    ): Promise<TurnCompletedNotification> {
         this.codexClient.onServerNotification(request.sessionId, eventHandler);
 
         const input = request.prompt.filter(b => b.type === "text")
@@ -119,11 +123,20 @@ export class CodexAcpClient {
             model: null,
         });
 
-        await this.codexClient.awaitTurnCompleted();
+        // Wait for turn completion
+        // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
+        return await this.codexClient.awaitTurnCompleted();
     }
 
     async setModel(params: SetDefaultModelParams): Promise<SetDefaultModelResponse> {
         return this.codexClient.setModelRequest(params);
+    }
+
+    async turnInterrupt(params: { threadId: string, turnId: string }): Promise<void> {
+        await this.codexClient.turnInterrupt({
+            threadId: params.threadId,
+            turnId: params.turnId
+        });
     }
 
     private async fetchAvailableModels(): Promise<Model[]> {
