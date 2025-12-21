@@ -1,0 +1,23 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "file-change-1",
+        "title": "Editing files",
+        "kind": "edit",
+        "status": "completed",
+        "content": [
+          {
+            "type": "diff",
+            "oldText": null,
+            "newText": "package test.project\n\nclass NewFile {\n    fun hello() = \"Hello\"\n}\n",
+            "path": "/test/project/NewFile.kt"
+          }
+        ]
+      }
+    }
+  ]
+}

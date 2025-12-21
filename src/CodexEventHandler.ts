@@ -157,8 +157,10 @@ export class CodexEventHandler {
     }
 
     private async createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
-        const oldContent = await readFile(change.path, { encoding: "utf8" });
-        const newContent = applyPatch(oldContent, change.diff);
+        const oldContent = change.kind.type === "add"
+            ? null
+            : await readFile(change.path, { encoding: "utf8" });
+        const newContent = applyPatch(oldContent ?? "", change.diff);
         if (!newContent) {
             return null
         }
