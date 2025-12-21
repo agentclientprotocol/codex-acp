@@ -161,6 +161,16 @@ export class CodexAcpServer implements acp.Agent {
 
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
+                await this.connection.sessionUpdate({
+                    sessionId: params.sessionId,
+                    update: {
+                        sessionUpdate: "agent_message_chunk",
+                        content: {
+                            type: "text",
+                            text: "*Conversation interrupted*"
+                        }
+                    }
+                });
                 return {
                     stopReason: "cancelled",
                 };
