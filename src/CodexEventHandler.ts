@@ -153,19 +153,31 @@ export class CodexEventHandler {
     }
 
     private async createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
-        const oldContent = change.kind.type === "add"
-            ? null
-            : await readFile(change.path, { encoding: "utf8" });
-        const newContent = applyPatch(oldContent ?? "", change.diff);
-        if (!newContent) {
+        if (change.kind.type === "add" && !this.isUnifiedDiff(change.diff)) {
+            // For new files, diff may contain raw file content instead of a patch
+            return {
+                type: "diff",
+                oldText: null,
+                newText: change.diff,
+                path: change.path,
+            }
+        }
+
+        const oldContent = change.kind.type === "add" ? "" : await readFile(change.path, { encoding: "utf8" });
+        const newContent = applyPatch(oldContent, change.diff);
+        if (newContent === false) {
             return null
         }
         return {
             type: "diff",
-            oldText: oldContent,
+            oldText: change.kind.type === "add" ? null : oldContent,
             newText: newContent,
             path: change.path,
         }
+    }
+
+    private isUnifiedDiff(content: string): boolean {
+        return content.startsWith('--- ') || content.includes('\n--- ');
     }
 
     private async createCommandEvent(item: ThreadItem & { "type": "commandExecution" }): Promise<UpdateSessionEvent> {

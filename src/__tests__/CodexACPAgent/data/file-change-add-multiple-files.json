@@ -1,0 +1,29 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "file-change-2",
+        "title": "Editing files",
+        "kind": "edit",
+        "status": "completed",
+        "content": [
+          {
+            "type": "diff",
+            "oldText": null,
+            "newText": "class FileA\n",
+            "path": "/test/project/FileA.kt"
+          },
+          {
+            "type": "diff",
+            "oldText": null,
+            "newText": "class FileB\n",
+            "path": "/test/project/FileB.kt"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -3,13 +3,33 @@ import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, type CodexMockTestFixture } from '../acp-test-utils';
 
+const { mockFiles, mockFileContent, clearMockFiles } = vi.hoisted(() => {
+    const files = new Map<string, string>();
+    return {
+        mockFiles: files,
+        mockFileContent: (path: string, content: string) => files.set(path, content),
+        clearMockFiles: () => files.clear(),
+    };
+});
+
+vi.mock('node:fs/promises', () => ({
+    readFile: (path: string) => {
+        const content = mockFiles.get(path);
+        if (content !== undefined) {
+            return Promise.resolve(content);
+        }
+        return Promise.reject(new Error(`ENOENT: no such file or directory, open '${path}'`));
+    },
+}));
+
 describe('CodexEventHandler - file change events', () => {
     let mockFixture: CodexMockTestFixture;
     const sessionId = 'test-session-id';
 
     beforeEach(() => {
         mockFixture = createCodexMockTestFixture();
-        vi.clearAllMocks();
+        clearMockFiles();
+        mockFileContent('/test/project/OldFile.kt', 'package test.project\n\nclass OldFile {}');
     });
 
     const sessionState: SessionState = {
@@ -117,6 +137,68 @@ describe('CodexEventHandler - file change events', () => {
 
         await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
             'data/file-change-add-multiple-files.json'
+        );
+    });
+
+    it('should handle new file creation with raw content', async () => {
+        // Codex sends raw file content (not unified diff) for new files
+        const newFileNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-change-raw',
+                    changes: [
+                        {
+                            path: '/test/project/RawFile.kt',
+                            kind: { type: 'add' },
+                            diff: 'fun main() {\n    println("Hello, World!")\n}\n',
+                        },
+                    ],
+                    status: 'completed',
+                },
+            },
+        };
+
+        await setupAndSendNotifications([newFileNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
+            'data/file-change-add-raw-content.json'
+        );
+    });
+
+    it('should handle file deletion', async () => {
+        const deleteFileNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-change-3',
+                    changes: [
+                        {
+                            path: '/test/project/OldFile.kt',
+                            kind: { type: 'delete' },
+                            diff: `--- /test/project/OldFile.kt
++++ /dev/null
+@@ -1,3 +0,0 @@
+-package test.project
+-
+-class OldFile {}`,
+                        },
+                    ],
+                    status: 'completed',
+                },
+            },
+        };
+
+        await setupAndSendNotifications([deleteFileNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
+            'data/file-change-delete-file.json'
         );
     });
 });

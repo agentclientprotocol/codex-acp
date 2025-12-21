@@ -1,0 +1,23 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "file-change-raw",
+        "title": "Editing files",
+        "kind": "edit",
+        "status": "completed",
+        "content": [
+          {
+            "type": "diff",
+            "oldText": null,
+            "newText": "fun main() {\n    println(\"Hello, World!\")\n}\n",
+            "path": "/test/project/RawFile.kt"
+          }
+        ]
+      }
+    }
+  ]
+}

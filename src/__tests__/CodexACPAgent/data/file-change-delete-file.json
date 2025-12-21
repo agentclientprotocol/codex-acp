@@ -1,0 +1,23 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "file-change-3",
+        "title": "Editing files",
+        "kind": "edit",
+        "status": "completed",
+        "content": [
+          {
+            "type": "diff",
+            "oldText": "package test.project\n\nclass OldFile {}",
+            "newText": "",
+            "path": "/test/project/OldFile.kt"
+          }
+        ]
+      }
+    }
+  ]
+}
