@@ -1,6 +1,6 @@
 import {isCodexAuthRequest} from "./CodexAuthMethod";
 import * as acp from "@agentclientprotocol/sdk";
-import type {CodexAppServerClient} from "./CodexAppServerClient";
+import type {ApprovalHandler, CodexAppServerClient} from "./CodexAppServerClient";
 import {RequestError} from "@agentclientprotocol/sdk";
 import open from "open";
 import type {
@@ -85,7 +85,7 @@ export class CodexAcpClient {
             modelProvider: this.modelProvider,
             model: null,
             cwd: request.cwd,
-            approvalPolicy: "never",
+            approvalPolicy: "on-request",
             sandbox: null,
             baseInstructions: null,
             developerInstructions: null,
@@ -104,10 +104,12 @@ export class CodexAcpClient {
     }
 
     async sendPrompt(
-        request: acp.PromptRequest, 
-        eventHandler: (result: ServerNotification) => void
+        request: acp.PromptRequest,
+        eventHandler: (result: ServerNotification) => void,
+        approvalHandler: ApprovalHandler
     ): Promise<TurnCompletedNotification> {
         this.codexClient.onServerNotification(request.sessionId, eventHandler);
+        this.codexClient.onApprovalRequest(request.sessionId, approvalHandler);
 
         const input = request.prompt.filter(b => b.type === "text")
             .map(b => b.text)

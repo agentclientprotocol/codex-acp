@@ -21,7 +21,7 @@
     "modelProvider": null,
     "model": null,
     "cwd": "cwd",
-    "approvalPolicy": "never",
+    "approvalPolicy": "on-request",
     "sandbox": "sandbox",
     "baseInstructions": null,
     "developerInstructions": null,
@@ -31,10 +31,10 @@
 {
   "eventType": "response",
   "thread": "thread",
-  "model": "gpt-5.1-codex-max",
+  "model": "gpt-5.2",
   "modelProvider": "openai",
   "cwd": "cwd",
-  "approvalPolicy": "never",
+  "approvalPolicy": "on-request",
   "sandbox": "sandbox",
   "reasoningEffort": "reasoningEffort"
 }

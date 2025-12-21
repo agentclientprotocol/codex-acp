@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {CodexEventHandler} from "./CodexEventHandler";
+import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
 import {type ModelInfo, RequestError, type SessionModelState} from "@agentclientprotocol/sdk";
 import {CodexAcpClient, type SessionMetadata} from "./CodexAcpClient";
@@ -156,9 +157,13 @@ export class CodexAcpServer implements acp.Agent {
         sessionState.currentTurnId = null;
 
         try {
-            const messageHandler = new CodexEventHandler(this.connection, sessionState);
-            const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.sendPrompt(params, (event) => messageHandler.handleNotification(event)));
-
+            const eventHandler = new CodexEventHandler(this.connection, sessionState);
+            const approvalHandler = new CodexApprovalHandler(this.connection, sessionState);
+            const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.sendPrompt(
+                params,
+                (event) => eventHandler.handleNotification(event),
+                approvalHandler
+            ));
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
                 await this.connection.sessionUpdate({

@@ -1,4 +1,4 @@
-import type {MessageConnection} from "vscode-jsonrpc/node";
+import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import type {
     ClientRequest,
     InitializeParams,
@@ -16,8 +16,29 @@ import type {
     TurnInterruptParams,
     TurnInterruptResponse,
     TurnStartParams,
-    TurnStartResponse
+    TurnStartResponse,
+    CommandExecutionRequestApprovalParams,
+    CommandExecutionRequestApprovalResponse,
+    FileChangeRequestApprovalParams,
+    FileChangeRequestApprovalResponse
 } from "./app-server/v2";
+
+export interface ApprovalHandler {
+    handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
+    handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse>;
+}
+
+const CommandExecutionApprovalRequest = new RequestType<
+    CommandExecutionRequestApprovalParams,
+    CommandExecutionRequestApprovalResponse,
+    void
+>('item/commandExecution/requestApproval');
+
+const FileChangeApprovalRequest = new RequestType<
+    FileChangeRequestApprovalParams,
+    FileChangeRequestApprovalResponse,
+    void
+>('item/fileChange/requestApproval');
 
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
@@ -25,6 +46,7 @@ import type {
  */
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
+    private approvalHandlers = new Map<string, ApprovalHandler>();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -37,6 +59,26 @@ export class CodexAppServerClient {
                 callback({ eventType: "notification", ...serverNotification});
             }
         });
+
+        this.connection.onRequest(CommandExecutionApprovalRequest, async (params) => {
+            const handler = this.approvalHandlers.get(params.threadId);
+            if (!handler) {
+                return { decision: "cancel" };
+            }
+            return await handler.handleCommandExecution(params);
+        });
+
+        this.connection.onRequest(FileChangeApprovalRequest, async (params) => {
+            const handler = this.approvalHandlers.get(params.threadId);
+            if (!handler) {
+                return { decision: "cancel" };
+            }
+            return await handler.handleFileChange(params);
+        });
+    }
+
+    onApprovalRequest(threadId: string, handler: ApprovalHandler): void {
+        this.approvalHandlers.set(threadId, handler);
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
