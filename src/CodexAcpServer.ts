@@ -10,7 +10,7 @@ import {ModelId} from "./ModelId";
 
 export interface SessionState {
     sessionMetadata: SessionMetadata;
-    pendingPrompt: AbortController | null;
+    currentTurnId: string | null;
 }
 
 export class CodexAcpServer implements acp.Agent {
@@ -62,7 +62,7 @@ export class CodexAcpServer implements acp.Agent {
         const {sessionId, currentModelId, models} = sessionMetadata;
         this.sessions.set(sessionId, {
             sessionMetadata: sessionMetadata,
-            pendingPrompt: null
+            currentTurnId: null
         });
 
         const availableModels = this.buildAvailableModels(models);
@@ -153,25 +153,28 @@ export class CodexAcpServer implements acp.Agent {
     async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
         const sessionState = this.getSessionState(params.sessionId);
 
-        sessionState.pendingPrompt?.abort();
-        sessionState.pendingPrompt = new AbortController();
+        sessionState.currentTurnId = null;
 
         try {
             const messageHandler = new CodexEventHandler(this.connection, sessionState);
-            await this.runWithProcessCheck(() => this.codexAcpClient.sendPrompt(params, (event) => messageHandler.handleNotification(event)));
-        } catch (err) {
-            if (sessionState.pendingPrompt.signal.aborted) {
-                return {stopReason: "cancelled"};
+            const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.sendPrompt(params, (event) => messageHandler.handleNotification(event)));
+
+            // Check if turn was interrupted (cancelled)
+            if (turnCompleted.turn.status === "interrupted") {
+                return {
+                    stopReason: "cancelled",
+                };
             }
 
+            return {
+                stopReason: "end_turn",
+            };
+        } catch (err) {
+            console.error(`Prompt for session ${params.sessionId} failed:`, err);
             throw err;
+        } finally {
+            sessionState.currentTurnId = null;
         }
-
-        sessionState.pendingPrompt = null;
-
-        return {
-            stopReason: "end_turn",
-        };
     }
 
     private async runWithProcessCheck<T>(operation: () => Promise<T>): Promise<T> {
@@ -191,7 +194,27 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     async cancel(params: acp.CancelNotification): Promise<void> {
-        //TODO not supported yet
-        this.sessions.get(params.sessionId)?.pendingPrompt?.abort();
+        const sessionState = this.sessions.get(params.sessionId);
+        if (!sessionState) {
+            console.info(`Can not cancel: session ${params.sessionId} not found`);
+            return;
+        }
+
+        if (!sessionState.currentTurnId) {
+            console.info(`Can not cancel: session ${params.sessionId} has no current turn`);
+            return;
+        }
+
+        console.info(`Cancel session ${params.sessionId}, currentTurnId: ${sessionState.currentTurnId}...`);
+        try {
+            // After turnInterrupt(), Codex will send turn/completed event, which will naturally complete awaitTurnCompleted()
+            await this.codexAcpClient.turnInterrupt({
+                threadId: params.sessionId,
+                turnId: sessionState.currentTurnId
+            });
+            console.log(`Cancel - turnInterrupt succeeded`);
+        } catch (err) {
+            console.error(`Cancel - turnInterrupt failed:`, err);
+        }
     }
 }

@@ -53,12 +53,16 @@ export class CodexEventHandler {
                 return await this.updatePlan(notification.params);
             case "error":
                 return await this.createErrorEvent(notification.params);
+            case "turn/started":
+                this.sessionState.currentTurnId = notification.params.turn.id;
+                return null;
+            case "turn/completed":
+                this.sessionState.currentTurnId = null;
+                return null;
             case "item/reasoning/summaryTextDelta": //TODO streaming reasoning?
             case "item/reasoning/summaryPartAdded":
             //skipped events
             case "item/reasoning/textDelta": //for raw output
-            case "turn/started":
-            case "turn/completed":
             case "turn/diff/updated":
             case "item/commandExecution/outputDelta":
             case "item/fileChange/outputDelta":

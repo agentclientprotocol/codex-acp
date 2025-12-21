@@ -77,10 +77,15 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
-        fixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue(undefined);
-        fixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue(undefined);
+        fixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
+            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+        });
+        fixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
+            threadId: "id",
+            turn: { id: "turn-id", items: [], status: "completed", error: null }
+        });
         const sessionState: SessionState = {
-            pendingPrompt: null,
+            currentTurnId: null,
             sessionMetadata: {
                 sessionId: "id",
                 currentModelId: "model-id",
@@ -99,11 +104,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
-        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue(undefined);
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue(undefined);
+        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
+            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+        });
+        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
+            threadId: "id",
+            turn: { id: "turn-id", items: [], status: "completed", error: null }
+        });
 
         const sessionState: SessionState = {
-            pendingPrompt: null,
+            currentTurnId: null,
             sessionMetadata: {
                 sessionId: "id",
                 currentModelId: "model-id",
@@ -143,11 +153,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
-        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue(undefined);
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue(undefined);
+        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
+            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+        });
+        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
+            threadId: "id",
+            turn: { id: "turn-id", items: [], status: "completed", error: null }
+        });
 
         const sessionState1: SessionState = {
-            pendingPrompt: null,
+            currentTurnId: null,
             sessionMetadata: {
                 sessionId: "session-1",
                 currentModelId: "model-id",
@@ -155,7 +170,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             }
         };
         const sessionState2: SessionState = {
-            pendingPrompt: null,
+            currentTurnId: null,
             sessionMetadata: {
                 sessionId: "session-2",
                 currentModelId: "model-id",

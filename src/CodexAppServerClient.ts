@@ -13,6 +13,8 @@ import type {
     ThreadStartParams,
     ThreadStartResponse,
     TurnCompletedNotification,
+    TurnInterruptParams,
+    TurnInterruptResponse,
     TurnStartParams,
     TurnStartResponse
 } from "./app-server/v2";
@@ -43,6 +45,10 @@ export class CodexAppServerClient {
 
     async turnStart(params: TurnStartParams): Promise<TurnStartResponse> {
         return await this.sendRequest({ method: "turn/start", params: params });
+    }
+
+    async turnInterrupt(params: TurnInterruptParams): Promise<TurnInterruptResponse> {
+        return await this.sendRequest({ method: "turn/interrupt", params: params });
     }
 
     async threadStart(params: ThreadStartParams): Promise<ThreadStartResponse> {
