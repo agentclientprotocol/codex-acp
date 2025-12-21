@@ -65,6 +65,7 @@ export class CodexEventHandler {
             case "item/reasoning/textDelta": //for raw output
             case "turn/diff/updated":
             case "item/commandExecution/outputDelta":
+            case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
             case "thread/tokenUsage/updated":
             case "item/mcpToolCall/progress":
@@ -76,6 +77,9 @@ export class CodexEventHandler {
             case "authStatusChange":
             case "loginChatGptComplete":
             case "sessionConfigured":
+            case "deprecationNotice":
+            case "mcpServer/oauthLogin/completed":
+            case "rawResponseItem/completed":
             case "thread/started":
                 return null;
         }
