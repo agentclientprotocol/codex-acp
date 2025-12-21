@@ -33,7 +33,7 @@ describe('CodexEventHandler - file change events', () => {
     });
 
     const sessionState: SessionState = {
-        pendingPrompt: null,
+        currentTurnId: null,
         sessionMetadata: {
             sessionId,
             currentModelId: 'model-id',
@@ -44,8 +44,13 @@ describe('CodexEventHandler - file change events', () => {
     async function setupAndSendNotifications(notifications: ServerNotification[]) {
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
-        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue(undefined);
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue(undefined);
+        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
+            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+        });
+        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
+            threadId: sessionId,
+            turn: { id: "turn-id", items: [], status: "completed", error: null }
+        });
 
         vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
 

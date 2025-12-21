@@ -5,4 +5,4 @@
 /**
  * User input
  */
-export type UserInput = { "type": "text", text: string, } | { "type": "image", image_url: string, } | { "type": "local_image", path: string, };
+export type UserInput = { "type": "text", text: string, } | { "type": "image", image_url: string, } | { "type": "local_image", path: string, } | { "type": "skill", name: string, path: string, };

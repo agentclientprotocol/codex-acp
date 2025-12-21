@@ -1,5 +1,6 @@
 // GENERATED CODE! DO NOT MODIFY BY HAND!
 
+export type { AbsolutePathBuf } from "./AbsolutePathBuf";
 export type { AddConversationListenerParams } from "./AddConversationListenerParams";
 export type { AddConversationSubscriptionResponse } from "./AddConversationSubscriptionResponse";
 export type { AgentMessageContent } from "./AgentMessageContent";
@@ -55,6 +56,7 @@ export type { ExecCommandSource } from "./ExecCommandSource";
 export type { ExecOneOffCommandParams } from "./ExecOneOffCommandParams";
 export type { ExecOneOffCommandResponse } from "./ExecOneOffCommandResponse";
 export type { ExecOutputStream } from "./ExecOutputStream";
+export type { ExecPolicyAmendment } from "./ExecPolicyAmendment";
 export type { ExitedReviewModeEvent } from "./ExitedReviewModeEvent";
 export type { FileChange } from "./FileChange";
 export type { ForcedLoginMethod } from "./ForcedLoginMethod";
@@ -86,6 +88,7 @@ export type { ItemStartedEvent } from "./ItemStartedEvent";
 export type { ListConversationsParams } from "./ListConversationsParams";
 export type { ListConversationsResponse } from "./ListConversationsResponse";
 export type { ListCustomPromptsResponseEvent } from "./ListCustomPromptsResponseEvent";
+export type { ListSkillsResponseEvent } from "./ListSkillsResponseEvent";
 export type { LocalShellAction } from "./LocalShellAction";
 export type { LocalShellExecAction } from "./LocalShellExecAction";
 export type { LocalShellStatus } from "./LocalShellStatus";
@@ -103,6 +106,7 @@ export type { McpStartupStatus } from "./McpStartupStatus";
 export type { McpStartupUpdateEvent } from "./McpStartupUpdateEvent";
 export type { McpToolCallBeginEvent } from "./McpToolCallBeginEvent";
 export type { McpToolCallEndEvent } from "./McpToolCallEndEvent";
+export type { NetworkAccess } from "./NetworkAccess";
 export type { NewConversationParams } from "./NewConversationParams";
 export type { NewConversationResponse } from "./NewConversationResponse";
 export type { ParsedCommand } from "./ParsedCommand";
@@ -154,11 +158,16 @@ export type { SessionConfiguredNotification } from "./SessionConfiguredNotificat
 export type { SessionSource } from "./SessionSource";
 export type { SetDefaultModelParams } from "./SetDefaultModelParams";
 export type { SetDefaultModelResponse } from "./SetDefaultModelResponse";
+export type { SkillErrorInfo } from "./SkillErrorInfo";
+export type { SkillMetadata } from "./SkillMetadata";
+export type { SkillScope } from "./SkillScope";
+export type { SkillsListEntry } from "./SkillsListEntry";
 export type { StepStatus } from "./StepStatus";
 export type { StreamErrorEvent } from "./StreamErrorEvent";
 export type { SubAgentSource } from "./SubAgentSource";
 export type { TaskCompleteEvent } from "./TaskCompleteEvent";
 export type { TaskStartedEvent } from "./TaskStartedEvent";
+export type { TerminalInteractionEvent } from "./TerminalInteractionEvent";
 export type { TextContent } from "./TextContent";
 export type { TextResourceContents } from "./TextResourceContents";
 export type { TokenCountEvent } from "./TokenCountEvent";

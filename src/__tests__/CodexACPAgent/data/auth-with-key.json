@@ -35,7 +35,8 @@
     "approvalPolicy": "never",
     "sandbox": "sandbox",
     "baseInstructions": null,
-    "developerInstructions": null
+    "developerInstructions": null,
+    "experimentalRawEvents": false
   }
 }
 {
@@ -86,7 +87,7 @@
       "id": "id",
       "model": "gpt-5.1-codex-max",
       "displayName": "gpt-5.1-codex-max",
-      "description": "Latest Codex-optimized flagship for deep and fast reasoning.",
+      "description": "Codex-optimized flagship for deep and fast reasoning.",
       "supportedReasoningEfforts": [
         {
           "reasoningEffort": "reasoningEffort",
@@ -98,7 +99,7 @@
         },
         {
           "reasoningEffort": "reasoningEffort",
-          "description": "Maximizes reasoning depth for complex problems"
+          "description": "Greater reasoning depth for complex problems"
         },
         {
           "reasoningEffort": "reasoningEffort",
@@ -107,28 +108,6 @@
       ],
       "defaultReasoningEffort": "medium",
       "isDefault": true
-    },
-    {
-      "id": "id",
-      "model": "gpt-5.1-codex",
-      "displayName": "gpt-5.1-codex",
-      "description": "Optimized for codex.",
-      "supportedReasoningEfforts": [
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Fastest responses with limited reasoning"
-        },
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Dynamically adjusts reasoning based on the task"
-        },
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Maximizes reasoning depth for complex or ambiguous problems"
-        }
-      ],
-      "defaultReasoningEffort": "medium",
-      "isDefault": false
     },
     {
       "id": "id",
@@ -150,9 +129,9 @@
     },
     {
       "id": "id",
-      "model": "gpt-5.1",
-      "displayName": "gpt-5.1",
-      "description": "Broad world knowledge with strong general reasoning.",
+      "model": "gpt-5.2",
+      "displayName": "gpt-5.2",
+      "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
       "supportedReasoningEfforts": [
         {
           "reasoningEffort": "reasoningEffort",
@@ -165,6 +144,10 @@
         {
           "reasoningEffort": "reasoningEffort",
           "description": "Maximizes reasoning depth for complex or ambiguous problems"
+        },
+        {
+          "reasoningEffort": "reasoningEffort",
+          "description": "Extra high reasoning for complex problems"
         }
       ],
       "defaultReasoningEffort": "medium",

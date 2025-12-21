@@ -89,6 +89,7 @@ export class CodexAcpClient {
             sandbox: null,
             baseInstructions: null,
             developerInstructions: null,
+            experimentalRawEvents: false
         });
         const codexModels = await this.fetchAvailableModels();
         if (codexModels.length === 0) {
