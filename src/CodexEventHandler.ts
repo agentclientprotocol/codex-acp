@@ -7,14 +7,30 @@ import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnect
 import type {
     AgentMessageDeltaNotification,
     CommandAction,
+    CommandExecutionStatus,
     ErrorNotification,
     FileUpdateChange,
     ItemCompletedNotification,
     ItemStartedNotification,
+    PatchApplyStatus,
     ThreadItem,
     TurnPlanUpdatedNotification
 } from "./app-server/v2";
 import {readFile} from "node:fs/promises";
+type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus;
+type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+
+function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
+    switch (status) {
+        case "inProgress":
+            return "in_progress";
+        case "completed":
+            return "completed";
+        case "failed":
+        case "declined":
+            return "failed";
+    }
+}
 
 export class CodexEventHandler {
 
@@ -155,7 +171,7 @@ export class CodexEventHandler {
             toolCallId: item.id,
             title: "Editing files",
             kind: "edit",
-            status: "completed",
+            status: toAcpStatus(item.status),
             content: patches,
         };
     }
@@ -191,7 +207,7 @@ export class CodexEventHandler {
     private async createCommandEvent(item: ThreadItem & { "type": "commandExecution" }): Promise<UpdateSessionEvent> {
         const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
         if (commandAction) {
-            return this.createCommandActionEvent(item.id, commandAction);
+            return this.createCommandActionEvent(item.id, item.status, commandAction);
         }
         const command = item.command.replace(/^(?:\/bin\/)?bash\s+/, "");
         return {
@@ -199,16 +215,17 @@ export class CodexEventHandler {
             toolCallId: item.id,
             kind: "execute",
             title: command,
-            status: "in_progress"
+            status: toAcpStatus(item.status)
         }
     }
 
-    private createCommandActionEvent(id: string, commandAction: CommandAction): UpdateSessionEvent {
+    private createCommandActionEvent(id: string, status: CommandExecutionStatus, commandAction: CommandAction): UpdateSessionEvent {
+        const acpStatus = toAcpStatus(status);
         if (commandAction.type === "read") {
             return {
                 sessionUpdate: "tool_call",
                 toolCallId: id,
-                status: "in_progress",
+                status: acpStatus,
                 kind: "read",
                 title: "Read file",
                 locations: [{path: commandAction.path}],
@@ -217,7 +234,7 @@ export class CodexEventHandler {
             return {
                 sessionUpdate: "tool_call",
                 toolCallId: id,
-                status: "in_progress",
+                status: acpStatus,
                 kind: "search",
                 title: `Search '${commandAction.query}'`,
             }
@@ -225,7 +242,7 @@ export class CodexEventHandler {
         return {
             sessionUpdate: "tool_call",
             toolCallId: id,
-            status: "in_progress",
+            status: acpStatus,
             kind: "execute",
             title: commandAction.command,
         }
