@@ -19,7 +19,7 @@
   "params": {
     "config": {},
     "modelProvider": null,
-    "model": null,
+    "model": "model",
     "cwd": "cwd",
     "approvalPolicy": "on-request",
     "sandbox": "sandbox",
@@ -31,7 +31,7 @@
 {
   "eventType": "response",
   "thread": "thread",
-  "model": "gpt-5.2",
+  "model": "model",
   "modelProvider": "openai",
   "cwd": "cwd",
   "approvalPolicy": "on-request",
@@ -74,7 +74,7 @@
   "data": [
     {
       "id": "id",
-      "model": "gpt-5.1-codex-max",
+      "model": "model",
       "displayName": "gpt-5.1-codex-max",
       "description": "Codex-optimized flagship for deep and fast reasoning.",
       "supportedReasoningEfforts": [
@@ -100,7 +100,7 @@
     },
     {
       "id": "id",
-      "model": "gpt-5.1-codex-mini",
+      "model": "model",
       "displayName": "gpt-5.1-codex-mini",
       "description": "Optimized for codex. Cheaper, faster, but less capable.",
       "supportedReasoningEfforts": [
@@ -118,7 +118,7 @@
     },
     {
       "id": "id",
-      "model": "gpt-5.2",
+      "model": "model",
       "displayName": "gpt-5.2",
       "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
       "supportedReasoningEfforts": [
@@ -161,6 +161,6 @@
     "summary": null,
     "cwd": "cwd",
     "effort": null,
-    "model": null
+    "model": "model"
   }
 }
