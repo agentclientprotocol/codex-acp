@@ -3,6 +3,7 @@ import type {CodexAuthRequest} from "../../CodexAuthMethod";
 import {createTestFixture, createCodexMockTestFixture, type TestFixture} from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
+import {AgentMode} from "../../AgentMode";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -90,6 +91,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 sessionId: "id",
                 currentModelId: "model-id",
                 models: [],
+                agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
         };
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);

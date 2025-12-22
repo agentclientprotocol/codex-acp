@@ -11,8 +11,9 @@ import type {
 } from "./app-server";
 import type {TurnCompletedNotification } from "./app-server/v2";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
-import type {Model} from "./app-server/v2";
+import type {Model, SandboxMode} from "./app-server/v2";
 import {ModelId} from "./ModelId";
+import {AgentMode} from "./AgentMode";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -79,14 +80,14 @@ export class CodexAcpClient {
     /**
      * Returns a new session ID.
      */
-    async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
+    async newSession(request: acp.NewSessionRequest, agentMode: AgentMode): Promise<SessionMetadata> {
         const threadStartResponse = await this.codexClient.threadStart({
             config: this.config,
             modelProvider: this.modelProvider,
             model: null,
             cwd: request.cwd,
-            approvalPolicy: "on-request",
-            sandbox: null,
+            approvalPolicy: agentMode.approvalPolicy,
+            sandbox: agentMode.sandboxPolicy.type as SandboxMode,
             baseInstructions: null,
             developerInstructions: null,
             experimentalRawEvents: false
@@ -99,12 +100,14 @@ export class CodexAcpClient {
         return {
             sessionId: threadStartResponse.thread.id,
             currentModelId: currentModelId,
-            models: codexModels
+            models: codexModels,
+            agentMode: agentMode,
         };
     }
 
     async sendPrompt(
         request: acp.PromptRequest,
+        agentMode: AgentMode,
         eventHandler: (result: ServerNotification) => void,
         approvalHandler: ApprovalHandler
     ): Promise<TurnCompletedNotification> {
@@ -118,8 +121,8 @@ export class CodexAcpClient {
         await this.codexClient.turnStart({
             threadId: request.sessionId,
             input: [{type: "text", text: input}],
-            approvalPolicy: null,
-            sandboxPolicy: null,
+            approvalPolicy: agentMode.approvalPolicy,
+            sandboxPolicy: agentMode.sandboxPolicy,
             summary: null,
             cwd: null,
             effort: null,
@@ -161,5 +164,6 @@ export type JsonObject = { [key in string]?: JsonValue }
 export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
-    models: Model[]
+    models: Model[],
+    agentMode: AgentMode,
 }

@@ -7,6 +7,7 @@ import {CodexAcpClient, type SessionMetadata} from "./CodexAcpClient";
 import type {Model} from "./app-server/v2";
 import type {ReasoningEffort} from "./app-server";
 import {ModelId} from "./ModelId";
+import {AgentMode} from "./AgentMode";
 
 
 export interface SessionState {
@@ -59,7 +60,9 @@ export class CodexAcpServer implements acp.Agent {
             }
         }
 
-        const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(_params));
+        // we are retrieving available modes from the session, so setting it to default on the new session
+        const agentMode = AgentMode.DEFAULT_AGENT_MODE
+        const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(_params, agentMode));
         const {sessionId, currentModelId, models} = sessionMetadata;
         this.sessions.set(sessionId, {
             sessionMetadata: sessionMetadata,
@@ -74,6 +77,7 @@ export class CodexAcpServer implements acp.Agent {
         return {
             sessionId: sessionId,
             models: sessionModelState,
+            modes: agentMode.toSessionModeState()
         };
     }
 
@@ -90,7 +94,14 @@ export class CodexAcpServer implements acp.Agent {
     async setSessionMode(
         _params: acp.SetSessionModeRequest,
     ): Promise<acp.SetSessionModeResponse> {
-        //TODO
+        const sessionState = this.sessions.get(_params.sessionId);
+        if (!sessionState) throw new Error(`Session ${_params.sessionId} not found`);
+
+        const newMode = AgentMode.find(_params.modeId);
+        if (!newMode) {
+            throw RequestError.invalidParams();
+        }
+        sessionState.sessionMetadata.agentMode = newMode;
         return {};
     }
 
@@ -159,8 +170,10 @@ export class CodexAcpServer implements acp.Agent {
         try {
             const eventHandler = new CodexEventHandler(this.connection, sessionState);
             const approvalHandler = new CodexApprovalHandler(this.connection, sessionState);
+            const agentMode = sessionState.sessionMetadata.agentMode;
             const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.sendPrompt(
                 params,
+                agentMode,
                 (event) => eventHandler.handleNotification(event),
                 approvalHandler
             ));
