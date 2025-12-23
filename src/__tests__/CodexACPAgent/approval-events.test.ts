@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CommandExecutionRequestApprovalParams, FileChangeRequestApprovalParams } from '../../app-server/v2';
 import { createCodexMockTestFixture, type CodexMockTestFixture } from '../acp-test-utils';
 import type { SessionState } from '../../CodexAcpServer';
+import {AgentMode} from "../../AgentMode";
 
 describe('Approval Events', () => {
     let fixture: CodexMockTestFixture;
@@ -31,6 +32,7 @@ describe('Approval Events', () => {
                 sessionId,
                 currentModelId: 'model-id',
                 models: [],
+                agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
         };
         vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);

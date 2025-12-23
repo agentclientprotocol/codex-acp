@@ -120,6 +120,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 sessionId: "id",
                 currentModelId: "model-id",
                 models: [],
+                agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
         };
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
@@ -169,6 +170,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 sessionId: "session-1",
                 currentModelId: "model-id",
                 models: [],
+                agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
         };
         const sessionState2: SessionState = {
@@ -177,6 +179,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 sessionId: "session-2",
                 currentModelId: "model-id",
                 models: [],
+                agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
         };
 
