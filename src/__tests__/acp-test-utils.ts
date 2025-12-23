@@ -202,10 +202,30 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
 }
 
 export function createObjectDump(obj: any, anonymizedFields: string[] = []) {
-    function fieldAnonymizer(key: string, value: any): any {
-        return anonymizedFields.includes(key) ? key : value;
+    const fieldsToAnonymize = new Set(anonymizedFields);
+
+    function anonymizeValue(value: any, path: string[]): any {
+        if (value === null || typeof value !== "object") {
+            return value;
+        }
+
+        if (Array.isArray(value)) {
+            return value.map((item, index) => anonymizeValue(item, [...path, String(index)]));
+        }
+
+        return Object.fromEntries(
+            Object.entries(value).map(([key, val]) => {
+                const nextPath = [...path, key];
+                const pathKey = nextPath.join(".");
+                if (fieldsToAnonymize.has(key) || fieldsToAnonymize.has(pathKey)) {
+                    return [key, key];
+                }
+                return [key, anonymizeValue(val, nextPath)];
+            })
+        );
     }
-    return JSON.stringify(obj, fieldAnonymizer, 2);
+
+    return JSON.stringify(anonymizeValue(obj, []), null, 2);
 }
 
 export function createArrayDump(objects: any[], anonymizedFields: string[]): string {
