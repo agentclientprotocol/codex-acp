@@ -11,7 +11,7 @@ import type {
 } from "./app-server";
 import type {TurnCompletedNotification } from "./app-server/v2";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
-import type {Model, SandboxMode} from "./app-server/v2";
+import type {Model} from "./app-server/v2";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 
@@ -87,7 +87,7 @@ export class CodexAcpClient {
             model: null,
             cwd: request.cwd,
             approvalPolicy: agentMode.approvalPolicy,
-            sandbox: agentMode.sandboxPolicy.type as SandboxMode,
+            sandbox: agentMode.sandboxMode,
             baseInstructions: null,
             developerInstructions: null,
             experimentalRawEvents: false

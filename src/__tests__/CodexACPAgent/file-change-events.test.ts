@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, type CodexMockTestFixture } from '../acp-test-utils';
+import {AgentMode} from "../../AgentMode";
 
 const { mockFiles, mockFileContent, clearMockFiles } = vi.hoisted(() => {
     const files = new Map<string, string>();
@@ -38,6 +39,7 @@ describe('CodexEventHandler - file change events', () => {
             sessionId,
             currentModelId: 'model-id',
             models: [],
+            agentMode: AgentMode.DEFAULT_AGENT_MODE
         },
     };
 
