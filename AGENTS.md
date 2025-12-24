@@ -1,0 +1,24 @@
+# Repository Guidelines
+
+## Project Structure
+
+- `src/` — ACP server implementation. Entry point: `src/index.ts`.
+- `src/__tests__/` — Vitest suite (behavior-focused tests around ACP/Codex events).
+- `src/app-server/` — generated Codex app-server API types (regenerate via `npm run generate-types`).
+- `dist/bin/` — release-ready single-file executables and `*.zip` archives.
+- `.github/workflows/ci.yml` — CI mirrors the local workflow: typecheck → tests → bundle.
+
+## Coding Style & Naming Conventions
+
+- Keep edits consistent with existing formatting.
+- When adding env/config knobs, document them in `readme-dev.md`.
+
+## Testing Guidelines
+
+- Tests live under `src/__tests__/` and use Vitest.
+- Favor event-driven assertions (see `src/__tests__/CodexACPAgent/*`).
+
+## Docs
+
+- Codex app-server usage: see https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md when touching protocol/transport details, adding or consuming JSON-RPC methods, handling approvals/turn events, or updating generated schema/clients.
+- App-server events: prefer `thread/*`, `turn/*`, and `item/*` event surfaces; avoid the deprecated `codex/event/*` API (planned removal). Keep implementations aligned with generated types in `src/app-server` (including `v2` exports).
