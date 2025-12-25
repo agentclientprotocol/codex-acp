@@ -1,0 +1,8 @@
+{
+  "stopReason": "end_turn",
+  "_meta": {
+    "quota": {
+      "token_count": null
+    }
+  }
+}

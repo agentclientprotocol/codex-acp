@@ -28,6 +28,7 @@ describe('Approval Events', () => {
 
         const sessionState: SessionState = {
             currentTurnId: null,
+            lastTokenUsage: null,
             sessionMetadata: {
                 sessionId,
                 currentModelId: 'model-id',

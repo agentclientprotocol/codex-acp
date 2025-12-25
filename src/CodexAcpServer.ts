@@ -8,11 +8,13 @@ import type {Model} from "./app-server/v2";
 import type {ReasoningEffort} from "./app-server";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
+import type {TokenCount} from "./TokenCount";
 
 
 export interface SessionState {
     sessionMetadata: SessionMetadata;
     currentTurnId: string | null;
+    lastTokenUsage: TokenCount | null;
 }
 
 export class CodexAcpServer implements acp.Agent {
@@ -66,7 +68,8 @@ export class CodexAcpServer implements acp.Agent {
         const {sessionId, currentModelId, models} = sessionMetadata;
         this.sessions.set(sessionId, {
             sessionMetadata: sessionMetadata,
-            currentTurnId: null
+            currentTurnId: null,
+            lastTokenUsage: null
         });
 
         const availableModels = this.buildAvailableModels(models);
@@ -166,6 +169,7 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState = this.getSessionState(params.sessionId);
 
         sessionState.currentTurnId = null;
+        sessionState.lastTokenUsage = null;
 
         try {
             const eventHandler = new CodexEventHandler(this.connection, sessionState);
@@ -191,11 +195,13 @@ export class CodexAcpServer implements acp.Agent {
                 });
                 return {
                     stopReason: "cancelled",
+                    _meta: this.buildQuotaMeta(sessionState),
                 };
             }
 
             return {
                 stopReason: "end_turn",
+                _meta: this.buildQuotaMeta(sessionState),
             };
         } catch (err) {
             console.error(`Prompt for session ${params.sessionId} failed:`, err);
@@ -203,6 +209,14 @@ export class CodexAcpServer implements acp.Agent {
         } finally {
             sessionState.currentTurnId = null;
         }
+    }
+
+    private buildQuotaMeta(sessionState: SessionState): { quota: { token_count: TokenCount | null } } {
+        return {
+            quota: {
+                token_count: sessionState.lastTokenUsage,
+            }
+        };
     }
 
     private async runWithProcessCheck<T>(operation: () => Promise<T>): Promise<T> {

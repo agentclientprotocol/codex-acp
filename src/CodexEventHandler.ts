@@ -14,9 +14,11 @@ import type {
     ItemStartedNotification,
     PatchApplyStatus,
     ThreadItem,
+    ThreadTokenUsageUpdatedNotification,
     TurnPlanUpdatedNotification
 } from "./app-server/v2";
 import {readFile} from "node:fs/promises";
+import {toTokenCount} from "./TokenCount";
 type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
 
@@ -75,6 +77,9 @@ export class CodexEventHandler {
             case "turn/completed":
                 this.sessionState.currentTurnId = null;
                 return null;
+            case "thread/tokenUsage/updated":
+                this.handleTokenUsageUpdated(notification.params);
+                return null;
             case "item/reasoning/summaryTextDelta": //TODO streaming reasoning?
             case "item/reasoning/summaryPartAdded":
             //skipped events
@@ -83,7 +88,6 @@ export class CodexEventHandler {
             case "item/commandExecution/outputDelta":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
-            case "thread/tokenUsage/updated":
             case "item/mcpToolCall/progress":
             case "account/updated":
             case "account/rateLimits/updated":
@@ -280,5 +284,9 @@ export class CodexEventHandler {
                 text: `❌ ${params.error.message}\n\n`
             }
         }
+    }
+
+    private handleTokenUsageUpdated(params: ThreadTokenUsageUpdatedNotification): void {
+        this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
     }
 }

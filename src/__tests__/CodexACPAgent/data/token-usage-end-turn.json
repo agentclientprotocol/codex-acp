@@ -1,0 +1,14 @@
+{
+  "stopReason": "end_turn",
+  "_meta": {
+    "quota": {
+      "token_count": {
+        "totalTokens": 2500,
+        "inputTokens": 2000,
+        "cachedInputTokens": 500,
+        "outputTokens": 450,
+        "reasoningOutputTokens": 50
+      }
+    }
+  }
+}
