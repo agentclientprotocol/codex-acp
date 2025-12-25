@@ -87,6 +87,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         const sessionState: SessionState = {
             currentTurnId: null,
+            lastTokenUsage: null,
             sessionMetadata: {
                 sessionId: "id",
                 currentModelId: "model-id",
@@ -116,6 +117,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const sessionState: SessionState = {
             currentTurnId: null,
+            lastTokenUsage: null,
             sessionMetadata: {
                 sessionId: "id",
                 currentModelId: "model-id",
@@ -166,6 +168,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const sessionState1: SessionState = {
             currentTurnId: null,
+            lastTokenUsage: null,
             sessionMetadata: {
                 sessionId: "session-1",
                 currentModelId: "model-id",
@@ -175,6 +178,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         };
         const sessionState2: SessionState = {
             currentTurnId: null,
+            lastTokenUsage: null,
             sessionMetadata: {
                 sessionId: "session-2",
                 currentModelId: "model-id",

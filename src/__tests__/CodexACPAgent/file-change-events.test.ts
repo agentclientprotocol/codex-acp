@@ -35,6 +35,7 @@ describe('CodexEventHandler - file change events', () => {
 
     const sessionState: SessionState = {
         currentTurnId: null,
+        lastTokenUsage: null,
         sessionMetadata: {
             sessionId,
             currentModelId: 'model-id',
