@@ -20,7 +20,8 @@
     "generate-types": "./node_modules/.bin/codex app-server generate-ts --out src/app-server",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "codex-test": "tsx .claude/skills/run-codex/scripts/run-codex-test.ts"
   },
   "keywords": [],
   "author": "",

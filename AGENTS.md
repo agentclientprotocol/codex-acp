@@ -17,6 +17,9 @@
 
 - Tests live under `src/__tests__/` and use Vitest.
 - Favor event-driven assertions (see `src/__tests__/CodexACPAgent/*`).
+- Prefer snapshot-based tests using `toMatchFileSnapshot()` over inline assertions.
+- Focus on behavior and outputs rather than implementation details.
+- Use `/run-codex` skill (`.claude/skills/run-codex/`) to test with real Codex and observe actual events.
 
 ## Docs
 
