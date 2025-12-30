@@ -238,6 +238,17 @@ export class CodexEventHandler {
                 kind: "search",
                 title: `Search '${commandAction.query}'`,
             }
+        } else if (commandAction.type === "listFiles") {
+            const title = commandAction.path
+                ? `List files in '${commandAction.path}'`
+                : "List files";
+            return {
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: acpStatus,
+                kind: "read",
+                title,
+            }
         }
         return {
             sessionUpdate: "tool_call",

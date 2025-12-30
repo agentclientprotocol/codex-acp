@@ -1,0 +1,15 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "command-list-path",
+        "status": "in_progress",
+        "kind": "read",
+        "title": "List files in '/test/project'"
+      }
+    }
+  ]
+}
