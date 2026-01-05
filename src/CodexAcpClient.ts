@@ -30,8 +30,15 @@ import type {
 export class CodexAcpClient {
 
     private readonly codexClient: CodexAppServerClient;
-    private readonly config: JsonObject;
-    private readonly modelProvider: string | null;
+    private config: JsonObject;
+    private modelProvider: string | null;
+
+    // Skip authentication check when using JetBrains AI model provider.
+    // The authentication scheme for JetBrains AI is performed entirely in the ACP server,
+    // so Codex would still report that authentication is required.
+    // To avoid this, this flag is set to true when JetBrains AI auth is requested,
+    // and reset back to false when any other method is invoked.
+    private skipAuthCheck: boolean = false;
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
         this.codexClient = codexClient;
@@ -57,11 +64,12 @@ export class CodexAcpClient {
         if (!isCodexAuthRequest(authRequest)) {
             throw RequestError.invalidRequest();
         }
+
         switch (authRequest.methodId) {
             case "api-key":
                 await this.codexClient.accountLogin({
                     type: "apiKey",
-                    apiKey: authRequest._meta.apiKey
+                    apiKey: authRequest._meta["api-key"].apiKey
                 });
                 break;
             case "chat-gpt":
@@ -70,7 +78,35 @@ export class CodexAcpClient {
                     await open(loginResponse.authUrl);
                 }
                 break;
+            case "jetbrains-ai":
+                const proxySettings = authRequest._meta["jb-proxy"]
+                const baseUrl = ensureBaseUrlFormat(proxySettings.baseUrl);
+                if (baseUrl == null) {
+                    return false;
+                }
+
+                const headers: Record<string, string> = {
+                    "X-Client-Feature-ID": "codex",
+                    ...proxySettings.headers
+                };
+
+                this.modelProvider = "jetbrains-ai"
+                this.config = {
+                    model_providers: {
+                        "jetbrains-ai": {
+                            name: "JetBrains AI",
+                            base_url: baseUrl,
+                            http_headers: headers,
+                            wire_api: "responses"
+                        }
+                    }
+                }
+
+                this.skipAuthCheck = true;
+                return true;
         }
+
+        this.skipAuthCheck = false;
         const result = await this.codexClient.awaitLoginCompleted()
         return result.success;
     }
@@ -81,6 +117,10 @@ export class CodexAcpClient {
     }
 
     async authRequired(): Promise<Boolean> {
+        if (this.skipAuthCheck) {
+            return false;
+        }
+
         const response = await this.codexClient.accountRead({refreshToken: false})
         return response.requiresOpenaiAuth && !response.account;
     }
@@ -247,4 +287,33 @@ function formatUriAsLink(name: string | null | undefined, uri: string): string {
         return `[@${fileName}](${uri})`;
     }
     return uri;
+}
+
+function ensureBaseUrlFormat(baseUrl: string | null): string | null {
+    if (baseUrl == null) return null;
+
+    const targetPath = "/llm/openai/v1";
+    let url = baseUrl.trim();
+
+    // Remove trailing slashes
+    while (url.endsWith("/")) {
+        url = url.slice(0, -1);
+    }
+
+    // Check if URL already ends with the target path
+    if (url.endsWith(targetPath)) {
+        return url;
+    }
+
+    // Check if URL ends with a partial path and append the missing parts
+    if (url.endsWith("/llm/openai")) {
+        return url + "/v1";
+    }
+
+    if (url.endsWith("/llm")) {
+        return url + "/openai/v1";
+    }
+
+    // Otherwise, append the full target path
+    return url + targetPath;
 }

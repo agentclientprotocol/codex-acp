@@ -54,7 +54,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await fixture.getCodexAcpClient().logout();
         fixture.clearCodexConnectionDump();
 
-        const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: {apiKey: "TOKEN"} }
+        const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}}
         await codexAcpAgent.authenticate(authRequest);
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
         expect(newSessionResponse.sessionId).toBeDefined()
@@ -62,6 +62,32 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const transportDump = fixture.getCodexConnectionDump(ignoredFields);
         await expect(transportDump).toMatchFileSnapshot("data/auth-with-key.json");
     });
+
+    it('should authenticate with JetBrains AI', async () => {
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        await fixture.getCodexAcpClient().logout();
+        fixture.clearCodexConnectionDump();
+
+        const authRequest: CodexAuthRequest = {
+            methodId: "jetbrains-ai",
+            _meta: {
+                "jb-proxy": {
+                    baseUrl: "https://www.example.com",
+                    headers: {
+                        "Custom-Auth-Header": "TOKEN"
+                    }
+                }
+            }
+        };
+
+        await codexAcpAgent.authenticate(authRequest);
+        expect(await fixture.getCodexAcpClient().authRequired()).toBe(false);
+
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        expect(newSessionResponse.sessionId).toBeDefined()
+    })
 
     function loadNotifications(){
         //TODO collect logs form dev run and then load them from file to speedup
@@ -104,7 +130,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.prompt({ sessionId: "id", prompt: [{type: "text", text: ""}] });
 
-        expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/output-acp-events.json");
+        await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/output-acp-events.json");
 
     });
 

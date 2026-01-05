@@ -190,7 +190,7 @@ export class CodexAppServerClient {
             result = await this.connection.sendRequest<R>(request.method, request.params)
         }
         else {
-            await this.connection.sendRequest<R>(request.method);
+            result = await this.connection.sendRequest<R>(request.method);
         }
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "response", ...result});
