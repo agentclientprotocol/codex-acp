@@ -1,5 +1,6 @@
 import {describe, expect, it, vi, beforeEach} from 'vitest';
 import type {CodexAuthRequest} from "../../CodexAuthMethod";
+import type * as acp from "@agentclientprotocol/sdk";
 import {createTestFixture, createCodexMockTestFixture, type TestFixture} from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
@@ -213,6 +214,39 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         // Should have 2 events - one for each session's handler
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/multiple-sessions.json");
+    });
+
+    it('should send attachments as prompt items', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
+            threadId: "session-id",
+            turn: { id: "turn-id", items: [], status: "completed", error: null }
+        });
+
+        const sessionState: SessionState = {
+            currentTurnId: null,
+            sessionMetadata: {
+                sessionId: "session-id",
+                currentModelId: "model-id",
+                models: [],
+                agentMode: AgentMode.DEFAULT_AGENT_MODE
+            }
+        };
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+        const prompt: acp.ContentBlock[] = [
+            { type: "text", text: "Hello" },
+            { type: "image", mimeType: "image/png", data: "abc123", uri: "https://example.com/image.png" },
+            { type: "resource_link", name: "report.txt", uri: "file:///tmp/report.txt" },
+            { type: "resource", resource: { uri: "file:///tmp/notes.txt", text: "Notes body" } as acp.EmbeddedResourceResource },
+        ];
+
+        await codexAcpAgent.prompt({ sessionId: "session-id", prompt });
+
+        await expect(mockFixture.getCodexConnectionDump(ignoredFields)).toMatchFileSnapshot("data/send-attachments-turn-start.json");
     });
 
     //dev-time test

@@ -1,0 +1,40 @@
+{
+  "eventType": "request",
+  "method": "turn/start",
+  "params": {
+    "threadId": "threadId",
+    "input": [
+      {
+        "type": "text",
+        "text": "Hello"
+      },
+      {
+        "type": "image",
+        "url": "https://example.com/image.png"
+      },
+      {
+        "type": "text",
+        "text": "[@report.txt](file:///tmp/report.txt)"
+      },
+      {
+        "type": "text",
+        "text": "[@notes.txt](file:///tmp/notes.txt)\n<context ref=\"file:///tmp/notes.txt\">\nNotes body\n</context>"
+      }
+    ],
+    "approvalPolicy": "on-request",
+    "sandboxPolicy": {
+      "type": "workspaceWrite",
+      "writableRoots": [],
+      "networkAccess": false,
+      "excludeTmpdirEnvVar": false,
+      "excludeSlashTmp": false
+    },
+    "summary": null,
+    "cwd": "cwd",
+    "effort": null,
+    "model": null
+  }
+}
+{
+  "eventType": "response"
+}
