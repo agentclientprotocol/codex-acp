@@ -33,6 +33,9 @@ describe('CodexACPAgent - initialize', () => {
             protocolVersion: acp.PROTOCOL_VERSION,
             agentCapabilities: {
                 loadSession: false,
+                promptCapabilities: {
+                    image: true
+                }
             },
             authMethods: CodexAuthMethods,
         });
