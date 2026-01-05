@@ -81,10 +81,6 @@ export class CodexAcpClient {
             case "jetbrains-ai":
                 const proxySettings = authRequest._meta["jb-proxy"]
                 const baseUrl = ensureBaseUrlFormat(proxySettings.baseUrl);
-                if (baseUrl == null) {
-                    return false;
-                }
-
                 const headers: Record<string, string> = {
                     "X-Client-Feature-ID": "codex",
                     ...proxySettings.headers
@@ -289,10 +285,11 @@ function formatUriAsLink(name: string | null | undefined, uri: string): string {
     return uri;
 }
 
-function ensureBaseUrlFormat(baseUrl: string | null): string | null {
-    if (baseUrl == null) return null;
-
-    const targetPath = "/llm/openai/v1";
+/**
+ * Ensures that the provided baseUrl ends with "/v1".
+ * @param baseUrl - base url of the model provider
+ */
+function ensureBaseUrlFormat(baseUrl: string): string {
     let url = baseUrl.trim();
 
     // Remove trailing slashes
@@ -300,20 +297,10 @@ function ensureBaseUrlFormat(baseUrl: string | null): string | null {
         url = url.slice(0, -1);
     }
 
-    // Check if URL already ends with the target path
-    if (url.endsWith(targetPath)) {
+    // Check if URL already ends with /v1
+    if (url.endsWith("/v1")) {
         return url;
     }
 
-    // Check if URL ends with a partial path and append the missing parts
-    if (url.endsWith("/llm/openai")) {
-        return url + "/v1";
-    }
-
-    if (url.endsWith("/llm")) {
-        return url + "/openai/v1";
-    }
-
-    // Otherwise, append the full target path
-    return url + targetPath;
+    return url + "/v1";
 }
