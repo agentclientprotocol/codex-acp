@@ -9,11 +9,13 @@ import type {
     SetDefaultModelParams,
     SetDefaultModelResponse
 } from "./app-server";
-import type {TurnCompletedNotification } from "./app-server/v2";
+import type {TurnCompletedNotification} from "./app-server/v2";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import type {Model} from "./app-server/v2";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
+import type {UserInput} from "./app-server/v2";
+import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -57,7 +59,7 @@ export class CodexAcpClient {
                 });
                 break;
             case "chat-gpt":
-                const loginResponse = await this.codexClient.accountLogin({ type: "chatgpt" });
+                const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
                 if (loginResponse.type == "chatgpt") {
                     await open(loginResponse.authUrl);
                 }
@@ -114,13 +116,11 @@ export class CodexAcpClient {
         this.codexClient.onServerNotification(request.sessionId, eventHandler);
         this.codexClient.onApprovalRequest(request.sessionId, approvalHandler);
 
-        const input = request.prompt.filter(b => b.type === "text")
-            .map(b => b.text)
-            .join(" ");
+        const input = buildPromptItems(request.prompt);
 
         await this.codexClient.turnStart({
             threadId: request.sessionId,
-            input: [{type: "text", text: input}],
+            input: input,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: agentMode.sandboxPolicy,
             summary: null,
@@ -150,7 +150,7 @@ export class CodexAcpClient {
         let cursor: string | null = null;
 
         do {
-            const response = await this.codexClient.listModels({ cursor, limit: null });
+            const response = await this.codexClient.listModels({cursor, limit: null});
             models.push(...response.data);
             cursor = response.nextCursor;
         } while (cursor);
@@ -166,4 +166,42 @@ export type SessionMetadata = {
     currentModelId: string,
     models: Model[],
     agentMode: AgentMode,
+}
+
+function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
+    return prompt.map((block): UserInput | null => {
+        switch (block.type) {
+            case "text":
+                return {type: "text", text: block.text};
+            case "image": {
+                const url = block.uri ?? `data:${block.mimeType};base64,${block.data}`;
+                return {type: "image", url};
+            }
+            case "resource_link":
+                return {type: "text", text: formatUriAsLink(block.name, block.uri)};
+            case "resource": {
+                const resource = block.resource as EmbeddedResourceResource;
+                if ("text" in resource) {
+                    const link = formatUriAsLink(null, resource.uri);
+                    const context = `<context ref="${resource.uri}">\n${resource.text}\n</context>`;
+                    return {type: "text", text: `${link}\n${context}`};
+                }
+                return null;
+            }
+            case "audio":
+                return null;
+        }
+    }).filter((block): block is UserInput => block !== null);
+}
+
+function formatUriAsLink(name: string | null | undefined, uri: string): string {
+    if (name && name.length > 0) {
+        return `[@${name}](${uri})`;
+    }
+    if (uri.startsWith("file://")) {
+        const path = uri.replace("file://", "");
+        const fileName = path.split("/").pop() ?? path;
+        return `[@${fileName}](${uri})`;
+    }
+    return uri;
 }
