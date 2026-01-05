@@ -1,4 +1,4 @@
-import type {ReasoningEffort} from "./app-server";
+import type {ReasoningEffort, SetDefaultModelParams} from "./app-server";
 import type {Model, ThreadStartResponse} from "./app-server/v2";
 
 export class ModelId {
@@ -16,17 +16,18 @@ export class ModelId {
     }
 
     static fromString(modelId: string): ModelId {
-        const parts = modelId.split("/");
-        const model = parts[0];
-        const effort = parts[1] ?? null;
+        const bracketMatch = modelId.match(/^(?<model>[^\[]+?)(?:\[(?<effort>[^\]]+)\])?$/);
+        const model = bracketMatch?.groups?.["model"];
+        const effort = bracketMatch?.groups?.["effort"] ?? null;
 
-        if (!model) {
-            throw new Error(`Invalid modelId format: ${modelId}`);
+        if (model) {
+            return new ModelId(model, effort);
         }
-        return new ModelId(model, effort);
+
+        throw new Error(`Invalid modelId format: ${modelId}`);
     }
 
     toString(): string {
-        return this.effort ? `${this.model}/${this.effort}` : this.model;
+        return this.effort ? `${this.model}[${this.effort}]` : this.model;
     }
 }

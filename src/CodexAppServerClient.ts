@@ -7,6 +7,8 @@ import type {
 } from "./app-server";
 import type {
     AccountLoginCompletedNotification, AccountUpdatedNotification,
+    ConfigReadParams,
+    ConfigReadResponse,
     GetAccountParams,
     GetAccountResponse, LoginAccountParams, LoginAccountResponse, LogoutAccountResponse, ModelListParams,
     ModelListResponse,
@@ -174,11 +176,11 @@ export class CodexAppServerClient {
             callback({ eventType: "request", ...request});
         }
         let result: any;
-        if (request.params) {
+        if (request.params !== undefined) {
             result = await this.connection.sendRequest<R>(request.method, request.params)
         }
         else {
-            await this.connection.sendRequest<R>(request.method);
+            result = await this.connection.sendRequest<R>(request.method);
         }
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "response", ...result});

@@ -77,24 +77,7 @@
       "model": "gpt-5.1-codex-max",
       "displayName": "gpt-5.1-codex-max",
       "description": "Codex-optimized flagship for deep and fast reasoning.",
-      "supportedReasoningEfforts": [
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Fast responses with lighter reasoning"
-        },
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Balances speed and reasoning depth for everyday tasks"
-        },
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Greater reasoning depth for complex problems"
-        },
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Extra high reasoning depth for complex problems"
-        }
-      ],
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "isDefault": true
     },
@@ -103,16 +86,7 @@
       "model": "gpt-5.1-codex-mini",
       "displayName": "gpt-5.1-codex-mini",
       "description": "Optimized for codex. Cheaper, faster, but less capable.",
-      "supportedReasoningEfforts": [
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Dynamically adjusts reasoning based on the task"
-        },
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Maximizes reasoning depth for complex or ambiguous problems"
-        }
-      ],
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "isDefault": false
     },
@@ -121,24 +95,7 @@
       "model": "gpt-5.2",
       "displayName": "gpt-5.2",
       "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
-      "supportedReasoningEfforts": [
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Balances speed with some reasoning; useful for straightforward queries and short explanations"
-        },
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Provides a solid balance of reasoning depth and latency for general-purpose tasks"
-        },
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Maximizes reasoning depth for complex or ambiguous problems"
-        },
-        {
-          "reasoningEffort": "reasoningEffort",
-          "description": "Extra high reasoning for complex problems"
-        }
-      ],
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "isDefault": false
     }

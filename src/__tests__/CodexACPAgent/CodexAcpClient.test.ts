@@ -16,7 +16,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.clearAllMocks();
     });
 
-    const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox", "reasoningEffort", "conversationId"];
+    const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "projects", "supportedReasoningEfforts", "reasoningEffort"];
 
     it('should start conversation', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
