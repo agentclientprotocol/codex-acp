@@ -234,13 +234,13 @@ export class CodexEventHandler {
                 title: "Read file",
                 locations: [{path: commandAction.path}],
             };
-        } else if (commandAction.type === "search" && commandAction.query) {
+        } else if (commandAction.type === "search") {
             return {
                 sessionUpdate: "tool_call",
                 toolCallId: id,
                 status: acpStatus,
                 kind: "search",
-                title: `Search '${commandAction.query}'`,
+                title: this.createSearchTitle(commandAction.query, commandAction.path),
             }
         } else if (commandAction.type === "listFiles") {
             const title = commandAction.path
@@ -251,7 +251,7 @@ export class CodexEventHandler {
                 toolCallId: id,
                 status: acpStatus,
                 kind: "read",
-                title,
+                title: title,
             }
         }
         return {
@@ -261,6 +261,17 @@ export class CodexEventHandler {
             kind: "execute",
             title: commandAction.command,
         }
+    }
+
+    private createSearchTitle(query: string | null, path: string | null): string {
+        if (query && path) {
+            return `Search for '${query}' in ${path}`;
+        } else if (query) {
+            return `Search for '${query}'`;
+        } else if (path) {
+            return `Search in '${path}'`;
+        }
+        return "Search";
     }
 
     private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {

@@ -121,4 +121,144 @@ describe('CodexEventHandler - command action events', () => {
             'data/command-list-files-without-path.json'
         );
     });
+
+    it('should handle search command with query and path', async () => {
+        const searchNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-search-query-path',
+                    command: 'rg "Service" src',
+                    cwd: '/test/project',
+                    processId: null,
+                    status: 'inProgress',
+                    commandActions: [
+                        {
+                            type: 'search',
+                            command: 'rg Service src',
+                            query: 'Service',
+                            path: 'src',
+                        },
+                    ],
+                    aggregatedOutput: null,
+                    exitCode: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        await setupAndSendNotifications([searchNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/command-search-with-query-and-path.json'
+        );
+    });
+
+    it('should handle search command with only query', async () => {
+        const searchNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-search-query-only',
+                    command: 'rg "Service"',
+                    cwd: '/test/project',
+                    processId: null,
+                    status: 'inProgress',
+                    commandActions: [
+                        {
+                            type: 'search',
+                            command: 'rg Service',
+                            query: 'Service',
+                            path: null,
+                        },
+                    ],
+                    aggregatedOutput: null,
+                    exitCode: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        await setupAndSendNotifications([searchNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/command-search-with-query-only.json'
+        );
+    });
+
+    it('should handle search command with only path (file glob search)', async () => {
+        const searchNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-search-path-only',
+                    command: 'rg --files -g "*service*"',
+                    cwd: '/test/project',
+                    processId: null,
+                    status: 'inProgress',
+                    commandActions: [
+                        {
+                            type: 'search',
+                            command: "rg --files -g '*service*'",
+                            query: null,
+                            path: '*service*',
+                        },
+                    ],
+                    aggregatedOutput: null,
+                    exitCode: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        await setupAndSendNotifications([searchNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/command-search-with-path-only.json'
+        );
+    });
+
+    it('should handle search command with neither query nor path', async () => {
+        const searchNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-search-no-query-no-path',
+                    command: 'rg',
+                    cwd: '/test/project',
+                    processId: null,
+                    status: 'inProgress',
+                    commandActions: [
+                        {
+                            type: 'search',
+                            command: 'rg',
+                            query: null,
+                            path: null,
+                        },
+                    ],
+                    aggregatedOutput: null,
+                    exitCode: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        await setupAndSendNotifications([searchNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/command-search-no-query-no-path.json'
+        );
+    });
 });
