@@ -31,32 +31,32 @@ export interface ChatGPTAuthRequest extends AuthenticateRequest {
     methodId: "chat-gpt";
 }
 
-const JetBrainsAiAuthMethod: AuthMethod = {
-    id: "jetbrains-ai",
-    name: "JetBrains AI",
-    description: "Use JetBrains AI to authenticate",
+const GatewayAuthMethod: AuthMethod = {
+    id: "gateway",
+    name: "Custom model gateway",
+    description: "Use a custom gateway to authenticate and access models",
     _meta: {
-        "jb-proxy": {
+        "gateway": {
             provider: "openai",
             restartRequired: "true"
         }
     }
 }
 
-export interface JetBrainsAiAuthRequest extends AuthenticateRequest {
-    methodId: "jetbrains-ai";
+export interface GatewayAuthRequest extends AuthenticateRequest {
+    methodId: "gateway";
     _meta: {
-        "jb-proxy": {
+        "gateway": {
             baseUrl: string;
             headers: Record<string, string>;
         }
     };
 }
 
-export const CodexAuthMethods: AuthMethod[] = [ApiKeyAuthMethod, ChatGptAuthMethod, JetBrainsAiAuthMethod];
+export const CodexAuthMethods: AuthMethod[] = [ApiKeyAuthMethod, ChatGptAuthMethod, GatewayAuthMethod];
 
-export type CodexAuthRequest = ApiKeyAuthRequest | ChatGPTAuthRequest | JetBrainsAiAuthRequest;
+export type CodexAuthRequest = ApiKeyAuthRequest | ChatGPTAuthRequest | GatewayAuthRequest;
 
 export function isCodexAuthRequest(request: AuthenticateRequest): request is CodexAuthRequest {
-    return request.methodId === "api-key" || request.methodId === "chat-gpt" || request.methodId === "jetbrains-ai";
+    return request.methodId === "api-key" || request.methodId === "chat-gpt" || request.methodId === "gateway";
 }
