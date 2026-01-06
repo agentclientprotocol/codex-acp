@@ -30,20 +30,16 @@ import type {
 export class CodexAcpClient {
 
     private readonly codexClient: CodexAppServerClient;
-    private config: JsonObject;
-    private modelProvider: string | null;
+    private readonly config: JsonObject;
+    private readonly modelProvider: string | null;
+    private gatewayConfig: GatewayConfig | null;
 
-    // Skip authentication check when using JetBrains AI model provider.
-    // The authentication scheme for JetBrains AI is performed entirely in the ACP server,
-    // so Codex would still report that authentication is required.
-    // To avoid this, this flag is set to true when JetBrains AI auth is requested,
-    // and reset back to false when any other method is invoked.
-    private skipAuthCheck: boolean = false;
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
         this.codexClient = codexClient;
         this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
+        this.gatewayConfig = null;
     }
 
     private readonly defaultClientInfo: ClientInfo = {
@@ -78,31 +74,31 @@ export class CodexAcpClient {
                     await open(loginResponse.authUrl);
                 }
                 break;
-            case "jetbrains-ai":
-                const proxySettings = authRequest._meta["jb-proxy"]
-                const baseUrl = ensureBaseUrlFormat(proxySettings.baseUrl);
+            case "gateway":
+                const gatewaySettings = authRequest._meta["gateway"]
+                const baseUrl = gatewaySettings.baseUrl;
                 const headers: Record<string, string> = {
                     "X-Client-Feature-ID": "codex",
-                    ...proxySettings.headers
+                    ...gatewaySettings.headers
                 };
 
-                this.modelProvider = "jetbrains-ai"
-                this.config = {
-                    model_providers: {
-                        "jetbrains-ai": {
-                            name: "JetBrains AI",
-                            base_url: baseUrl,
-                            http_headers: headers,
-                            wire_api: "responses"
-                        }
+                this.gatewayConfig = {
+                    modelProvider: "custom-gateway",
+                    config: {
+                        name: "User-provided gateway",
+                        base_url: baseUrl,
+                        http_headers: headers,
+                        wire_api: "responses"
                     }
                 }
 
-                this.skipAuthCheck = true;
+                // Early return: model provider information will be sent to Codex later during the session creation
                 return true;
         }
 
-        this.skipAuthCheck = false;
+        // Reset the gateway config to null if another authentication method was used
+        this.gatewayConfig = null;
+
         const result = await this.codexClient.awaitLoginCompleted()
         return result.success;
     }
@@ -113,7 +109,11 @@ export class CodexAcpClient {
     }
 
     async authRequired(): Promise<Boolean> {
-        if (this.skipAuthCheck) {
+        if (this.gatewayConfig != null) {
+            // The authentication is already in progress:
+            // the gateway config is set during the authentication request processing.
+            // We assume that custom model providers will handle authentication themselves,
+            // so Codex will not need to require it.
             return false;
         }
 
@@ -148,9 +148,11 @@ export class CodexAcpClient {
      * Returns a new session ID.
      */
     async newSession(request: acp.NewSessionRequest, agentMode: AgentMode): Promise<SessionMetadata> {
+        const sessionModelProvider = this.gatewayConfig?.modelProvider ?? this.modelProvider;
+        const sessionConfig = mergeGatewayConfig(this.config, this.gatewayConfig)
         const threadStartResponse = await this.codexClient.threadStart({
-            config: this.config,
-            modelProvider: this.modelProvider,
+            config: sessionConfig,
+            modelProvider: sessionModelProvider,
             model: null,
             cwd: request.cwd,
             approvalPolicy: agentMode.approvalPolicy,
@@ -285,22 +287,28 @@ function formatUriAsLink(name: string | null | undefined, uri: string): string {
     return uri;
 }
 
-/**
- * Ensures that the provided baseUrl ends with "/v1".
- * @param baseUrl - base url of the model provider
- */
-function ensureBaseUrlFormat(baseUrl: string): string {
-    let url = baseUrl.trim();
-
-    // Remove trailing slashes
-    while (url.endsWith("/")) {
-        url = url.slice(0, -1);
+interface GatewayConfig {
+    modelProvider: string;
+    config: {
+        name: string,
+        base_url: string,
+        http_headers: Record<string, string>,
+        wire_api: "responses"
     }
+}
 
-    // Check if URL already ends with /v1
-    if (url.endsWith("/v1")) {
-        return url;
+function mergeGatewayConfig(config: JsonObject, gatewayConfig: GatewayConfig | null): JsonObject {
+    if (gatewayConfig !== null) {
+        const newConfig = {...config};
+        if (!newConfig["model_providers"] || typeof newConfig["model_providers"] !== 'object') {
+            newConfig["model_providers"] = {};
+        } else {
+            newConfig["model_providers"] = {...newConfig["model_providers"] as JsonObject};
+        }
+
+        newConfig["model_providers"][gatewayConfig.modelProvider] = gatewayConfig.config;
+        return newConfig;
+    } else {
+        return config;
     }
-
-    return url + "/v1";
 }

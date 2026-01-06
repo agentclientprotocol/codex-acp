@@ -63,17 +63,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(transportDump).toMatchFileSnapshot("data/auth-with-key.json");
     });
 
-    it('should authenticate with JetBrains AI', async () => {
+    it('should authenticate with a gateway', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
         await codexAcpAgent.initialize({protocolVersion: 1});
         await fixture.getCodexAcpClient().logout();
-        fixture.clearCodexConnectionDump();
 
         const authRequest: CodexAuthRequest = {
-            methodId: "jetbrains-ai",
+            methodId: "gateway",
             _meta: {
-                "jb-proxy": {
+                "gateway": {
                     baseUrl: "https://www.example.com",
                     headers: {
                         "Custom-Auth-Header": "TOKEN"
