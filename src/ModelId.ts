@@ -1,4 +1,4 @@
-import type {ReasoningEffort, SetDefaultModelParams} from "./app-server";
+import type {ReasoningEffort} from "./app-server";
 import type {Model, ThreadStartResponse} from "./app-server/v2";
 
 export class ModelId {
