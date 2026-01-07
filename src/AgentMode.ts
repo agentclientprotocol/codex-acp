@@ -74,4 +74,13 @@ export class AgentMode {
         const match = AgentMode.all().find(m => m.id === modeId);
         return match ?? null;
     }
+
+    static getInitialAgentMode(): AgentMode {
+        const predefinedAgentMode = process.env["INITIAL_AGENT_MODE"];
+        if (predefinedAgentMode) {
+            return AgentMode.find(predefinedAgentMode) ?? AgentMode.DEFAULT_AGENT_MODE;
+        } else {
+            return AgentMode.DEFAULT_AGENT_MODE;
+        }
+    }
 }

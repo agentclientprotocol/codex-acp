@@ -86,8 +86,8 @@ export class CodexAcpServer implements acp.Agent {
             }
         }
 
-        // we are retrieving available modes from the session, so setting it to default on the new session
-        const agentMode = AgentMode.DEFAULT_AGENT_MODE
+        // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
+        const agentMode = AgentMode.getInitialAgentMode();
         const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(_params, agentMode));
         const {sessionId, currentModelId, models} = sessionMetadata;
         this.sessions.set(sessionId, {
