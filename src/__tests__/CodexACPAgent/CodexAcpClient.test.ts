@@ -1,3 +1,5 @@
+// noinspection ES6RedundantAwait
+
 import {describe, expect, it, vi, beforeEach} from 'vitest';
 import type {CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk";
@@ -22,6 +24,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        // noinspection ES6MissingAwait - we're only check initialization
         codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "Hi!"}]});
 
         const transportDump = fixture.getCodexConnectionDump(ignoredFields);
@@ -250,15 +253,47 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(mockFixture.getCodexConnectionDump(ignoredFields)).toMatchFileSnapshot("data/send-attachments-turn-start.json");
     });
 
-    //dev-time test
-    it.skip('should convert session notification to acp events', async () => {
-        fixture.onCodexConnectionEvent((event) => {
-            console.log(JSON.stringify(event, null, 2));
+    async function createSessionInSeparateInstance(): Promise<string> {
+        const initFixture = createTestFixture();
+        initFixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        await initFixture.getCodexAcpAgent().initialize({protocolVersion: 1});
+        const newSessionResponse = await initFixture.getCodexAcpAgent().newSession({
+            cwd: "",
+            mcpServers: []
         });
-        const codexAcpAgent = fixture.getCodexAcpAgent();
-        await codexAcpAgent.initialize({protocolVersion: 1});
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "/home/alex/work/spring-petclinic/", mcpServers: []});
+        return newSessionResponse.sessionId;
+    }
+
+    it('should resume session', async () => {
+        const sessionId = await createSessionInSeparateInstance();
+
+        await fixture.getCodexAcpAgent().initialize({protocolVersion: 1});
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
         fixture.clearCodexConnectionDump();
-        await codexAcpAgent.prompt({ sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "Add method `minus` to Math Utils."}] });
+
+        await fixture.getCodexAcpAgent().unstable_resumeSession({
+            cwd: "",
+            sessionId: sessionId
+        });
+        await expect(fixture.getCodexConnectionDump(ignoredFields.concat("data", "model"))).toMatchFileSnapshot("data/thread-resume.json");
+
+        const promptResult: Promise<acp.PromptResponse> = fixture.getCodexAcpAgent().prompt({
+            sessionId: sessionId,
+            prompt: []
+        });
+
+        expect(promptResult).toBeDefined();
+    });
+
+    it('should fail on wrong sessionId', async () => {
+        const sessionId = "not-existing-session";
+
+        await fixture.getCodexAcpAgent().initialize({protocolVersion: 1});
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        fixture.clearCodexConnectionDump();
+
+        await expect(
+            fixture.getCodexAcpAgent().unstable_resumeSession({cwd: "", sessionId: sessionId})
+        ).rejects.toThrow("invalid thread id");
     });
 });

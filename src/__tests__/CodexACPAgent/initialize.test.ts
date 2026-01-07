@@ -35,7 +35,10 @@ describe('CodexACPAgent - initialize', () => {
                 loadSession: false,
                 promptCapabilities: {
                     image: true
-                }
+                },
+                sessionCapabilities: {
+                    resume: {},
+                },
             },
             authMethods: CodexAuthMethods,
         });

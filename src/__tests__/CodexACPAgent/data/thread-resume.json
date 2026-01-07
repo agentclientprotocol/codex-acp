@@ -1,0 +1,55 @@
+{
+  "eventType": "request",
+  "method": "thread/resume",
+  "params": {
+    "approvalPolicy": null,
+    "baseInstructions": null,
+    "config": {},
+    "cwd": "cwd",
+    "developerInstructions": null,
+    "history": null,
+    "model": "model",
+    "modelProvider": null,
+    "path": "path",
+    "sandbox": "sandbox",
+    "threadId": "threadId"
+  }
+}
+{
+  "eventType": "notification",
+  "method": "codex/event/mcp_startup_complete",
+  "params": {
+    "id": "id",
+    "msg": {
+      "type": "mcp_startup_complete",
+      "ready": [],
+      "failed": [],
+      "cancelled": []
+    },
+    "conversationId": "conversationId"
+  },
+  "jsonrpc": "2.0"
+}
+{
+  "eventType": "response",
+  "thread": "thread",
+  "model": "model",
+  "modelProvider": "openai",
+  "cwd": "cwd",
+  "approvalPolicy": "untrusted",
+  "sandbox": "sandbox",
+  "reasoningEffort": "reasoningEffort"
+}
+{
+  "eventType": "request",
+  "method": "model/list",
+  "params": {
+    "cursor": null,
+    "limit": null
+  }
+}
+{
+  "eventType": "response",
+  "data": "data",
+  "nextCursor": null
+}
