@@ -79,9 +79,10 @@ export class CodexAcpClient {
         return response.requiresOpenaiAuth && !response.account;
     }
 
-    async resumeSession(request: acp.ResumeSessionRequest): Promise<SessionMetadata> {
+    async resumeSession(request: acp.ResumeSessionRequest, agentMode: AgentMode): Promise<SessionMetadata> {
         const response = await this.codexClient.threadResume({
-            approvalPolicy: null,
+            approvalPolicy: agentMode.approvalPolicy,
+            sandbox: agentMode.sandboxMode,
             baseInstructions: null,
             config: this.config,
             cwd: request.cwd,
@@ -90,7 +91,6 @@ export class CodexAcpClient {
             model: null,
             modelProvider: this.modelProvider,
             path: null,
-            sandbox: null,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -98,7 +98,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: response.model,
             models: codexModels,
-            agentMode: AgentMode.DEFAULT_AGENT_MODE
+            agentMode: agentMode
         }
     }
 

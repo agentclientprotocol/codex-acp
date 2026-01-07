@@ -2,7 +2,8 @@
   "eventType": "request",
   "method": "thread/resume",
   "params": {
-    "approvalPolicy": null,
+    "approvalPolicy": "on-request",
+    "sandbox": "sandbox",
     "baseInstructions": null,
     "config": {},
     "cwd": "cwd",
@@ -11,7 +12,6 @@
     "model": "model",
     "modelProvider": null,
     "path": "path",
-    "sandbox": "sandbox",
     "threadId": "threadId"
   }
 }
@@ -36,7 +36,7 @@
   "model": "model",
   "modelProvider": "openai",
   "cwd": "cwd",
-  "approvalPolicy": "untrusted",
+  "approvalPolicy": "on-request",
   "sandbox": "sandbox",
   "reasoningEffort": "reasoningEffort"
 }

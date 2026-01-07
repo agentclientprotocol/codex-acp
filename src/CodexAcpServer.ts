@@ -39,7 +39,7 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
-        const sessionMetadata = await this.codexAcpClient.resumeSession(params);
+        const sessionMetadata = await this.codexAcpClient.resumeSession(params, AgentMode.DEFAULT_AGENT_MODE);
         this.sessions.set(params.sessionId, {
             currentTurnId: null,
             lastTokenUsage: null,
