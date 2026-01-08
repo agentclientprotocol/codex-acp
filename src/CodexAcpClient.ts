@@ -63,6 +63,7 @@ export class CodexAcpClient {
 
         switch (authRequest.methodId) {
             case "api-key":
+                if (!authRequest._meta || !authRequest._meta["api-key"]) throw RequestError.invalidRequest();
                 await this.codexClient.accountLogin({
                     type: "apiKey",
                     apiKey: authRequest._meta["api-key"].apiKey
@@ -75,7 +76,11 @@ export class CodexAcpClient {
                 }
                 break;
             case "gateway":
+                if (!authRequest._meta) throw RequestError.invalidRequest();
+
                 const gatewaySettings = authRequest._meta["gateway"]
+                if (!gatewaySettings) throw RequestError.invalidRequest();
+
                 const baseUrl = gatewaySettings.baseUrl;
                 const headers: Record<string, string> = {
                     "X-Client-Feature-ID": "codex",
@@ -94,6 +99,7 @@ export class CodexAcpClient {
 
                 // Early return: model provider information will be sent to Codex later during the session creation
                 return true;
+
         }
 
         // Reset the gateway config to null if another authentication method was used
