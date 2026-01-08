@@ -18,6 +18,10 @@ const codexPath = process.env["CODEX_PATH"] ?? "codex";
 const logPath = process.env["APP_SERVER_LOGS"];
 
 const codexConnection = startCodexConnection(codexPath, logPath);
+process.stdin.on("close", (chunk: Buffer) => {
+    codexConnection.process.stdin.end();
+});
+
 const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
 function createAgent(connection: acp.AgentSideConnection): CodexAcpServer {
