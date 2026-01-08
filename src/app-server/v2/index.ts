@@ -5,7 +5,6 @@ export type { AccountLoginCompletedNotification } from "./AccountLoginCompletedN
 export type { AccountRateLimitsUpdatedNotification } from "./AccountRateLimitsUpdatedNotification";
 export type { AccountUpdatedNotification } from "./AccountUpdatedNotification";
 export type { AgentMessageDeltaNotification } from "./AgentMessageDeltaNotification";
-export type { AnalyticsConfig } from "./AnalyticsConfig";
 export type { ApprovalDecision } from "./ApprovalDecision";
 export type { AskForApproval } from "./AskForApproval";
 export type { CancelLoginAccountParams } from "./CancelLoginAccountParams";
@@ -108,8 +107,6 @@ export type { ThreadListParams } from "./ThreadListParams";
 export type { ThreadListResponse } from "./ThreadListResponse";
 export type { ThreadResumeParams } from "./ThreadResumeParams";
 export type { ThreadResumeResponse } from "./ThreadResumeResponse";
-export type { ThreadRollbackParams } from "./ThreadRollbackParams";
-export type { ThreadRollbackResponse } from "./ThreadRollbackResponse";
 export type { ThreadStartParams } from "./ThreadStartParams";
 export type { ThreadStartResponse } from "./ThreadStartResponse";
 export type { ThreadStartedNotification } from "./ThreadStartedNotification";

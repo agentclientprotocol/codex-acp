@@ -170,7 +170,6 @@ export type { TaskStartedEvent } from "./TaskStartedEvent";
 export type { TerminalInteractionEvent } from "./TerminalInteractionEvent";
 export type { TextContent } from "./TextContent";
 export type { TextResourceContents } from "./TextResourceContents";
-export type { ThreadRolledBackEvent } from "./ThreadRolledBackEvent";
 export type { TokenCountEvent } from "./TokenCountEvent";
 export type { TokenUsage } from "./TokenUsage";
 export type { TokenUsageInfo } from "./TokenUsageInfo";
