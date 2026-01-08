@@ -37,8 +37,8 @@ const GatewayAuthMethod: AuthMethod = {
     description: "Use a custom gateway to authenticate and access models",
     _meta: {
         "gateway": {
-            provider: "openai",
-            restartRequired: "true"
+            protocol: "openai",
+            restartRequired: "false"
         }
     }
 }
