@@ -79,6 +79,29 @@ export class CodexAcpClient {
         return response.requiresOpenaiAuth && !response.account;
     }
 
+    async resumeSession(request: acp.ResumeSessionRequest, agentMode: AgentMode): Promise<SessionMetadata> {
+        const response = await this.codexClient.threadResume({
+            approvalPolicy: agentMode.approvalPolicy,
+            sandbox: agentMode.sandboxMode,
+            baseInstructions: null,
+            config: this.config,
+            cwd: request.cwd,
+            developerInstructions: null,
+            history: null,
+            model: null,
+            modelProvider: this.modelProvider,
+            path: null,
+            threadId: request.sessionId,
+        });
+        const codexModels = await this.fetchAvailableModels();
+        return {
+            sessionId: request.sessionId,
+            currentModelId: response.model,
+            models: codexModels,
+            agentMode: agentMode
+        }
+    }
+
     /**
      * Returns a new session ID.
      */
@@ -94,11 +117,13 @@ export class CodexAcpClient {
             developerInstructions: null,
             experimentalRawEvents: false
         });
+
         const codexModels = await this.fetchAvailableModels();
         if (codexModels.length === 0) {
             throw new Error("Codex did not return any models");
         }
         const currentModelId = ModelId.fromThreadResponse(threadStartResponse).toString();
+
         return {
             sessionId: threadStartResponse.thread.id,
             currentModelId: currentModelId,

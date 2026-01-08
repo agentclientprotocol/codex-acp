@@ -38,6 +38,17 @@ export class CodexAcpServer implements acp.Agent {
         this.getExitCode = getExitCode ?? (() => null);
     }
 
+    async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
+        const sessionMetadata = await this.codexAcpClient.resumeSession(params, AgentMode.DEFAULT_AGENT_MODE);
+        this.sessions.set(params.sessionId, {
+            currentTurnId: null,
+            lastTokenUsage: null,
+            sessionMetadata: sessionMetadata,
+        });
+        return {
+        };
+    }
+
     async initialize(
         _params: acp.InitializeRequest,
     ): Promise<acp.InitializeResponse> {
@@ -48,6 +59,9 @@ export class CodexAcpServer implements acp.Agent {
                 loadSession: false,
                 promptCapabilities: {
                     image: true
+                },
+                sessionCapabilities: {
+                    resume: { }
                 }
             },
             authMethods: CodexAuthMethods,
@@ -147,8 +161,6 @@ export class CodexAcpServer implements acp.Agent {
 
         return {};
     }
-
-
 
     private buildAvailableModels(models: Model[]): ModelInfo[] {
         return models.flatMap((model) =>

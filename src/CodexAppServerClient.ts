@@ -20,7 +20,9 @@ import type {
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
     FileChangeRequestApprovalParams,
-    FileChangeRequestApprovalResponse
+    FileChangeRequestApprovalResponse,
+    ThreadResumeParams,
+    ThreadResumeResponse
 } from "./app-server/v2";
 
 export interface ApprovalHandler {
@@ -95,6 +97,10 @@ export class CodexAppServerClient {
 
     async threadStart(params: ThreadStartParams): Promise<ThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
+    }
+
+    async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
+        return await this.sendRequest({ method: "thread/resume", params: params });
     }
 
     async accountLogin(params: LoginAccountParams): Promise<LoginAccountResponse> {

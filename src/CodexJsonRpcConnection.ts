@@ -44,6 +44,11 @@ function attachLogs(proc: ChildProcessWithoutNullStreams, logPath: string) {
         const timestamp = new Date().toISOString();
         fs.appendFileSync(logFile, `[${timestamp}] ${message}\n`);
     }
+    const originalWrite = proc.stdin.write.bind(proc.stdin);
+    proc.stdin.write = (chunk: any, encoding?: any, callback?: any): boolean => {
+        log("[STDIN] " + chunk.toString());
+        return originalWrite(chunk, encoding, callback);
+    };
 
     proc.stderr.on("data", (data) => {
         log("[STDERR] " + data.toString());
