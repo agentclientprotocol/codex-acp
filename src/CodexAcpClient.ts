@@ -117,11 +117,13 @@ export class CodexAcpClient {
             developerInstructions: null,
             experimentalRawEvents: false
         });
+
         const codexModels = await this.fetchAvailableModels();
         if (codexModels.length === 0) {
             throw new Error("Codex did not return any models");
         }
         const currentModelId = ModelId.fromThreadResponse(threadStartResponse).toString();
+
         return {
             sessionId: threadStartResponse.thread.id,
             currentModelId: currentModelId,
