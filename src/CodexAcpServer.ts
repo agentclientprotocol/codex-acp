@@ -125,7 +125,7 @@ export class CodexAcpServer implements acp.Agent {
         return {};
     }
 
-    async setSessionModel(params: acp.SetSessionModelRequest): Promise<acp.SetSessionModelResponse> {
+    async unstable_setSessionModel(params: acp.SetSessionModelRequest): Promise<acp.SetSessionModelResponse | void> {
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
