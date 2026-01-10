@@ -53,3 +53,8 @@
   "data": "data",
   "nextCursor": null
 }
+{
+  "eventType": "request",
+  "method": "skills/list",
+  "params": {}
+}

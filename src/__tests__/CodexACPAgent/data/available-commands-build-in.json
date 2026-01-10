@@ -1,0 +1,33 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-id",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "mcp",
+            "description": "List configured Model Context Protocol (MCP) tools.",
+            "input": null
+          },
+          {
+            "name": "skills",
+            "description": "List available skills.",
+            "input": null
+          },
+          {
+            "name": "status",
+            "description": "Display session configuration and token usage.",
+            "input": null
+          },
+          {
+            "name": "logout",
+            "description": "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
+            "input": null
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -9,6 +9,7 @@ import type {ReasoningEffort} from "./app-server";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import type {TokenCount} from "./TokenCount";
+import {AvailableCommandsPublisher} from "./AvailableCommandsPublisher";
 
 
 export interface SessionState {
@@ -22,6 +23,7 @@ export class CodexAcpServer implements acp.Agent {
     private readonly connection: acp.AgentSideConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
+    private readonly availableCommandsPublisher: AvailableCommandsPublisher;
 
     private readonly sessions: Map<string, SessionState>;
 
@@ -36,6 +38,11 @@ export class CodexAcpServer implements acp.Agent {
         this.codexAcpClient = codexAcpClient;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.getExitCode = getExitCode ?? (() => null);
+        this.availableCommandsPublisher = new AvailableCommandsPublisher(
+            connection,
+            codexAcpClient,
+            (operation) => this.runWithProcessCheck(operation)
+        );
     }
 
     async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
@@ -45,6 +52,8 @@ export class CodexAcpServer implements acp.Agent {
             lastTokenUsage: null,
             sessionMetadata: sessionMetadata,
         });
+        // Fire-and-forget to avoid blocking the resume handshake on client-side processing
+        this.publishAvailableCommandsAsync(params.sessionId);
         return {
         };
     }
@@ -89,6 +98,7 @@ export class CodexAcpServer implements acp.Agent {
             lastTokenUsage: null
         });
 
+        this.publishAvailableCommandsAsync(sessionId);
         const availableModels = this.buildAvailableModels(models);
         const sessionModelState: SessionModelState = {
             availableModels: availableModels,
@@ -162,6 +172,10 @@ export class CodexAcpServer implements acp.Agent {
         return {};
     }
 
+    private publishAvailableCommandsAsync(sessionId: string) {
+        void this.availableCommandsPublisher.publish(sessionId);
+    }
+
     private buildAvailableModels(models: Model[]): ModelInfo[] {
         return models.flatMap((model) =>
             model.supportedReasoningEfforts.map((effort) => ({
@@ -185,6 +199,7 @@ export class CodexAcpServer implements acp.Agent {
 
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
+        this.publishAvailableCommandsAsync(params.sessionId);
 
         try {
             const eventHandler = new CodexEventHandler(this.connection, sessionState);

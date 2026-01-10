@@ -104,6 +104,16 @@
 }
 {
   "eventType": "request",
+  "method": "skills/list",
+  "params": {}
+}
+{
+  "eventType": "request",
+  "method": "skills/list",
+  "params": {}
+}
+{
+  "eventType": "request",
   "method": "turn/start",
   "params": {
     "outputSchema": null,

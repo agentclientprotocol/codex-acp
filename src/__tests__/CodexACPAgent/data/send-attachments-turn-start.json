@@ -1,5 +1,10 @@
 {
   "eventType": "request",
+  "method": "skills/list",
+  "params": {}
+}
+{
+  "eventType": "request",
   "method": "turn/start",
   "params": {
     "outputSchema": null,
@@ -35,6 +40,9 @@
     "effort": null,
     "model": null
   }
+}
+{
+  "eventType": "response"
 }
 {
   "eventType": "response"
