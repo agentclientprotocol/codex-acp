@@ -16,6 +16,7 @@ import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import type {UserInput} from "./app-server/v2";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
+import type {SkillsListParams, SkillsListResponse} from "./app-server/v2";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -162,6 +163,10 @@ export class CodexAcpClient {
 
     async setModel(params: SetDefaultModelParams): Promise<SetDefaultModelResponse> {
         return this.codexClient.setModelRequest(params);
+    }
+
+    async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {
+        return this.codexClient.listSkills(params ?? {});
     }
 
     async turnInterrupt(params: { threadId: string, turnId: string }): Promise<void> {

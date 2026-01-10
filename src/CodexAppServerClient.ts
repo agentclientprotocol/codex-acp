@@ -22,7 +22,9 @@ import type {
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
     ThreadResumeParams,
-    ThreadResumeResponse
+    ThreadResumeResponse,
+    SkillsListParams,
+    SkillsListResponse
 } from "./app-server/v2";
 
 export interface ApprovalHandler {
@@ -147,6 +149,10 @@ export class CodexAppServerClient {
 
     async listModels(params: ModelListParams = {cursor: null, limit: null}): Promise<ModelListResponse> {
         return await this.sendRequest({ method: "model/list", params });
+    }
+
+    async listSkills(params: SkillsListParams = {}): Promise<SkillsListResponse> {
+        return await this.sendRequest({ method: "skills/list", params });
     }
 
     /**

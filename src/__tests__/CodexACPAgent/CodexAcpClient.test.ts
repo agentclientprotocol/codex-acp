@@ -296,4 +296,40 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             fixture.getCodexAcpAgent().unstable_resumeSession({cwd: "", sessionId: sessionId})
         ).rejects.toThrow("invalid thread id");
     });
+
+    it('should return available builtin commands', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue({ data: [] });
+
+        // @ts-expect-error - exercising private helper
+        await codexAcpAgent.availableCommandsPublisher.publish("session-id");
+
+        expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-build-in.json");
+    });
+
+    it('should return available commands from skills list', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue({
+            data: [{
+                cwd: "/workspace",
+                skills: [{
+                    name: "build",
+                    description: "Build the project",
+                    shortDescription: "Build",
+                    path: "/workspace",
+                    scope: "user"
+                }],
+                errors: []
+            }]
+        });
+
+        // @ts-expect-error - exercising private helper
+        await codexAcpAgent.availableCommandsPublisher.publish("session-id");
+
+        expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-skills.json");
+    });
 });
