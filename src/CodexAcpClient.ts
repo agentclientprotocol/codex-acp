@@ -9,14 +9,19 @@ import type {
     SetDefaultModelParams,
     SetDefaultModelResponse
 } from "./app-server";
-import type {TurnCompletedNotification} from "./app-server/v2";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
-import type {Model} from "./app-server/v2";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
-import type {UserInput} from "./app-server/v2";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
-import type {SkillsListParams, SkillsListResponse} from "./app-server/v2";
+import type {
+    Model,
+    ListMcpServerStatusParams,
+    ListMcpServerStatusResponse,
+    SkillsListParams,
+    SkillsListResponse,
+    TurnCompletedNotification,
+    UserInput,
+} from "./app-server/v2";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -133,17 +138,20 @@ export class CodexAcpClient {
         };
     }
 
+    async subscribeToSessionEvents(
+        sessionId: string,
+        eventHandler: (result: ServerNotification) => void,
+        approvalHandler: ApprovalHandler
+    ) {
+        this.codexClient.onServerNotification(sessionId, eventHandler);
+        this.codexClient.onApprovalRequest(sessionId, approvalHandler);
+    }
+
     async sendPrompt(
         request: acp.PromptRequest,
         agentMode: AgentMode,
-        eventHandler: (result: ServerNotification) => void,
-        approvalHandler: ApprovalHandler
     ): Promise<TurnCompletedNotification> {
-        this.codexClient.onServerNotification(request.sessionId, eventHandler);
-        this.codexClient.onApprovalRequest(request.sessionId, approvalHandler);
-
         const input = buildPromptItems(request.prompt);
-
         await this.codexClient.turnStart({
             outputSchema: null,
             threadId: request.sessionId,
@@ -167,6 +175,10 @@ export class CodexAcpClient {
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {
         return this.codexClient.listSkills(params ?? {});
+    }
+
+    async listMcpServers(params: ListMcpServerStatusParams = { cursor: null, limit: null }): Promise<ListMcpServerStatusResponse> {
+        return this.codexClient.listMcpServerStatus(params);
     }
 
     async turnInterrupt(params: { threadId: string, turnId: string }): Promise<void> {

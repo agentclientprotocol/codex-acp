@@ -9,7 +9,7 @@ import type {ReasoningEffort} from "./app-server";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import type {TokenCount} from "./TokenCount";
-import {AvailableCommandsPublisher} from "./AvailableCommandsPublisher";
+import {CodexCommands} from "./CodexCommands";
 
 
 export interface SessionState {
@@ -23,7 +23,7 @@ export class CodexAcpServer implements acp.Agent {
     private readonly connection: acp.AgentSideConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
-    private readonly availableCommandsPublisher: AvailableCommandsPublisher;
+    private readonly availableCommands: CodexCommands;
 
     private readonly sessions: Map<string, SessionState>;
 
@@ -38,7 +38,7 @@ export class CodexAcpServer implements acp.Agent {
         this.codexAcpClient = codexAcpClient;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.getExitCode = getExitCode ?? (() => null);
-        this.availableCommandsPublisher = new AvailableCommandsPublisher(
+        this.availableCommands = new CodexCommands(
             connection,
             codexAcpClient,
             (operation) => this.runWithProcessCheck(operation)
@@ -52,10 +52,8 @@ export class CodexAcpServer implements acp.Agent {
             lastTokenUsage: null,
             sessionMetadata: sessionMetadata,
         });
-        // Fire-and-forget to avoid blocking the resume handshake on client-side processing
         this.publishAvailableCommandsAsync(params.sessionId);
-        return {
-        };
+        return {};
     }
 
     async initialize(
@@ -173,7 +171,7 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     private publishAvailableCommandsAsync(sessionId: string) {
-        void this.availableCommandsPublisher.publish(sessionId);
+        void this.availableCommands.publish(sessionId);
     }
 
     private buildAvailableModels(models: Model[]): ModelInfo[] {
@@ -199,18 +197,25 @@ export class CodexAcpServer implements acp.Agent {
 
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
-        this.publishAvailableCommandsAsync(params.sessionId);
 
         try {
             const eventHandler = new CodexEventHandler(this.connection, sessionState);
             const approvalHandler = new CodexApprovalHandler(this.connection, sessionState);
-            const agentMode = sessionState.sessionMetadata.agentMode;
-            const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.sendPrompt(
-                params,
-                agentMode,
+            await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 (event) => eventHandler.handleNotification(event),
-                approvalHandler
-            ));
+                approvalHandler);
+
+            if (await this.availableCommands.tryHandle(params.prompt, sessionState)) {
+                return {
+                    stopReason: "end_turn",
+                    _meta: this.buildQuotaMeta(sessionState),
+                };
+            }
+
+            const agentMode = sessionState.sessionMetadata.agentMode;
+            const turnCompleted = await this.runWithProcessCheck(
+                () => this.codexAcpClient.sendPrompt(params, agentMode));
+
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
                 await this.connection.sessionUpdate({
