@@ -7,6 +7,7 @@ import {createTestFixture, createCodexMockTestFixture, type TestFixture} from ".
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
+import type {ListMcpServerStatusResponse, SkillsListResponse} from "../../app-server/v2";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -304,9 +305,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue({ data: [] });
 
         // @ts-expect-error - exercising private helper
-        await codexAcpAgent.availableCommandsPublisher.publish("session-id");
+        await codexAcpAgent.availableCommands.publish("session-id");
 
-        expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-build-in.json");
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-build-in.json");
     });
 
     it('should return available commands from skills list', async () => {
@@ -328,8 +329,132 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         // @ts-expect-error - exercising private helper
-        await codexAcpAgent.availableCommandsPublisher.publish("session-id");
+        await codexAcpAgent.availableCommands.publish("session-id");
 
-        expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-skills.json");
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-skills.json");
+    });
+
+    it('handles builtin slash command locally', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        const sessionState: SessionState = {
+            currentTurnId: null,
+            lastTokenUsage: null,
+            sessionMetadata: {
+                sessionId: "session-id",
+                currentModelId: "model-id",
+                models: [],
+                agentMode: AgentMode.DEFAULT_AGENT_MODE
+            }
+        };
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+        await codexAcpAgent.prompt({ sessionId: "session-id", prompt: [{ type: "text", text: "/status" }] });
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-status.json");
+    });
+
+    it('handles logout command', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        const sessionState: SessionState = {
+            currentTurnId: null,
+            lastTokenUsage: null,
+            sessionMetadata: {
+                sessionId: "session-id",
+                currentModelId: "model-id",
+                models: [],
+                agentMode: AgentMode.DEFAULT_AGENT_MODE
+            }
+        };
+
+        const logoutSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "logout").mockResolvedValue(undefined);
+
+        // @ts-expect-error - exercising private helper
+        const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "logout", input: null }, sessionState);
+
+        expect(handled).toBe(true);
+        expect(logoutSpy).toHaveBeenCalledTimes(1);
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-logout.json");
+    });
+
+    it('handles skills command', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        const sessionState: SessionState = {
+            currentTurnId: null,
+            lastTokenUsage: null,
+            sessionMetadata: {
+                sessionId: "session-id",
+                currentModelId: "model-id",
+                models: [],
+                agentMode: AgentMode.DEFAULT_AGENT_MODE
+            }
+        };
+
+        const skillsResponse: SkillsListResponse = {
+            data: [{
+                cwd: "/workspace",
+                skills: [
+                    { name: "build", description: "Build the project", shortDescription: "Build", path: "/workspace/build", scope: "user" },
+                    { name: "deploy", description: "Deploy the service", path: "/workspace/deploy", scope: "repo" }
+                ],
+                errors: []
+            }]
+        };
+        const skillsSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue(skillsResponse);
+
+        // @ts-expect-error - exercising private helper
+        const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "skills", input: null }, sessionState);
+
+        expect(handled).toBe(true);
+        expect(skillsSpy).toHaveBeenCalledTimes(1);
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-skills.json");
+    });
+
+    it('handles mcp command', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        const sessionState: SessionState = {
+            currentTurnId: null,
+            lastTokenUsage: null,
+            sessionMetadata: {
+                sessionId: "session-id",
+                currentModelId: "model-id",
+                models: [],
+                agentMode: AgentMode.DEFAULT_AGENT_MODE
+            }
+        };
+
+        const mcpResponse: ListMcpServerStatusResponse = {
+            data: [
+                {
+                    name: "fs",
+                    tools: { listFiles: { name: "listFiles", inputSchema: { type: "object" } } },
+                    resources: [{ name: "workspace", uri: "file:///workspace" }],
+                    resourceTemplates: [],
+                    authStatus: "bearerToken"
+                },
+                {
+                    name: "browser",
+                    tools: {},
+                    resources: [],
+                    resourceTemplates: [],
+                    authStatus: "notLoggedIn"
+                }
+            ],
+            nextCursor: null
+        };
+        const mcpSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "listMcpServers").mockResolvedValue(mcpResponse);
+
+        // @ts-expect-error - exercising private helper
+        const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "mcp", input: null }, sessionState);
+
+        expect(handled).toBe(true);
+        expect(mcpSpy).toHaveBeenCalledTimes(1);
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-mcp.json");
     });
 });

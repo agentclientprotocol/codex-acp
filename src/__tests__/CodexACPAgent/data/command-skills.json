@@ -1,0 +1,15 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Available skills:\n- build: Build\n- deploy: Deploy the service"
+        }
+      }
+    }
+  ]
+}

@@ -24,7 +24,9 @@ import type {
     ThreadResumeParams,
     ThreadResumeResponse,
     SkillsListParams,
-    SkillsListResponse
+    SkillsListResponse,
+    ListMcpServerStatusParams,
+    ListMcpServerStatusResponse,
 } from "./app-server/v2";
 
 export interface ApprovalHandler {
@@ -103,6 +105,10 @@ export class CodexAppServerClient {
 
     async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
+    }
+
+    async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
+        return await this.sendRequest({ method: "mcpServerStatus/list", params });
     }
 
     async accountLogin(params: LoginAccountParams): Promise<LoginAccountResponse> {

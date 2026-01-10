@@ -1,0 +1,15 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Configured MCP servers:\n- fs: 1 tools, 1 resources, auth=bearerToken\n- browser: 0 tools, 0 resources, auth=notLoggedIn"
+        }
+      }
+    }
+  ]
+}
