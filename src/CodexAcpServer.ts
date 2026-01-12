@@ -168,6 +168,9 @@ export class CodexAcpServer implements acp.Agent {
                 modelId: ModelId.fromComponents(model, effort.reasoningEffort).toString(),
                 name: `${model.displayName} (${effort.reasoningEffort})`,
                 description: `${model.description} ${effort.description}`,
+                _meta: {
+                    isDefault: model.isDefault && model.defaultReasoningEffort == effort.reasoningEffort
+                }
             }))
         );
     }
