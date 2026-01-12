@@ -4,7 +4,7 @@ import type {ApprovalHandler, CodexAppServerClient} from "./CodexAppServerClient
 import {RequestError} from "@agentclientprotocol/sdk";
 import open from "open";
 import type {
-    ClientInfo,
+    ClientInfo, ReasoningEffort,
     ServerNotification,
     SetDefaultModelParams,
     SetDefaultModelResponse
@@ -194,8 +194,10 @@ export class CodexAcpClient {
     async sendPrompt(
         request: acp.PromptRequest,
         agentMode: AgentMode,
+        modelId: ModelId,
     ): Promise<TurnCompletedNotification> {
         const input = buildPromptItems(request.prompt);
+        const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
         await this.codexClient.turnStart({
             outputSchema: null,
             threadId: request.sessionId,
@@ -204,8 +206,8 @@ export class CodexAcpClient {
             sandboxPolicy: agentMode.sandboxPolicy,
             summary: null,
             cwd: null,
-            effort: null,
-            model: null
+            effort: effort,
+            model: modelId.model,
         });
 
         // Wait for turn completion

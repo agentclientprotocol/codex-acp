@@ -160,11 +160,6 @@ export class CodexAcpServer implements acp.Agent {
             reasoningEffort = model.defaultReasoningEffort;
         }
 
-
-        await this.runWithProcessCheck(() => this.codexAcpClient.setModel({
-            model: model.model,
-            reasoningEffort,
-        }));
         sessionState.sessionMetadata.currentModelId = ModelId.fromComponents(model, reasoningEffort).toString();
 
         return {};
@@ -213,8 +208,9 @@ export class CodexAcpServer implements acp.Agent {
             }
 
             const agentMode = sessionState.sessionMetadata.agentMode;
+            const modelId = ModelId.fromString(sessionState.sessionMetadata.currentModelId);
             const turnCompleted = await this.runWithProcessCheck(
-                () => this.codexAcpClient.sendPrompt(params, agentMode));
+                () => this.codexAcpClient.sendPrompt(params, agentMode, modelId));
 
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
