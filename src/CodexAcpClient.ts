@@ -128,16 +128,18 @@ export class CodexAcpClient {
     }
 
     async resumeSession(request: acp.ResumeSessionRequest, agentMode: AgentMode): Promise<SessionMetadata> {
+        const sessionModelProvider = this.gatewayConfig?.modelProvider ?? this.modelProvider;
+        const sessionConfig = mergeGatewayConfig(this.config, this.gatewayConfig)
         const response = await this.codexClient.threadResume({
             approvalPolicy: agentMode.approvalPolicy,
             sandbox: agentMode.sandboxMode,
             baseInstructions: null,
-            config: this.config,
+            config: sessionConfig,
             cwd: request.cwd,
             developerInstructions: null,
             history: null,
             model: null,
-            modelProvider: this.modelProvider,
+            modelProvider: sessionModelProvider,
             path: null,
             threadId: request.sessionId,
         });

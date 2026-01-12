@@ -45,17 +45,6 @@ export class CodexAcpServer implements acp.Agent {
         );
     }
 
-    async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
-        const sessionMetadata = await this.codexAcpClient.resumeSession(params, AgentMode.DEFAULT_AGENT_MODE);
-        this.sessions.set(params.sessionId, {
-            currentTurnId: null,
-            lastTokenUsage: null,
-            sessionMetadata: sessionMetadata,
-        });
-        this.publishAvailableCommandsAsync(params.sessionId);
-        return {};
-    }
-
     async initialize(
         _params: acp.InitializeRequest,
     ): Promise<acp.InitializeResponse> {
@@ -72,6 +61,38 @@ export class CodexAcpServer implements acp.Agent {
                 }
             },
             authMethods: CodexAuthMethods,
+        };
+    }
+
+    async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
+        //TODO cleanup duplicate
+        if (await this.runWithProcessCheck(() => this.codexAcpClient.authRequired())) {
+            if (this.defaultAuthRequest) {
+                await this.authenticate(this.defaultAuthRequest)
+            } else {
+                throw RequestError.authRequired();
+            }
+        }
+
+        // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
+        const agentMode = AgentMode.getInitialAgentMode();
+        const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.resumeSession(params, agentMode));
+        const {sessionId, currentModelId, models} = sessionMetadata;
+        this.sessions.set(sessionId, {
+            sessionMetadata: sessionMetadata,
+            currentTurnId: null,
+            lastTokenUsage: null
+        });
+
+        this.publishAvailableCommandsAsync(sessionId);
+        const availableModels = this.buildAvailableModels(models);
+        const sessionModelState: SessionModelState = {
+            availableModels: availableModels,
+            currentModelId: currentModelId,
+        }
+        return {
+            models: sessionModelState,
+            modes: agentMode.toSessionModeState()
         };
     }
 
