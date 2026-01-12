@@ -39,7 +39,7 @@ source: SessionSource,
  */
 gitInfo: GitInfo | null, 
 /**
- * Only populated on a `thread/resume` response.
+ * Only populated on `thread/resume`, `thread/rollback`, `thread/fork` responses.
  * For all other responses and notifications returning a Thread,
  * the turns field will be an empty list.
  */

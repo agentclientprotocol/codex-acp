@@ -106,6 +106,7 @@
   "eventType": "request",
   "method": "turn/start",
   "params": {
+    "outputSchema": null,
     "threadId": "threadId",
     "input": [
       {

@@ -144,6 +144,7 @@ export class CodexAcpClient {
         const input = buildPromptItems(request.prompt);
 
         await this.codexClient.turnStart({
+            outputSchema: null,
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
@@ -151,7 +152,7 @@ export class CodexAcpClient {
             summary: null,
             cwd: null,
             effort: null,
-            model: null,
+            model: null
         });
 
         // Wait for turn completion
