@@ -2,7 +2,8 @@
   "stopReason": "end_turn",
   "_meta": {
     "quota": {
-      "token_count": null
+      "token_count": null,
+      "model_usage": []
     }
   }
 }

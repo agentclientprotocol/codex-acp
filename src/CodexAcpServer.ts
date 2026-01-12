@@ -10,6 +10,7 @@ import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import type {TokenCount} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
+import type {QuotaMeta} from "./QuotaMeta";
 
 
 export interface SessionState {
@@ -263,10 +264,21 @@ export class CodexAcpServer implements acp.Agent {
         }
     }
 
-    private buildQuotaMeta(sessionState: SessionState): { quota: { token_count: TokenCount | null } } {
+    private buildQuotaMeta(sessionState: SessionState): { quota: QuotaMeta } {
+        const lastTokenUsage = sessionState.lastTokenUsage;
+
+        // Remove the "[reasoning-level]" suffix from currentModelId if present
+        const modelName = sessionState.sessionMetadata.currentModelId.replace(/\[.*?]$/, '');
+
+        // FIXME: currently all tokens are reported for the current model
+        const modelUsage = (lastTokenUsage != null)
+            ? [{ model: modelName, token_count: lastTokenUsage }]
+            : [];
+
         return {
             quota: {
                 token_count: sessionState.lastTokenUsage,
+                model_usage: modelUsage
             }
         };
     }
