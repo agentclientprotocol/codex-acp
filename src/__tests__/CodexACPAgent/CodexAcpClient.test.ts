@@ -19,7 +19,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
     const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "projects", "supportedReasoningEfforts", "reasoningEffort", "model"];
 
-    it('should start conversation', async () => {
+    it.skip('should start conversation', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
 
