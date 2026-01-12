@@ -8,7 +8,19 @@
         "cachedInputTokens": 0,
         "outputTokens": 300,
         "reasoningOutputTokens": 0
-      }
+      },
+      "model_usage": [
+        {
+          "model": "model-id",
+          "token_count": {
+            "totalTokens": 1500,
+            "inputTokens": 1200,
+            "cachedInputTokens": 0,
+            "outputTokens": 300,
+            "reasoningOutputTokens": 0
+          }
+        }
+      ]
     }
   }
 }

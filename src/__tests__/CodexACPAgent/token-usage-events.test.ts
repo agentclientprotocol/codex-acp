@@ -40,7 +40,7 @@ describe('Token Usage Events', () => {
                 lastTokenUsage: null,
                 sessionMetadata: {
                     sessionId,
-                    currentModelId: 'model-id',
+                    currentModelId: 'model-id[medium]',
                     models: [],
                     agentMode: AgentMode.DEFAULT_AGENT_MODE
                 },
