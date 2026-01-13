@@ -7,6 +7,7 @@ import type {
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse
 } from "./app-server/v2";
+import type {ToolCallContent} from "@agentclientprotocol/sdk/dist/schema/types.gen";
 
 const APPROVAL_OPTIONS: acp.PermissionOption[] = [
     { optionId: "allow_once", name: "Allow Once", kind: "allow_once" },
@@ -58,29 +59,44 @@ export class CodexApprovalHandler implements ApprovalHandler {
         sessionId: string,
         params: CommandExecutionRequestApprovalParams
     ): acp.RequestPermissionRequest {
+        const reasonContent = this.createContentFromReason(params.reason);
         return {
             sessionId,
             toolCall: {
                 toolCallId: params.itemId,
-                title: params.reason ?? "Execute command",
                 kind: "execute",
                 status: "pending",
+                content: reasonContent ? [reasonContent] : null,
             },
             options: APPROVAL_OPTIONS,
         };
+    }
+
+    private createContentFromReason(reason: string | null): ToolCallContent | null {
+        if (reason === null || reason === "") {
+            return null;
+        }
+        return {
+            type: "content",
+            content: {
+                type: "text",
+                text: reason
+            }
+        }
     }
 
     private buildFileChangePermissionRequest(
         sessionId: string,
         params: FileChangeRequestApprovalParams
     ): acp.RequestPermissionRequest {
+        const reasonContent = this.createContentFromReason(params.reason);
         return {
             sessionId,
             toolCall: {
                 toolCallId: params.itemId,
-                title: params.reason ?? "Edit file",
                 kind: "edit",
                 status: "pending",
+                content: reasonContent ? [reasonContent] : null,
             },
             options: APPROVAL_OPTIONS,
         };

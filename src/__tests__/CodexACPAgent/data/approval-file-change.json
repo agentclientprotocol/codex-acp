@@ -5,9 +5,17 @@
       "sessionId": "test-session-id",
       "toolCall": {
         "toolCallId": "file-change-snapshot",
-        "title": "Modifying config file",
         "kind": "edit",
-        "status": "pending"
+        "status": "pending",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Modifying config file"
+            }
+          }
+        ]
       },
       "options": [
         {

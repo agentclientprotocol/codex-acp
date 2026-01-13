@@ -5,9 +5,17 @@
       "sessionId": "test-session-id",
       "toolCall": {
         "toolCallId": "item-snapshot",
-        "title": "Running npm install",
         "kind": "execute",
-        "status": "pending"
+        "status": "pending",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Running npm install"
+            }
+          }
+        ]
       },
       "options": [
         {
