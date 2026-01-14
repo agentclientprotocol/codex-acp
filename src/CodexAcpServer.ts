@@ -211,7 +211,6 @@ export class CodexAcpServer implements acp.Agent {
 
     async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
         const sessionState = this.getSessionState(params.sessionId);
-
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
 
@@ -250,6 +249,12 @@ export class CodexAcpServer implements acp.Agent {
                     stopReason: "cancelled",
                     _meta: this.buildQuotaMeta(sessionState),
                 };
+            }
+
+            const error = eventHandler.getFailure()
+            if (error) {
+                // noinspection ExceptionCaughtLocallyJS
+                throw error;
             }
 
             return {

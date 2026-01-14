@@ -1,11 +1,11 @@
 import type {ServerNotification} from "./app-server";
 import type {SessionState} from "./CodexAcpServer";
 import * as acp from "@agentclientprotocol/sdk";
-import {type PlanEntry, type ToolCallContent} from "@agentclientprotocol/sdk";
+import {type PlanEntry, RequestError, type ToolCallContent} from "@agentclientprotocol/sdk";
 import {applyPatch} from "diff";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
-    AgentMessageDeltaNotification,
+    AgentMessageDeltaNotification, CodexErrorInfo,
     CommandAction,
     CommandExecutionStatus,
     ErrorNotification,
@@ -38,10 +38,15 @@ export class CodexEventHandler {
 
     private readonly connection: acp.AgentSideConnection;
     private readonly sessionState: SessionState;
+    private failure: RequestError | null = null;
 
     constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
         this.sessionState = sessionState;
+    }
+
+    getFailure(): RequestError | null {
+        return this.failure;
     }
 
     async handleNotification(notification: ServerNotification) {
@@ -288,13 +293,32 @@ export class CodexEventHandler {
     }
 
     private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent> {
+        const error = params.error.codexErrorInfo
+        if (error == "unauthorized" || error == "usageLimitExceeded" || this.getHttpStatusCode(error) == 401) {
+            this.failure = RequestError.authRequired();
+        }
         return {
             sessionUpdate: "agent_message_chunk",
             content: {
                 type: "text",
-                text: `❌ ${params.error.message}\n\n`
+                text: `${params.error.message}\n\n`
             }
         }
+    }
+
+    private getHttpStatusCode(error: CodexErrorInfo | null): number | null {
+        if (error !== null && typeof error === "object") {
+            if ("httpConnectionFailed" in error) {
+                return error.httpConnectionFailed.httpStatusCode;
+            } else if ("responseStreamConnectionFailed" in error) {
+                return error.responseStreamConnectionFailed.httpStatusCode;
+            } else if ("responseStreamDisconnected" in error) {
+                return error.responseStreamDisconnected.httpStatusCode;
+            } else if ("responseTooManyFailedAttempts" in error) {
+                return error.responseTooManyFailedAttempts.httpStatusCode;
+            }
+        }
+        return null;
     }
 
     private handleTokenUsageUpdated(params: ThreadTokenUsageUpdatedNotification): void {
