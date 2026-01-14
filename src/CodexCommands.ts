@@ -2,8 +2,9 @@ import type * as acp from "@agentclientprotocol/sdk";
 import type {AgentSideConnection, AvailableCommand} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection} from "./ACPSessionConnection";
 import type {CodexAcpClient} from "./CodexAcpClient";
-import type {SkillsListEntry} from "./app-server/v2";
+import type {RateLimitSnapshot, SkillsListEntry} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
+import type {TokenCount} from "./TokenCount";
 
 export class CodexCommands {
     private readonly connection: AgentSideConnection;
@@ -123,18 +124,7 @@ export class CodexCommands {
         switch (name) {
             case "status": {
                 const session = new ACPSessionConnection(this.connection, sessionId);
-                const usage = sessionState.lastTokenUsage;
-                const usageText = usage
-                    ? `tokens: total=${usage.totalTokens}, input=${usage.inputTokens} (cached=${usage.cachedInputTokens}), output=${usage.outputTokens}, reasoning=${usage.reasoningOutputTokens}`
-                    : "tokens: not available (no turn yet)";
-
-                const message = [
-                    "Session status:",
-                    `- mode: ${sessionState.sessionMetadata.agentMode.name}`,
-                    `- model: ${sessionState.sessionMetadata.currentModelId}`,
-                    `- ${usageText}`
-                ].join("\n");
-
+                const message = this.buildStatusMessage(sessionState);
                 await session.update({
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text: message }
@@ -204,6 +194,144 @@ export class CodexCommands {
             sessionUpdate: "agent_message_chunk",
             content: { type: "text", text: text.join("\n") }
         });
+    }
+
+    private buildStatusMessage(sessionState: SessionState): string {
+        const metadata = sessionState.sessionMetadata;
+        const agentMode = metadata.agentMode;
+        const accountText = this.formatAccountInfo(sessionState.account);
+        const tokenUsageText = this.formatTokenUsage(sessionState.totalTokenUsage);
+        const contextWindowText = this.formatContextWindow(
+            sessionState.totalTokenUsage,
+            sessionState.modelContextWindow
+        );
+
+        const lines = [
+            `**Model:** ${metadata.currentModelId}`,
+            `**Directory:** ${sessionState.cwd}`,
+            `**Approval:** ${agentMode.approvalPolicy}`,
+            `**Sandbox:** ${agentMode.sandboxMode}`,
+            `**Account:** ${accountText}`,
+            `**Session:** \`${metadata.sessionId}\``,
+            ``,
+            `**Token usage:** ${tokenUsageText}`,
+            `**Context window:** ${contextWindowText}`,
+            ...this.formatRateLimitLines(sessionState.rateLimits),
+        ];
+
+        return lines.join("  \n");
+    }
+
+    private formatAccountInfo(account: SessionState["account"]): string {
+        if (!account) {
+            return "not logged in";
+        }
+        if (account.type === "apiKey") {
+            return "API key configured";
+        }
+        if (account.type === "chatgpt") {
+            return `ChatGPT (${account.email})`;
+        }
+        return "unknown";
+    }
+
+    private formatTokenUsage(usage: TokenCount | null): string {
+        if (!usage) {
+            return "data not available yet";
+        }
+        const total = this.formatTokenCount(usage.totalTokens);
+        const input = this.formatTokenCount(usage.inputTokens);
+        const output = this.formatTokenCount(usage.outputTokens);
+        return `${total} total  (${input} input + ${output} output)`;
+    }
+
+    private formatContextWindow(usage: TokenCount | null, contextWindow: number | null): string {
+        if (!usage || !contextWindow) {
+            return "data not available yet";
+        }
+        const used = usage.totalTokens;
+        const percentLeft = Math.round(((contextWindow - used) / contextWindow) * 100);
+        const usedFormatted = this.formatTokenCount(used);
+        const totalFormatted = this.formatTokenCount(contextWindow);
+        return `${percentLeft}% left (${usedFormatted} used / ${totalFormatted})`;
+    }
+
+    private formatRateLimitLines(rateLimits: RateLimitSnapshot | null): string[] {
+        if (!rateLimits) {
+            return [`**Limits:** data not available yet`];
+        }
+
+        const lines: string[] = [];
+
+        if (rateLimits.primary) {
+            const percentLeft = Math.round(100 - rateLimits.primary.usedPercent);
+            const resetText = this.formatResetTime(rateLimits.primary.resetsAt);
+            const label = this.formatWindowLabel(rateLimits.primary.windowDurationMins);
+            lines.push(`**${label}:** ${percentLeft}% left${resetText}`);
+        }
+
+        if (rateLimits.secondary) {
+            const percentLeft = Math.round(100 - rateLimits.secondary.usedPercent);
+            const resetText = this.formatResetTime(rateLimits.secondary.resetsAt);
+            const label = this.formatWindowLabel(rateLimits.secondary.windowDurationMins);
+            lines.push(`**${label}:** ${percentLeft}% left${resetText}`);
+        }
+
+        if (rateLimits.credits) {
+            if (rateLimits.credits.unlimited) {
+                lines.push(`**Credits:** unlimited`);
+            } else if (rateLimits.credits.balance) {
+                lines.push(`**Credits:** ${rateLimits.credits.balance}`);
+            }
+        }
+
+        return lines.length > 0 ? lines : [`**Limits:** data not available yet`];
+    }
+
+    private formatWindowLabel(windowDurationMins: number | null): string {
+        if (windowDurationMins === null) {
+            return "Limit";
+        }
+        if (windowDurationMins < 60) {
+            return `${windowDurationMins}m limit`;
+        }
+        if (windowDurationMins < 1440) {
+            const hours = Math.round(windowDurationMins / 60);
+            return `${hours}h limit`;
+        }
+        if (windowDurationMins < 10080) {
+            const days = Math.round(windowDurationMins / 1440);
+            return `${days}d limit`;
+        }
+        return "Weekly limit";
+    }
+
+    private formatResetTime(resetsAt: number | null): string {
+        if (resetsAt === null) {
+            return "";
+        }
+        const resetDate = new Date(resetsAt * 1000);
+        const now = new Date();
+        const isToday = resetDate.toDateString() === now.toDateString();
+
+        const timeStr = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+        if (isToday) {
+            return ` (resets ${timeStr})`;
+        }
+
+        const dateStr = resetDate.toLocaleDateString([], { day: 'numeric', month: 'short' });
+        return ` (resets ${timeStr} on ${dateStr})`;
+    }
+
+    private formatTokenCount(count: number): string {
+        if (count >= 1000000) {
+            return `${(count / 1000000).toFixed(1)}M`;
+        }
+        if (count >= 1000) {
+            return `${(count / 1000).toFixed(1)}K`;
+        }
+        return count.toString();
     }
 }
 

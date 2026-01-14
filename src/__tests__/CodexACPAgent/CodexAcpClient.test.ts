@@ -3,7 +3,7 @@
 import {describe, expect, it, vi, beforeEach} from 'vitest';
 import type {CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk";
-import {createTestFixture, createCodexMockTestFixture, type TestFixture} from "../acp-test-utils";
+import {createTestFixture, createCodexMockTestFixture, createTestSessionState, type TestFixture} from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
@@ -115,16 +115,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             threadId: "id",
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
-        const sessionState: SessionState = {
-            currentTurnId: null,
-            lastTokenUsage: null,
+        const sessionState: SessionState = createTestSessionState({
             sessionMetadata: {
                 sessionId: "id",
                 currentModelId: "model-id",
                 models: [],
                 agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
-        };
+        });
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
 
         await codexAcpAgent.prompt({ sessionId: "id", prompt: [{type: "text", text: ""}] });
@@ -145,16 +143,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
 
-        const sessionState: SessionState = {
-            currentTurnId: null,
-            lastTokenUsage: null,
+        const sessionState: SessionState = createTestSessionState({
             sessionMetadata: {
                 sessionId: "id",
                 currentModelId: "model-id",
                 models: [],
                 agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
-        };
+        });
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
 
         // First prompt - registers first notification handler
@@ -196,26 +192,22 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
 
-        const sessionState1: SessionState = {
-            currentTurnId: null,
-            lastTokenUsage: null,
+        const sessionState1: SessionState = createTestSessionState({
             sessionMetadata: {
                 sessionId: "session-1",
                 currentModelId: "model-id",
                 models: [],
                 agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
-        };
-        const sessionState2: SessionState = {
-            currentTurnId: null,
-            lastTokenUsage: null,
+        });
+        const sessionState2: SessionState = createTestSessionState({
             sessionMetadata: {
                 sessionId: "session-2",
                 currentModelId: "model-id",
                 models: [],
                 agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
-        };
+        });
 
         vi.spyOn(codexAcpAgent, "getSessionState").mockImplementation((sessionId: string) => {
             return sessionId === "session-1" ? sessionState1 : sessionState2;
@@ -255,16 +247,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
 
-        const sessionState: SessionState = {
-            currentTurnId: null,
-            sessionMetadata: {
-                sessionId: "session-id",
-                currentModelId: "model-id",
-                models: [],
-                agentMode: AgentMode.DEFAULT_AGENT_MODE,
-            },
-            lastTokenUsage: null
-        };
+        const sessionState: SessionState = createTestSessionState();
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
 
         const prompt: acp.ContentBlock[] = [
@@ -363,16 +346,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
-        const sessionState: SessionState = {
-            currentTurnId: null,
-            lastTokenUsage: null,
-            sessionMetadata: {
-                sessionId: "session-id",
-                currentModelId: "model-id",
-                models: [],
-                agentMode: AgentMode.DEFAULT_AGENT_MODE
-            }
-        };
+        const sessionState: SessionState = createTestSessionState();
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
 
         await codexAcpAgent.prompt({ sessionId: "session-id", prompt: [{ type: "text", text: "/status" }] });
@@ -383,16 +357,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
-        const sessionState: SessionState = {
-            currentTurnId: null,
-            lastTokenUsage: null,
-            sessionMetadata: {
-                sessionId: "session-id",
-                currentModelId: "model-id",
-                models: [],
-                agentMode: AgentMode.DEFAULT_AGENT_MODE
-            }
-        };
+        const sessionState: SessionState = createTestSessionState();
 
         const logoutSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "logout").mockResolvedValue(undefined);
 
@@ -408,16 +373,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
-        const sessionState: SessionState = {
-            currentTurnId: null,
-            lastTokenUsage: null,
-            sessionMetadata: {
-                sessionId: "session-id",
-                currentModelId: "model-id",
-                models: [],
-                agentMode: AgentMode.DEFAULT_AGENT_MODE
-            }
-        };
+        const sessionState: SessionState = createTestSessionState();
 
         const skillsResponse: SkillsListResponse = {
             data: [{
@@ -443,16 +399,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
-        const sessionState: SessionState = {
-            currentTurnId: null,
-            lastTokenUsage: null,
-            sessionMetadata: {
-                sessionId: "session-id",
-                currentModelId: "model-id",
-                models: [],
-                agentMode: AgentMode.DEFAULT_AGENT_MODE
-            }
-        };
+        const sessionState: SessionState = createTestSessionState();
 
         const mcpResponse: ListMcpServerStatusResponse = {
             data: [

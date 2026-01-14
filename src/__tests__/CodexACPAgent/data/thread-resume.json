@@ -55,6 +55,18 @@
 }
 {
   "eventType": "request",
+  "method": "account/read",
+  "params": {
+    "refreshToken": false
+  }
+}
+{
+  "eventType": "response",
+  "account": null,
+  "requiresOpenaiAuth": true
+}
+{
+  "eventType": "request",
   "method": "skills/list",
   "params": {}
 }

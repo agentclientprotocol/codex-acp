@@ -1,12 +1,13 @@
 import {CodexAcpClient} from '../CodexAcpClient';
 import {type CodexConnectionEvent, CodexAppServerClient} from '../CodexAppServerClient';
 import {startCodexConnection} from "../CodexJsonRpcConnection";
-import {CodexAcpServer} from "../CodexAcpServer";
+import {CodexAcpServer, type SessionState} from "../CodexAcpServer";
 import type {AgentSideConnection, RequestPermissionResponse} from "@agentclientprotocol/sdk";
 import type {ServerNotification} from "../app-server";
 import type {MessageConnection} from "vscode-jsonrpc/node";
 import path from "node:path";
 import fs from "node:fs";
+import {AgentMode} from "../AgentMode";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -230,4 +231,27 @@ export function createObjectDump(obj: any, anonymizedFields: string[] = []) {
 
 export function createArrayDump(objects: any[], anonymizedFields: string[]): string {
     return objects.map(event => createObjectDump(event, anonymizedFields)).join("\n");
+}
+
+/**
+ * Creates a default SessionState for use in tests.
+ * Override specific fields as needed.
+ */
+export function createTestSessionState(overrides?: Partial<SessionState>): SessionState {
+    return {
+        currentTurnId: null,
+        lastTokenUsage: null,
+        totalTokenUsage: null,
+        modelContextWindow: null,
+        rateLimits: null,
+        account: null,
+        cwd: "/test/cwd",
+        sessionMetadata: {
+            sessionId: "session-id",
+            currentModelId: "model-id",
+            models: [],
+            agentMode: AgentMode.DEFAULT_AGENT_MODE
+        },
+        ...overrides,
+    };
 }

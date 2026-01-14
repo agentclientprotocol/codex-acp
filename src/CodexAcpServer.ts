@@ -11,12 +11,18 @@ import {AgentMode} from "./AgentMode";
 import type {TokenCount} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
 import type {QuotaMeta} from "./QuotaMeta";
+import type {RateLimitSnapshot, Account} from "./app-server/v2";
 
 
 export interface SessionState {
     sessionMetadata: SessionMetadata;
     currentTurnId: string | null;
     lastTokenUsage: TokenCount | null;
+    totalTokenUsage: TokenCount | null;
+    modelContextWindow: number | null;
+    rateLimits: RateLimitSnapshot | null;
+    account: Account | null;
+    cwd: string;
 }
 
 export class CodexAcpServer implements acp.Agent {
@@ -78,11 +84,17 @@ export class CodexAcpServer implements acp.Agent {
         // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
         const agentMode = AgentMode.getInitialAgentMode();
         const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.resumeSession(params, agentMode));
+        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models} = sessionMetadata;
         this.sessions.set(sessionId, {
             sessionMetadata: sessionMetadata,
             currentTurnId: null,
-            lastTokenUsage: null
+            lastTokenUsage: null,
+            totalTokenUsage: null,
+            modelContextWindow: null,
+            rateLimits: null,
+            account: accountResponse.account,
+            cwd: params.cwd,
         });
 
         this.publishAvailableCommandsAsync(sessionId);
@@ -111,11 +123,17 @@ export class CodexAcpServer implements acp.Agent {
         // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
         const agentMode = AgentMode.getInitialAgentMode();
         const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(_params, agentMode));
+        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models} = sessionMetadata;
         this.sessions.set(sessionId, {
             sessionMetadata: sessionMetadata,
             currentTurnId: null,
-            lastTokenUsage: null
+            lastTokenUsage: null,
+            totalTokenUsage: null,
+            modelContextWindow: null,
+            rateLimits: null,
+            account: accountResponse.account,
+            cwd: _params.cwd,
         });
 
         this.publishAvailableCommandsAsync(sessionId);
