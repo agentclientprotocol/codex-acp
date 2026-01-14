@@ -15,6 +15,7 @@ import {AgentMode} from "./AgentMode";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import type {
     Model,
+    GetAccountResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
     SkillsListParams,
@@ -125,6 +126,10 @@ export class CodexAcpClient {
 
         const response = await this.codexClient.accountRead({refreshToken: false})
         return response.requiresOpenaiAuth && !response.account;
+    }
+
+    async getAccount(): Promise<GetAccountResponse> {
+        return this.codexClient.accountRead({refreshToken: false});
     }
 
     async resumeSession(request: acp.ResumeSessionRequest, agentMode: AgentMode): Promise<SessionMetadata> {

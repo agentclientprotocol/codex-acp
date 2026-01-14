@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
-import { createCodexMockTestFixture, type CodexMockTestFixture } from '../acp-test-utils';
+import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import { AgentMode } from "../../AgentMode";
 import type { TokenUsageBreakdown } from '../../app-server/v2';
 
@@ -35,16 +35,14 @@ describe('Token Usage Events', () => {
                 };
             });
 
-            const sessionState: SessionState = {
-                currentTurnId: null,
-                lastTokenUsage: null,
+            const sessionState: SessionState = createTestSessionState({
                 sessionMetadata: {
                     sessionId,
                     currentModelId: 'model-id[medium]',
                     models: [],
                     agentMode: AgentMode.DEFAULT_AGENT_MODE
                 },
-            };
+            });
             vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
 
             return codexAcpAgent;

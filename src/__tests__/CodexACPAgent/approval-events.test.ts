@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CommandExecutionRequestApprovalParams, FileChangeRequestApprovalParams } from '../../app-server/v2';
-import { createCodexMockTestFixture, type CodexMockTestFixture } from '../acp-test-utils';
+import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { SessionState } from '../../CodexAcpServer';
 import {AgentMode} from "../../AgentMode";
 
@@ -26,16 +26,14 @@ describe('Approval Events', () => {
         });
         fixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockReturnValue(turnCompletedPromise);
 
-        const sessionState: SessionState = {
-            currentTurnId: null,
-            lastTokenUsage: null,
+        const sessionState: SessionState = createTestSessionState({
             sessionMetadata: {
                 sessionId,
                 currentModelId: 'model-id',
                 models: [],
                 agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
-        };
+        });
         vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
 
         const promptPromise = codexAcpAgent.prompt({

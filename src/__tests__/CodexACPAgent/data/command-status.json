@@ -7,7 +7,7 @@
         "sessionUpdate": "agent_message_chunk",
         "content": {
           "type": "text",
-          "text": "Session status:\n- mode: Agent\n- model: model-id\n- tokens: not available (no turn yet)"
+          "text": "**Model:** model-id  \n**Directory:** /test/cwd  \n**Approval:** on-request  \n**Sandbox:** workspace-write  \n**Account:** not logged in  \n**Session:** `session-id`  \n  \n**Token usage:** data not available yet  \n**Context window:** data not available yet  \n**Limits:** data not available yet"
         }
       }
     }

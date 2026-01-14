@@ -115,6 +115,20 @@
 }
 {
   "eventType": "request",
+  "method": "account/read",
+  "params": {
+    "refreshToken": false
+  }
+}
+{
+  "eventType": "response",
+  "account": {
+    "type": "apiKey"
+  },
+  "requiresOpenaiAuth": true
+}
+{
+  "eventType": "request",
   "method": "skills/list",
   "params": {}
 }

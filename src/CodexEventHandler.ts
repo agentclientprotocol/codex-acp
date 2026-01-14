@@ -5,6 +5,7 @@ import {type PlanEntry, RequestError, type ToolCallContent} from "@agentclientpr
 import {applyPatch} from "diff";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
+    AccountRateLimitsUpdatedNotification,
     AgentMessageDeltaNotification, CodexErrorInfo,
     CommandAction,
     CommandExecutionStatus,
@@ -95,7 +96,10 @@ export class CodexEventHandler {
             case "item/fileChange/outputDelta":
             case "item/mcpToolCall/progress":
             case "account/updated":
+                return null;
             case "account/rateLimits/updated":
+                this.handleRateLimitsUpdated(notification.params);
+                return null;
             case "thread/compacted":
             case "windows/worldWritableWarning":
             case "account/login/completed":
@@ -323,5 +327,11 @@ export class CodexEventHandler {
 
     private handleTokenUsageUpdated(params: ThreadTokenUsageUpdatedNotification): void {
         this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
+        this.sessionState.totalTokenUsage = toTokenCount(params.tokenUsage.total);
+        this.sessionState.modelContextWindow = params.tokenUsage.modelContextWindow;
+    }
+
+    private handleRateLimitsUpdated(params: AccountRateLimitsUpdatedNotification): void {
+        this.sessionState.rateLimits = params.rateLimits;
     }
 }

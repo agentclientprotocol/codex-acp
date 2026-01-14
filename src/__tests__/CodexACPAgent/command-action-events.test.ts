@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
-import { createCodexMockTestFixture, type CodexMockTestFixture } from '../acp-test-utils';
+import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import {AgentMode} from "../../AgentMode";
 
 describe('CodexEventHandler - command action events', () => {
@@ -13,16 +13,14 @@ describe('CodexEventHandler - command action events', () => {
         vi.clearAllMocks();
     });
 
-    const sessionState: SessionState = {
-        currentTurnId: null,
-        lastTokenUsage: null,
+    const sessionState: SessionState = createTestSessionState({
         sessionMetadata: {
             sessionId,
             currentModelId: 'model-id',
             models: [],
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         },
-    };
+    });
 
     async function setupAndSendNotifications(notifications: ServerNotification[]) {
         const codexAcpAgent = mockFixture.getCodexAcpAgent();

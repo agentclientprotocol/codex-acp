@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
-import { createCodexMockTestFixture, type CodexMockTestFixture } from '../acp-test-utils';
+import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import {AgentMode} from "../../AgentMode";
 
 const { mockFiles, mockFileContent, clearMockFiles } = vi.hoisted(() => {
@@ -33,16 +33,14 @@ describe('CodexEventHandler - file change events', () => {
         mockFileContent('/test/project/OldFile.kt', 'package test.project\n\nclass OldFile {}');
     });
 
-    const sessionState: SessionState = {
-        currentTurnId: null,
-        lastTokenUsage: null,
+    const sessionState: SessionState = createTestSessionState({
         sessionMetadata: {
             sessionId,
             currentModelId: 'model-id',
             models: [],
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         },
-    };
+    });
 
     async function setupAndSendNotifications(notifications: ServerNotification[]) {
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
