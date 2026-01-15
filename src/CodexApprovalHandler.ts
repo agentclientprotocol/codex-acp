@@ -8,6 +8,7 @@ import type {
     FileChangeRequestApprovalResponse
 } from "./app-server/v2";
 import type {ToolCallContent} from "@agentclientprotocol/sdk/dist/schema/types.gen";
+import {logger} from "./Logger";
 
 const APPROVAL_OPTIONS: acp.PermissionOption[] = [
     { optionId: "allow_once", name: "Allow Once", kind: "allow_once" },
@@ -36,7 +37,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
             const response = await this.connection.requestPermission(acpRequest);
             return this.convertCommandResponse(response);
         } catch (error) {
-            console.error("Error requesting command execution permission:", error);
+            logger.error("Error requesting command execution permission", error);
             return { decision: "cancel" };
         }
     }
@@ -50,7 +51,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
             const response = await this.connection.requestPermission(acpRequest);
             return this.convertFileChangeResponse(response);
         } catch (error) {
-            console.error("Error requesting file change permission:", error);
+            logger.error("Error requesting file change permission", error);
             return { decision: "cancel" };
         }
     }

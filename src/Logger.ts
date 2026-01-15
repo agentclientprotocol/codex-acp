@@ -24,6 +24,10 @@ class Logger {
         }
     }
 
+    error(message: string, err: unknown) {
+        this.log(`[SYSTEM_ERROR] ${message}`, {exception: this.formatError(err)});
+    }
+
     log(message: string, context?: LogContext) {
         if (!this.logFilePath) return;
         try {
@@ -36,6 +40,25 @@ class Logger {
         } catch (ex) {
             console.error("Logger write failed", ex);
         }
+    }
+
+    private formatError(err: unknown): string {
+        if (err instanceof Error) {
+            const parts = [`${err.name}: ${err.message}`];
+            if (err.stack) {
+                parts.push(err.stack);
+            }
+            if ("cause" in err && err.cause) {
+                parts.push(`Caused by: ${this.formatError(err.cause as unknown)}`);
+            }
+            return parts.join("\n");
+        }
+
+        if (typeof err === "string") {
+            return err;
+        }
+
+        return String(err);
     }
 }
 
