@@ -11,6 +11,7 @@ import {AgentMode} from "./AgentMode";
 import type {TokenCount} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
 import type {QuotaMeta} from "./QuotaMeta";
+import {logger} from "./Logger";
 import type {RateLimitSnapshot, Account} from "./app-server/v2";
 
 
@@ -112,15 +113,24 @@ export class CodexAcpServer implements acp.Agent {
     async newSession(
         _params: acp.NewSessionRequest,
     ): Promise<acp.NewSessionResponse> {
-        if (await this.runWithProcessCheck(() => this.codexAcpClient.authRequired())) {
+        logger.log("Starting new session...");
+        const authNeeded = await this.runWithProcessCheck(() => this.codexAcpClient.authRequired());
+        logger.log("Auth requirement checked", {authRequired: authNeeded});
+        if (authNeeded) {
             if (this.defaultAuthRequest) {
-                await this.authenticate(this.defaultAuthRequest)
+                logger.log("Authenticating with default auth request...", {
+                    authRequest: this.defaultAuthRequest
+                });
+                await this.authenticate(this.defaultAuthRequest);
+                logger.log("Authentication completed");
             } else {
+                logger.log("Authentication required but no default auth request provided, return to IDE");
                 throw RequestError.authRequired();
             }
         }
 
         // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
+        logger.log("Create new session...")
         const agentMode = AgentMode.getInitialAgentMode();
         const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(_params, agentMode));
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
@@ -142,6 +152,13 @@ export class CodexAcpServer implements acp.Agent {
             availableModels: availableModels,
             currentModelId: currentModelId,
         }
+
+        logger.log("New session created", {
+            sessionId,
+            currentModelId,
+            availableModelCount: availableModels.length
+        });
+
         return {
             sessionId: sessionId,
             models: sessionModelState,
@@ -228,6 +245,7 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
+        logger.log("Prompt", params)
         const sessionState = this.getSessionState(params.sessionId);
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;

@@ -3,23 +3,20 @@ import type {MessageConnection} from "vscode-jsonrpc/node";
 import type {ChildProcessWithoutNullStreams} from "node:child_process";
 import {spawn} from "node:child_process";
 
-import fs from "node:fs";
-import path from "node:path";
 import {createJSONRPCReader, createJSONRPCWriter} from "./StdUtils";
+import {logger} from "./Logger";
 
 export interface CodexConnection {
     readonly connection: MessageConnection
     readonly process: ChildProcessWithoutNullStreams;
 }
 
-export function startCodexConnection(codexPath: string, logPath?: string): CodexConnection {
+export function startCodexConnection(codexPath: string): CodexConnection {
     const codex: ChildProcessWithoutNullStreams = process.platform === 'win32'
         ? spawn(`"${codexPath}" app-server`, { shell: true })
         : spawn(codexPath, ['app-server']);
 
-    if (logPath) {
-        attachLogs(codex, logPath);
-    }
+    attachLogs(codex);
 
     const reader = createJSONRPCReader(codex.stdout);
     const writer = createJSONRPCWriter(codex.stdin);
@@ -36,27 +33,20 @@ export function startCodexConnection(codexPath: string, logPath?: string): Codex
     return {connection: connection, process: codex};
 }
 
-function attachLogs(proc: ChildProcessWithoutNullStreams, logPath: string) {
-    function log(message: string) {
-        const logDir = path.join(logPath);
-        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir);
-        const logFile = path.join(logPath, "app-server.log");
-        const timestamp = new Date().toISOString();
-        fs.appendFileSync(logFile, `[${timestamp}] ${message}\n`);
-    }
+function attachLogs(proc: ChildProcessWithoutNullStreams) {
     const originalWrite = proc.stdin.write.bind(proc.stdin);
     proc.stdin.write = (chunk: any, encoding?: any, callback?: any): boolean => {
-        log("[STDIN] " + chunk.toString());
+        logger.log("[IN]", {data: chunk.toString()});
         return originalWrite(chunk, encoding, callback);
     };
 
     proc.stderr.on("data", (data) => {
-        log("[STDERR] " + data.toString());
+        logger.log("[ERR]", {data: data.toString()});
     });
     proc.stdout.on("data", (data: Buffer) => {
-        log("[STDOUT] " + data.toString());
+        logger.log("[OUT]", {data: data.toString()});
     });
     proc.on("exit", (code) => {
-        log("[EXIT] " + code?.toString());
+        logger.log("[EXIT]", {code: code?.toString()});
     });
 }
