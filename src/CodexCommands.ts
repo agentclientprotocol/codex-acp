@@ -5,6 +5,7 @@ import type {CodexAcpClient} from "./CodexAcpClient";
 import type {RateLimitSnapshot, SkillsListEntry} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
 import type {TokenCount} from "./TokenCount";
+import {logger} from "./Logger";
 
 export class CodexCommands {
     private readonly connection: AgentSideConnection;
@@ -35,7 +36,7 @@ export class CodexCommands {
                 availableCommands
             });
         } catch (err) {
-            console.error(`Failed to publish available commands for session ${sessionId}:`, err);
+            logger.error(`Failed to publish available commands for session ${sessionId}`, err);
         }
     }
 

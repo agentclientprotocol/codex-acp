@@ -56,6 +56,7 @@ export class CodexAcpServer implements acp.Agent {
     async initialize(
         _params: acp.InitializeRequest,
     ): Promise<acp.InitializeResponse> {
+        logger.log("Initialize request received");
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
@@ -74,15 +75,24 @@ export class CodexAcpServer implements acp.Agent {
 
     async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
         //TODO cleanup duplicate
-        if (await this.runWithProcessCheck(() => this.codexAcpClient.authRequired())) {
+        logger.log("Resuming session...", {sessionId: params.sessionId});
+        const authNeeded = await this.runWithProcessCheck(() => this.codexAcpClient.authRequired());
+        logger.log("Auth requirement checked", {authRequired: authNeeded});
+        if (authNeeded) {
             if (this.defaultAuthRequest) {
+                logger.log("Authenticating with default auth request...", {
+                    authRequest: this.defaultAuthRequest
+                });
                 await this.authenticate(this.defaultAuthRequest)
+                logger.log("Authentication completed");
             } else {
+                logger.log("Authentication required but no default auth request provided, return to IDE");
                 throw RequestError.authRequired();
             }
         }
 
         // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
+        logger.log("Resume existing session...")
         const agentMode = AgentMode.getInitialAgentMode();
         const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.resumeSession(params, agentMode));
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
@@ -104,6 +114,11 @@ export class CodexAcpServer implements acp.Agent {
             availableModels: availableModels,
             currentModelId: currentModelId,
         }
+        logger.log("Session resumed", {
+            sessionId,
+            currentModelId,
+            availableModelCount: availableModels.length
+        });
         return {
             models: sessionModelState,
             modes: agentMode.toSessionModeState()
@@ -169,16 +184,23 @@ export class CodexAcpServer implements acp.Agent {
     async authenticate(
         _params: acp.AuthenticateRequest,
     ): Promise<acp.AuthenticateResponse> {
+        logger.log("Authenticate request received");
         const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params));
         if (!isAuthenticated) {
+            logger.log("Authenticate request failed");
             throw RequestError.invalidParams();
         }
+        logger.log("Authenticate request completed");
         return { };
     }
 
     async setSessionMode(
         _params: acp.SetSessionModeRequest,
     ): Promise<acp.SetSessionModeResponse> {
+        logger.log("Set session mode requested", {
+            sessionId: _params.sessionId,
+            modeId: _params.modeId
+        });
         const sessionState = this.sessions.get(_params.sessionId);
         if (!sessionState) throw new Error(`Session ${_params.sessionId} not found`);
 
@@ -191,6 +213,10 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     async unstable_setSessionModel(params: acp.SetSessionModelRequest): Promise<acp.SetSessionModelResponse | void> {
+        logger.log("Set session model requested", {
+            sessionId: params.sessionId,
+            modelId: params.modelId
+        });
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
@@ -245,7 +271,10 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
-        logger.log("Prompt", params)
+        logger.log("Prompt received", {
+            sessionId: params.sessionId,
+            prompt: params.prompt,
+        });
         const sessionState = this.getSessionState(params.sessionId);
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
@@ -258,6 +287,7 @@ export class CodexAcpServer implements acp.Agent {
                 approvalHandler);
 
             if (await this.availableCommands.tryHandle(params.prompt, sessionState)) {
+                logger.log("Prompt handled by a command");
                 return {
                     stopReason: "end_turn",
                     _meta: this.buildQuotaMeta(sessionState),
@@ -298,9 +328,10 @@ export class CodexAcpServer implements acp.Agent {
                 _meta: this.buildQuotaMeta(sessionState),
             };
         } catch (err) {
-            console.error(`Prompt for session ${params.sessionId} failed:`, err);
+            logger.error(`Prompt for session ${params.sessionId} failed`, err);
             throw err;
         } finally {
+            logger.log("Prompt completed", {sessionId: params.sessionId});
             sessionState.currentTurnId = null;
         }
     }
@@ -343,25 +374,31 @@ export class CodexAcpServer implements acp.Agent {
     async cancel(params: acp.CancelNotification): Promise<void> {
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) {
-            console.info(`Can not cancel: session ${params.sessionId} not found`);
+            logger.log("Cancel request rejected: session not found", {sessionId: params.sessionId});
             return;
         }
 
         if (!sessionState.currentTurnId) {
-            console.info(`Can not cancel: session ${params.sessionId} has no current turn`);
+            logger.log("Cancel request rejected: no current turn", {sessionId: params.sessionId});
             return;
         }
 
-        console.info(`Cancel session ${params.sessionId}, currentTurnId: ${sessionState.currentTurnId}...`);
+        logger.log("Cancel session requested", {
+            sessionId: params.sessionId,
+            currentTurnId: sessionState.currentTurnId
+        });
         try {
             // After turnInterrupt(), Codex will send turn/completed event, which will naturally complete awaitTurnCompleted()
             await this.codexAcpClient.turnInterrupt({
                 threadId: params.sessionId,
                 turnId: sessionState.currentTurnId
             });
-            console.log(`Cancel - turnInterrupt succeeded`);
+            logger.log("Cancel - turnInterrupt succeeded", {
+                sessionId: params.sessionId,
+                currentTurnId: sessionState.currentTurnId
+            });
         } catch (err) {
-            console.error(`Cancel - turnInterrupt failed:`, err);
+            logger.error(`Cancel - turnInterrupt failed`, err);
         }
     }
 }
