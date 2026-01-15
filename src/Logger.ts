@@ -31,15 +31,26 @@ class Logger {
     log(message: string, context?: LogContext) {
         if (!this.logFilePath) return;
         try {
-            const timestamp = new Date().toISOString();
+            const timestamp = this.formatTimestamp(new Date());
             const serializedContext = context ? ` ${JSON.stringify(context)}` : "";
 
             if (!message.startsWith('[')) message = `[SYS] ${message}`;
-            const line = `[${timestamp}] ${message}${serializedContext}`;
+            const line = `${timestamp} ${message}${serializedContext}`;
             fs.appendFileSync(this.logFilePath, `${line}\n`);
         } catch (ex) {
             console.error("Logger write failed", ex);
         }
+    }
+
+    private formatTimestamp(date: Date): string {
+        const yyyy = date.getFullYear();
+        const mm = String(date.getMonth() + 1).padStart(2, "0");
+        const dd = String(date.getDate()).padStart(2, "0");
+        const hh = String(date.getHours()).padStart(2, "0");
+        const min = String(date.getMinutes()).padStart(2, "0");
+        const ss = String(date.getSeconds()).padStart(2, "0");
+        const ms = String(date.getMilliseconds()).padStart(3, "0");
+        return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss},${ms}`;
     }
 
     private formatError(err: unknown): string {
