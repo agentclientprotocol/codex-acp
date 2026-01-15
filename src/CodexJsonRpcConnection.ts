@@ -36,7 +36,7 @@ export function startCodexConnection(codexPath: string): CodexConnection {
 function attachLogs(proc: ChildProcessWithoutNullStreams) {
     const originalWrite = proc.stdin.write.bind(proc.stdin);
     proc.stdin.write = (chunk: any, encoding?: any, callback?: any): boolean => {
-        logger.log("[IN]", {data: chunk.toString()});
+        logger.log("[IN] ", {data: chunk.toString()});
         return originalWrite(chunk, encoding, callback);
     };
 
