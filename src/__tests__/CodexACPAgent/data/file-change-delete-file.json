@@ -14,7 +14,10 @@
             "type": "diff",
             "oldText": "package test.project\n\nclass OldFile {}",
             "newText": "",
-            "path": "/test/project/OldFile.kt"
+            "path": "/test/project/OldFile.kt",
+            "_meta": {
+              "kind": "delete"
+            }
           }
         ]
       }

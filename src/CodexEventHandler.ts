@@ -197,11 +197,16 @@ export class CodexEventHandler {
                 oldText: null,
                 newText: change.diff,
                 path: change.path,
+                _meta: {
+                    kind: "add"
+                }
             }
         }
 
         const oldContent = change.kind.type === "add" ? "" : await readFile(change.path, { encoding: "utf8" });
         const newContent = applyPatch(oldContent, change.diff);
+        // For deleted files, diff may contain raw file content instead of a patch.
+        // Since new text is not optional, we need to pass kind in meta and set newText to null on the client side
         if (newContent === false) {
             return null
         }
@@ -210,6 +215,9 @@ export class CodexEventHandler {
             oldText: change.kind.type === "add" ? null : oldContent,
             newText: newContent,
             path: change.path,
+            _meta: {
+                kind: change.kind.type
+            }
         }
     }
 

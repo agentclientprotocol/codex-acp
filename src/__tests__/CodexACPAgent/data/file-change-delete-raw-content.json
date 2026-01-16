@@ -5,18 +5,18 @@
       "sessionId": "test-session-id",
       "update": {
         "sessionUpdate": "tool_call",
-        "toolCallId": "file-change-raw",
+        "toolCallId": "file-delete-raw",
         "title": "Editing files",
         "kind": "edit",
         "status": "completed",
         "content": [
           {
             "type": "diff",
-            "oldText": null,
+            "oldText": "fun main() {\n    println(\"Hello, World!\")\n}\n",
             "newText": "fun main() {\n    println(\"Hello, World!\")\n}\n",
-            "path": "/test/project/RawFile.kt",
+            "path": "/test/project/RawDeleteFile.kt",
             "_meta": {
-              "kind": "add"
+              "kind": "delete"
             }
           }
         ]

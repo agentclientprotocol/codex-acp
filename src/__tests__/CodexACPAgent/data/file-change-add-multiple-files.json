@@ -14,13 +14,19 @@
             "type": "diff",
             "oldText": null,
             "newText": "class FileA\n",
-            "path": "/test/project/FileA.kt"
+            "path": "/test/project/FileA.kt",
+            "_meta": {
+              "kind": "add"
+            }
           },
           {
             "type": "diff",
             "oldText": null,
             "newText": "class FileB\n",
-            "path": "/test/project/FileB.kt"
+            "path": "/test/project/FileB.kt",
+            "_meta": {
+              "kind": "add"
+            }
           }
         ]
       }

@@ -207,4 +207,35 @@ describe('CodexEventHandler - file change events', () => {
             'data/file-change-delete-file.json'
         );
     });
+
+    it('should handle file deletion with raw content', async () => {
+        mockFileContent('/test/project/RawDeleteFile.kt', 'fun main() {\n    println("Hello, World!")\n}\n');
+
+        // Codex sends raw file content (not unified diff) for deleted files
+        const deletedFileNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-delete-raw',
+                    changes: [
+                        {
+                            path: '/test/project/RawDeleteFile.kt',
+                            kind: { type: 'delete' },
+                            diff: 'fun main() {\n    println("Hello, World!")\n}\n',
+                        },
+                    ],
+                    status: 'completed',
+                },
+            },
+        };
+
+        await setupAndSendNotifications([deletedFileNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
+            'data/file-change-delete-raw-content.json'
+        );
+    });
 });
