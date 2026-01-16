@@ -14,7 +14,10 @@
             "type": "diff",
             "oldText": null,
             "newText": "package test.project\n\nclass NewFile {\n    fun hello() = \"Hello\"\n}\n",
-            "path": "/test/project/NewFile.kt"
+            "path": "/test/project/NewFile.kt",
+            "_meta": {
+              "kind": "add"
+            }
           }
         ]
       }
