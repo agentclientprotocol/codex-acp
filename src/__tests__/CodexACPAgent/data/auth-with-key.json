@@ -86,8 +86,8 @@
     {
       "id": "id",
       "model": "model",
-      "displayName": "gpt-5.1-codex-max",
-      "description": "Codex-optimized flagship for deep and fast reasoning.",
+      "displayName": "gpt-5.2-codex",
+      "description": "Latest frontier agentic coding model.",
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "isDefault": true
@@ -95,8 +95,8 @@
     {
       "id": "id",
       "model": "model",
-      "displayName": "gpt-5.1-codex-mini",
-      "description": "Optimized for codex. Cheaper, faster, but less capable.",
+      "displayName": "gpt-5.2",
+      "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "isDefault": false
@@ -104,8 +104,17 @@
     {
       "id": "id",
       "model": "model",
-      "displayName": "gpt-5.2",
-      "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
+      "displayName": "gpt-5.1-codex-max",
+      "description": "Codex-optimized flagship for deep and fast reasoning.",
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
+      "defaultReasoningEffort": "medium",
+      "isDefault": false
+    },
+    {
+      "id": "id",
+      "model": "model",
+      "displayName": "gpt-5.1-codex-mini",
+      "description": "Optimized for codex. Cheaper, faster, but less capable.",
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "isDefault": false

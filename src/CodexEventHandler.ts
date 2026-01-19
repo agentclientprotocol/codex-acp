@@ -9,6 +9,7 @@ import type {
     AgentMessageDeltaNotification, CodexErrorInfo,
     CommandAction,
     CommandExecutionStatus,
+    ConfigWarningNotification,
     ErrorNotification,
     FileUpdateChange,
     ItemCompletedNotification,
@@ -100,6 +101,8 @@ export class CodexEventHandler {
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
                 return null;
+            case "configWarning":
+                return await this.createConfigWarningEvent(notification.params);
             case "thread/compacted":
             case "windows/worldWritableWarning":
             case "account/login/completed":
@@ -124,12 +127,24 @@ export class CodexEventHandler {
         }
     }
 
+    private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
+        const detailsText = event.details ? `\n\n${event.details}` : "";
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `Config warning: ${event.summary}${detailsText}\n\n`
+            }
+        }
+    }
+
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
                 return await this.createFileChangeEvent(event.item)
             case "commandExecution":
                 return await this.createCommandEvent(event.item)
+            case "collabAgentToolCall":
             case "userMessage":
             case "agentMessage":
             case "reasoning":
@@ -161,6 +176,7 @@ export class CodexEventHandler {
                         text: summary
                     }
                 }
+            case "collabAgentToolCall":
             case "userMessage":
             case "agentMessage":
             case "mcpToolCall":
