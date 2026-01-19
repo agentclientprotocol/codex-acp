@@ -7,7 +7,8 @@
     "input": [
       {
         "type": "text",
-        "text": "Hello"
+        "text": "Hello",
+        "text_elements": []
       },
       {
         "type": "image",
@@ -15,11 +16,13 @@
       },
       {
         "type": "text",
-        "text": "[@report.txt](file:///tmp/report.txt)"
+        "text": "[@report.txt](file:///tmp/report.txt)",
+        "text_elements": []
       },
       {
         "type": "text",
-        "text": "[@notes.txt](file:///tmp/notes.txt)\n<context ref=\"file:///tmp/notes.txt\">\nNotes body\n</context>"
+        "text": "[@notes.txt](file:///tmp/notes.txt)\n<context ref=\"file:///tmp/notes.txt\">\nNotes body\n</context>",
+        "text_elements": []
       }
     ],
     "approvalPolicy": "on-request",

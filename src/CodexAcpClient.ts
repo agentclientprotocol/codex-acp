@@ -268,19 +268,19 @@ function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
     return prompt.map((block): UserInput | null => {
         switch (block.type) {
             case "text":
-                return {type: "text", text: block.text};
+                return {type: "text", text: block.text, text_elements: []};
             case "image": {
                 const url = block.uri ?? `data:${block.mimeType};base64,${block.data}`;
                 return {type: "image", url};
             }
             case "resource_link":
-                return {type: "text", text: formatUriAsLink(block.name, block.uri)};
+                return {type: "text", text: formatUriAsLink(block.name, block.uri), text_elements: []};
             case "resource": {
                 const resource = block.resource as EmbeddedResourceResource;
                 if ("text" in resource) {
                     const link = formatUriAsLink(null, resource.uri);
                     const context = `<context ref="${resource.uri}">\n${resource.text}\n</context>`;
-                    return {type: "text", text: `${link}\n${context}`};
+                    return {type: "text", text: `${link}\n${context}`, text_elements: []};
                 }
                 return null;
             }
