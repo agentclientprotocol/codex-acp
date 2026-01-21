@@ -24,39 +24,41 @@ if (process.argv[2] === "login") {
             console.error("Login error:", error.message);
             process.exit(1);
         });
-    process.exit(0);
+} else {
+    startAcpServer();
 }
 
+function startAcpServer() {
+    const codexPath = process.env["CODEX_PATH"] ?? "codex";
+    const configString = process.env["CODEX_CONFIG"];
+    const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
+    const modelProvider = process.env["MODEL_PROVIDER"];
+    const config = configString ? JSON.parse(configString) : undefined;
+    const parsedAuthRequest = authRequestString ? JSON.parse(authRequestString) : undefined;
+    const defaultAuthRequest = parsedAuthRequest && isCodexAuthRequest(parsedAuthRequest) ? parsedAuthRequest : undefined;
 
-const codexPath = process.env["CODEX_PATH"] ?? "codex";
-const configString = process.env["CODEX_CONFIG"];
-const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
-const modelProvider = process.env["MODEL_PROVIDER"];
-const config = configString ? JSON.parse(configString) : undefined;
-const parsedAuthRequest = authRequestString ? JSON.parse(authRequestString) : undefined;
-const defaultAuthRequest = parsedAuthRequest && isCodexAuthRequest(parsedAuthRequest) ? parsedAuthRequest : undefined;
+    logger.log("Startup", {
+        name: packageJson.name,
+        version: packageJson.version,
+        codexPath: codexPath,
+        modelProvider: modelProvider ?? null,
+        codexConfig: config ?? null,
+        authRequest: authRequestString ?? null,
+        defaultAuthRequest: defaultAuthRequest ?? null,
+    });
 
-logger.log("Startup", {
-    name: packageJson.name,
-    version: packageJson.version,
-    codexPath: codexPath,
-    modelProvider: modelProvider ?? null,
-    codexConfig: config ?? null,
-    authRequest: authRequestString ?? null,
-    defaultAuthRequest: defaultAuthRequest ?? null,
-});
+    const codexConnection = startCodexConnection(codexPath);
+    process.stdin.on("close", (chunk: Buffer) => {
+        codexConnection.process.stdin.end();
+    });
 
-const codexConnection = startCodexConnection(codexPath);
-process.stdin.on("close", (chunk: Buffer) => {
-    codexConnection.process.stdin.end();
-});
+    const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
-const acpJsonStream = createJsonStream(process.stdin, process.stdout);
+    function createAgent(connection: acp.AgentSideConnection): CodexAcpServer {
+        const appServerClient = new CodexAppServerClient(codexConnection.connection);
+        const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
+        return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.process.exitCode);
+    }
 
-function createAgent(connection: acp.AgentSideConnection): CodexAcpServer {
-    const appServerClient = new CodexAppServerClient(codexConnection.connection);
-    const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
-    return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.process.exitCode);
+    new acp.AgentSideConnection(createAgent, acpJsonStream);
 }
-
-new acp.AgentSideConnection(createAgent, acpJsonStream);
