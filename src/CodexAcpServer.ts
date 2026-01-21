@@ -1,10 +1,10 @@
 import * as acp from "@agentclientprotocol/sdk";
+import {type ModelInfo, RequestError, type SessionModelState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
-import {type ModelInfo, RequestError, type SessionModelState} from "@agentclientprotocol/sdk";
 import {CodexAcpClient, type SessionMetadata} from "./CodexAcpClient";
-import type {Model} from "./app-server/v2";
+import type {Account, Model, RateLimitSnapshot} from "./app-server/v2";
 import type {ReasoningEffort} from "./app-server";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
@@ -12,8 +12,13 @@ import type {TokenCount} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
-import type {RateLimitSnapshot, Account} from "./app-server/v2";
 
+const ALLOWED_MODEL_IDS = new Set([
+    "gpt-5.2",
+    "gpt-5.2-codex",
+    "gpt-5.1-codex-max",
+    "gpt-5.1-codex-mini",
+]);
 
 export interface SessionState {
     sessionMetadata: SessionMetadata;
@@ -253,13 +258,15 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     private buildAvailableModels(models: Model[]): ModelInfo[] {
-        return models.flatMap((model) =>
-            model.supportedReasoningEfforts.map((effort) => ({
-                modelId: ModelId.fromComponents(model, effort.reasoningEffort).toString(),
-                name: `${model.displayName} (${effort.reasoningEffort})`,
-                description: `${model.description} ${effort.description}`,
-            }))
-        );
+        return models
+            .filter((model) => ALLOWED_MODEL_IDS.has(model.id))
+            .flatMap((model) =>
+                model.supportedReasoningEfforts.map((effort) => ({
+                    modelId: ModelId.fromComponents(model, effort.reasoningEffort).toString(),
+                    name: `${model.displayName} (${effort.reasoningEffort})`,
+                    description: `${model.description} ${effort.description}`,
+                }))
+            );
     }
 
     getSessionState(sessionId: string): SessionState {
