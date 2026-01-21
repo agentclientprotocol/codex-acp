@@ -9,11 +9,24 @@ import {CodexAcpClient} from "./CodexAcpClient";
 import {CodexAppServerClient} from "./CodexAppServerClient";
 import packageJson from "../package.json";
 import {logger} from "./Logger";
+import {runLoginCommand} from "./login";
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
     process.exit(0);
 }
+
+if (process.argv[2] === "login") {
+    const args = process.argv.slice(3);
+    runLoginCommand(args)
+        .then((success) => process.exit(success ? 0 : 1))
+        .catch((error) => {
+            console.error("Login error:", error.message);
+            process.exit(1);
+        });
+    process.exit(0);
+}
+
 
 const codexPath = process.env["CODEX_PATH"] ?? "codex";
 const configString = process.env["CODEX_CONFIG"];
