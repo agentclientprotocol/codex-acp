@@ -1,0 +1,17 @@
+[
+  {
+    "modelId": "gpt-5.2[medium]",
+    "name": "GPT-5.2 (medium)",
+    "description": "Allowed by id. Default effort."
+  },
+  {
+    "modelId": "gpt-5.2[low]",
+    "name": "GPT-5.2 (low)",
+    "description": "Allowed by id. Fast effort."
+  },
+  {
+    "modelId": "gpt-5.1-codex-mini[medium]",
+    "name": "Other (medium)",
+    "description": "Allowed by id. Default effort."
+  }
+]
