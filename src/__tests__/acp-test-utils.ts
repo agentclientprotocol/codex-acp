@@ -248,7 +248,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         cwd: "/test/cwd",
         sessionMetadata: {
             sessionId: "session-id",
-            currentModelId: "model-id",
+            currentModelId: "model-id[effort]",
             models: [],
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         },

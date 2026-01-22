@@ -29,7 +29,7 @@ describe('Approval Events', () => {
         const sessionState: SessionState = createTestSessionState({
             sessionMetadata: {
                 sessionId,
-                currentModelId: 'model-id',
+                currentModelId: 'model-id[effort]',
                 models: [],
                 agentMode: AgentMode.DEFAULT_AGENT_MODE
             }

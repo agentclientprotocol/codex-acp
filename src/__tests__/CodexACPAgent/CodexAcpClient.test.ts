@@ -7,7 +7,8 @@ import {createTestFixture, createCodexMockTestFixture, createTestSessionState, t
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
-import type {ListMcpServerStatusResponse, SkillsListResponse} from "../../app-server/v2";
+import type {ListMcpServerStatusResponse, Model, SkillsListResponse} from "../../app-server/v2";
+import {ModelId} from "../../ModelId";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -118,7 +119,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const sessionState: SessionState = createTestSessionState({
             sessionMetadata: {
                 sessionId: "id",
-                currentModelId: "model-id",
+                currentModelId: "model-id[effort]",
                 models: [],
                 agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
@@ -146,7 +147,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const sessionState: SessionState = createTestSessionState({
             sessionMetadata: {
                 sessionId: "id",
-                currentModelId: "model-id",
+                currentModelId: "model-id[effort]",
                 models: [],
                 agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
@@ -195,7 +196,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const sessionState1: SessionState = createTestSessionState({
             sessionMetadata: {
                 sessionId: "session-1",
-                currentModelId: "model-id",
+                currentModelId: "model-id[effort]",
                 models: [],
                 agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
@@ -203,7 +204,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const sessionState2: SessionState = createTestSessionState({
             sessionMetadata: {
                 sessionId: "session-2",
-                currentModelId: "model-id",
+                currentModelId: "model-id[effort]",
                 models: [],
                 agentMode: AgentMode.DEFAULT_AGENT_MODE
             }
@@ -428,5 +429,41 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(handled).toBe(true);
         expect(mcpSpy).toHaveBeenCalledTimes(1);
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-mcp.json");
+    });
+
+    const mockModels: Model[] = [
+        {
+            id: '5.2-codex',
+            model: '5.2-codex',
+            displayName: 'Codex 5.2',
+            description: 'Coding model',
+            supportedReasoningEfforts: [
+                { reasoningEffort: 'high', description: 'Deep' },
+                { reasoningEffort: 'medium', description: 'Balanced' }
+            ],
+            defaultReasoningEffort: 'medium',
+            isDefault: false,
+        },
+        {
+            id: '5.1',
+            model: '5.1',
+            displayName: 'Standard 5.1',
+            description: 'Standard model',
+            supportedReasoningEfforts: [
+                { reasoningEffort: 'low', description: 'Fast' }
+            ],
+            defaultReasoningEffort: 'low',
+            isDefault: true,
+        }
+    ];
+
+    it('should fallback to the default model when modelId is null', () => {
+        const result = fixture.getCodexAcpClient().createModelId(mockModels, null, 'low');
+        expect(result).toEqual(ModelId.create('5.1', 'low'));
+    });
+
+    it('should fallback to the model-specific effort when reasoningEffort is null', () => {
+        const result = fixture.getCodexAcpClient().createModelId(mockModels, '5.2-codex', null);
+        expect(result).toEqual(ModelId.create('5.2-codex', 'medium'));
     });
 });

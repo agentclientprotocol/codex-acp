@@ -1,10 +1,11 @@
 import {isCodexAuthRequest} from "./CodexAuthMethod";
 import * as acp from "@agentclientprotocol/sdk";
-import type {ApprovalHandler, CodexAppServerClient} from "./CodexAppServerClient";
 import {RequestError} from "@agentclientprotocol/sdk";
+import type {ApprovalHandler, CodexAppServerClient} from "./CodexAppServerClient";
 import open from "open";
 import type {
-    ClientInfo, ReasoningEffort,
+    ClientInfo,
+    ReasoningEffort,
     ServerNotification,
     SetDefaultModelParams,
     SetDefaultModelResponse
@@ -14,10 +15,10 @@ import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import type {
-    Model,
     GetAccountResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
+    Model,
     SkillsListParams,
     SkillsListResponse,
     TurnCompletedNotification,
@@ -149,21 +150,19 @@ export class CodexAcpClient {
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
+        const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
             sessionId: request.sessionId,
-            currentModelId: response.model,
+            currentModelId: currentModelId,
             models: codexModels,
             agentMode: agentMode
         }
     }
 
-    /**
-     * Returns a new session ID.
-     */
     async newSession(request: acp.NewSessionRequest, agentMode: AgentMode): Promise<SessionMetadata> {
         const sessionModelProvider = this.gatewayConfig?.modelProvider ?? this.modelProvider;
         const sessionConfig = mergeGatewayConfig(this.config, this.gatewayConfig)
-        const threadStartResponse = await this.codexClient.threadStart({
+        const response = await this.codexClient.threadStart({
             config: sessionConfig,
             modelProvider: sessionModelProvider,
             model: null,
@@ -179,14 +178,29 @@ export class CodexAcpClient {
         if (codexModels.length === 0) {
             throw new Error("Codex did not return any models");
         }
-        const currentModelId = ModelId.fromThreadResponse(threadStartResponse).toString();
-
+        const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
-            sessionId: threadStartResponse.thread.id,
+            sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
             agentMode: agentMode,
         };
+    }
+
+    /**
+     * Resolves a ModelId using the provided ID and reasoning effort.
+     * Falls back to model defaults if parameters are missing or unsupported.
+     */
+    createModelId(availableModels: Model[], modelId: string | null, reasoningEffort: ReasoningEffort | null): ModelId {
+        const selectedModel =
+            availableModels.find(m => m.id === modelId) ??
+            availableModels.find(m => m.isDefault);
+
+        if (!selectedModel) {
+            throw new Error(`Model selection failed: No model found for ID "${modelId}" and no default model is defined.`);
+        }
+
+        return ModelId.create(selectedModel.id, reasoningEffort ?? selectedModel.defaultReasoningEffort);
     }
 
     async subscribeToSessionEvents(
