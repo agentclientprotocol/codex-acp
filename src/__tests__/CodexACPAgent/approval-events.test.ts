@@ -159,7 +159,7 @@ describe('Approval Events', () => {
         const fileChangeApprovalCases = [
             { optionId: 'allow_once', expectedDecision: 'accept', description: 'allow once' },
             { optionId: 'allow_always', expectedDecision: 'acceptForSession', description: 'allow for session' },
-            { optionId: 'reject_once', expectedDecision: 'decline', description: 'reject' },
+            { optionId: 'reject_once', expectedDecision: 'cancel', description: 'reject' },
         ] as const;
 
         it.each(fileChangeApprovalCases)(
