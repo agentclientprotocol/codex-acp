@@ -133,7 +133,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         } else if (optionId === "allow_always") {
             return { decision: "acceptForSession" };
         } else {
-            return { decision: "decline" };
+            return { decision: "cancel" };
         }
     }
 }
