@@ -216,6 +216,7 @@ export class CodexAcpClient {
         request: acp.PromptRequest,
         agentMode: AgentMode,
         modelId: ModelId,
+        disableSummary: boolean,
     ): Promise<TurnCompletedNotification> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
@@ -225,7 +226,7 @@ export class CodexAcpClient {
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: agentMode.sandboxPolicy,
-            summary: "none",
+            summary: disableSummary ? "none" : null,
             cwd: null,
             effort: effort,
             model: modelId.model,

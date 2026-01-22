@@ -33,7 +33,7 @@
       "excludeTmpdirEnvVar": false,
       "excludeSlashTmp": false
     },
-    "summary": "none",
+    "summary": null,
     "cwd": "cwd",
     "effort": "effort",
     "model": "model"

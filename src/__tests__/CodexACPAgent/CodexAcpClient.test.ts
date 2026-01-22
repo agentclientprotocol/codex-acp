@@ -466,4 +466,38 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const result = fixture.getCodexAcpClient().createModelId(mockModels, '5.2-codex', null);
         expect(result).toEqual(ModelId.create('5.2-codex', 'medium'));
     });
+
+    it ('should disable resasoning.summary if key authorization is used', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart").mockResolvedValue({
+            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+        });
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted").mockResolvedValue({
+            threadId: "id", turn: { id: "turn-id", items: [], status: "completed", error: null }
+        });
+        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(
+            createTestSessionState({ account: { type: "apiKey" } })
+        );
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "none" }));
+    });
+
+    it ('should not disable resasoning.summary by default', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart").mockResolvedValue({
+            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+        });
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted").mockResolvedValue({
+            threadId: "id", turn: { id: "turn-id", items: [], status: "completed", error: null }
+        });
+        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(
+            createTestSessionState({ account: { type: "chatgpt", email: "test@example.com", planType: "pro" } })
+        );
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: null }));
+    });
 });

@@ -301,10 +301,16 @@ export class CodexAcpServer implements acp.Agent {
                 };
             }
 
+            const disableSummary = sessionState.account?.type === "apiKey"
+            if (disableSummary) {
+                logger.log("Disable reasoning.summary because API key is used", {sessionId: params.sessionId});
+            }
+
+
             const agentMode = sessionState.sessionMetadata.agentMode;
             const modelId = ModelId.fromString(sessionState.sessionMetadata.currentModelId);
             const turnCompleted = await this.runWithProcessCheck(
-                () => this.codexAcpClient.sendPrompt(params, agentMode, modelId));
+                () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, disableSummary));
 
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
