@@ -225,7 +225,7 @@ export class CodexAcpClient {
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: agentMode.sandboxPolicy,
-            summary: null,
+            summary: "none",
             cwd: null,
             effort: effort,
             model: modelId.model,
