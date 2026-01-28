@@ -32,7 +32,7 @@
     "modelProvider": null,
     "model": "model",
     "cwd": "cwd",
-    "approvalPolicy": "on-request",
+    "approvalPolicy": null,
     "sandbox": "sandbox",
     "baseInstructions": null,
     "developerInstructions": null,
@@ -45,7 +45,7 @@
   "model": "model",
   "modelProvider": "openai",
   "cwd": "cwd",
-  "approvalPolicy": "on-request",
+  "approvalPolicy": "untrusted",
   "sandbox": "sandbox",
   "reasoningEffort": "reasoningEffort"
 }
