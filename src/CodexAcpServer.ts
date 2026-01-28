@@ -78,9 +78,7 @@ export class CodexAcpServer implements acp.Agent {
         };
     }
 
-    async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
-        //TODO cleanup duplicate
-        logger.log("Resuming session...", {sessionId: params.sessionId});
+    async checkAuthorization(){
         const authNeeded = await this.runWithProcessCheck(() => this.codexAcpClient.authRequired());
         logger.log("Auth requirement checked", {authRequired: authNeeded});
         if (authNeeded) {
@@ -95,6 +93,11 @@ export class CodexAcpServer implements acp.Agent {
                 throw RequestError.authRequired();
             }
         }
+    }
+
+    async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
+        logger.log("Resuming session...", {sessionId: params.sessionId});
+        await this.checkAuthorization();
 
         // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
         logger.log("Resume existing session...")
@@ -134,20 +137,7 @@ export class CodexAcpServer implements acp.Agent {
         _params: acp.NewSessionRequest,
     ): Promise<acp.NewSessionResponse> {
         logger.log("Starting new session...");
-        const authNeeded = await this.runWithProcessCheck(() => this.codexAcpClient.authRequired());
-        logger.log("Auth requirement checked", {authRequired: authNeeded});
-        if (authNeeded) {
-            if (this.defaultAuthRequest) {
-                logger.log("Authenticating with default auth request...", {
-                    authRequest: this.defaultAuthRequest
-                });
-                await this.authenticate(this.defaultAuthRequest);
-                logger.log("Authentication completed");
-            } else {
-                logger.log("Authentication required but no default auth request provided, return to IDE");
-                throw RequestError.authRequired();
-            }
-        }
+        await this.checkAuthorization();
 
         // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
         logger.log("Create new session...")
