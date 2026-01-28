@@ -27,12 +27,10 @@ describe('Approval Events', () => {
         fixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockReturnValue(turnCompletedPromise);
 
         const sessionState: SessionState = createTestSessionState({
-            sessionMetadata: {
-                sessionId,
-                currentModelId: 'model-id[effort]',
-                models: [],
-                agentMode: AgentMode.DEFAULT_AGENT_MODE
-            }
+            sessionId,
+            currentModelId: 'model-id[effort]',
+            models: [],
+            agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
 

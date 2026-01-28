@@ -246,12 +246,10 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         rateLimits: null,
         account: null,
         cwd: "/test/cwd",
-        sessionMetadata: {
-            sessionId: "session-id",
-            currentModelId: "model-id[effort]",
-            models: [],
-            agentMode: AgentMode.DEFAULT_AGENT_MODE
-        },
+        sessionId: "session-id",
+        currentModelId: "model-id[effort]",
+        models: [],
+        agentMode: AgentMode.DEFAULT_AGENT_MODE,
         ...overrides,
     };
 }

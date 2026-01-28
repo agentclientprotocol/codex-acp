@@ -117,12 +117,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
         const sessionState: SessionState = createTestSessionState({
-            sessionMetadata: {
-                sessionId: "id",
-                currentModelId: "model-id[effort]",
-                models: [],
-                agentMode: AgentMode.DEFAULT_AGENT_MODE
-            }
+            sessionId: "id",
+            currentModelId: "model-id[effort]",
+            models: [],
+            agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
 
@@ -145,12 +143,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         const sessionState: SessionState = createTestSessionState({
-            sessionMetadata: {
-                sessionId: "id",
-                currentModelId: "model-id[effort]",
-                models: [],
-                agentMode: AgentMode.DEFAULT_AGENT_MODE
-            }
+            sessionId: "id",
+            currentModelId: "model-id[effort]",
+            models: [],
+            agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
 
@@ -194,20 +190,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         const sessionState1: SessionState = createTestSessionState({
-            sessionMetadata: {
-                sessionId: "session-1",
-                currentModelId: "model-id[effort]",
-                models: [],
-                agentMode: AgentMode.DEFAULT_AGENT_MODE
-            }
+            sessionId: "session-1",
+            currentModelId: "model-id[effort]",
+            models: [],
+            agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         const sessionState2: SessionState = createTestSessionState({
-            sessionMetadata: {
-                sessionId: "session-2",
-                currentModelId: "model-id[effort]",
-                models: [],
-                agentMode: AgentMode.DEFAULT_AGENT_MODE
-            }
+            sessionId: "session-2",
+            currentModelId: "model-id[effort]",
+            models: [],
+            agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
 
         vi.spyOn(codexAcpAgent, "getSessionState").mockImplementation((sessionId: string) => {

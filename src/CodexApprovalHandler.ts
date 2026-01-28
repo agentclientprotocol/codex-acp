@@ -32,7 +32,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         params: CommandExecutionRequestApprovalParams
     ): Promise<CommandExecutionRequestApprovalResponse> {
         try {
-            const sessionId = this.sessionState.sessionMetadata.sessionId;
+            const sessionId = this.sessionState.sessionId;
             const acpRequest = this.buildCommandPermissionRequest(sessionId, params);
             const response = await this.connection.requestPermission(acpRequest);
             return this.convertCommandResponse(response);
@@ -46,7 +46,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         params: FileChangeRequestApprovalParams
     ): Promise<FileChangeRequestApprovalResponse> {
         try {
-            const sessionId = this.sessionState.sessionMetadata.sessionId;
+            const sessionId = this.sessionState.sessionId;
             const acpRequest = this.buildFileChangePermissionRequest(sessionId, params);
             const response = await this.connection.requestPermission(acpRequest);
             return this.convertFileChangeResponse(response);

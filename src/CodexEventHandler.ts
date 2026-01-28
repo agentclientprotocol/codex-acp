@@ -52,7 +52,7 @@ export class CodexEventHandler {
     }
 
     async handleNotification(notification: ServerNotification) {
-        const session = new ACPSessionConnection(this.connection, this.sessionState.sessionMetadata.sessionId);
+        const session = new ACPSessionConnection(this.connection, this.sessionState.sessionId);
         const updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
             await session.update(updateEvent);
