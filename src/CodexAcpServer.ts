@@ -21,7 +21,10 @@ const ALLOWED_MODEL_IDS = new Set([
 ]);
 
 export interface SessionState {
-    sessionMetadata: SessionMetadata;
+    sessionId: string,
+    currentModelId: string,
+    models: Model[],
+    agentMode: AgentMode,
     currentTurnId: string | null;
     lastTokenUsage: TokenCount | null;
     totalTokenUsage: TokenCount | null;
@@ -103,8 +106,11 @@ export class CodexAcpServer implements acp.Agent {
         const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.resumeSession(params));
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models} = sessionMetadata;
-        this.sessions.set(sessionId, {
-            sessionMetadata: sessionMetadata,
+        const sessionState: SessionState = {
+            sessionId: sessionId,
+            currentModelId: currentModelId,
+            models: models,
+            agentMode: AgentMode.getInitialAgentMode(),
             currentTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
@@ -112,7 +118,8 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: accountResponse.account,
             cwd: params.cwd,
-        });
+        }
+        this.sessions.set(sessionId, sessionState);
 
         this.publishAvailableCommandsAsync(sessionId);
         const availableModels = this.buildAvailableModels(models);
@@ -142,8 +149,11 @@ export class CodexAcpServer implements acp.Agent {
         const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(_params));
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models} = sessionMetadata;
-        this.sessions.set(sessionId, {
-            sessionMetadata: sessionMetadata,
+        const sessionState: SessionState = {
+            sessionId: sessionId,
+            currentModelId: currentModelId,
+            models: models,
+            agentMode: AgentMode.getInitialAgentMode(),
             currentTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
@@ -151,7 +161,8 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: accountResponse.account,
             cwd: _params.cwd,
-        });
+        }
+        this.sessions.set(sessionId, sessionState);
 
         this.publishAvailableCommandsAsync(sessionId);
         const availableModels = this.buildAvailableModels(models);
@@ -169,7 +180,7 @@ export class CodexAcpServer implements acp.Agent {
         return {
             sessionId: sessionId,
             models: sessionModelState,
-            modes: AgentMode.getInitialAgentMode().toSessionModeState()
+            modes: sessionState.agentMode.toSessionModeState()
         };
     }
 
@@ -200,7 +211,7 @@ export class CodexAcpServer implements acp.Agent {
         if (!newMode) {
             throw RequestError.invalidParams();
         }
-        sessionState.sessionMetadata.agentMode = newMode;
+        sessionState.agentMode = newMode;
         return {};
     }
 
@@ -216,7 +227,7 @@ export class CodexAcpServer implements acp.Agent {
         const requestedModelName = requestedModelId.model;
         const requestedEffort = requestedModelId.effort;
 
-        const model = sessionState.sessionMetadata.models.find(m => m.id === requestedModelName);
+        const model = sessionState.models.find(m => m.id === requestedModelName);
         if (!model) throw new Error(`Unknown model ${params.modelId}`);
 
         const requestedEffortValue = requestedEffort as ReasoningEffort | undefined;
@@ -235,7 +246,7 @@ export class CodexAcpServer implements acp.Agent {
             reasoningEffort = model.defaultReasoningEffort;
         }
 
-        sessionState.sessionMetadata.currentModelId = ModelId.fromComponents(model, reasoningEffort).toString();
+        sessionState.currentModelId = ModelId.fromComponents(model, reasoningEffort).toString();
 
         return {};
     }
@@ -294,8 +305,8 @@ export class CodexAcpServer implements acp.Agent {
             }
 
 
-            const agentMode = sessionState.sessionMetadata.agentMode;
-            const modelId = ModelId.fromString(sessionState.sessionMetadata.currentModelId);
+            const agentMode = sessionState.agentMode;
+            const modelId = ModelId.fromString(sessionState.currentModelId);
             const turnCompleted = await this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, disableSummary));
 
@@ -340,7 +351,7 @@ export class CodexAcpServer implements acp.Agent {
         const lastTokenUsage = sessionState.lastTokenUsage;
 
         // Remove the "[reasoning-level]" suffix from currentModelId if present
-        const modelName = sessionState.sessionMetadata.currentModelId.replace(/\[.*?]$/, '');
+        const modelName = sessionState.currentModelId.replace(/\[.*?]$/, '');
 
         // FIXME: currently all tokens are reported for the current model
         const modelUsage = (lastTokenUsage != null)

@@ -35,15 +35,7 @@ describe('Token Usage Events', () => {
                 };
             });
 
-            const sessionState: SessionState = createTestSessionState({
-                sessionMetadata: {
-                    sessionId,
-                    currentModelId: 'model-id[medium]',
-                    models: [],
-                    agentMode: AgentMode.DEFAULT_AGENT_MODE
-                },
-            });
-            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState());
 
             return codexAcpAgent;
         }

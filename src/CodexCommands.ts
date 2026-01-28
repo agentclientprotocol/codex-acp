@@ -120,7 +120,7 @@ export class CodexCommands {
 
     async handleCommand(command: ParsedCommand, sessionState: SessionState): Promise<boolean> {
         const {name, input} = command;
-        const sessionId = sessionState.sessionMetadata.sessionId;
+        const sessionId = sessionState.sessionId;
 
         switch (name) {
             case "status": {
@@ -198,8 +198,7 @@ export class CodexCommands {
     }
 
     private buildStatusMessage(sessionState: SessionState): string {
-        const metadata = sessionState.sessionMetadata;
-        const agentMode = metadata.agentMode;
+        const agentMode = sessionState.agentMode;
         const accountText = this.formatAccountInfo(sessionState.account);
         const tokenUsageText = this.formatTokenUsage(sessionState.totalTokenUsage);
         const contextWindowText = this.formatContextWindow(
@@ -208,12 +207,12 @@ export class CodexCommands {
         );
 
         const lines = [
-            `**Model:** ${metadata.currentModelId}`,
+            `**Model:** ${sessionState.currentModelId}`,
             `**Directory:** ${sessionState.cwd}`,
             `**Approval:** ${agentMode.approvalPolicy}`,
             `**Sandbox:** ${agentMode.sandboxMode}`,
             `**Account:** ${accountText}`,
-            `**Session:** \`${metadata.sessionId}\``,
+            `**Session:** \`${sessionState.sessionId}\``,
             ``,
             `**Token usage:** ${tokenUsageText}`,
             `**Context window:** ${contextWindowText}`,
