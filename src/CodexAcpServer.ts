@@ -1,5 +1,11 @@
 import * as acp from "@agentclientprotocol/sdk";
-import {type ModelInfo, RequestError, type SessionModelState} from "@agentclientprotocol/sdk";
+import {
+    type ModelInfo,
+    RequestError,
+    type SessionId,
+    type SessionModelState,
+    type SessionModeState
+} from "@agentclientprotocol/sdk";
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
@@ -97,12 +103,18 @@ export class CodexAcpServer implements acp.Agent {
         }
     }
 
-    async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
-        logger.log("Resuming session...", {sessionId: params.sessionId});
+    async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, SessionModelState, SessionModeState]> {
         await this.checkAuthorization();
 
-        logger.log("Resume existing session...")
-        const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.resumeSession(params));
+        let sessionMetadata: SessionMetadata;
+        if ("sessionId" in request) {
+            logger.log(`Resume existing session: ${request.sessionId}...`)
+            sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.resumeSession(request));
+        } else {
+            logger.log(`Create new session...`)
+            sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(request));
+        }
+
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models} = sessionMetadata;
         const sessionState: SessionState = {
@@ -115,69 +127,48 @@ export class CodexAcpServer implements acp.Agent {
             modelContextWindow: null,
             rateLimits: null,
             account: accountResponse.account,
-            cwd: params.cwd,
+            cwd: request.cwd,
         }
         this.sessions.set(sessionId, sessionState);
 
         this.publishAvailableCommandsAsync(sessionId);
-        const availableModels = this.buildAvailableModels(models);
-        const sessionModelState: SessionModelState = {
-            availableModels: availableModels,
-            currentModelId: currentModelId,
-        }
+        const sessionModelState: SessionModelState = this.createModelState(models, currentModelId);
+        const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
+
+        return [sessionId, sessionModelState, sessionModeState];
+    }
+
+    async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
+        logger.log("Resuming session...", {sessionId: params.sessionId});
+        const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
+
         logger.log("Session resumed", {
-            sessionId,
-            currentModelId,
-            availableModelCount: availableModels.length
+            sessionId: sessionId,
+            modelId: modelState.currentModelId,
+            availableModelCount: modelState.availableModels.length
         });
         return {
-            models: sessionModelState,
-            modes: AgentMode.getInitialAgentMode().toSessionModeState()
+            models: modelState,
+            modes: modeState
         };
     }
 
     async newSession(
-        _params: acp.NewSessionRequest,
+        params: acp.NewSessionRequest,
     ): Promise<acp.NewSessionResponse> {
         logger.log("Starting new session...");
-        await this.checkAuthorization();
-
-        // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
-        logger.log("Create new session...")
-        const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(_params));
-        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
-        const {sessionId, currentModelId, models} = sessionMetadata;
-        const sessionState: SessionState = {
-            sessionId: sessionId,
-            currentModelId: currentModelId,
-            agentMode: AgentMode.getInitialAgentMode(),
-            currentTurnId: null,
-            lastTokenUsage: null,
-            totalTokenUsage: null,
-            modelContextWindow: null,
-            rateLimits: null,
-            account: accountResponse.account,
-            cwd: _params.cwd,
-        }
-        this.sessions.set(sessionId, sessionState);
-
-        this.publishAvailableCommandsAsync(sessionId);
-        const availableModels = this.buildAvailableModels(models);
-        const sessionModelState: SessionModelState = {
-            availableModels: availableModels,
-            currentModelId: currentModelId,
-        }
+        const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
         logger.log("New session created", {
-            sessionId,
-            currentModelId,
-            availableModelCount: availableModels.length
+            sessionId: sessionId,
+            modelId: modelState.currentModelId,
+            availableModelCount: modelState.availableModels.length
         });
 
         return {
             sessionId: sessionId,
-            models: sessionModelState,
-            modes: sessionState.agentMode.toSessionModeState()
+            models: modelState,
+            modes: modeState
         };
     }
 
@@ -253,8 +244,8 @@ export class CodexAcpServer implements acp.Agent {
         void this.availableCommands.publish(sessionId);
     }
 
-    private buildAvailableModels(models: Model[]): ModelInfo[] {
-        return models
+    private createModelState(availableModels: Model[], selectedModelId: string): SessionModelState {
+        const allowedModels = availableModels
             .filter((model) => ALLOWED_MODEL_IDS.has(model.id))
             .flatMap((model) =>
                 model.supportedReasoningEfforts.map((effort) => ({
@@ -263,6 +254,10 @@ export class CodexAcpServer implements acp.Agent {
                     description: `${model.description} ${effort.description}`,
                 }))
             );
+        return {
+            availableModels: allowedModels,
+            currentModelId: selectedModelId,
+        }
     }
 
     getSessionState(sessionId: string): SessionState {
