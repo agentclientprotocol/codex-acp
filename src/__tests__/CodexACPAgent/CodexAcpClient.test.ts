@@ -119,7 +119,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const sessionState: SessionState = createTestSessionState({
             sessionId: "id",
             currentModelId: "model-id[effort]",
-            models: [],
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
@@ -145,7 +144,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const sessionState: SessionState = createTestSessionState({
             sessionId: "id",
             currentModelId: "model-id[effort]",
-            models: [],
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
@@ -192,13 +190,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const sessionState1: SessionState = createTestSessionState({
             sessionId: "session-1",
             currentModelId: "model-id[effort]",
-            models: [],
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         const sessionState2: SessionState = createTestSessionState({
             sessionId: "session-2",
             currentModelId: "model-id[effort]",
-            models: [],
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
 
