@@ -235,7 +235,7 @@ export class CodexAcpClient {
         return await this.codexClient.awaitTurnCompleted();
     }
 
-    async setModel(params: SetDefaultModelParams): Promise<SetDefaultModelResponse> {
+    async setDefaultModel(params: SetDefaultModelParams): Promise<SetDefaultModelResponse> {
         return this.codexClient.setModelRequest(params);
     }
 
