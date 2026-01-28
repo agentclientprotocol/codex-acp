@@ -99,10 +99,8 @@ export class CodexAcpServer implements acp.Agent {
         logger.log("Resuming session...", {sessionId: params.sessionId});
         await this.checkAuthorization();
 
-        // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
         logger.log("Resume existing session...")
-        const agentMode = AgentMode.getInitialAgentMode();
-        const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.resumeSession(params, agentMode));
+        const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.resumeSession(params));
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models} = sessionMetadata;
         this.sessions.set(sessionId, {
@@ -129,7 +127,7 @@ export class CodexAcpServer implements acp.Agent {
         });
         return {
             models: sessionModelState,
-            modes: agentMode.toSessionModeState()
+            modes: AgentMode.getInitialAgentMode().toSessionModeState()
         };
     }
 
@@ -141,8 +139,7 @@ export class CodexAcpServer implements acp.Agent {
 
         // we are retrieving available modes from the session, so setting it to a user-defined or default on the new session
         logger.log("Create new session...")
-        const agentMode = AgentMode.getInitialAgentMode();
-        const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(_params, agentMode));
+        const sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(_params));
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models} = sessionMetadata;
         this.sessions.set(sessionId, {
@@ -172,7 +169,7 @@ export class CodexAcpServer implements acp.Agent {
         return {
             sessionId: sessionId,
             models: sessionModelState,
-            modes: agentMode.toSessionModeState()
+            modes: AgentMode.getInitialAgentMode().toSessionModeState()
         };
     }
 

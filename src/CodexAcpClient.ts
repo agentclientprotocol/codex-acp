@@ -133,12 +133,12 @@ export class CodexAcpClient {
         return this.codexClient.accountRead({refreshToken: false});
     }
 
-    async resumeSession(request: acp.ResumeSessionRequest, agentMode: AgentMode): Promise<SessionMetadata> {
+    async resumeSession(request: acp.ResumeSessionRequest): Promise<SessionMetadata> {
         const sessionModelProvider = this.gatewayConfig?.modelProvider ?? this.modelProvider;
         const sessionConfig = mergeGatewayConfig(this.config, this.gatewayConfig)
         const response = await this.codexClient.threadResume({
-            approvalPolicy: agentMode.approvalPolicy,
-            sandbox: agentMode.sandboxMode,
+            approvalPolicy: null,
+            sandbox: null,
             baseInstructions: null,
             config: sessionConfig,
             cwd: request.cwd,
@@ -155,11 +155,11 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
-            agentMode: agentMode
+            agentMode: AgentMode.getInitialAgentMode(),
         }
     }
 
-    async newSession(request: acp.NewSessionRequest, agentMode: AgentMode): Promise<SessionMetadata> {
+    async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         const sessionModelProvider = this.gatewayConfig?.modelProvider ?? this.modelProvider;
         const sessionConfig = mergeGatewayConfig(this.config, this.gatewayConfig)
         const response = await this.codexClient.threadStart({
@@ -167,8 +167,8 @@ export class CodexAcpClient {
             modelProvider: sessionModelProvider,
             model: null,
             cwd: request.cwd,
-            approvalPolicy: agentMode.approvalPolicy,
-            sandbox: agentMode.sandboxMode,
+            approvalPolicy: null,
+            sandbox: null,
             baseInstructions: null,
             developerInstructions: null,
             experimentalRawEvents: false
@@ -183,7 +183,7 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
-            agentMode: agentMode,
+            agentMode: AgentMode.getInitialAgentMode(),
         };
     }
 
