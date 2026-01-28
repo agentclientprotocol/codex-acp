@@ -29,7 +29,6 @@ describe('Approval Events', () => {
         const sessionState: SessionState = createTestSessionState({
             sessionId,
             currentModelId: 'model-id[effort]',
-            models: [],
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);

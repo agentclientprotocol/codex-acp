@@ -57,7 +57,6 @@ describe("Model filtering", () => {
             sessionId: "session-id",
             currentModelId: "gpt-5.2[medium]",
             models,
-            agentMode: AgentMode.getInitialAgentMode(),
         });
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
 

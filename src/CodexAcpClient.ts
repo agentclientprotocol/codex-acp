@@ -155,7 +155,6 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
-            agentMode: AgentMode.getInitialAgentMode(),
         }
     }
 
@@ -183,7 +182,6 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
-            agentMode: AgentMode.getInitialAgentMode(),
         };
     }
 
@@ -256,7 +254,7 @@ export class CodexAcpClient {
         });
     }
 
-    private async fetchAvailableModels(): Promise<Model[]> {
+    async fetchAvailableModels(): Promise<Model[]> {
         const models: Model[] = [];
         let cursor: string | null = null;
 
@@ -276,7 +274,6 @@ export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
     models: Model[],
-    agentMode: AgentMode,
 }
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {

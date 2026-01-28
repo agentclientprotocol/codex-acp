@@ -23,7 +23,6 @@ const ALLOWED_MODEL_IDS = new Set([
 export interface SessionState {
     sessionId: string,
     currentModelId: string,
-    models: Model[],
     agentMode: AgentMode,
     currentTurnId: string | null;
     lastTokenUsage: TokenCount | null;
@@ -109,7 +108,6 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
-            models: models,
             agentMode: AgentMode.getInitialAgentMode(),
             currentTurnId: null,
             lastTokenUsage: null,
@@ -152,7 +150,6 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
-            models: models,
             agentMode: AgentMode.getInitialAgentMode(),
             currentTurnId: null,
             lastTokenUsage: null,
@@ -227,7 +224,8 @@ export class CodexAcpServer implements acp.Agent {
         const requestedModelName = requestedModelId.model;
         const requestedEffort = requestedModelId.effort;
 
-        const model = sessionState.models.find(m => m.id === requestedModelName);
+        const models = await this.codexAcpClient.fetchAvailableModels();
+        const model = models.find(m => m.id === requestedModelName);
         if (!model) throw new Error(`Unknown model ${params.modelId}`);
 
         const requestedEffortValue = requestedEffort as ReasoningEffort | undefined;
