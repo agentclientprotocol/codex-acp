@@ -50,6 +50,12 @@ function startAcpServer() {
     const codexConnection = startCodexConnection(codexPath);
     process.stdin.on("close", (chunk: Buffer) => {
         codexConnection.process.stdin.end();
+        // Kill the codex process if it doesn't exit naturally
+        setTimeout(() => {
+            if (!codexConnection.process.killed) {
+                codexConnection.process.kill();
+            }
+        }, 2000);
     });
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
