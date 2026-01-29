@@ -36,6 +36,9 @@
     "sandbox": "sandbox",
     "baseInstructions": null,
     "developerInstructions": null,
+    "personality": null,
+    "ephemeral": null,
+    "dynamicTools": null,
     "experimentalRawEvents": false
   }
 }
@@ -90,6 +93,7 @@
       "description": "Latest frontier agentic coding model.",
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
+      "supportsPersonality": false,
       "isDefault": true
     },
     {
@@ -99,6 +103,7 @@
       "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
+      "supportsPersonality": false,
       "isDefault": false
     },
     {
@@ -108,6 +113,7 @@
       "description": "Codex-optimized flagship for deep and fast reasoning.",
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
+      "supportsPersonality": false,
       "isDefault": false
     },
     {
@@ -117,6 +123,7 @@
       "description": "Optimized for codex. Cheaper, faster, but less capable.",
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
+      "supportsPersonality": false,
       "isDefault": false
     }
   ],

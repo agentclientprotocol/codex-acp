@@ -12,6 +12,7 @@
     "model": "model",
     "modelProvider": null,
     "path": "path",
+    "personality": null,
     "threadId": "threadId"
   }
 }

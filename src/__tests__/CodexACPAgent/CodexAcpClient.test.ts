@@ -319,7 +319,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     description: "Build the project",
                     shortDescription: "Build",
                     path: "/workspace",
-                    scope: "user"
+                    scope: "user",
+                    enabled: true
                 }],
                 errors: []
             }]
@@ -368,8 +369,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             data: [{
                 cwd: "/workspace",
                 skills: [
-                    { name: "build", description: "Build the project", shortDescription: "Build", path: "/workspace/build", scope: "user" },
-                    { name: "deploy", description: "Deploy the service", path: "/workspace/deploy", scope: "repo" }
+                    { name: "build", description: "Build the project", shortDescription: "Build", path: "/workspace/build", scope: "user", enabled: true },
+                    { name: "deploy", description: "Deploy the service", path: "/workspace/deploy", scope: "repo", enabled: true }
                 ],
                 errors: []
             }]
@@ -430,6 +431,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 { reasoningEffort: 'medium', description: 'Balanced' }
             ],
             defaultReasoningEffort: 'medium',
+            supportsPersonality: false,
             isDefault: false,
         },
         {
@@ -441,6 +443,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 { reasoningEffort: 'low', description: 'Fast' }
             ],
             defaultReasoningEffort: 'low',
+            supportsPersonality: false,
             isDefault: true,
         }
     ];
