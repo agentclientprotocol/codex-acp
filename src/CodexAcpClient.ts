@@ -24,6 +24,7 @@ import type {
     TurnCompletedNotification,
     UserInput,
 } from "./app-server/v2";
+import packageJson from "../package.json";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -45,7 +46,7 @@ export class CodexAcpClient {
     }
 
     private readonly defaultClientInfo: ClientInfo = {
-        name: "codex-acp", title: "Codex ACP", version: "0.0.5"
+        name: `${packageJson.name}`, title: "Codex ACP", version: `${packageJson.version}`
     };
 
     async initialize(request: acp.InitializeRequest): Promise<void> {
