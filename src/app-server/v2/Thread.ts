@@ -19,9 +19,13 @@ modelProvider: string,
  */
 createdAt: number, 
 /**
+ * Unix timestamp (in seconds) when the thread was last updated.
+ */
+updatedAt: number, 
+/**
  * [UNSTABLE] Path to the thread on disk.
  */
-path: string, 
+path: string | null, 
 /**
  * Working directory captured for the thread.
  */
@@ -39,7 +43,8 @@ source: SessionSource,
  */
 gitInfo: GitInfo | null, 
 /**
- * Only populated on `thread/resume`, `thread/rollback`, `thread/fork` responses.
+ * Only populated on `thread/resume`, `thread/rollback`, `thread/fork`, and `thread/read`
+ * (when `includeTurns` is true) responses.
  * For all other responses and notifications returning a Thread,
  * the turns field will be an empty list.
  */

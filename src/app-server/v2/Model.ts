@@ -4,4 +4,4 @@
 import type { ReasoningEffort } from "../ReasoningEffort";
 import type { ReasoningEffortOption } from "./ReasoningEffortOption";
 
-export type Model = { id: string, model: string, displayName: string, description: string, supportedReasoningEfforts: Array<ReasoningEffortOption>, defaultReasoningEffort: ReasoningEffort, isDefault: boolean, };
+export type Model = { id: string, model: string, displayName: string, description: string, supportedReasoningEfforts: Array<ReasoningEffortOption>, defaultReasoningEffort: ReasoningEffort, supportsPersonality: boolean, isDefault: boolean, };

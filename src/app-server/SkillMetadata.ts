@@ -8,4 +8,4 @@ export type SkillMetadata = { name: string, description: string,
 /**
  * Legacy short_description from SKILL.md. Prefer SKILL.toml interface.short_description.
  */
-short_description?: string, interface?: SkillInterface, path: string, scope: SkillScope, };
+short_description?: string, interface?: SkillInterface, path: string, scope: SkillScope, enabled: boolean, };
