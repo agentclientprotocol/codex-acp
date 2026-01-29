@@ -11,7 +11,7 @@ export type SessionConfiguredEvent = {
 /**
  * Name left as session_id instead of thread_id for backwards compatibility.
  */
-session_id: ThreadId, 
+session_id: ThreadId, forked_from_id: ThreadId | null, 
 /**
  * Tell the client what model is being queried.
  */
@@ -45,4 +45,8 @@ history_entry_count: number,
  * Optional initial messages (as events) for resumed sessions.
  * When present, UIs can use these to seed the history.
  */
-initial_messages: Array<EventMsg> | null, rollout_path: string, };
+initial_messages: Array<EventMsg> | null, 
+/**
+ * Path in which the rollout is stored. Can be `None` for ephemeral threads
+ */
+rollout_path: string | null, };
