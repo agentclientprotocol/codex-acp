@@ -53,6 +53,7 @@ function startAcpServer() {
         // Kill the codex process if it doesn't exit naturally
         setTimeout(() => {
             if (!codexConnection.process.killed) {
+                logger.log("Codex still running 2s after stdin closed; terminating process");
                 codexConnection.process.kill();
             }
         }, 2000);
