@@ -36,17 +36,17 @@ export function startCodexConnection(codexPath: string): CodexConnection {
 function attachLogs(proc: ChildProcessWithoutNullStreams) {
     const originalWrite = proc.stdin.write.bind(proc.stdin);
     proc.stdin.write = (chunk: any, encoding?: any, callback?: any): boolean => {
-        logger.log("[IN] ", {data: chunk.toString()});
+        logger.log(`[IN] ${chunk.toString()}`);
         return originalWrite(chunk, encoding, callback);
     };
 
     proc.stderr.on("data", (data) => {
-        logger.log("[ERR]", {data: data.toString()});
+        logger.log(`[ERR] ${data.toString()}`);
     });
     proc.stdout.on("data", (data: Buffer) => {
-        logger.log("[OUT]", {data: data.toString()});
+        logger.log(`[OUT] ${data.toString()}`);
     });
     proc.on("exit", (code) => {
-        logger.log("[EXIT]", {code: code?.toString()});
+        logger.log(`[EXIT] code: ${code?.toString()}`);
     });
 }
