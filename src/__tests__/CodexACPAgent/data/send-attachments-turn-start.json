@@ -34,6 +34,8 @@
       "excludeSlashTmp": false
     },
     "summary": null,
+    "personality": null,
+    "collaborationMode": null,
     "cwd": "cwd",
     "effort": "effort",
     "model": "model"

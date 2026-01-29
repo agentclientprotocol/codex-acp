@@ -21,6 +21,7 @@ describe("Model filtering", () => {
                 description: "Allowed by id.",
                 supportedReasoningEfforts: efforts,
                 defaultReasoningEffort: "medium",
+                supportsPersonality: false,
                 isDefault: false,
             },
             {
@@ -30,6 +31,7 @@ describe("Model filtering", () => {
                 description: "Looks allowed but id is not.",
                 supportedReasoningEfforts: [defaultEffort],
                 defaultReasoningEffort: "medium",
+                supportsPersonality: false,
                 isDefault: false,
             },
             {
@@ -39,6 +41,7 @@ describe("Model filtering", () => {
                 description: "Allowed by id.",
                 supportedReasoningEfforts: [defaultEffort],
                 defaultReasoningEffort: "medium",
+                supportsPersonality: false,
                 isDefault: false,
             },
             {
@@ -48,6 +51,7 @@ describe("Model filtering", () => {
                 description: "Not allowed.",
                 supportedReasoningEfforts: [defaultEffort],
                 defaultReasoningEffort: "medium",
+                supportsPersonality: false,
                 isDefault: false,
             },
         ];

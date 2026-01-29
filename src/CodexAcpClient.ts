@@ -147,6 +147,7 @@ export class CodexAcpClient {
             model: null,
             modelProvider: sessionModelProvider,
             path: null,
+            personality: null,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -170,6 +171,9 @@ export class CodexAcpClient {
             sandbox: null,
             baseInstructions: null,
             developerInstructions: null,
+            personality: null,
+            ephemeral: null,
+            dynamicTools: null,
             experimentalRawEvents: false
         });
 
@@ -225,6 +229,8 @@ export class CodexAcpClient {
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: agentMode.sandboxPolicy,
             summary: disableSummary ? "none" : null,
+            personality: null,
+            collaborationMode: null,
             cwd: null,
             effort: effort,
             model: modelId.model,
