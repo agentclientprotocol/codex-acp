@@ -1,0 +1,15 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-id",
+        "kind": "other",
+        "title": "mcp.server-name.tool-name",
+        "status": "in_progress"
+      }
+    }
+  ]
+}

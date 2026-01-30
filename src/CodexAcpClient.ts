@@ -1,6 +1,7 @@
 import {isCodexAuthRequest} from "./CodexAuthMethod";
+import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
 import type {ApprovalHandler, CodexAppServerClient} from "./CodexAppServerClient";
 import open from "open";
 import type {
@@ -13,7 +14,6 @@ import type {
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
-import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import type {
     GetAccountResponse,
     ListMcpServerStatusParams,
@@ -135,18 +135,16 @@ export class CodexAcpClient {
     }
 
     async resumeSession(request: acp.ResumeSessionRequest): Promise<SessionMetadata> {
-        const sessionModelProvider = this.gatewayConfig?.modelProvider ?? this.modelProvider;
-        const sessionConfig = mergeGatewayConfig(this.config, this.gatewayConfig)
         const response = await this.codexClient.threadResume({
             approvalPolicy: null,
             sandbox: null,
             baseInstructions: null,
-            config: sessionConfig,
+            config: this.createSessionConfig(request.mcpServers ?? []),
             cwd: request.cwd,
             developerInstructions: null,
             history: null,
             model: null,
-            modelProvider: sessionModelProvider,
+            modelProvider: this.getModelProvider(),
             path: null,
             personality: null,
             threadId: request.sessionId,
@@ -161,11 +159,9 @@ export class CodexAcpClient {
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
-        const sessionModelProvider = this.gatewayConfig?.modelProvider ?? this.modelProvider;
-        const sessionConfig = mergeGatewayConfig(this.config, this.gatewayConfig)
         const response = await this.codexClient.threadStart({
-            config: sessionConfig,
-            modelProvider: sessionModelProvider,
+            config: this.createSessionConfig(request.mcpServers),
+            modelProvider: this.getModelProvider(),
             model: null,
             cwd: request.cwd,
             approvalPolicy: null,
@@ -188,6 +184,46 @@ export class CodexAcpClient {
             currentModelId: currentModelId,
             models: codexModels,
         };
+    }
+
+    async awaitMcpServers(): Promise<Array<string>>{
+        const response = await this.codexClient.awaitMcpStartup();
+        return response.ready;
+    }
+
+    private createSessionConfig(mcpServers: Array<McpServer>): JsonObject {
+        const mergedConfig = mergeGatewayConfig(this.config, this.gatewayConfig);
+        if (mcpServers.length === 0) {
+            return mergedConfig;
+        }
+        return {
+            ...mergedConfig,
+            "mcp_servers": Object.fromEntries(mcpServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp)]))
+        }
+    }
+
+    private getModelProvider(): string | null {
+        return this.gatewayConfig?.modelProvider ?? this.modelProvider;
+    }
+
+    /**
+     * Create a codex config entry for MCP server
+     */
+    private createMcpSeverConfig(mcpServer: McpServer): JsonObject {
+        if ("type" in mcpServer) {
+            if (mcpServer.type == "sse") {
+                throw RequestError.invalidRequest("Codex doesn't support MCP SSE transport protocol")
+            }
+            return {
+                "url": mcpServer.url,
+                "http_headers": Object.fromEntries(mcpServer.headers.map(h => [h.name, h.value])),
+            }
+        }
+        return {
+            "command": mcpServer.command,
+            "args": mcpServer.args,
+            "env": Object.fromEntries(mcpServer.env.map(env => [env.name, env.value])),
+        }
     }
 
     /**

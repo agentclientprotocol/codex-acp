@@ -119,10 +119,9 @@ export class CodexCommands {
     }
 
     async handleCommand(command: ParsedCommand, sessionState: SessionState): Promise<boolean> {
-        const {name, input} = command;
         const sessionId = sessionState.sessionId;
 
-        switch (name) {
+        switch (command.name) {
             case "status": {
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 const message = this.buildStatusMessage(sessionState);
@@ -160,11 +159,15 @@ export class CodexCommands {
             }
             case "mcp": {
                 const servers = await this.runWithProcessCheck(() => this.codexAcpClient.listMcpServers());
-                const lines = servers.data.map(server => {
+                const configuredServers = servers.data.map(server => {
                     const toolCount = Object.keys(server.tools ?? {}).length;
                     const resourceCount = (server.resources ?? []).length;
                     return `- ${server.name}: ${toolCount} tools, ${resourceCount} resources, auth=${server.authStatus}`;
                 });
+                const sessionServers = sessionState.sessionMcpServers
+                    ? sessionState.sessionMcpServers.map(serverName => `- ${serverName}`)
+                    : [];
+                const lines = [...configuredServers, ...sessionServers];
                 const text = lines.length > 0
                     ? ["Configured MCP servers:", ...lines].join("\n")
                     : "No MCP servers configured.";
@@ -176,7 +179,7 @@ export class CodexCommands {
                 return true;
             }
             default:
-                await this.sendUnknownCommandMessage(name, sessionId);
+                await this.sendUnknownCommandMessage(command.name, sessionId);
                 return true;
         }
     }

@@ -141,14 +141,15 @@ export class CodexEventHandler {
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                return await this.createFileChangeEvent(event.item)
+                return await this.createFileChangeEvent(event.item);
             case "commandExecution":
-                return await this.createCommandEvent(event.item)
+                return await this.createCommandEvent(event.item);
+            case "mcpToolCall":
+                return await this.createMcpEvent(event.item);
             case "collabAgentToolCall":
             case "userMessage":
             case "agentMessage":
             case "reasoning":
-            case "mcpToolCall":
             case "webSearch":
             case "imageView":
             case "enteredReviewMode":
@@ -159,6 +160,7 @@ export class CodexEventHandler {
 
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
+            case "mcpToolCall":
             case "fileChange":
             case "commandExecution":
                 return {
@@ -179,7 +181,6 @@ export class CodexEventHandler {
             case "collabAgentToolCall":
             case "userMessage":
             case "agentMessage":
-            case "mcpToolCall":
             case "webSearch":
             case "imageView":
             case "enteredReviewMode":
@@ -252,6 +253,16 @@ export class CodexEventHandler {
             toolCallId: item.id,
             kind: "execute",
             title: command,
+            status: toAcpStatus(item.status)
+        }
+    }
+
+    private async createMcpEvent(item: ThreadItem & { "type": "mcpToolCall" }): Promise<UpdateSessionEvent> {
+        return {
+            sessionUpdate: "tool_call",
+            toolCallId: item.id,
+            kind: "other",
+            title: `mcp.${item.server}.${item.tool}`,
             status: toAcpStatus(item.status)
         }
     }
