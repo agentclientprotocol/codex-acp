@@ -261,9 +261,9 @@ export class CodexEventHandler {
         return {
             sessionUpdate: "tool_call",
             toolCallId: item.id,
-            kind: "other",
+            kind: "execute",
             title: `mcp.${item.server}.${item.tool}`,
-            status: toAcpStatus(item.status)
+            status: toAcpStatus(item.status),
         }
     }
 

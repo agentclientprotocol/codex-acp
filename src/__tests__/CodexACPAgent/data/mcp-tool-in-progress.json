@@ -6,7 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "call-id",
-        "kind": "other",
+        "kind": "execute",
         "title": "mcp.server-name.tool-name",
         "status": "in_progress"
       }
