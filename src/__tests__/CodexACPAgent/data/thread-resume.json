@@ -22,7 +22,7 @@
   "model": "model",
   "modelProvider": "openai",
   "cwd": "cwd",
-  "approvalPolicy": "untrusted",
+  "approvalPolicy": "on-request",
   "sandbox": "sandbox",
   "reasoningEffort": "reasoningEffort"
 }
