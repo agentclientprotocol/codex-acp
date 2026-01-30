@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Model, ReasoningEffortOption } from "../../app-server/v2";
-import { AgentMode } from "../../AgentMode";
 import { createCodexMockTestFixture } from "../acp-test-utils";
 
 describe("Model filtering", () => {
@@ -63,6 +62,7 @@ describe("Model filtering", () => {
             models,
         });
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "awaitMcpServers").mockResolvedValue([]);
 
         const newSessionResponse = await codexAcpAgent.newSession({ cwd: "", mcpServers: [] });
         const sessionModels = newSessionResponse.models;

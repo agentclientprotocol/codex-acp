@@ -256,4 +256,31 @@ describe('CodexEventHandler - command action events', () => {
             'data/command-search-no-query-no-path.json'
         );
     });
+
+    it('should handle mcp tools', async () => {
+        const searchNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: "mcpToolCall",
+                    id: "call-id",
+                    server: "server-name",
+                    tool: "tool-name",
+                    status: "inProgress",
+                    arguments: { argument: "example"},
+                    result: null,
+                    error: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        await setupAndSendNotifications([searchNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/mcp-tool-in-progress.json'
+        );
+    });
 });

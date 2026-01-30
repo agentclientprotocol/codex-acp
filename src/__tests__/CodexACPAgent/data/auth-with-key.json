@@ -69,21 +69,6 @@
   "jsonrpc": "2.0"
 }
 {
-  "eventType": "notification",
-  "method": "codex/event/mcp_startup_complete",
-  "params": {
-    "id": "id",
-    "msg": {
-      "type": "mcp_startup_complete",
-      "ready": [],
-      "failed": [],
-      "cancelled": []
-    },
-    "conversationId": "conversationId"
-  },
-  "jsonrpc": "2.0"
-}
-{
   "eventType": "response",
   "data": [
     {

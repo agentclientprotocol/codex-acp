@@ -39,6 +39,10 @@ describe('CodexACPAgent - initialize', () => {
                 sessionCapabilities: {
                     resume: {},
                 },
+                mcpCapabilities: {
+                    http: true,
+                    sse: false,
+                },
             },
             authMethods: CodexAuthMethods,
         });

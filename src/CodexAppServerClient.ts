@@ -1,8 +1,8 @@
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import type {
-    ClientRequest,
+    ClientRequest, ConversationId,
     InitializeParams,
-    InitializeResponse,
+    InitializeResponse, McpStartupCompleteEvent,
     ServerNotification, SetDefaultModelParams, SetDefaultModelResponse
 } from "./app-server";
 import type {
@@ -45,6 +45,11 @@ const FileChangeApprovalRequest = new RequestType<
     FileChangeRequestApprovalResponse,
     void
 >('item/fileChange/requestApproval');
+
+/**
+ * Poorly supported/deprecated event types
+ */
+export type McpStartupCompleteNotification = { method: "codex/event/mcp_startup_complete", params: { id?: string, msg: McpStartupCompleteEvent & { type:"mcp_startup_complete" }, conversationId?: ConversationId } }
 
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
@@ -131,6 +136,14 @@ export class CodexAppServerClient {
         return await new Promise((resolve) => {
             this.connection.onNotification("account/updated", (event: AccountUpdatedNotification) => {
                 resolve(event);
+            });
+        });
+    }
+
+    async awaitMcpStartup(): Promise<McpStartupCompleteEvent> {
+        return await new Promise((resolve) => {
+            this.connection.onNotification("codex/event/mcp_startup_complete", (event: McpStartupCompleteNotification["params"]) => {
+                resolve(event.msg);
             });
         });
     }
