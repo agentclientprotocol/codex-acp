@@ -8,8 +8,9 @@ import {
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
-import {CodexAcpClient, type SessionMetadata} from "./CodexAcpClient";
-import type {Account, Model, ReasoningEffortOption} from "./app-server/v2";
+import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
+import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
+import type {Account, CollabAgentToolCallStatus, Model, RateLimitSnapshot, Thread, ThreadItem, UserInput, ReasoningEffortOption} from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import type {InputModality, ReasoningEffort} from "./app-server";
 import {ModelId} from "./ModelId";
@@ -19,6 +20,11 @@ import {CodexCommands} from "./CodexCommands";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {isExtMethodRequest} from "./AcpExtensions";
+import {
+    createCommandExecutionUpdate,
+    createFileChangeUpdate,
+    createMcpToolCallUpdate,
+} from "./CodexToolCallMapper";
 
 export interface SessionState {
     sessionId: string,
@@ -71,12 +77,13 @@ export class CodexAcpServer implements acp.Agent {
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
             agentCapabilities: {
-                loadSession: false,
+                loadSession: true,
                 promptCapabilities: {
                     image: true
                 },
                 sessionCapabilities: {
-                    resume: { }
+                    resume: { },
+                    list: { }
                 },
                 mcpCapabilities: {
                     http: true,
@@ -159,6 +166,28 @@ export class CodexAcpServer implements acp.Agent {
         return [sessionId, sessionModelState, sessionModeState];
     }
 
+    async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
+        logger.log("Loading session...", {sessionId: params.sessionId});
+        const {
+            sessionId,
+            modelState,
+            modeState,
+            thread,
+        } = await this.getOrCreateSessionWithHistory(params);
+
+        await this.streamThreadHistory(sessionId, thread);
+
+        logger.log("Session loaded", {
+            sessionId: sessionId,
+            modelId: modelState.currentModelId,
+            availableModelCount: modelState.availableModels.length
+        });
+        return {
+            models: modelState,
+            modes: modeState
+        };
+    }
+
     async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
         logger.log("Resuming session...", {sessionId: params.sessionId});
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
@@ -172,6 +201,12 @@ export class CodexAcpServer implements acp.Agent {
             models: modelState,
             modes: modeState
         };
+    }
+
+    async unstable_listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+        logger.log("Listing sessions...", {cwd: params.cwd, cursor: params.cursor});
+        await this.checkAuthorization();
+        return await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
     }
 
     async newSession(
@@ -285,6 +320,272 @@ export class CodexAcpServer implements acp.Agent {
             availableModels: allowedModels,
             currentModelId: selectedModelId,
         }
+    }
+
+    private async getOrCreateSessionWithHistory(
+        request: acp.LoadSessionRequest
+    ): Promise<{
+        sessionId: SessionId;
+        modelState: SessionModelState;
+        modeState: SessionModeState;
+        thread: Thread;
+    }> {
+        await this.checkAuthorization();
+        const pendingMcpServers: Promise<Array<string>> = this.codexAcpClient.awaitMcpServers();
+
+        logger.log(`Load existing session: ${request.sessionId}...`);
+        const sessionMetadata: SessionMetadataWithThread = await this.runWithProcessCheck(() =>
+            this.codexAcpClient.loadSession(request)
+        );
+
+        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        const {sessionId, currentModelId, models, thread} = sessionMetadata;
+        logger.log("Waiting MCP servers to start...");
+        const sessionMcpServers = await pendingMcpServers;
+        const currentModel = this.findCurrentModel(models, currentModelId);
+        const sessionState: SessionState = {
+            sessionId: sessionId,
+            currentModelId: currentModelId,
+            supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
+            supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
+            agentMode: AgentMode.getInitialAgentMode(),
+            currentTurnId: null,
+            lastTokenUsage: null,
+            totalTokenUsage: null,
+            modelContextWindow: null,
+            rateLimits: null,
+            account: accountResponse.account,
+            cwd: request.cwd,
+            sessionMcpServers: sessionMcpServers,
+        };
+        this.sessions.set(sessionId, sessionState);
+
+        await this.availableCommands.publish(sessionId);
+        const sessionModelState: SessionModelState = this.createModelState(models, currentModelId);
+        const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
+
+        return {
+            sessionId: sessionId,
+            modelState: sessionModelState,
+            modeState: sessionModeState,
+            thread: thread,
+        };
+    }
+
+    private async streamThreadHistory(sessionId: string, thread: Thread): Promise<void> {
+        const session = new ACPSessionConnection(this.connection, sessionId);
+        for (const turn of thread.turns) {
+            for (const item of turn.items) {
+                const updates = await this.createHistoryUpdates(item);
+                for (const update of updates) {
+                    await session.update(update);
+                }
+            }
+        }
+    }
+
+    private async createHistoryUpdates(item: ThreadItem): Promise<UpdateSessionEvent[]> {
+        switch (item.type) {
+            case "userMessage":
+                return this.createUserMessageUpdates(item);
+            case "agentMessage":
+                return [{
+                    sessionUpdate: "agent_message_chunk",
+                    content: { type: "text", text: item.text },
+                }];
+            case "reasoning":
+                return this.createReasoningUpdates(item);
+            case "fileChange":
+                return [await createFileChangeUpdate(item)];
+            case "commandExecution":
+                return [await createCommandExecutionUpdate(item)];
+            case "mcpToolCall":
+                return [await createMcpToolCallUpdate(item)];
+            case "collabAgentToolCall":
+                return [this.createCollabAgentToolCallUpdate(item)];
+            case "webSearch":
+                return [this.createWebSearchUpdate(item)];
+            case "imageView":
+                return [this.createImageViewUpdate(item)];
+            case "enteredReviewMode":
+                return [this.createReviewModeUpdate(item, true)];
+            case "exitedReviewMode":
+                return [this.createReviewModeUpdate(item, false)];
+            case "contextCompaction":
+                return [this.createContextCompactionUpdate()];
+            case "plan":
+                return [this.createPlanUpdate(item)];
+        }
+    }
+
+    private createUserMessageUpdates(item: ThreadItem & { type: "userMessage" }): UpdateSessionEvent[] {
+        const updates: UpdateSessionEvent[] = [];
+        for (const input of item.content) {
+            const blocks = this.userInputToContentBlocks(input);
+            for (const block of blocks) {
+                updates.push({
+                    sessionUpdate: "user_message_chunk",
+                    content: block,
+                });
+            }
+        }
+        return updates;
+    }
+
+    private createReasoningUpdates(item: ThreadItem & { type: "reasoning" }): UpdateSessionEvent[] {
+        const parts = item.summary.length > 0 ? item.summary : item.content;
+        return parts.map((text) => ({
+            sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: text },
+        }));
+    }
+
+    private createCollabAgentToolCallUpdate(
+        item: ThreadItem & { type: "collabAgentToolCall" }
+    ): UpdateSessionEvent {
+        return {
+            sessionUpdate: "tool_call",
+            toolCallId: item.id,
+            kind: "other",
+            title: `collab.${item.tool}`,
+            status: this.toAcpToolCallStatus(item.status),
+            rawInput: {
+                prompt: item.prompt,
+                senderThreadId: item.senderThreadId,
+                receiverThreadIds: item.receiverThreadIds,
+                agentsStates: item.agentsStates,
+                status: item.status,
+            },
+        };
+    }
+
+    private createWebSearchUpdate(
+        item: ThreadItem & { type: "webSearch" }
+    ): UpdateSessionEvent {
+        return {
+            sessionUpdate: "tool_call",
+            toolCallId: item.id,
+            kind: "search",
+            title: this.formatWebSearchTitle(item),
+            status: "completed",
+            rawInput: {
+                query: item.query,
+                action: item.action,
+            },
+        };
+    }
+
+    private createImageViewUpdate(
+        item: ThreadItem & { type: "imageView" }
+    ): UpdateSessionEvent {
+        return {
+            sessionUpdate: "tool_call",
+            toolCallId: item.id,
+            kind: "read",
+            title: "View image",
+            status: "completed",
+            locations: [{ path: item.path }],
+            rawInput: {
+                path: item.path,
+            },
+        };
+    }
+
+    private createReviewModeUpdate(
+        item: ThreadItem & { type: "enteredReviewMode" | "exitedReviewMode" },
+        entered: boolean
+    ): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `${entered ? "Entered" : "Exited"} review mode: ${item.review}`,
+            },
+        };
+    }
+
+    private createContextCompactionUpdate(): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: "Context compacted.",
+            },
+        };
+    }
+
+    private createPlanUpdate(
+        item: ThreadItem & { type: "plan" }
+    ): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `Plan:\n${item.text}`,
+            },
+        };
+    }
+
+    private formatWebSearchTitle(item: ThreadItem & { type: "webSearch" }): string {
+        const action = item.action;
+        if (!action) {
+            return item.query ? `Web search: ${item.query}` : "Web search";
+        }
+        switch (action.type) {
+            case "search": {
+                const queries = action.queries?.filter((query) => query && query.length > 0) ?? [];
+                const query = action.query ?? (queries.length > 0 ? queries.join(", ") : null) ?? item.query;
+                return query ? `Web search: ${query}` : "Web search";
+            }
+            case "openPage":
+                return action.url ? `Open page: ${action.url}` : "Open page";
+            case "findInPage": {
+                const pattern = action.pattern ? ` for '${action.pattern}'` : "";
+                const url = action.url ? ` in ${action.url}` : "";
+                return `Find in page${pattern}${url}`.trim();
+            }
+            case "other":
+                return "Web search";
+        }
+    }
+
+    private toAcpToolCallStatus(status: CollabAgentToolCallStatus): "in_progress" | "completed" | "failed" {
+        switch (status) {
+            case "inProgress":
+                return "in_progress";
+            case "completed":
+                return "completed";
+            case "failed":
+                return "failed";
+        }
+    }
+
+    private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
+        switch (input.type) {
+            case "text":
+                return input.text.length > 0 ? [{ type: "text", text: input.text }] : [];
+            case "image":
+                return [{ type: "text", text: this.formatUriAsLink("image", input.url) }];
+            case "localImage": {
+                const uri = input.path.startsWith("file://") ? input.path : `file://${input.path}`;
+                return [{ type: "text", text: this.formatUriAsLink(null, uri) }];
+            }
+            case "skill":
+                return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
+        }
+        return [];
+    }
+
+    private formatUriAsLink(name: string | null, uri: string): string {
+        if (name && name.length > 0) {
+            return `[@${name}](${uri})`;
+        }
+        if (uri.startsWith("file://")) {
+            const path = uri.replace("file://", "");
+            const fileName = path.split("/").pop() ?? path;
+            return `[@${fileName}](${uri})`;
+        }
+        return uri;
     }
 
     getSessionState(sessionId: string): SessionState {

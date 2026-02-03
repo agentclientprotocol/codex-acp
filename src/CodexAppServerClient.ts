@@ -12,6 +12,12 @@ import type {
     ModelListResponse,
     ThreadStartParams,
     ThreadStartResponse,
+    ThreadLoadedListParams,
+    ThreadLoadedListResponse,
+    ThreadListParams,
+    ThreadListResponse,
+    ThreadReadParams,
+    ThreadReadResponse,
     TurnCompletedNotification,
     TurnInterruptParams,
     TurnInterruptResponse,
@@ -110,6 +116,18 @@ export class CodexAppServerClient {
 
     async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
+    }
+
+    async threadList(params: ThreadListParams): Promise<ThreadListResponse> {
+        return await this.sendRequest({ method: "thread/list", params: params });
+    }
+
+    async threadLoadedList(params: ThreadLoadedListParams): Promise<ThreadLoadedListResponse> {
+        return await this.sendRequest({ method: "thread/loaded/list", params: params });
+    }
+
+    async threadRead(params: ThreadReadParams): Promise<ThreadReadResponse> {
+        return await this.sendRequest({ method: "thread/read", params: params });
     }
 
     async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {

@@ -1,53 +1,29 @@
 import type {ServerNotification} from "./app-server";
 import type {SessionState} from "./CodexAcpServer";
 import * as acp from "@agentclientprotocol/sdk";
-import {type PlanEntry, RequestError, type ToolCallContent} from "@agentclientprotocol/sdk";
-import {applyPatch} from "diff";
+import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
     AccountRateLimitsUpdatedNotification,
-    AgentMessageDeltaNotification, CodexErrorInfo,
-    CommandAction,
+    AgentMessageDeltaNotification,
+    CodexErrorInfo,
     CommandExecutionOutputDeltaNotification,
-    CommandExecutionStatus,
     ConfigWarningNotification,
     ErrorNotification,
-    FileUpdateChange,
     ItemCompletedNotification,
-    ItemStartedNotification,
-    PatchApplyStatus,
-    ThreadItem,
+    ItemStartedNotification, ThreadItem,
     ThreadTokenUsageUpdatedNotification,
     TurnPlanUpdatedNotification
 } from "./app-server/v2";
-import {readFile} from "node:fs/promises";
 import {toTokenCount} from "./TokenCount";
-type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus;
-type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+import {
+    createCommandExecutionUpdate,
+    createFileChangeUpdate,
+    createMcpToolCallUpdate,
+} from "./CodexToolCallMapper";
+import { stripShellPrefix } from "./CommandUtils";
 
-function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
-    switch (status) {
-        case "inProgress":
-            return "in_progress";
-        case "completed":
-            return "completed";
-        case "failed":
-        case "declined":
-            return "failed";
-    }
-}
-
-/**
- * Strips shell prefix from command string (e.g., "/bin/bash -lc 'command'", "/bin/zsh -c command")
- */
-export function stripShellPrefix(command: string): string {
-    const withoutShell = command.replace(/^(?:\/bin\/)?(?:bash|zsh|sh)\s+(?:-[lc]+\s+)?/, "");
-    // Strip surrounding single quotes if present
-    if (withoutShell.startsWith("'") && withoutShell.endsWith("'")) {
-        return withoutShell.slice(1, -1);
-    }
-    return withoutShell;
-}
+export { stripShellPrefix };
 
 export class CodexEventHandler {
 
@@ -167,11 +143,11 @@ export class CodexEventHandler {
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                return await this.createFileChangeEvent(event.item);
+                return await createFileChangeUpdate(event.item);
             case "commandExecution":
-                return await this.createCommandEvent(event.item);
+                return await createCommandExecutionUpdate(event.item);
             case "mcpToolCall":
-                return await this.createMcpEvent(event.item);
+                return await createMcpToolCallUpdate(event.item);
             case "collabAgentToolCall":
             case "userMessage":
             case "agentMessage":
@@ -220,95 +196,6 @@ export class CodexEventHandler {
         }
     }
 
-    private async createFileChangeEvent(item: ThreadItem & { "type": "fileChange" }): Promise<UpdateSessionEvent | null> {
-        const patches: ToolCallContent[] = [];
-        for (const change of item.changes) {
-            const content = await this.createPatchContent(change);
-            if (content) patches.push(content);
-            //TODO handle errors (nulls)
-        }
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: item.id,
-            title: "Editing files",
-            kind: "edit",
-            status: toAcpStatus(item.status),
-            content: patches,
-        };
-    }
-
-    private async createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
-        if (change.kind.type === "add" && !this.isUnifiedDiff(change.diff)) {
-            // For new files, diff may contain raw file content instead of a patch
-            return {
-                type: "diff",
-                oldText: null,
-                newText: change.diff,
-                path: change.path,
-                _meta: {
-                    kind: "add"
-                }
-            }
-        }
-
-        const oldContent = change.kind.type === "add" ? "" : await readFile(change.path, { encoding: "utf8" });
-        const newContent = applyPatch(oldContent, change.diff);
-        // For deleted files, diff may contain raw file content instead of a patch.
-        // Since new text is not optional, we need to pass kind in meta and set newText to null on the client side
-        if (newContent === false) {
-            return null
-        }
-        return {
-            type: "diff",
-            oldText: change.kind.type === "add" ? null : oldContent,
-            newText: newContent,
-            path: change.path,
-            _meta: {
-                kind: change.kind.type
-            }
-        }
-    }
-
-    private isUnifiedDiff(content: string): boolean {
-        return content.startsWith('--- ') || content.includes('\n--- ');
-    }
-
-    private async createCommandEvent(item: ThreadItem & { "type": "commandExecution" }): Promise<UpdateSessionEvent> {
-        const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
-        if (commandAction) {
-            return this.createCommandActionEvent(item.id, item.status, item.cwd, commandAction);
-        }
-        const command = stripShellPrefix(item.command);
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: item.id,
-            kind: "execute",
-            title: command,
-            status: toAcpStatus(item.status),
-            content: [{ type: "terminal", terminalId: item.id }],
-            rawInput: {
-                command: item.command,
-                cwd: item.cwd
-            },
-            _meta: {
-                terminal_info: {
-                    cwd: item.cwd,
-                    terminal_id: item.id
-                }
-            }
-        }
-    }
-
-    private async createMcpEvent(item: ThreadItem & { "type": "mcpToolCall" }): Promise<UpdateSessionEvent> {
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: item.id,
-            kind: "execute",
-            title: `mcp.${item.server}.${item.tool}`,
-            status: toAcpStatus(item.status),
-        }
-    }
-
     private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
         const accumulated = (this.terminalOutputs.get(event.itemId) ?? "") + event.delta;
         this.terminalOutputs.set(event.itemId, accumulated);
@@ -345,68 +232,6 @@ export class CodexEventHandler {
                 }
             }
         }
-    }
-
-    private createCommandActionEvent(id: string, status: CommandExecutionStatus, cwd: string, commandAction: CommandAction): UpdateSessionEvent {
-        const acpStatus = toAcpStatus(status);
-        if (commandAction.type === "read") {
-            return {
-                sessionUpdate: "tool_call",
-                toolCallId: id,
-                status: acpStatus,
-                kind: "read",
-                title: "Read file",
-                locations: [{path: commandAction.path}],
-            };
-        } else if (commandAction.type === "search") {
-            return {
-                sessionUpdate: "tool_call",
-                toolCallId: id,
-                status: acpStatus,
-                kind: "search",
-                title: this.createSearchTitle(commandAction.query, commandAction.path),
-            }
-        } else if (commandAction.type === "listFiles") {
-            const title = commandAction.path
-                ? `List files in '${commandAction.path}'`
-                : "List files";
-            return {
-                sessionUpdate: "tool_call",
-                toolCallId: id,
-                status: acpStatus,
-                kind: "read",
-                title: title,
-            }
-        }
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: id,
-            status: acpStatus,
-            kind: "execute",
-            title: commandAction.command,
-            content: [{ type: "terminal", terminalId: id }],
-            rawInput: {
-                command: commandAction.command,
-                cwd: cwd
-            },
-            _meta: {
-                terminal_info: {
-                    cwd: cwd,
-                    terminal_id: id
-                }
-            }
-        }
-    }
-
-    private createSearchTitle(query: string | null, path: string | null): string {
-        if (query && path) {
-            return `Search for '${query}' in ${path}`;
-        } else if (query) {
-            return `Search for '${query}'`;
-        } else if (path) {
-            return `Search in '${path}'`;
-        }
-        return "Search";
     }
 
     private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {
