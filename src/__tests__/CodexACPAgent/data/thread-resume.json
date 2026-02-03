@@ -5,7 +5,13 @@
     "approvalPolicy": null,
     "sandbox": "sandbox",
     "baseInstructions": null,
-    "config": {},
+    "config": {
+      "projects": {
+        "": {
+          "trust_level": "trusted"
+        }
+      }
+    },
     "cwd": "cwd",
     "developerInstructions": null,
     "history": null,
