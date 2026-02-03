@@ -1,0 +1,18 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "command-123",
+        "_meta": {
+          "terminal_output": {
+            "data": "file1.txt\nfile2.txt\n",
+            "terminal_id": "command-123"
+          }
+        }
+      }
+    }
+  ]
+}

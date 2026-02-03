@@ -1,0 +1,31 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "command-123",
+        "kind": "execute",
+        "title": "ls -la",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "command-123"
+          }
+        ],
+        "rawInput": {
+          "command": "ls -la",
+          "cwd": "/test/project"
+        },
+        "_meta": {
+          "terminal_info": {
+            "cwd": "/test/project",
+            "terminal_id": "command-123"
+          }
+        }
+      }
+    }
+  ]
+}

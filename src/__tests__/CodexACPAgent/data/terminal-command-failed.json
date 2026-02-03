@@ -1,0 +1,24 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "command-456",
+        "status": "failed",
+        "rawOutput": {
+          "formatted_output": "cat: nonexistent.txt: No such file or directory",
+          "exit_code": 1
+        },
+        "_meta": {
+          "terminal_exit": {
+            "exit_code": 1,
+            "signal": null,
+            "terminal_id": "command-456"
+          }
+        }
+      }
+    }
+  ]
+}
