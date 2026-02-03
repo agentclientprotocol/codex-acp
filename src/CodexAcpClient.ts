@@ -139,7 +139,7 @@ export class CodexAcpClient {
             approvalPolicy: null,
             sandbox: null,
             baseInstructions: null,
-            config: this.createSessionConfig(request.mcpServers ?? []),
+            config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
             developerInstructions: null,
             history: null,
@@ -160,7 +160,7 @@ export class CodexAcpClient {
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         const response = await this.codexClient.threadStart({
-            config: this.createSessionConfig(request.mcpServers),
+            config: this.createSessionConfig(request.cwd, request.mcpServers),
             modelProvider: this.getModelProvider(),
             model: null,
             cwd: request.cwd,
@@ -191,8 +191,15 @@ export class CodexAcpClient {
         return response.ready;
     }
 
-    private createSessionConfig(mcpServers: Array<McpServer>): JsonObject {
-        const mergedConfig = mergeGatewayConfig(this.config, this.gatewayConfig);
+    private createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): JsonObject {
+        const mergedConfig = {
+            ...mergeGatewayConfig(this.config, this.gatewayConfig),
+            projects: {
+                [projectPath]: {
+                    trust_level: "trusted",
+                }
+            },
+        };
         if (mcpServers.length === 0) {
             return mergedConfig;
         }

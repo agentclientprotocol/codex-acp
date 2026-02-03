@@ -28,7 +28,13 @@
   "eventType": "request",
   "method": "thread/start",
   "params": {
-    "config": {},
+    "config": {
+      "projects": {
+        "": {
+          "trust_level": "trusted"
+        }
+      }
+    },
     "modelProvider": null,
     "model": "model",
     "cwd": "cwd",
