@@ -8,6 +8,7 @@ import type {
     AccountRateLimitsUpdatedNotification,
     AgentMessageDeltaNotification, CodexErrorInfo,
     CommandAction,
+    CommandExecutionOutputDeltaNotification,
     CommandExecutionStatus,
     ConfigWarningNotification,
     ErrorNotification,
@@ -41,6 +42,7 @@ export class CodexEventHandler {
     private readonly connection: acp.AgentSideConnection;
     private readonly sessionState: SessionState;
     private failure: RequestError | null = null;
+    private readonly terminalOutputs: Map<string, string> = new Map();
 
     constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
@@ -83,16 +85,18 @@ export class CodexEventHandler {
                 return null;
             case "turn/completed":
                 this.sessionState.currentTurnId = null;
+                this.terminalOutputs.clear();
                 return null;
             case "thread/tokenUsage/updated":
                 this.handleTokenUsageUpdated(notification.params);
                 return null;
+            case "item/commandExecution/outputDelta":
+                return this.createCommandOutputDeltaEvent(notification.params);
             case "item/reasoning/summaryTextDelta": //TODO streaming reasoning?
             case "item/reasoning/summaryPartAdded":
             //skipped events
             case "item/reasoning/textDelta": //for raw output
             case "turn/diff/updated":
-            case "item/commandExecution/outputDelta":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
             case "item/mcpToolCall/progress":
@@ -162,12 +166,13 @@ export class CodexEventHandler {
         switch (event.item.type) {
             case "mcpToolCall":
             case "fileChange":
-            case "commandExecution":
                 return {
                     sessionUpdate: "tool_call_update",
                     toolCallId: event.item.id,
                     status: event.item.status === "completed" ? "completed" : "failed"
                 }
+            case "commandExecution":
+                return this.completeCommandExecutionEvent(event.item);
             case "reasoning":
                 const summary = event.item.summary[0];
                 if (!summary) return null;
@@ -245,7 +250,7 @@ export class CodexEventHandler {
     private async createCommandEvent(item: ThreadItem & { "type": "commandExecution" }): Promise<UpdateSessionEvent> {
         const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
         if (commandAction) {
-            return this.createCommandActionEvent(item.id, item.status, commandAction);
+            return this.createCommandActionEvent(item.id, item.status, item.cwd, commandAction);
         }
         const command = item.command.replace(/^(?:\/bin\/)?bash\s+/, "");
         return {
@@ -253,7 +258,18 @@ export class CodexEventHandler {
             toolCallId: item.id,
             kind: "execute",
             title: command,
-            status: toAcpStatus(item.status)
+            status: toAcpStatus(item.status),
+            content: [{ type: "terminal", terminalId: item.id }],
+            rawInput: {
+                command: item.command,
+                cwd: item.cwd
+            },
+            _meta: {
+                terminal_info: {
+                    cwd: item.cwd,
+                    terminal_id: item.id
+                }
+            }
         }
     }
 
@@ -267,7 +283,45 @@ export class CodexEventHandler {
         }
     }
 
-    private createCommandActionEvent(id: string, status: CommandExecutionStatus, commandAction: CommandAction): UpdateSessionEvent {
+    private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
+        const accumulated = (this.terminalOutputs.get(event.itemId) ?? "") + event.delta;
+        this.terminalOutputs.set(event.itemId, accumulated);
+
+        return {
+            sessionUpdate: "tool_call_update",
+            toolCallId: event.itemId,
+            _meta: {
+                terminal_output: {
+                    data: accumulated,
+                    terminal_id: event.itemId
+                }
+            }
+        }
+    }
+
+    private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {
+        // Clean up accumulator
+        this.terminalOutputs.delete(item.id);
+
+        return {
+            sessionUpdate: "tool_call_update",
+            toolCallId: item.id,
+            status: item.status === "completed" ? "completed" : "failed",
+            rawOutput: {
+                formatted_output: item.aggregatedOutput ?? "",
+                exit_code: item.exitCode
+            },
+            _meta: {
+                terminal_exit: {
+                    exit_code: item.exitCode,
+                    signal: null,
+                    terminal_id: item.id
+                }
+            }
+        }
+    }
+
+    private createCommandActionEvent(id: string, status: CommandExecutionStatus, cwd: string, commandAction: CommandAction): UpdateSessionEvent {
         const acpStatus = toAcpStatus(status);
         if (commandAction.type === "read") {
             return {
@@ -304,6 +358,17 @@ export class CodexEventHandler {
             status: acpStatus,
             kind: "execute",
             title: commandAction.command,
+            content: [{ type: "terminal", terminalId: id }],
+            rawInput: {
+                command: commandAction.command,
+                cwd: cwd
+            },
+            _meta: {
+                terminal_info: {
+                    cwd: cwd,
+                    terminal_id: id
+                }
+            }
         }
     }
 
