@@ -68,6 +68,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
                 kind: "execute",
                 status: "pending",
                 content: reasonContent ? [reasonContent] : null,
+                rawInput: params.command ? { command: params.command, cwd: params.cwd } : null,
             },
             options: APPROVAL_OPTIONS,
         };

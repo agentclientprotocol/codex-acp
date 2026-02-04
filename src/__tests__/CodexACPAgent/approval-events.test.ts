@@ -150,6 +150,35 @@ describe('Approval Events', () => {
             completeTurn();
             await promptPromise;
         });
+
+        it('should include rawInput with command and cwd', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+
+            const params: CommandExecutionRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-with-command',
+                reason: 'Installing dependencies',
+                command: 'npm install',
+                cwd: '/home/user/project',
+                proposedExecpolicyAmendment: null,
+            };
+
+            await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                params
+            );
+
+            await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot(
+                'data/approval-command-with-rawInput.json'
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
     });
 
     describe('File change approval', () => {
