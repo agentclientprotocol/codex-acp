@@ -37,6 +37,18 @@ function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
     }
 }
 
+/**
+ * Strips shell prefix from command string (e.g., "/bin/bash -lc 'command'", "/bin/zsh -c command")
+ */
+export function stripShellPrefix(command: string): string {
+    const withoutShell = command.replace(/^(?:\/bin\/)?(?:bash|zsh|sh)\s+(?:-[lc]+\s+)?/, "");
+    // Strip surrounding single quotes if present
+    if (withoutShell.startsWith("'") && withoutShell.endsWith("'")) {
+        return withoutShell.slice(1, -1);
+    }
+    return withoutShell;
+}
+
 export class CodexEventHandler {
 
     private readonly connection: acp.AgentSideConnection;
@@ -252,7 +264,7 @@ export class CodexEventHandler {
         if (commandAction) {
             return this.createCommandActionEvent(item.id, item.status, item.cwd, commandAction);
         }
-        const command = item.command.replace(/^(?:\/bin\/)?bash\s+/, "");
+        const command = stripShellPrefix(item.command);
         return {
             sessionUpdate: "tool_call",
             toolCallId: item.id,

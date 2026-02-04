@@ -9,6 +9,7 @@ import type {
 } from "./app-server/v2";
 import type {ToolCallContent} from "@agentclientprotocol/sdk/dist/schema/types.gen";
 import {logger} from "./Logger";
+import {stripShellPrefix} from "./CodexEventHandler";
 
 const APPROVAL_OPTIONS: acp.PermissionOption[] = [
     { optionId: "allow_once", name: "Allow Once", kind: "allow_once" },
@@ -68,7 +69,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
                 kind: "execute",
                 status: "pending",
                 content: reasonContent ? [reasonContent] : null,
-                rawInput: params.command ? { command: params.command, cwd: params.cwd } : null,
+                rawInput: params.command ? { command: stripShellPrefix(params.command), cwd: params.cwd } : null,
             },
             options: APPROVAL_OPTIONS,
         };

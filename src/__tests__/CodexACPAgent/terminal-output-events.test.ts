@@ -77,6 +77,43 @@ describe('CodexEventHandler - terminal output events', () => {
         );
     });
 
+    it.each([
+        { command: '/bin/zsh -c npm install', expected: 'npm install' },
+        { command: '/bin/bash -lc npm install', expected: 'npm install' },
+        { command: 'zsh npm install', expected: 'npm install' },
+        { command: 'sh -c ls -la', expected: 'ls -la' },
+        { command: 'npm install', expected: 'npm install' },
+        { command: "/bin/bash -lc './tests.cmd -Darg=value'", expected: './tests.cmd -Darg=value' },
+        { command: "/bin/zsh -c 'echo hello'", expected: 'echo hello' },
+    ])('should strip shell prefix from "$command"', async ({ command, expected }) => {
+        const commandStartNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-shell-prefix',
+                    command,
+                    cwd: '/test/project',
+                    processId: null,
+                    status: 'inProgress',
+                    commandActions: [],
+                    aggregatedOutput: null,
+                    exitCode: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        await setupAndSendNotifications([commandStartNotification]);
+
+        const dump = mockFixture.getAcpConnectionDump([]);
+        const parsed = JSON.parse(dump);
+        expect(parsed.args[0].update.title).toBe(expected);
+        expect(parsed.args[0].update.rawInput.command).toBe(command);
+    });
+
     it('should stream terminal output delta', async () => {
         const outputDeltaNotification: ServerNotification = {
             method: 'item/commandExecution/outputDelta',
