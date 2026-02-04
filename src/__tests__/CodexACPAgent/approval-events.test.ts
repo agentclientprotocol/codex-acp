@@ -179,6 +179,43 @@ describe('Approval Events', () => {
             completeTurn();
             await promptPromise;
         });
+
+        it.each([
+            { command: '/bin/zsh -c npm install', expected: 'npm install' },
+            { command: '/bin/bash -lc npm install', expected: 'npm install' },
+            { command: 'zsh npm install', expected: 'npm install' },
+            { command: 'sh -c ls -la', expected: 'ls -la' },
+            { command: 'npm install', expected: 'npm install' },
+            { command: "/bin/bash -lc './tests.cmd -Darg=value'", expected: './tests.cmd -Darg=value' },
+            { command: "/bin/zsh -c 'echo hello'", expected: 'echo hello' },
+        ])('should strip shell prefix from "$command" in rawInput', async ({ command, expected }) => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+
+            const params: CommandExecutionRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-shell-prefix',
+                reason: 'Installing dependencies',
+                command,
+                cwd: '/home/user/project',
+                proposedExecpolicyAmendment: null,
+            };
+
+            await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                params
+            );
+
+            const dump = fixture.getAcpConnectionDump(['_meta']);
+            const parsed = JSON.parse(dump);
+            expect(parsed.args[0].toolCall.rawInput.command).toBe(expected);
+
+            completeTurn();
+            await promptPromise;
+        });
     });
 
     describe('File change approval', () => {
