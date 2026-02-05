@@ -7,11 +7,11 @@ import type { ReasoningEffort } from "./ReasoningEffort";
 import type { SandboxPolicy } from "./SandboxPolicy";
 import type { ThreadId } from "./ThreadId";
 
-export type SessionConfiguredEvent = { 
+export type SessionConfiguredEvent = { session_id: ThreadId, forked_from_id: ThreadId | null, 
 /**
- * Name left as session_id instead of thread_id for backwards compatibility.
+ * Optional user-facing thread name (may be unset).
  */
-session_id: ThreadId, forked_from_id: ThreadId | null, 
+thread_name?: string, 
 /**
  * Tell the client what model is being queried.
  */
