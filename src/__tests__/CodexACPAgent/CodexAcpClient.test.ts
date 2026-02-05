@@ -433,6 +433,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             defaultReasoningEffort: 'medium',
             supportsPersonality: false,
             isDefault: false,
+            upgrade: null,
+            inputModalities: []
         },
         {
             id: '5.1',
@@ -445,6 +447,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             defaultReasoningEffort: 'low',
             supportsPersonality: false,
             isDefault: true,
+            upgrade: null,
+            inputModalities: []
         }
     ];
 

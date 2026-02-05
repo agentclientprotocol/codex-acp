@@ -51,6 +51,7 @@ export class CodexAcpClient {
 
     async initialize(request: acp.InitializeRequest): Promise<void> {
         await this.codexClient.initialize({
+            capabilities: null,
             clientInfo: {
                 name: request.clientInfo?.name ?? this.defaultClientInfo.name,
                 version: request.clientInfo?.version ?? this.defaultClientInfo.version,
@@ -170,7 +171,6 @@ export class CodexAcpClient {
             developerInstructions: null,
             personality: null,
             ephemeral: null,
-            dynamicTools: null,
             experimentalRawEvents: false
         });
 

@@ -129,6 +129,8 @@ export class CodexEventHandler {
             case "mcpServer/oauthLogin/completed":
             case "rawResponseItem/completed":
             case "thread/started":
+            case "thread/name/updated":
+            case "item/plan/delta":
                 return null;
         }
     }
@@ -170,6 +172,8 @@ export class CodexEventHandler {
             case "imageView":
             case "enteredReviewMode":
             case "exitedReviewMode":
+            case "contextCompaction":
+            case "plan":
                 return null;
         }
     }
@@ -202,6 +206,8 @@ export class CodexEventHandler {
             case "imageView":
             case "enteredReviewMode":
             case "exitedReviewMode":
+            case "contextCompaction":
+            case "plan":
                 return null;
         }
     }
