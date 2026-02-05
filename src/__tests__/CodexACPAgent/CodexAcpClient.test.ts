@@ -60,7 +60,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
         expect(newSessionResponse.sessionId).toBeDefined()
 
-        const transportDump = fixture.getCodexConnectionDump(ignoredFields);
+        const transportDump = fixture.getCodexConnectionDump([...ignoredFields, "upgrade"]);
         await expect(transportDump).toMatchFileSnapshot("data/auth-with-key.json");
     });
 
@@ -433,6 +433,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             defaultReasoningEffort: 'medium',
             supportsPersonality: false,
             isDefault: false,
+            upgrade: null,
+            inputModalities: []
         },
         {
             id: '5.1',
@@ -445,6 +447,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             defaultReasoningEffort: 'low',
             supportsPersonality: false,
             isDefault: true,
+            upgrade: null,
+            inputModalities: []
         }
     ];
 

@@ -61,7 +61,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         sessionId: string,
         params: CommandExecutionRequestApprovalParams
     ): acp.RequestPermissionRequest {
-        const reasonContent = this.createContentFromReason(params.reason);
+        const reasonContent = this.createContentFromReason(params.reason ?? null);
         return {
             sessionId,
             toolCall: {
@@ -92,7 +92,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         sessionId: string,
         params: FileChangeRequestApprovalParams
     ): acp.RequestPermissionRequest {
-        const reasonContent = this.createContentFromReason(params.reason);
+        const reasonContent = this.createContentFromReason(params.reason ?? null);
         return {
             sessionId,
             toolCall: {

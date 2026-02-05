@@ -22,6 +22,8 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 isDefault: false,
+                upgrade: null,
+                inputModalities: []
             },
             {
                 id: "other-id",
@@ -32,6 +34,8 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 isDefault: false,
+                upgrade: null,
+                inputModalities: []
             },
             {
                 id: "gpt-5.1-codex-mini",
@@ -42,6 +46,8 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 isDefault: false,
+                upgrade: null,
+                inputModalities: []
             },
             {
                 id: "gpt-4o",
@@ -52,6 +58,8 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 isDefault: false,
+                upgrade: null,
+                inputModalities: []
             },
         ];
 
