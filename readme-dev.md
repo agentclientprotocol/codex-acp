@@ -1,11 +1,10 @@
-### Quick start from sources
+This package lists codex only as a dev dependency and requires the codex binary.
+It may not work with versions other than the one specified in package.json.
 
-#### Download or install codex binary 
+### Quick start
 
-Last checked version: `codex-cli 0.64.0-alpha.9`)
-
-###### Develop on Windows?
-- Download and install [bum](https://bun.com/docs/installation#windows)
+#### Develop on Windows?
+- Download and install [bun](https://bun.com/docs/installation#windows)
 - Download and install [C++ redistributable package](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version)
 
 #### Adjust acp config for IDE
@@ -26,7 +25,8 @@ Run from sources
         "/path/to/project/"
       ],
       "env": {
-        "CODEX_PATH": "/path/to/codex"
+        "CODEX_PATH": "node_modules/.bin/codex",
+        "APP_SERVER_LOGS": "optional/path/to/existing/log/directory"
       }
     }
   }
@@ -53,11 +53,9 @@ Run from binaries
 }
 ```
 
-Optionally, set a path to log directory via env variable `APP_SERVER_LOGS`.
-
 ### Build binaries
 
-Build single executables in `dist/bin` directory:
+Build single-file executables in `dist/bin` directory:
 
 ```bash
 npm run bundle:all
@@ -69,6 +67,8 @@ Package binaries into zip archives:
 npm run package:all
 ```
 
-### Generate codex-specific types
+### Update supported Codex version
 
-Generate files in `src/app-server/`: `npm run generate-types`
+1. Update Codex dependency: `package.json`
+2. Regenerate Codex types in `src/app-server/`: `npm run generate-types`
+3. Ensure there are no type errors or failed tests: `npm run typecheck` and `npm run test`
