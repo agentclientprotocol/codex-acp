@@ -18,13 +18,6 @@ import {CodexCommands} from "./CodexCommands";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 
-const ALLOWED_MODEL_IDS = new Set([
-    "gpt-5.2",
-    "gpt-5.2-codex",
-    "gpt-5.1-codex-max",
-    "gpt-5.1-codex-mini",
-]);
-
 export interface SessionState {
     sessionId: string,
     currentModelId: string,
@@ -254,7 +247,6 @@ export class CodexAcpServer implements acp.Agent {
 
     private createModelState(availableModels: Model[], selectedModelId: string): SessionModelState {
         const allowedModels = availableModels
-            .filter((model) => ALLOWED_MODEL_IDS.has(model.id))
             .flatMap((model) =>
                 model.supportedReasoningEfforts.map((effort) => ({
                     modelId: ModelId.fromComponents(model, effort.reasoningEffort).toString(),

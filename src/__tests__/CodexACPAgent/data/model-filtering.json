@@ -10,8 +10,18 @@
     "description": "Allowed by id. Fast effort."
   },
   {
+    "modelId": "other-id[medium]",
+    "name": "gpt-5.2 (medium)",
+    "description": "Allowed Default effort."
+  },
+  {
     "modelId": "gpt-5.1-codex-mini[medium]",
     "name": "Other (medium)",
     "description": "Allowed by id. Default effort."
+  },
+  {
+    "modelId": "gpt-4o[medium]",
+    "name": "gpt-4o (medium)",
+    "description": "Allowed. Default effort."
   }
 ]
