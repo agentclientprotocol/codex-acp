@@ -8,6 +8,7 @@ import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
 import type {ListMcpServerStatusResponse, Model, SkillsListResponse} from "../../app-server/v2";
+import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
@@ -462,17 +463,26 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(result).toEqual(ModelId.create('5.2-codex', 'medium'));
     });
 
-    it ('should disable resasoning.summary if key authorization is used', async () => {
+    /**
+     * Sets up a mock fixture with turnStart/awaitTurnCompleted spied on,
+     * and a given session state. Returns the fixture and turnStart spy.
+     */
+    function setupPromptFixture(sessionOverrides?: Partial<SessionState>) {
         const mockFixture = createCodexMockTestFixture();
+        const sessionState = createTestSessionState(sessionOverrides);
         const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart").mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
         vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted").mockResolvedValue({
-            threadId: "id", turn: { id: "turn-id", items: [], status: "completed", error: null }
+            threadId: sessionState.sessionId,
+            turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
-        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(
-            createTestSessionState({ account: { type: "apiKey" } })
-        );
+        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
+        return { mockFixture, sessionState, turnStartSpy };
+    }
+
+    it ('should disable resasoning.summary if key authorization is used', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({ account: { type: "apiKey" } });
 
         await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
 
@@ -480,19 +490,185 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it ('should not disable resasoning.summary by default', async () => {
-        const mockFixture = createCodexMockTestFixture();
-        const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart").mockResolvedValue({
-            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+        const { mockFixture, turnStartSpy } = setupPromptFixture({
+            account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
         });
-        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted").mockResolvedValue({
-            threadId: "id", turn: { id: "turn-id", items: [], status: "completed", error: null }
-        });
-        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(
-            createTestSessionState({ account: { type: "chatgpt", email: "test@example.com", planType: "pro" } })
-        );
 
         await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
 
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: null }));
+    });
+
+    it ('should disable reasoning.summary when model lacks reasoning', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({
+            account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
+            supportedReasoningEfforts: [{ reasoningEffort: "none", description: "No reasoning" }],
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "none" }));
+    });
+
+    it ('should not disable reasoning.summary when model supports reasoning', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({
+            account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
+            supportedReasoningEfforts: [
+                { reasoningEffort: "none", description: "No reasoning" },
+                { reasoningEffort: "medium", description: "Default effort" },
+            ],
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: null }));
+    });
+
+    it ('should reject prompt with images when model does not support image input', async () => {
+        const { mockFixture } = setupPromptFixture({
+            supportedInputModalities: ["text"],
+        });
+
+        const prompt: acp.ContentBlock[] = [
+            { type: "text", text: "Hello" },
+            { type: "image", mimeType: "image/png", data: "abc123", uri: "https://example.com/image.png" },
+        ];
+
+        await expect(mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt }))
+            .rejects.toThrow("Invalid request");
+    });
+
+    it ('should accept prompt with images when model supports image input', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({
+            supportedInputModalities: ["text", "image"],
+        });
+
+        const prompt: acp.ContentBlock[] = [
+            { type: "text", text: "Hello" },
+            { type: "image", mimeType: "image/png", data: "abc123", uri: "https://example.com/image.png" },
+        ];
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            input: [
+                { type: "text", text: "Hello", text_elements: [] },
+                { type: "image", url: "https://example.com/image.png" },
+            ]
+        }));
+    });
+
+    it ('should show rate limits from multiple sources in status', async () => {
+        const rateLimits: RateLimitsMap = new Map();
+        rateLimits.set("limit-1", {
+            limitId: "limit-1",
+            limitName: "Standard",
+            snapshot: {
+                primary: { usedPercent: 25, resetsAt: null, windowDurationMins: 60 },
+                secondary: null,
+                credits: null,
+                planType: null,
+            }
+        });
+        rateLimits.set("limit-2", {
+            limitId: "limit-2",
+            limitName: "Fast",
+            snapshot: {
+                primary: { usedPercent: 80, resetsAt: null, windowDurationMins: 1440 },
+                secondary: null,
+                credits: null,
+                planType: null,
+            }
+        });
+
+        const { mockFixture } = setupPromptFixture({ rateLimits });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "session-id", prompt: [{ type: "text", text: "/status" }] });
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-status-with-rate-limits.json");
+    });
+
+    it ('should surface thread/compacted as user-visible message', async () => {
+        const sessionId = "test-session-id";
+        const { mockFixture } = setupPromptFixture({ sessionId });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "test" }],
+        });
+
+        mockFixture.clearAcpConnectionDump();
+
+        mockFixture.sendServerNotification({
+            method: "thread/compacted",
+            params: { threadId: sessionId, turnId: "turn-id" }
+        });
+
+        await vi.waitFor(() => {
+            const dump = mockFixture.getAcpConnectionDump([]);
+            expect(dump.length).toBeGreaterThan(0);
+        });
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/thread-compacted.json");
+    });
+
+    it ('should accumulate rate limits from multiple notifications', async () => {
+        const sessionId = "test-session-id";
+        const { mockFixture, sessionState } = setupPromptFixture({ sessionId });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "test" }],
+        });
+
+        mockFixture.sendServerNotification({
+            method: "account/rateLimits/updated",
+            params: {
+                limitId: "standard-limit",
+                limitName: "Standard",
+                rateLimits: {
+                    primary: { usedPercent: 30, resetsAt: null, windowDurationMins: 60 },
+                    secondary: null,
+                    credits: null,
+                    planType: null,
+                }
+            }
+        });
+
+        mockFixture.sendServerNotification({
+            method: "account/rateLimits/updated",
+            params: {
+                limitId: "fast-limit",
+                limitName: "Fast",
+                rateLimits: {
+                    primary: { usedPercent: 50, resetsAt: null, windowDurationMins: 1440 },
+                    secondary: null,
+                    credits: null,
+                    planType: null,
+                }
+            }
+        });
+
+        expect(sessionState.rateLimits).not.toBeNull();
+        expect(sessionState.rateLimits!.size).toBe(2);
+        expect(sessionState.rateLimits!.get("standard-limit")).toEqual({
+            limitId: "standard-limit",
+            limitName: "Standard",
+            snapshot: {
+                primary: { usedPercent: 30, resetsAt: null, windowDurationMins: 60 },
+                secondary: null,
+                credits: null,
+                planType: null,
+            }
+        });
+        expect(sessionState.rateLimits!.get("fast-limit")).toEqual({
+            limitId: "fast-limit",
+            limitName: "Fast",
+            snapshot: {
+                primary: { usedPercent: 50, resetsAt: null, windowDurationMins: 1440 },
+                secondary: null,
+                credits: null,
+                planType: null,
+            }
+        });
     });
 });

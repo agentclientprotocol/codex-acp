@@ -4,6 +4,7 @@ import {ACPSessionConnection} from "./ACPSessionConnection";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {RateLimitSnapshot, SkillsListEntry} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
+import type {RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
 import {logger} from "./Logger";
 
@@ -233,7 +234,7 @@ export class CodexCommands {
             return "API key configured";
         }
         if (account.type === "chatgpt") {
-            return `ChatGPT (${account.email})`;
+            return `ChatGPT ${account.planType} (${account.email})`;
         }
         return "unknown";
     }
@@ -259,36 +260,47 @@ export class CodexCommands {
         return `${percentLeft}% left (${usedFormatted} used / ${totalFormatted})`;
     }
 
-    private formatRateLimitLines(rateLimits: RateLimitSnapshot | null): string[] {
-        if (!rateLimits) {
+    private formatRateLimitLines(rateLimits: RateLimitsMap | null): string[] {
+        if (!rateLimits || rateLimits.size === 0) {
             return [`**Limits:** data not available yet`];
         }
 
         const lines: string[] = [];
 
+        for (const [, entry] of rateLimits) {
+            lines.push(...this.formatSingleRateLimit(entry.limitName, entry.snapshot));
+        }
+
+        return lines.length > 0 ? lines : [`**Limits:** data not available yet`];
+    }
+
+    private formatSingleRateLimit(limitName: string, rateLimits: RateLimitSnapshot): string[] {
+        const lines: string[] = [];
+        const prefix = limitName ? `${limitName} ` : "";
+
         if (rateLimits.primary) {
             const percentLeft = Math.round(100 - rateLimits.primary.usedPercent);
             const resetText = this.formatResetTime(rateLimits.primary.resetsAt);
             const label = this.formatWindowLabel(rateLimits.primary.windowDurationMins);
-            lines.push(`**${label}:** ${percentLeft}% left${resetText}`);
+            lines.push(`**${prefix}${label}:** ${percentLeft}% left${resetText}`);
         }
 
         if (rateLimits.secondary) {
             const percentLeft = Math.round(100 - rateLimits.secondary.usedPercent);
             const resetText = this.formatResetTime(rateLimits.secondary.resetsAt);
             const label = this.formatWindowLabel(rateLimits.secondary.windowDurationMins);
-            lines.push(`**${label}:** ${percentLeft}% left${resetText}`);
+            lines.push(`**${prefix}${label}:** ${percentLeft}% left${resetText}`);
         }
 
         if (rateLimits.credits) {
             if (rateLimits.credits.unlimited) {
-                lines.push(`**Credits:** unlimited`);
+                lines.push(`**${prefix}Credits:** unlimited`);
             } else if (rateLimits.credits.balance) {
-                lines.push(`**Credits:** ${rateLimits.credits.balance}`);
+                lines.push(`**${prefix}Credits:** ${rateLimits.credits.balance}`);
             }
         }
 
-        return lines.length > 0 ? lines : [`**Limits:** data not available yet`];
+        return lines;
     }
 
     private formatWindowLabel(windowDurationMins: number | null): string {

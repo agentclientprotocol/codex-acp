@@ -1,0 +1,15 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "**Model:** model-id[effort]  \n**Directory:** /test/cwd  \n**Approval:** on-request  \n**Sandbox:** workspace-write  \n**Account:** not logged in  \n**Session:** `session-id`  \n  \n**Token usage:** data not available yet  \n**Context window:** data not available yet  \n**Standard 1h limit:** 75% left  \n**Fast 1d limit:** 20% left"
+        }
+      }
+    }
+  ]
+}
