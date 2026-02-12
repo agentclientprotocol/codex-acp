@@ -9,8 +9,9 @@ import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata} from "./CodexAcpClient";
-import type {Account, Model, RateLimitSnapshot} from "./app-server/v2";
-import type {ReasoningEffort} from "./app-server";
+import type {Account, Model, ReasoningEffortOption} from "./app-server/v2";
+import type {RateLimitsMap} from "./RateLimitsMap";
+import type {InputModality, ReasoningEffort} from "./app-server";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import type {TokenCount} from "./TokenCount";
@@ -21,12 +22,14 @@ import {logger} from "./Logger";
 export interface SessionState {
     sessionId: string,
     currentModelId: string,
+    supportedReasoningEfforts: Array<ReasoningEffortOption>,
+    supportedInputModalities: Array<InputModality>,
     agentMode: AgentMode,
     currentTurnId: string | null;
     lastTokenUsage: TokenCount | null;
     totalTokenUsage: TokenCount | null;
     modelContextWindow: number | null;
-    rateLimits: RateLimitSnapshot | null;
+    rateLimits: RateLimitsMap | null;
     account: Account | null;
     cwd: string;
     sessionMcpServers?: Array<string>;
@@ -117,9 +120,12 @@ export class CodexAcpServer implements acp.Agent {
         const {sessionId, currentModelId, models} = sessionMetadata;
         logger.log(`Waiting MCP servers to start...`)
         const sessionMcpServers = await pendingMcpServers;
+        const currentModel = this.findCurrentModel(models, currentModelId);
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
+            supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
+            supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
             currentTurnId: null,
             lastTokenUsage: null,
@@ -237,12 +243,19 @@ export class CodexAcpServer implements acp.Agent {
         }
 
         sessionState.currentModelId = ModelId.fromComponents(model, reasoningEffort).toString();
+        sessionState.supportedReasoningEfforts = model.supportedReasoningEfforts;
+        sessionState.supportedInputModalities = model.inputModalities;
 
         return {};
     }
 
     private publishAvailableCommandsAsync(sessionId: string) {
         void this.availableCommands.publish(sessionId);
+    }
+
+    private findCurrentModel(models: Model[], currentModelId: string): Model | undefined {
+        const modelId = ModelId.fromString(currentModelId);
+        return models.find(m => m.id === modelId.model);
     }
 
     private createModelState(availableModels: Model[], selectedModelId: string): SessionModelState {
@@ -292,14 +305,22 @@ export class CodexAcpServer implements acp.Agent {
                 };
             }
 
-            const disableSummary = sessionState.account?.type === "apiKey"
+            const modelId = ModelId.fromString(sessionState.currentModelId);
+            const modelLacksReasoning = sessionState.supportedReasoningEfforts.length > 0
+                && sessionState.supportedReasoningEfforts.every(e => e.reasoningEffort === "none");
+
+            const disableSummary = sessionState.account?.type === "apiKey" || modelLacksReasoning;
             if (disableSummary) {
-                logger.log("Disable reasoning.summary because API key is used", {sessionId: params.sessionId});
+                logger.log("Disable reasoning.summary", {
+                    sessionId: params.sessionId,
+                    reason: sessionState.account?.type === "apiKey" ? "API key" : "model lacks reasoning"
+                });
             }
 
-
+            if (!sessionState.supportedInputModalities.includes("image") && params.prompt.some(b => b.type === "image")) {
+                throw RequestError.invalidRequest("The current model does not support image input");
+            }
             const agentMode = sessionState.agentMode;
-            const modelId = ModelId.fromString(sessionState.currentModelId);
             const turnCompleted = await this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, disableSummary));
 
