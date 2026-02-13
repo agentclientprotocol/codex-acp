@@ -25,6 +25,7 @@ import type {
     UserInput,
 } from "./app-server/v2";
 import packageJson from "../package.json";
+import type {AuthenticationLogoutResponse, AuthenticationStatusResponse} from "./AcpExtensions";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -113,9 +114,47 @@ export class CodexAcpClient {
         return result.success;
     }
 
-    async logout(): Promise<void> {
+
+    async getAuthenticationStatus(): Promise<AuthenticationStatusResponse> {
+        const modelProvider = await this.getCurrentModelProvider();
+        if (modelProvider) {
+            return {
+                type: "gateway",
+                name: modelProvider,
+            };
+        }
+        const account = (await this.getAccount()).account;
+        if (account === null) {
+            return {
+                type: "unauthenticated",
+            };
+        }
+        switch (account.type) {
+            case "apiKey":
+                return {
+                    type: "api-key",
+                };
+            case "chatgpt":
+                return {
+                    type: "chat-gpt",
+                    email: account.email,
+                };
+        }
+    }
+
+    async getCurrentModelProvider(): Promise<string | null> {
+        const sessionModelProvider = this.getModelProvider();
+        if (sessionModelProvider !== null) {
+            return sessionModelProvider;
+        }
+        const settingsModelProvider = await this.codexClient.configRead({includeLayers: false});
+        return settingsModelProvider.config.model_provider;
+    }
+
+    async logout(): Promise<AuthenticationLogoutResponse> {
         await this.codexClient.accountLogout();
         await this.codexClient.awaitAccountUpdated();
+        return {};
     }
 
     async authRequired(): Promise<Boolean> {

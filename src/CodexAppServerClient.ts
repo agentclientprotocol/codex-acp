@@ -26,7 +26,7 @@ import type {
     SkillsListParams,
     SkillsListResponse,
     ListMcpServerStatusParams,
-    ListMcpServerStatusResponse,
+    ListMcpServerStatusResponse, ConfigReadParams, ConfigReadResponse,
 } from "./app-server/v2";
 
 export interface ApprovalHandler {
@@ -122,6 +122,10 @@ export class CodexAppServerClient {
 
     async accountLogout(): Promise<LogoutAccountResponse> {
         return await this.sendRequest({ method: "account/logout", params: undefined });
+    }
+
+    async configRead(params: ConfigReadParams): Promise<ConfigReadResponse> {
+        return await this.sendRequest({ method: "config/read", params: params });
     }
 
     async awaitLoginCompleted(): Promise<AccountLoginCompletedNotification> {
