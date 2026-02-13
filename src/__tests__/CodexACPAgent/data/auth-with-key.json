@@ -81,22 +81,22 @@
       "model": "model",
       "upgrade": "upgrade",
       "displayName": "gpt-5.2-codex",
-      "description": "Latest frontier agentic coding model.",
+      "description": "Frontier agentic coding model.",
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "inputModalities": [
         "text",
         "image"
       ],
-      "supportsPersonality": false,
+      "supportsPersonality": true,
       "isDefault": true
     },
     {
       "id": "id",
       "model": "model",
       "upgrade": "upgrade",
-      "displayName": "gpt-5.2",
-      "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
+      "displayName": "gpt-5.1-codex-max",
+      "description": "Codex-optimized flagship for deep and fast reasoning.",
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "inputModalities": [
@@ -110,8 +110,8 @@
       "id": "id",
       "model": "model",
       "upgrade": "upgrade",
-      "displayName": "gpt-5.1-codex-max",
-      "description": "Codex-optimized flagship for deep and fast reasoning.",
+      "displayName": "gpt-5.2",
+      "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "inputModalities": [

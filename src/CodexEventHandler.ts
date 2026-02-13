@@ -120,6 +120,13 @@ export class CodexEventHandler {
             case "configWarning":
                 return await this.createConfigWarningEvent(notification.params);
             case "thread/compacted":
+                return {
+                    sessionUpdate: "agent_message_chunk",
+                    content: {
+                        type: "text",
+                        text: "*Context compacted to fit the model's context window.*\n\n"
+                    }
+                };
             case "windows/worldWritableWarning":
             case "account/login/completed":
             case "authStatusChange":
@@ -131,6 +138,7 @@ export class CodexEventHandler {
             case "thread/started":
             case "thread/name/updated":
             case "item/plan/delta":
+            case "app/list/updated":
                 return null;
         }
     }
@@ -450,6 +458,13 @@ export class CodexEventHandler {
     }
 
     private handleRateLimitsUpdated(params: AccountRateLimitsUpdatedNotification): void {
-        this.sessionState.rateLimits = params.rateLimits;
+        if (!this.sessionState.rateLimits) {
+            this.sessionState.rateLimits = new Map();
+        }
+        this.sessionState.rateLimits.set(params.limitId, {
+            limitId: params.limitId,
+            limitName: params.limitName,
+            snapshot: params.rateLimits,
+        });
     }
 }
