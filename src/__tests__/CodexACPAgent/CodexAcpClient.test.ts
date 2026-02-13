@@ -9,6 +9,7 @@ import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
 import type {ListMcpServerStatusResponse, Model, SkillsListResponse} from "../../app-server/v2";
 import {ModelId} from "../../ModelId";
+import type {AuthenticationStatusResponse} from "../../AcpExtensions";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -53,6 +54,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.initialize({protocolVersion: 1});
         await fixture.getCodexAcpClient().logout();
+
+
+        const unauthenticatedResponse = await fixture.getCodexAcpAgent().extMethod("authentication/status", {}) as AuthenticationStatusResponse;
+        expect(unauthenticatedResponse).toEqual({type: "unauthenticated"});
+
         fixture.clearCodexConnectionDump();
 
         const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}}
@@ -62,6 +68,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const transportDump = fixture.getCodexConnectionDump([...ignoredFields, "upgrade"]);
         await expect(transportDump).toMatchFileSnapshot("data/auth-with-key.json");
+
+        const authenticatedResponse = await fixture.getCodexAcpAgent().extMethod("authentication/status", {}) as AuthenticationStatusResponse;
+        expect(authenticatedResponse).toEqual({type: "api-key"});
     });
 
     it('should authenticate with a gateway', async () => {
@@ -84,6 +93,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.authenticate(authRequest);
         expect(await fixture.getCodexAcpClient().authRequired()).toBe(false);
+
+        const authenticatedResponse = await fixture.getCodexAcpAgent().extMethod("authentication/status", {}) as AuthenticationStatusResponse;
+        expect(authenticatedResponse).toEqual({type: "gateway", name: "custom-gateway"});
 
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
         expect(newSessionResponse.sessionId).toBeDefined()
@@ -349,7 +361,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const sessionState: SessionState = createTestSessionState();
 
-        const logoutSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "logout").mockResolvedValue(undefined);
+        const logoutSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "logout").mockResolvedValue({});
 
         // @ts-expect-error - exercising private helper
         const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "logout", input: null }, sessionState);

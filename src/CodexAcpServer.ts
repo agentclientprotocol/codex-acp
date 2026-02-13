@@ -17,6 +17,7 @@ import type {TokenCount} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
+import {isExtMethodRequest} from "./AcpExtensions";
 
 export interface SessionState {
     sessionId: string,
@@ -81,6 +82,19 @@ export class CodexAcpServer implements acp.Agent {
             },
             authMethods: CodexAuthMethods,
         };
+    }
+
+    async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+        const methodRequest = { method: method, params: params };
+        if (!isExtMethodRequest(methodRequest)) {
+            return {};
+        }
+        switch (methodRequest.method) {
+            case "authentication/status":
+                return await this.runWithProcessCheck(() => this.codexAcpClient.getAuthenticationStatus());
+            case "authentication/logout":
+                return await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+        }
     }
 
     async checkAuthorization(){
