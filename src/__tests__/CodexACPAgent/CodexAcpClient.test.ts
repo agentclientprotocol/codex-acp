@@ -105,6 +105,96 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(newSessionResponse.sessionId).toBeDefined()
     })
 
+    it('prefetches session additional skill roots before thread start', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        const listSkillsSpy = vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({ data: [] });
+        const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+            thread: { id: "thread-id" } as any,
+            model: "gpt-5",
+            modelProvider: "openai",
+            cwd: "/workspace",
+            approvalPolicy: "on-request",
+            sandbox: "workspace-write",
+            reasoningEffort: "medium",
+        } as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [{
+                id: "gpt-5",
+                model: "gpt-5",
+                upgrade: null,
+                displayName: "gpt-5",
+                description: "test model",
+                supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "balanced" }],
+                defaultReasoningEffort: "medium",
+                inputModalities: ["text"],
+                supportsPersonality: false,
+                isDefault: true
+            }],
+            nextCursor: null
+        });
+
+        await codexAcpClient.newSession({
+            cwd: "/workspace",
+            mcpServers: [],
+            _meta: {
+                additionalRoots: ["/skills/one", " /skills/two ", 7]
+            }
+        });
+
+        expect(listSkillsSpy).toHaveBeenCalledWith({
+            cwds: ["/workspace"],
+            forceReload: true,
+            perCwdExtraUserRoots: [{
+                cwd: "/workspace",
+                extraUserRoots: ["/skills/one", "/skills/two"]
+            }]
+        });
+        expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
+    });
+
+    it('prefetches session additional skill roots before turn start', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        const listSkillsSpy = vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({ data: [] });
+        const turnStartSpy = vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({
+            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+        } as any);
+        vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
+            threadId: "session-id",
+            turn: { id: "turn-id", items: [], status: "completed", error: null }
+        } as any);
+
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(createTestSessionState({
+            sessionId: "session-id",
+            cwd: "/workspace"
+        }));
+
+        const promptRequest: acp.PromptRequest = {
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "Hello" }],
+            _meta: {
+                additionalRoots: ["/skills/one", " /skills/two ", 7],
+                cwd: "/workspace"
+            }
+        };
+        await codexAcpAgent.prompt(promptRequest);
+
+        expect(listSkillsSpy).toHaveBeenCalledWith({
+            cwds: ["/workspace"],
+            forceReload: true,
+            perCwdExtraUserRoots: [{
+                cwd: "/workspace",
+                extraUserRoots: ["/skills/one", "/skills/two"]
+            }]
+        });
+        expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(turnStartSpy.mock.invocationCallOrder[0]!);
+    });
+
     function loadNotifications(){
         //TODO collect logs form dev run and then load them from file to speedup
         const serverNotifications: ServerNotification[] = [
