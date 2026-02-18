@@ -14,6 +14,8 @@ import type {
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
+import path from "node:path";
+import {logger} from "./Logger";
 import type {
     GetAccountResponse,
     ListMcpServerStatusParams,
@@ -21,6 +23,8 @@ import type {
     Model,
     SkillsListParams,
     SkillsListResponse,
+    Thread,
+    ThreadSourceKind,
     TurnCompletedNotification,
     UserInput,
 } from "./app-server/v2";
@@ -198,6 +202,31 @@ export class CodexAcpClient {
         }
     }
 
+    async loadSession(request: acp.LoadSessionRequest): Promise<SessionMetadataWithThread> {
+        const response = await this.codexClient.threadResume({
+            approvalPolicy: null,
+            sandbox: null,
+            baseInstructions: null,
+            config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
+            cwd: request.cwd,
+            developerInstructions: null,
+            history: null,
+            model: null,
+            modelProvider: this.getModelProvider(),
+            path: null,
+            personality: null,
+            threadId: request.sessionId,
+        });
+        const codexModels = await this.fetchAvailableModels();
+        const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
+        return {
+            sessionId: request.sessionId,
+            currentModelId: currentModelId,
+            models: codexModels,
+            thread: response.thread,
+        };
+    }
+
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         const response = await this.codexClient.threadStart({
             config: this.createSessionConfig(request.cwd, request.mcpServers),
@@ -336,6 +365,73 @@ export class CodexAcpClient {
         return this.codexClient.listMcpServerStatus(params);
     }
 
+    async listSessions(request: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+        const sourceKinds: ThreadSourceKind[] = [
+            "cli",
+            "vscode",
+            "exec",
+            "appServer",
+            "subAgent",
+            "subAgentReview",
+            "subAgentCompact",
+            "subAgentThreadSpawn",
+            "subAgentOther",
+            "unknown",
+        ];
+        const requestedCwd = request.cwd?.trim() ?? null;
+        const filterByCwd = (thread: Thread): boolean => {
+            if (!requestedCwd) return true;
+            if (path.isAbsolute(requestedCwd)) {
+                return thread.cwd === requestedCwd;
+            }
+            const requestedBase = path.basename(requestedCwd);
+            return path.basename(thread.cwd) === requestedBase;
+        };
+
+        const preferredProvider = this.getModelProvider();
+        const modelProviders = preferredProvider ? [preferredProvider] : [];
+        const listResponse = await this.codexClient.threadList({
+            cursor: request.cursor ?? null,
+            limit: null,
+            sortKey: null,
+            modelProviders: modelProviders,
+            sourceKinds: sourceKinds,
+            archived: null,
+        });
+
+        if (listResponse.data.length === 0) {
+            const diagnostics = await this.runSessionListDiagnostics();
+            logger.log("Session list diagnostics", diagnostics);
+        }
+
+        let sessions = listResponse.data.map((thread) => ({
+            sessionId: thread.id,
+            cwd: thread.cwd,
+            title: thread.preview || null,
+            updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
+        }));
+        if (requestedCwd) {
+            const filtered = listResponse.data
+                .filter(filterByCwd)
+                .map((thread) => ({
+                    sessionId: thread.id,
+                    cwd: thread.cwd,
+                    title: thread.preview || null,
+                    updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
+                }));
+            if (filtered.length > 0 || path.isAbsolute(requestedCwd)) {
+                sessions = filtered;
+            } else {
+                logger.log("Ignoring non-absolute cwd filter for session/list", {cwd: requestedCwd});
+            }
+        }
+
+        return {
+            sessions,
+            nextCursor: listResponse.nextCursor ?? null,
+        };
+    }
+
     async turnInterrupt(params: { threadId: string, turnId: string }): Promise<void> {
         await this.codexClient.turnInterrupt({
             threadId: params.threadId,
@@ -355,6 +451,51 @@ export class CodexAcpClient {
 
         return models;
     }
+
+    private async runSessionListDiagnostics(): Promise<Record<string, unknown>> {
+        const [allProviders, archivedAllProviders, customGateway] = await Promise.all([
+            this.codexClient.threadList({
+                cursor: null,
+                limit: null,
+                sortKey: null,
+                modelProviders: [],
+                sourceKinds: null,
+                archived: null,
+            }),
+            this.codexClient.threadList({
+                cursor: null,
+                limit: null,
+                sortKey: null,
+                modelProviders: [],
+                sourceKinds: null,
+                archived: true,
+            }),
+            this.codexClient.threadList({
+                cursor: null,
+                limit: null,
+                sortKey: null,
+                modelProviders: ["custom-gateway"],
+                sourceKinds: null,
+                archived: null,
+            }),
+        ]);
+
+        return {
+            allProviders: {
+                count: allProviders.data.length,
+                nextCursor: allProviders.nextCursor ?? null,
+            },
+            archivedAllProviders: {
+                count: archivedAllProviders.data.length,
+                nextCursor: archivedAllProviders.nextCursor ?? null,
+            },
+            customGateway: {
+                count: customGateway.data.length,
+                nextCursor: customGateway.nextCursor ?? null,
+            },
+        };
+    }
+
 }
 
 export type JsonObject = { [key in string]?: JsonValue }
@@ -363,6 +504,10 @@ export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
     models: Model[],
+}
+
+export type SessionMetadataWithThread = SessionMetadata & {
+    thread: Thread,
 }
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {

@@ -32,12 +32,13 @@ describe('CodexACPAgent - initialize', () => {
         expect(result).toEqual({
             protocolVersion: acp.PROTOCOL_VERSION,
             agentCapabilities: {
-                loadSession: false,
+                loadSession: true,
                 promptCapabilities: {
                     image: true
                 },
                 sessionCapabilities: {
                     resume: {},
+                    list: {},
                 },
                 mcpCapabilities: {
                     http: true,
