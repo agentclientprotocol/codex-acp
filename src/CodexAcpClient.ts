@@ -14,6 +14,7 @@ import type {
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
+import {CodexAdditionalRootsProvider} from "./CodexAdditionalRootsProvider";
 import path from "node:path";
 import {logger} from "./Logger";
 import type {
@@ -38,6 +39,7 @@ import type {AuthenticationLogoutResponse, AuthenticationStatusResponse} from ".
 export class CodexAcpClient {
 
     private readonly codexClient: CodexAppServerClient;
+    private readonly additionalRootsProvider: CodexAdditionalRootsProvider;
     private readonly config: JsonObject;
     private readonly modelProvider: string | null;
     private gatewayConfig: GatewayConfig | null;
@@ -45,6 +47,7 @@ export class CodexAcpClient {
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
         this.codexClient = codexClient;
+        this.additionalRootsProvider = new CodexAdditionalRootsProvider(codexClient);
         this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
         this.gatewayConfig = null;
@@ -179,6 +182,8 @@ export class CodexAcpClient {
     }
 
     async resumeSession(request: acp.ResumeSessionRequest): Promise<SessionMetadata> {
+        await this.additionalRootsProvider.refreshSkills(request);
+
         const response = await this.codexClient.threadResume({
             approvalPolicy: null,
             sandbox: null,
@@ -228,6 +233,8 @@ export class CodexAcpClient {
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
+        await this.additionalRootsProvider.refreshSkills(request);
+
         const response = await this.codexClient.threadStart({
             config: this.createSessionConfig(request.cwd, request.mcpServers),
             modelProvider: this.getModelProvider(),
@@ -334,6 +341,8 @@ export class CodexAcpClient {
     ): Promise<TurnCompletedNotification> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
+
+        await this.additionalRootsProvider.refreshSkills(request);
         await this.codexClient.turnStart({
             outputSchema: null,
             threadId: request.sessionId,
