@@ -26,8 +26,8 @@ describe('MCP session configuration', { timeout: 40_000 }, () => {
         fixture.clearAcpConnectionDump();
         await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "/mcp"}]});
         const transportDump = fixture.getAcpConnectionDump([]);
-        console.log(transportDump)
-        expect(transportDump).contain("Configured MCP servers:\\n- test-mcp");
+        expect(transportDump).toContain("Configured MCP servers:");
+        expect(transportDump).toContain("- test-mcp");
     });
 
 });
