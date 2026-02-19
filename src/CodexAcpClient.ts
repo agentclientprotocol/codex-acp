@@ -338,11 +338,16 @@ export class CodexAcpClient {
         agentMode: AgentMode,
         modelId: ModelId,
         disableSummary: boolean,
+        cwd: string,
     ): Promise<TurnCompletedNotification> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
 
-        await this.additionalRootsProvider.refreshSkills(request);
+        const refreshSkillsRequest: { _meta?: Record<string, unknown> | null, cwd?: string } = { cwd: cwd };
+        if (request._meta !== undefined) {
+            refreshSkillsRequest._meta = request._meta;
+        }
+        await this.additionalRootsProvider.refreshSkills(refreshSkillsRequest);
         await this.codexClient.turnStart({
             outputSchema: null,
             threadId: request.sessionId,

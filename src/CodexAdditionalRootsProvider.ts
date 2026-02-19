@@ -5,7 +5,7 @@ export class CodexAdditionalRootsProvider {
 
     async refreshSkills(request: { _meta?: Record<string, unknown> | null, cwd?: string }): Promise<void> {
         const additionalRoots = this.readAdditionalRoots(request._meta);
-        const cwd = this.nonEmpty(request.cwd) ?? this.nonEmpty(request._meta?.["cwd"]);
+        const cwd = this.nonEmpty(request.cwd);
         if (!cwd) {
             return;
         }
