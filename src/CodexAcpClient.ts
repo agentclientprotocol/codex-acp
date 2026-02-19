@@ -14,7 +14,6 @@ import type {
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
-import {CodexAdditionalRootsProvider} from "./CodexAdditionalRootsProvider";
 import path from "node:path";
 import {logger} from "./Logger";
 import type {
@@ -39,7 +38,6 @@ import type {AuthenticationLogoutResponse, AuthenticationStatusResponse} from ".
 export class CodexAcpClient {
 
     private readonly codexClient: CodexAppServerClient;
-    private readonly additionalRootsProvider: CodexAdditionalRootsProvider;
     private readonly config: JsonObject;
     private readonly modelProvider: string | null;
     private gatewayConfig: GatewayConfig | null;
@@ -47,7 +45,6 @@ export class CodexAcpClient {
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
         this.codexClient = codexClient;
-        this.additionalRootsProvider = new CodexAdditionalRootsProvider(codexClient);
         this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
         this.gatewayConfig = null;
@@ -182,7 +179,7 @@ export class CodexAcpClient {
     }
 
     async resumeSession(request: acp.ResumeSessionRequest): Promise<SessionMetadata> {
-        await this.additionalRootsProvider.refreshSkills(request);
+        await this.refreshSkills(request.cwd, request._meta);
 
         const response = await this.codexClient.threadResume({
             approvalPolicy: null,
@@ -233,7 +230,7 @@ export class CodexAcpClient {
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
-        await this.additionalRootsProvider.refreshSkills(request);
+        await this.refreshSkills(request.cwd, request._meta);
 
         const response = await this.codexClient.threadStart({
             config: this.createSessionConfig(request.cwd, request.mcpServers),
@@ -286,6 +283,21 @@ export class CodexAcpClient {
 
     private getModelProvider(): string | null {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
+    }
+
+    private async refreshSkills(cwd: string, meta?: Record<string, unknown> | null): Promise<void> {
+        if (!cwd) {
+            return;
+        }
+        const additionalRoots = readAdditionalRoots(meta);
+        await this.codexClient.listSkills({
+            cwds: [cwd],
+            forceReload: true,
+            perCwdExtraUserRoots: [{
+                cwd: cwd,
+                extraUserRoots: additionalRoots
+            }]
+        });
     }
 
     /**
@@ -343,11 +355,7 @@ export class CodexAcpClient {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
 
-        const refreshSkillsRequest: { _meta?: Record<string, unknown> | null, cwd?: string } = { cwd: cwd };
-        if (request._meta !== undefined) {
-            refreshSkillsRequest._meta = request._meta;
-        }
-        await this.additionalRootsProvider.refreshSkills(refreshSkillsRequest);
+        await this.refreshSkills(cwd, request._meta);
         await this.codexClient.turnStart({
             outputSchema: null,
             threadId: request.sessionId,
@@ -570,6 +578,18 @@ interface GatewayConfig {
         http_headers: Record<string, string>,
         wire_api: "responses"
     }
+}
+
+function readAdditionalRoots(meta: Record<string, unknown> | null | undefined): string[] {
+    const rawRoots = meta?.["additionalRoots"];
+    if (!Array.isArray(rawRoots)) {
+        return [];
+    }
+
+    return Array.from(new Set(rawRoots
+        .filter((value): value is string => typeof value === "string")
+        .map(value => value.trim())
+        .filter(value => value.length > 0)));
 }
 
 function mergeGatewayConfig(config: JsonObject, gatewayConfig: GatewayConfig | null): JsonObject {
