@@ -39,7 +39,7 @@ export interface TestFixture {
     getCodexAcpAgent(): CodexAcpServer,
 
     onCodexConnectionEvent(handler: (event: CodexConnectionEvent) => void): void,
-    getCodexConnectionDump(ignoredFields: string[]): string,
+    getCodexConnectionDump(ignoredFields: string[], options?: { ignoreNotificationMethods?: string[] }): string,
     clearCodexConnectionDump(): void,
 
     onAcpConnectionEvent(handler: (event: MethodCallEvent) => void): void,
@@ -85,8 +85,14 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         getCodexAcpClient(): CodexAcpClient {
             return codexAcpClient;
         },
-        getCodexConnectionDump(ignoredFields: string[]): string {
-            return createArrayDump(transportEvents, ignoredFields);
+        getCodexConnectionDump(ignoredFields: string[], options?: { ignoreNotificationMethods?: string[] }): string {
+            const ignoredMethods = new Set(options?.ignoreNotificationMethods ?? []);
+            const filteredEvents = ignoredMethods.size === 0
+                ? transportEvents
+                : transportEvents.filter((event) =>
+                    !(event.eventType === "notification" && ignoredMethods.has(event.method))
+                );
+            return createArrayDump(filteredEvents, ignoredFields);
         },
         onCodexConnectionEvent(handler: (event: CodexConnectionEvent) => void): void {
             codexEventHandlers.push(handler);
