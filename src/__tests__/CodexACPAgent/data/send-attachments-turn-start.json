@@ -1,5 +1,24 @@
 {
   "eventType": "request",
+  "method": "skills/list",
+  "params": {
+    "cwds": [
+      "/test/cwd"
+    ],
+    "forceReload": true,
+    "perCwdExtraUserRoots": [
+      {
+        "cwd": "cwd",
+        "extraUserRoots": []
+      }
+    ]
+  }
+}
+{
+  "eventType": "response"
+}
+{
+  "eventType": "request",
   "method": "turn/start",
   "params": {
     "outputSchema": null,

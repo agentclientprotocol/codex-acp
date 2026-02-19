@@ -637,7 +637,7 @@ export class CodexAcpServer implements acp.Agent {
             }
             const agentMode = sessionState.agentMode;
             const turnCompleted = await this.runWithProcessCheck(
-                () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, disableSummary));
+                () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, disableSummary, sessionState.cwd));
 
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
