@@ -2,18 +2,19 @@ name: Codex Update
 
 on:
   schedule:
-    - cron: '0 9 * * *'
-  push:
-    branches:
-      - ish/codex-autoupdate
+    - cron: '0 9 * * *' 
   workflow_dispatch:
 
 env:
   CODEX_PACKAGE: '@openai/codex'
 
 jobs:
-  check-and-update:
+  check:
     runs-on: ubuntu-latest
+    outputs:
+      should_update: ${{ steps.check.outputs.should_update }}
+      version: ${{ steps.check.outputs.version }}
+      branch: ${{ steps.check.outputs.branch }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,22 +36,33 @@ jobs:
             exit 0
           fi
 
-          echo "VERSION=$LATEST" >> $GITHUB_ENV
-          echo "BRANCH=$BRANCH" >> $GITHUB_ENV
+          echo "version=$LATEST" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           echo "should_update=true" >> $GITHUB_OUTPUT
 
-      - name: Try to update and create PR
-        if: steps.check.outputs.should_update == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  update:
+    needs: check
+    if: needs.check.outputs.should_update == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git user and prepare branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${{ needs.check.outputs.branch }}"
 
-          git checkout -b "${{ env.BRANCH }}"
-          npm install ${{ env.CODEX_PACKAGE }}@${{ env.VERSION }}
-          git add package.json package-lock.json
-          git commit -m "Update codex to ${{ env.VERSION }}"
-          git push origin "${{ env.BRANCH }}"
+      - name: Install new version of package and commit
+        run: |
+          npm install ${{ env.CODEX_PACKAGE }}@${{ needs.check.outputs.version }}
+          npm run generate-types
+          git add package.json package-lock.json src/app-server
+          git commit -m "Update codex to ${{ needs.check.outputs.version }}"
 
-          gh pr create --title "Update codex to ${{ env.VERSION }}"
+      - name: Push and create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin "${{ needs.check.outputs.branch }}"
+          gh pr create --title "Update codex to ${{ needs.check.outputs.version }}" --body "Automated codex update"
