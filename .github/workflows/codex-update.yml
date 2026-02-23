@@ -1,0 +1,82 @@
+name: Codex Update
+
+on:
+  schedule:
+    - cron: '0 9 * * *' 
+  workflow_dispatch:
+
+env:
+  CODEX_PACKAGE: '@openai/codex'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_update: ${{ steps.check.outputs.should_update }}
+      version: ${{ steps.check.outputs.version }}
+      branch: ${{ steps.check.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if update is required
+        id: check
+        run: |
+          if ! npm outdated ${{ env.CODEX_PACKAGE }}; then
+            echo "Package is up to date"
+            exit 0
+          fi
+
+          LATEST=$(npm view ${{ env.CODEX_PACKAGE }} version)
+          BRANCH="codex-update/$LATEST"
+
+          if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
+            echo "Branch $BRANCH already exists"
+            exit 0
+          fi
+
+          echo "version=$LATEST" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "should_update=true" >> $GITHUB_OUTPUT
+
+  update:
+    needs: check
+    if: needs.check.outputs.should_update == 'true'
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: ${{ needs.check.outputs.branch }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git user and prepare branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${{ env.BRANCH }}"
+
+      - name: Install new version of package and commit
+        run: |
+          npm install ${{ env.CODEX_PACKAGE }}@${{ env.VERSION }}
+          npm run generate-types
+          git add package.json package-lock.json src/app-server
+          git commit -m "Update codex to ${{ env.VERSION }}"
+          git push origin "${{ env.BRANCH }}"
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
+      - name: Create PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh pr create \
+            --base main \
+            --title "Update codex to ${{ env.VERSION }}" \
+            --body "[What's new](https://github.com/openai/codex/releases/tag/rust-v${{ env.VERSION }})" \
+            --label "codex-update"
