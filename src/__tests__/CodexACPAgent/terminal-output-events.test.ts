@@ -250,7 +250,7 @@ describe('CodexEventHandler - terminal output events', () => {
         );
     });
 
-    it('should accumulate terminal output across multiple deltas', async () => {
+    it('should stream multiple terminal output deltas without accumulation', async () => {
         const delta1: ServerNotification = {
             method: 'item/commandExecution/outputDelta',
             params: {
@@ -284,7 +284,7 @@ describe('CodexEventHandler - terminal output events', () => {
         await setupAndSendNotifications([delta1, delta2, delta3]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
-            'data/terminal-output-accumulated.json'
+            'data/terminal-output-multiple-deltas.json'
         );
     });
 });

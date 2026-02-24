@@ -7,7 +7,7 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-flow",
         "_meta": {
-          "terminal_output": {
+          "terminal_output_delta": {
             "data": "hello\n",
             "terminal_id": "command-flow"
           }

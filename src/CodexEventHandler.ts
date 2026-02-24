@@ -30,7 +30,6 @@ export class CodexEventHandler {
     private readonly connection: acp.AgentSideConnection;
     private readonly sessionState: SessionState;
     private failure: RequestError | null = null;
-    private readonly terminalOutputs: Map<string, string> = new Map();
 
     constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
@@ -73,7 +72,6 @@ export class CodexEventHandler {
                 return null;
             case "turn/completed":
                 this.sessionState.currentTurnId = null;
-                this.terminalOutputs.clear();
                 return null;
             case "thread/tokenUsage/updated":
                 this.handleTokenUsageUpdated(notification.params);
@@ -197,15 +195,12 @@ export class CodexEventHandler {
     }
 
     private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
-        const accumulated = (this.terminalOutputs.get(event.itemId) ?? "") + event.delta;
-        this.terminalOutputs.set(event.itemId, accumulated);
-
         return {
             sessionUpdate: "tool_call_update",
             toolCallId: event.itemId,
             _meta: {
-                terminal_output: {
-                    data: accumulated,
+                terminal_output_delta: {
+                    data: event.delta,
                     terminal_id: event.itemId
                 }
             }
@@ -213,9 +208,6 @@ export class CodexEventHandler {
     }
 
     private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {
-        // Clean up accumulator
-        this.terminalOutputs.delete(item.id);
-
         return {
             sessionUpdate: "tool_call_update",
             toolCallId: item.id,

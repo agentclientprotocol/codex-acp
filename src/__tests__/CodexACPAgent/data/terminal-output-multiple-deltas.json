@@ -7,7 +7,7 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-accumulate",
         "_meta": {
-          "terminal_output": {
+          "terminal_output_delta": {
             "data": "line1\n",
             "terminal_id": "command-accumulate"
           }
@@ -25,8 +25,8 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-accumulate",
         "_meta": {
-          "terminal_output": {
-            "data": "line1\nline2\n",
+          "terminal_output_delta": {
+            "data": "line2\n",
             "terminal_id": "command-accumulate"
           }
         }
@@ -43,8 +43,8 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-accumulate",
         "_meta": {
-          "terminal_output": {
-            "data": "line1\nline2\nline3\n",
+          "terminal_output_delta": {
+            "data": "line3\n",
             "terminal_id": "command-accumulate"
           }
         }
