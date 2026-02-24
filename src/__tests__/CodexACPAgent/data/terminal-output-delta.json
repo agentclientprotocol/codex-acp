@@ -7,7 +7,7 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-123",
         "_meta": {
-          "terminal_output": {
+          "terminal_output_delta": {
             "data": "file1.txt\nfile2.txt\n",
             "terminal_id": "command-123"
           }
