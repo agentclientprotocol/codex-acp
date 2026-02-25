@@ -65,7 +65,7 @@ jobs:
 
       - name: Push and create PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_CREATE_PR_TOKEN }}
         run: |
           git push origin "${{ needs.check.outputs.branch }}"
-          gh pr create --title "Update codex to ${{ needs.check.outputs.version }}" --body "Automated codex update"
+          gh pr create --title "Update codex to ${{ needs.check.outputs.version }}" --body "Automated codex update" --label "codex-update"
