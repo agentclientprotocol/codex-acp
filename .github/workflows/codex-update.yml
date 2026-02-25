@@ -62,10 +62,10 @@ jobs:
           npm run generate-types
           git add package.json package-lock.json src/app-server
           git commit -m "Update codex to ${{ needs.check.outputs.version }}"
+          git push origin "${{ needs.check.outputs.branch }}"
 
-      - name: Push and create PR
+      - name: Create PR
         env:
           GH_TOKEN: ${{ secrets.GH_CREATE_PR_TOKEN }}
         run: |
-          git push origin "${{ needs.check.outputs.branch }}"
           gh pr create --title "Update codex to ${{ needs.check.outputs.version }}" --body "Automated codex update" --label "codex-update"
