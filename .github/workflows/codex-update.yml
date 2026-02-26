@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: '0 9 * * *' 
   workflow_dispatch:
+  push:
+    branches:
+      - ish/codex-autoupdate
 
 env:
   CODEX_PACKAGE: '@openai/codex'
