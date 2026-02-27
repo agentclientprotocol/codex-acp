@@ -18,6 +18,10 @@ import type {
     ThreadListResponse,
     ThreadReadParams,
     ThreadReadResponse,
+    ThreadForkParams,
+    ThreadForkResponse,
+    ThreadArchiveParams,
+    ThreadArchiveResponse,
     TurnCompletedNotification,
     TurnInterruptParams,
     TurnInterruptResponse,
@@ -29,6 +33,8 @@ import type {
     FileChangeRequestApprovalResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
+    ThreadSetNameParams,
+    ThreadSetNameResponse,
     SkillsListParams,
     SkillsListResponse,
     ListMcpServerStatusParams,
@@ -64,6 +70,16 @@ export type McpStartupCompleteNotification = { method: "codex/event/mcp_startup_
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
+    private pendingTurnCompletedEvents: Array<{
+        key: string,
+        event: TurnCompletedNotification,
+    }> = [];
+    private pendingTurnWaiters: Array<{
+        key: string,
+        predicate: (event: TurnCompletedNotification) => boolean,
+        resolve: (event: TurnCompletedNotification) => void,
+    }> = [];
+    private expectedTurnCompletionCounts = new Map<string, number>();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -91,6 +107,15 @@ export class CodexAppServerClient {
                 return { decision: "cancel" };
             }
             return await handler.handleFileChange(params);
+        });
+
+        this.connection.onNotification("turn/completed", (event: TurnCompletedNotification) => {
+            const notification: ServerNotification = { method: "turn/completed", params: event };
+            this.notify(notification);
+            for (const callback of this.codexEventHandlers) {
+                callback({ eventType: "notification", ...notification });
+            }
+            this.handleTurnCompleted(event);
         });
     }
 
@@ -128,6 +153,18 @@ export class CodexAppServerClient {
 
     async threadRead(params: ThreadReadParams): Promise<ThreadReadResponse> {
         return await this.sendRequest({ method: "thread/read", params: params });
+    }
+
+    async threadFork(params: ThreadForkParams): Promise<ThreadForkResponse> {
+        return await this.sendRequest({ method: "thread/fork", params: params });
+    }
+
+    async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
+        return await this.sendRequest({ method: "thread/archive", params });
+    }
+
+    async threadSetName(params: ThreadSetNameParams): Promise<ThreadSetNameResponse> {
+        return await this.sendRequest({ method: "thread/name/set", params });
     }
 
     async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
@@ -174,13 +211,15 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "account/read", params: params });
     }
 
-    //TODO create type-safe helper
-    async awaitTurnCompleted(): Promise<TurnCompletedNotification> {
-        return await new Promise((resolve) => {
-            this.connection.onNotification("turn/completed", (event: TurnCompletedNotification) => {
-                resolve(event);
-            });
-        });
+    async awaitTurnCompletedForThread(threadId: string, turnId: string | null = null): Promise<TurnCompletedNotification> {
+        const key = turnId === null
+            ? this.makeThreadTurnCompletionKey(threadId)
+            : this.makeTurnCompletionKey(threadId, turnId);
+
+        return await this.awaitMatchingTurnCompleted(
+            key,
+            (event) => event.threadId === threadId && (turnId === null || event.turn.id === turnId)
+        );
     }
 
 
@@ -213,6 +252,73 @@ export class CodexAppServerClient {
     private notify(notification: ServerNotification) {
         for (const notificationHandler of this.notificationHandlers.values()) {
             notificationHandler(notification);
+        }
+    }
+
+    private handleTurnCompleted(event: TurnCompletedNotification): void {
+        const waiterIndex = this.pendingTurnWaiters.findIndex(({predicate}) => predicate(event));
+        if (waiterIndex >= 0) {
+            const [waiter] = this.pendingTurnWaiters.splice(waiterIndex, 1);
+            this.decrementExpectedTurnCompletion(waiter!.key);
+            waiter!.resolve(event);
+            return;
+        }
+
+        const turnId = event.turn?.id ?? null;
+        const exactKey = turnId === null ? null : this.makeTurnCompletionKey(event.threadId, turnId);
+        const threadKey = this.makeThreadTurnCompletionKey(event.threadId);
+        const bufferKey =
+            (exactKey !== null && this.hasExpectedTurnCompletion(exactKey))
+                ? exactKey
+                : (this.hasExpectedTurnCompletion(threadKey) ? threadKey : null);
+
+        if (bufferKey !== null) {
+            this.pendingTurnCompletedEvents.push({ key: bufferKey, event });
+        }
+    }
+
+    private async awaitMatchingTurnCompleted(
+        key: string,
+        predicate: (event: TurnCompletedNotification) => boolean
+    ): Promise<TurnCompletedNotification> {
+        this.incrementExpectedTurnCompletion(key);
+
+        const eventIndex = this.pendingTurnCompletedEvents.findIndex(({ key: eventKey, event }) =>
+            eventKey === key && predicate(event)
+        );
+        if (eventIndex >= 0) {
+            const [entry] = this.pendingTurnCompletedEvents.splice(eventIndex, 1);
+            this.decrementExpectedTurnCompletion(key);
+            return entry!.event;
+        }
+
+        return await new Promise((resolve) => {
+            this.pendingTurnWaiters.push({key, predicate, resolve});
+        });
+    }
+
+    private makeTurnCompletionKey(threadId: string, turnId: string): string {
+        return `${threadId}:${turnId}`;
+    }
+
+    private makeThreadTurnCompletionKey(threadId: string): string {
+        return `${threadId}:*`;
+    }
+
+    private hasExpectedTurnCompletion(key: string): boolean {
+        return (this.expectedTurnCompletionCounts.get(key) ?? 0) > 0;
+    }
+
+    private incrementExpectedTurnCompletion(key: string): void {
+        this.expectedTurnCompletionCounts.set(key, (this.expectedTurnCompletionCounts.get(key) ?? 0) + 1);
+    }
+
+    private decrementExpectedTurnCompletion(key: string): void {
+        const next = (this.expectedTurnCompletionCounts.get(key) ?? 0) - 1;
+        if (next > 0) {
+            this.expectedTurnCompletionCounts.set(key, next);
+        } else {
+            this.expectedTurnCompletionCounts.delete(key);
         }
     }
 

@@ -24,6 +24,7 @@ import type {
     SkillsListParams,
     SkillsListResponse,
     Thread,
+    ThreadItem,
     ThreadSourceKind,
     TurnCompletedNotification,
     UserInput,
@@ -356,7 +357,7 @@ export class CodexAcpClient {
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
 
         await this.refreshSkills(cwd, request._meta);
-        await this.codexClient.turnStart({
+        const started = await this.codexClient.turnStart({
             outputSchema: null,
             threadId: request.sessionId,
             input: input,
@@ -370,9 +371,9 @@ export class CodexAcpClient {
             model: modelId.model,
         });
 
-        // Wait for turn completion
-        // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
-        return await this.codexClient.awaitTurnCompleted();
+        // Wait for completion of the specific started turn.
+        // If turnInterrupt() was called, Codex will send turn/completed with status "interrupted".
+        return await this.codexClient.awaitTurnCompletedForThread(request.sessionId, started?.turn?.id ?? null);
     }
 
     async setDefaultModel(params: SetDefaultModelParams): Promise<SetDefaultModelResponse> {
@@ -461,6 +462,96 @@ export class CodexAcpClient {
         });
     }
 
+    async setThreadName(params: { threadId: string, name: string }): Promise<void> {
+        await this.codexClient.threadSetName(params);
+    }
+
+    async generateThreadNameFromHistory(
+        params: { threadId: string, modelId: ModelId, summary: "none" | null, firstUserMessage: string }
+    ): Promise<string | null> {
+        let forkedThreadId: string | null = null;
+        try {
+            const fork = await this.codexClient.threadFork({
+                threadId: params.threadId,
+                path: null,
+                model: params.modelId.model,
+                modelProvider: null,
+                cwd: null,
+                approvalPolicy: "never",
+                sandbox: "read-only",
+                config: null,
+                baseInstructions: null,
+                developerInstructions: null,
+            });
+            forkedThreadId = fork.thread.id;
+
+            const started = await this.codexClient.turnStart({
+                outputSchema: null,
+                threadId: forkedThreadId,
+                input: [{
+                    type: "text",
+                    text: [
+                        "Generate chat title based on the conversation transcript.",
+                        "Ignore this naming request itself, use only transcript content.",
+                        "Return only title text.",
+                        "Constraints:",
+                        "- 3 to 7 words",
+                        "- no quotes",
+                        "- no trailing punctuation",
+                        "- summarize the main technical task",
+                        "",
+                        "Transcript:",
+                        `User: ${params.firstUserMessage}`.slice(0, 1500),
+                    ].join("\n"),
+                    text_elements: [],
+                }],
+                approvalPolicy: "never",
+                sandboxPolicy: {type: "readOnly"},
+                summary: params.summary,
+                personality: null,
+                collaborationMode: null,
+                cwd: null,
+                effort: params.modelId.effort as ReasoningEffort | null, //TODO remove unsafe conversion
+                model: params.modelId.model,
+            });
+            const completed = await this.codexClient.awaitTurnCompletedForThread(forkedThreadId, started?.turn?.id ?? null);
+            if (completed.turn.status !== "completed") {
+                return null;
+            }
+
+            const thread = await this.codexClient.threadRead({
+                threadId: forkedThreadId,
+                includeTurns: true,
+            });
+            const latestTurn = thread.thread.turns.at(-1);
+            if (!latestTurn) {
+                return null;
+            }
+            const rawTitle = this.extractGeneratedTitleFromLastAgentMessage(latestTurn.items);
+            if (!rawTitle) {
+                return null;
+            }
+
+            const normalized = rawTitle
+                .replace(/\s+/g, " ")
+                .replace(/^['"`]+|['"`]+$/g, "")
+                .replace(/[.!?;:,]+$/g, "")
+                .trim();
+            if (normalized.length === 0) {
+                return null;
+            }
+            return normalized.slice(0, 120);
+        } finally {
+            if (forkedThreadId !== null) {
+                try {
+                    await this.codexClient.threadArchive({threadId: forkedThreadId});
+                } catch (err) {
+                    logger.error("Failed to archive temporary thread used for title generation", err);
+                }
+            }
+        }
+    }
+
     async fetchAvailableModels(): Promise<Model[]> {
         const models: Model[] = [];
         let cursor: string | null = null;
@@ -516,6 +607,23 @@ export class CodexAcpClient {
                 nextCursor: customGateway.nextCursor ?? null,
             },
         };
+    }
+
+    private extractGeneratedTitleFromLastAgentMessage(items: ThreadItem[]): string | null {
+        for (let i = items.length - 1; i >= 0; i -= 1) {
+            const item = items[i];
+            if (!item) {
+                continue;
+            }
+            if (item.type !== "agentMessage") {
+                continue;
+            }
+            const text = item.text.trim();
+            if (text.length > 0) {
+                return text;
+            }
+        }
+        return null;
     }
 
 }

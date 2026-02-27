@@ -45,7 +45,7 @@ describe('CodexEventHandler - file change events', () => {
         mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
+        mockFixture.getCodexAppServerClient().awaitTurnCompletedForThread = vi.fn().mockResolvedValue({
             threadId: sessionId,
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
@@ -73,7 +73,7 @@ describe('CodexEventHandler - file change events', () => {
         const newFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
@@ -108,7 +108,7 @@ describe('CodexEventHandler - file change events', () => {
         const multiFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
@@ -148,7 +148,7 @@ describe('CodexEventHandler - file change events', () => {
         const newFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
@@ -176,7 +176,7 @@ describe('CodexEventHandler - file change events', () => {
         const deleteFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
@@ -212,7 +212,7 @@ describe('CodexEventHandler - file change events', () => {
         const deletedFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',

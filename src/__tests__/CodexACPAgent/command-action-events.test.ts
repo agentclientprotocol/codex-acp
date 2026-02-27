@@ -25,7 +25,7 @@ describe('CodexEventHandler - command action events', () => {
         mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
+        mockFixture.getCodexAppServerClient().awaitTurnCompletedForThread = vi.fn().mockResolvedValue({
             threadId: sessionId,
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
@@ -53,7 +53,7 @@ describe('CodexEventHandler - command action events', () => {
         const listFilesNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -87,7 +87,7 @@ describe('CodexEventHandler - command action events', () => {
         const listFilesNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -121,7 +121,7 @@ describe('CodexEventHandler - command action events', () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -156,7 +156,7 @@ describe('CodexEventHandler - command action events', () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -191,7 +191,7 @@ describe('CodexEventHandler - command action events', () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -226,7 +226,7 @@ describe('CodexEventHandler - command action events', () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -261,7 +261,7 @@ describe('CodexEventHandler - command action events', () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: "mcpToolCall",

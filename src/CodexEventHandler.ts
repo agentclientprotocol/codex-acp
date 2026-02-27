@@ -12,6 +12,7 @@ import type {
     ErrorNotification,
     ItemCompletedNotification,
     ItemStartedNotification, ThreadItem,
+    ThreadNameUpdatedNotification,
     ThreadTokenUsageUpdatedNotification,
     TurnPlanUpdatedNotification
 } from "./app-server/v2";
@@ -50,6 +51,11 @@ export class CodexEventHandler {
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
+        const eventThreadId = this.extractNotificationThreadId(notification);
+        if (eventThreadId !== null && eventThreadId !== this.sessionState.sessionId) {
+            return null;
+        }
+
         /*
         TODO split UpdateSessionEvent to improve completion
         createUpdateEvent({
@@ -112,11 +118,34 @@ export class CodexEventHandler {
             case "mcpServer/oauthLogin/completed":
             case "rawResponseItem/completed":
             case "thread/started":
-            case "thread/name/updated":
-            case "item/plan/delta":
             case "app/list/updated":
                 return null;
+            case "thread/name/updated":
+                return await this.createThreadNameUpdatedEvent(notification.params);
+            case "item/plan/delta":
+                return null;
         }
+    }
+
+    private extractNotificationThreadId(notification: ServerNotification): string | null {
+        const params = notification.params as Record<string, unknown> | undefined;
+        const threadId = params?.["threadId"];
+        return typeof threadId === "string" ? threadId : null;
+    }
+
+    private async createThreadNameUpdatedEvent(event: ThreadNameUpdatedNotification): Promise<UpdateSessionEvent | null> {
+        if (event.threadId !== this.sessionState.sessionId) {
+            return null;
+        }
+
+        const title = event.threadName?.trim();
+        if (!title) {
+            return null;
+        }
+        return {
+            sessionUpdate: "session_info_update",
+            title,
+        };
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {

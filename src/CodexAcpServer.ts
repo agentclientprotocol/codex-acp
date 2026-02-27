@@ -39,6 +39,7 @@ export interface SessionState {
     rateLimits: RateLimitsMap | null;
     account: Account | null;
     cwd: string;
+    threadRenameState: "notScheduled" | "running" | "done";
     sessionMcpServers?: Array<string>;
 }
 
@@ -129,6 +130,8 @@ export class CodexAcpServer implements acp.Agent {
         const pendingMcpServers: Promise<Array<string>> = this.codexAcpClient.awaitMcpServers();
 
         let sessionMetadata: SessionMetadata;
+        const threadRenameState: SessionState["threadRenameState"] =
+            !("sessionId" in request) ? "notScheduled" : "done";
         if ("sessionId" in request) {
             logger.log(`Resume existing session: ${request.sessionId}...`)
             sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.resumeSession(request));
@@ -155,6 +158,7 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: accountResponse.account,
             cwd: request.cwd,
+            threadRenameState: threadRenameState,
             sessionMcpServers: sessionMcpServers,
         }
         this.sessions.set(sessionId, sessionState);
@@ -356,6 +360,7 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: accountResponse.account,
             cwd: request.cwd,
+            threadRenameState: "done",
             sessionMcpServers: sessionMcpServers,
         };
         this.sessions.set(sessionId, sessionState);
@@ -638,6 +643,7 @@ export class CodexAcpServer implements acp.Agent {
             const agentMode = sessionState.agentMode;
             const turnCompleted = await this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, disableSummary, sessionState.cwd));
+            const firstUserMessage = this.extractFirstUserMessageFromPrompt(params.prompt);
 
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
@@ -663,6 +669,13 @@ export class CodexAcpServer implements acp.Agent {
                 throw error;
             }
 
+            this.scheduleThreadRenameFromContext(
+                sessionState,
+                modelId,
+                disableSummary ? "none" : null,
+                firstUserMessage,
+            );
+
             return {
                 stopReason: "end_turn",
                 _meta: this.buildQuotaMeta(sessionState),
@@ -673,6 +686,88 @@ export class CodexAcpServer implements acp.Agent {
         } finally {
             logger.log("Prompt completed", {sessionId: params.sessionId});
             sessionState.currentTurnId = null;
+        }
+    }
+
+    private scheduleThreadRenameFromContext(
+        sessionState: SessionState,
+        modelId: ModelId,
+        summary: "none" | null,
+        firstUserMessage: string | null,
+    ): void {
+        if (sessionState.threadRenameState !== "notScheduled") {
+            return;
+        }
+        if (!firstUserMessage) {
+            sessionState.threadRenameState = "done";
+            return;
+        }
+        sessionState.threadRenameState = "running";
+        const renameTask = (async () => {
+            let threadName: string | null = null;
+            try {
+                threadName = await this.codexAcpClient.generateThreadNameFromHistory({
+                    threadId: sessionState.sessionId,
+                    modelId,
+                    summary,
+                    firstUserMessage,
+                });
+            } catch (err) {
+                logger.error(`Failed to generate thread name for session ${sessionState.sessionId}`, err);
+                return;
+            }
+
+            if (!threadName) {
+                return;
+            }
+
+            try {
+                await this.codexAcpClient.setThreadName({
+                    threadId: sessionState.sessionId,
+                    name: threadName,
+                });
+            } catch (err) {
+                logger.error(`Failed to update thread name for session ${sessionState.sessionId}`, err);
+            }
+        })();
+
+        void renameTask.finally(() => {
+            sessionState.threadRenameState = "done";
+        });
+    }
+
+    private extractFirstUserMessageFromPrompt(prompt: acp.ContentBlock[]): string | null {
+        const parts: string[] = [];
+        for (const block of prompt) {
+            const text = this.convertPromptBlockToText(block);
+            if (text.length > 0) {
+                parts.push(text);
+            }
+        }
+        if (parts.length === 0) {
+            return null;
+        }
+        return parts.join("\n").trim();
+    }
+
+    private convertPromptBlockToText(block: acp.ContentBlock): string {
+        switch (block.type) {
+            case "text":
+                return block.text.trim();
+            case "resource_link":
+                return this.formatUriAsLink(block.name ?? null, block.uri).trim();
+            case "resource": {
+                const resource = block.resource as acp.EmbeddedResourceResource;
+                if (!("text" in resource)) {
+                    return "";
+                }
+                const link = this.formatUriAsLink(null, resource.uri);
+                const context = `<context ref="${resource.uri}">\n${resource.text}\n</context>`;
+                return `${link}\n${context}`.trim();
+            }
+            case "image":
+            case "audio":
+                return "";
         }
     }
 

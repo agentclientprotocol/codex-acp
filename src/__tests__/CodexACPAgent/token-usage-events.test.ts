@@ -23,8 +23,8 @@ describe('Token Usage Events', () => {
                 turn: { id: "turn-id", items: [], status: "inProgress", error: null }
             });
 
-            // awaitTurnCompleted sends notifications before resolving
-            mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation(async () => {
+            // awaitTurnCompletedForThread sends notifications before resolving
+            mockFixture.getCodexAppServerClient().awaitTurnCompletedForThread = vi.fn().mockImplementation(async () => {
                 // Send notifications during turn (after handler is registered)
                 for (const notification of notifications) {
                     mockFixture.sendServerNotification(notification);
@@ -35,7 +35,7 @@ describe('Token Usage Events', () => {
                 };
             });
 
-            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState());
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({ sessionId }));
 
             return codexAcpAgent;
         }

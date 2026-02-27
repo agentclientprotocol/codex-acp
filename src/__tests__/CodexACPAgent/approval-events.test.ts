@@ -24,7 +24,7 @@ describe('Approval Events', () => {
         fixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
-        fixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockReturnValue(turnCompletedPromise);
+        fixture.getCodexAppServerClient().awaitTurnCompletedForThread = vi.fn().mockReturnValue(turnCompletedPromise);
 
         const sessionState: SessionState = createTestSessionState({
             sessionId,

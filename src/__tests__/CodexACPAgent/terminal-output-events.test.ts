@@ -25,7 +25,7 @@ describe('CodexEventHandler - terminal output events', () => {
         mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
+        mockFixture.getCodexAppServerClient().awaitTurnCompletedForThread = vi.fn().mockResolvedValue({
             threadId: sessionId,
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
@@ -53,7 +53,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -89,7 +89,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -118,7 +118,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const outputDeltaNotification: ServerNotification = {
             method: 'item/commandExecution/outputDelta',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'command-123',
                 delta: 'file1.txt\nfile2.txt\n',
@@ -136,7 +136,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const commandCompletedNotification: ServerNotification = {
             method: 'item/completed',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -164,7 +164,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const commandFailedNotification: ServerNotification = {
             method: 'item/completed',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -192,7 +192,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -212,7 +212,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const outputDeltaNotification: ServerNotification = {
             method: 'item/commandExecution/outputDelta',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'command-flow',
                 delta: 'hello\n',
@@ -222,7 +222,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const commandCompletedNotification: ServerNotification = {
             method: 'item/completed',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -254,7 +254,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const delta1: ServerNotification = {
             method: 'item/commandExecution/outputDelta',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'command-accumulate',
                 delta: 'line1\n',
@@ -264,7 +264,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const delta2: ServerNotification = {
             method: 'item/commandExecution/outputDelta',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'command-accumulate',
                 delta: 'line2\n',
@@ -274,7 +274,7 @@ describe('CodexEventHandler - terminal output events', () => {
         const delta3: ServerNotification = {
             method: 'item/commandExecution/outputDelta',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'command-accumulate',
                 delta: 'line3\n',

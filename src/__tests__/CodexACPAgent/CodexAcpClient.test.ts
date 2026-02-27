@@ -164,7 +164,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const turnStartSpy = vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         } as any);
-        vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
+        vi.spyOn(codexAppServerClient, "awaitTurnCompletedForThread").mockResolvedValue({
             threadId: "session-id",
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         } as any);
@@ -194,12 +194,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(turnStartSpy.mock.invocationCallOrder[0]!);
     });
 
-    function loadNotifications(){
+    function loadNotifications(threadId: string){
         //TODO collect logs form dev run and then load them from file to speedup
         const serverNotifications: ServerNotification[] = [
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "He", }},
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "ll", }},
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "o!", }},
+            { method: "item/agentMessage/delta", params: { threadId, turnId: "string", itemId: "string", delta: "He", }},
+            { method: "item/agentMessage/delta", params: { threadId, turnId: "string", itemId: "string", delta: "ll", }},
+            { method: "item/agentMessage/delta", params: { threadId, turnId: "string", itemId: "string", delta: "o!", }},
         ];
         function onServerNotification(_sessionId: string, callback: (event: ServerNotification) => void){
             for (const notification of serverNotifications) {
@@ -210,7 +210,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     }
 
     it('should map events from dump', async () => {
-        fixture.getCodexAppServerClient().onServerNotification = loadNotifications();
+        fixture.getCodexAppServerClient().onServerNotification = loadNotifications("id");
 
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
@@ -218,7 +218,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         fixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
-        fixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
+        fixture.getCodexAppServerClient().awaitTurnCompletedForThread = vi.fn().mockResolvedValue({
             threadId: "id",
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
@@ -242,7 +242,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
+        mockFixture.getCodexAppServerClient().awaitTurnCompletedForThread = vi.fn().mockResolvedValue({
             threadId: "id",
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
@@ -264,9 +264,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         // Trigger notifications after both prompts - should produce only 3 events, not 6
         const serverNotifications: ServerNotification[] = [
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "He", }},
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "ll", }},
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "o!", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "He", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "ll", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "o!", }},
         ];
         for (const notification of serverNotifications) {
             mockFixture.sendServerNotification(notification);
@@ -288,7 +288,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
+        mockFixture.getCodexAppServerClient().awaitTurnCompletedForThread = vi.fn().mockResolvedValue({
             threadId: "id",
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
@@ -314,9 +314,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         mockFixture.clearAcpConnectionDump();
 
-        // Trigger notifications - both session handlers should receive them
+        // Trigger notifications - each session handler should receive only matching thread events
         const serverNotifications: ServerNotification[] = [
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "Hello", }},
+            { method: "item/agentMessage/delta", params: { threadId: "session-1", turnId: "string", itemId: "string", delta: "Hello", }},
+            { method: "item/agentMessage/delta", params: { threadId: "session-2", turnId: "string", itemId: "string", delta: "Hello", }},
         ];
         for (const notification of serverNotifications) {
             mockFixture.sendServerNotification(notification);
@@ -336,14 +337,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
 
-        vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
+        vi.spyOn(codexAppServerClient, "awaitTurnCompletedForThread").mockResolvedValue({
             threadId: "session-id",
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
 
         const sessionState: SessionState = createTestSessionState();
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+        vi.spyOn(codexAcpClient, "generateThreadNameFromHistory").mockResolvedValue(null);
 
         const prompt: acp.ContentBlock[] = [
             { type: "text", text: "Hello" },
@@ -355,6 +358,80 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await codexAcpAgent.prompt({ sessionId: "session-id", prompt });
 
         await expect(mockFixture.getCodexConnectionDump(ignoredFields)).toMatchFileSnapshot("data/send-attachments-turn-start.json");
+    });
+
+    it("should archive temporary fork thread after title generation", async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "threadRead")
+            .mockResolvedValueOnce({
+                thread: {
+                    turns: [{
+                        items: [{type: "agentMessage", text: "Fix flaky CI test"}]
+                    }]
+                }
+            } as any);
+        vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
+            thread: {id: "fork-thread-id"}
+        } as any);
+        vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({
+            turn: { id: "fork-turn-id", items: [], status: "inProgress", error: null }
+        } as any);
+        vi.spyOn(codexAppServerClient, "awaitTurnCompletedForThread").mockResolvedValue({
+            threadId: "fork-thread-id",
+            turn: { id: "fork-turn-id", items: [], status: "completed", error: null }
+        } as any);
+        const threadArchiveSpy = vi.spyOn(codexAppServerClient, "threadArchive").mockResolvedValue({});
+
+        const title = await codexAcpClient.generateThreadNameFromHistory({
+            threadId: "main-thread-id",
+            modelId: ModelId.create("gpt-5", "medium"),
+            summary: null,
+            firstUserMessage: "Fix flaky CI test",
+        });
+
+        expect(title).toBe("Fix flaky CI test");
+        expect(threadArchiveSpy).toHaveBeenCalledWith({threadId: "fork-thread-id"});
+    });
+
+    it("should archive temporary fork thread when title generation turn is not completed", async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+            thread: {
+                turns: [{
+                    items: [{
+                        type: "userMessage",
+                        content: [{type: "text", text: "Fix flaky CI test"}]
+                    }]
+                }]
+            }
+        } as any);
+        vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
+            thread: {id: "fork-thread-id"}
+        } as any);
+        vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({
+            turn: { id: "fork-turn-id", items: [], status: "inProgress", error: null }
+        } as any);
+        vi.spyOn(codexAppServerClient, "awaitTurnCompletedForThread").mockResolvedValue({
+            threadId: "fork-thread-id",
+            turn: { id: "fork-turn-id", items: [], status: "interrupted", error: null }
+        } as any);
+        const threadArchiveSpy = vi.spyOn(codexAppServerClient, "threadArchive").mockResolvedValue({});
+
+        const title = await codexAcpClient.generateThreadNameFromHistory({
+            threadId: "main-thread-id",
+            modelId: ModelId.create("gpt-5", "medium"),
+            summary: null,
+            firstUserMessage: "Fix flaky CI test",
+        });
+
+        expect(title).toBeNull();
+        expect(threadArchiveSpy).toHaveBeenCalledWith({threadId: "fork-thread-id"});
     });
 
     async function createSessionInSeparateInstance(): Promise<string> {
@@ -577,7 +654,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     /**
-     * Sets up a mock fixture with turnStart/awaitTurnCompleted spied on,
+     * Sets up a mock fixture with turnStart/awaitTurnCompletedForThread spied on,
      * and a given session state. Returns the fixture and turnStart spy.
      */
     function setupPromptFixture(sessionOverrides?: Partial<SessionState>) {
@@ -586,7 +663,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart").mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
-        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted").mockResolvedValue({
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompletedForThread").mockResolvedValue({
             threadId: sessionState.sessionId,
             turn: { id: "turn-id", items: [], status: "completed", error: null }
         });
@@ -669,6 +746,213 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 { type: "image", url: "https://example.com/image.png" },
             ]
         }));
+    });
+
+    it("should derive first user message from resource link prompt for thread rename", async () => {
+        const { mockFixture } = setupPromptFixture({ sessionId: "session-id" });
+        const generateTitleSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "generateThreadNameFromHistory")
+            .mockResolvedValue("Generated title");
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName").mockResolvedValue({});
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "resource_link", name: "report.txt", uri: "file:///tmp/report.txt" }],
+        });
+
+        await vi.waitFor(() => {
+            expect(generateTitleSpy).toHaveBeenCalledWith(expect.objectContaining({
+                firstUserMessage: "[@report.txt](file:///tmp/report.txt)",
+            }));
+        });
+    });
+
+    it("should include all textual blocks in first prompt rename context", async () => {
+        const { mockFixture } = setupPromptFixture({ sessionId: "session-id" });
+        const generateTitleSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "generateThreadNameFromHistory")
+            .mockResolvedValue("Generated title");
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName").mockResolvedValue({});
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [
+                { type: "resource_link", name: "report.txt", uri: "file:///tmp/report.txt" },
+                { type: "text", text: "Summarize failing CI test" },
+            ],
+        });
+
+        await vi.waitFor(() => {
+            expect(generateTitleSpy).toHaveBeenCalledWith(expect.objectContaining({
+                firstUserMessage: "[@report.txt](file:///tmp/report.txt)\nSummarize failing CI test",
+            }));
+        });
+    });
+
+    it("should await thread completion without turn id when turnStart response omits turn", async () => {
+        const { mockFixture } = setupPromptFixture();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({} as any);
+        const awaitTurnCompletedSpy = vi.spyOn(codexAppServerClient, "awaitTurnCompletedForThread").mockResolvedValue({
+            threadId: "id",
+            turn: { id: "turn-id", items: [], status: "completed", error: null }
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+
+        expect(awaitTurnCompletedSpy).toHaveBeenCalledWith("id", null);
+    });
+
+    it("should set thread name only from the first prompt", async () => {
+        const { mockFixture, sessionState } = setupPromptFixture({ sessionId: "session-id" });
+        const generateTitleSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "generateThreadNameFromHistory")
+            .mockResolvedValue("Generated title 1");
+        const threadSetNameSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName").mockResolvedValue({});
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "   Fix flaky CI test   " }],
+        });
+        for (let i = 2; i <= 5; i += 1) {
+            await mockFixture.getCodexAcpAgent().prompt({
+                sessionId: "session-id",
+                prompt: [{ type: "text", text: `message-${i}` }],
+            });
+        }
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "message-6" }],
+        });
+
+        expect(threadSetNameSpy).toHaveBeenCalledTimes(1);
+        expect(threadSetNameSpy).toHaveBeenNthCalledWith(1, {
+            threadId: "session-id",
+            name: "Generated title 1",
+        });
+        expect(generateTitleSpy).toHaveBeenCalledTimes(1);
+        expect(sessionState.threadRenameState).not.toBe("notScheduled");
+    });
+
+    it("should not block prompt response while thread rename is running", async () => {
+        const { mockFixture } = setupPromptFixture({ sessionId: "session-id" });
+        let resolveGenerate: ((title: string | null) => void) | null = null;
+        const generatePromise = new Promise<string | null>((resolve) => {
+            resolveGenerate = resolve;
+        });
+        const generateTitleSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "generateThreadNameFromHistory")
+            .mockReturnValue(generatePromise);
+        const threadSetNameSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName").mockResolvedValue({});
+
+        let promptResolved = false;
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "rename me" }],
+        }).then(() => {
+            promptResolved = true;
+        });
+
+        await vi.waitFor(() => {
+            expect(promptResolved).toBe(true);
+        });
+        expect(generateTitleSpy).toHaveBeenCalledTimes(1);
+        expect(threadSetNameSpy).not.toHaveBeenCalled();
+
+        resolveGenerate!("Generated async title");
+        await promptPromise;
+        await vi.waitFor(() => expect(threadSetNameSpy).toHaveBeenCalledWith({
+            threadId: "session-id",
+            name: "Generated async title",
+        }));
+    });
+
+    it("should not block subsequent prompts while initial rename is pending", async () => {
+        const { mockFixture } = setupPromptFixture({ sessionId: "session-id" });
+        let resolveGenerate: ((title: string | null) => void) | null = null;
+        const generatePromise = new Promise<string | null>((resolve) => {
+            resolveGenerate = resolve;
+        });
+        const generateTitleSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "generateThreadNameFromHistory")
+            .mockReturnValue(generatePromise);
+        const threadSetNameSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName").mockResolvedValue({});
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "first title candidate" }],
+        });
+
+        let secondPromptResolved = false;
+        const secondPrompt = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "second prompt" }],
+        }).then(() => {
+            secondPromptResolved = true;
+        });
+
+        await vi.waitFor(() => {
+            expect(secondPromptResolved).toBe(true);
+        });
+        expect(generateTitleSpy).toHaveBeenCalledTimes(1);
+        expect(threadSetNameSpy).not.toHaveBeenCalled();
+
+        resolveGenerate!("Generated async title");
+        await secondPrompt;
+    });
+
+    it("should not set name and should not retry when generated title is empty", async () => {
+        const { mockFixture, sessionState } = setupPromptFixture({ sessionId: "session-id" });
+        const generateTitleSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "generateThreadNameFromHistory")
+            .mockResolvedValue(null);
+        const threadSetNameSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName").mockResolvedValue({});
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id", prompt: [{ type: "text", text: "first prompt" }],
+        });
+
+        expect(threadSetNameSpy).not.toHaveBeenCalled();
+        expect(generateTitleSpy).toHaveBeenCalledTimes(1);
+        expect(sessionState.threadRenameState).not.toBe("notScheduled");
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "second prompt" }],
+        });
+
+        expect(generateTitleSpy).toHaveBeenCalledTimes(1);
+        expect(threadSetNameSpy).not.toHaveBeenCalled();
+        expect(sessionState.threadRenameState).toBe("done");
+    });
+
+    it("should not rename thread when turn is interrupted", async () => {
+        const { mockFixture } = setupPromptFixture({ sessionId: "session-id" });
+        const generateTitleSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "generateThreadNameFromHistory").mockResolvedValue("generated");
+        const threadSetNameSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName").mockResolvedValue({});
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompletedForThread").mockResolvedValue({
+            threadId: "session-id",
+            turn: { id: "turn-id", items: [], status: "interrupted", error: null }
+        });
+
+        const response = await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "interrupted message" }],
+        });
+
+        expect(response.stopReason).toBe("cancelled");
+        expect(generateTitleSpy).not.toHaveBeenCalled();
+        expect(threadSetNameSpy).not.toHaveBeenCalled();
+    });
+
+    it("should set thread name from generated title", async () => {
+        const { mockFixture } = setupPromptFixture({ sessionId: "session-id" });
+        vi.spyOn(mockFixture.getCodexAcpClient(), "generateThreadNameFromHistory").mockResolvedValue("Generated title");
+        const threadSetNameSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName").mockResolvedValue({});
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id", prompt: [{ type: "text", text: "prompt content" }],
+        });
+
+        expect(threadSetNameSpy).toHaveBeenCalledWith({
+            threadId: "session-id",
+            name: "Generated title",
+        });
     });
 
     it ('should show rate limits from multiple sources in status', async () => {
