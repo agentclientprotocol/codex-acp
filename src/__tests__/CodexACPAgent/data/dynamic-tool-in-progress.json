@@ -1,0 +1,20 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "dyn-call-id",
+        "kind": "execute",
+        "title": "list_apps",
+        "status": "in_progress",
+        "rawInput": {
+          "arguments": {
+            "includeDisabled": false
+          }
+        }
+      }
+    }
+  ]
+}

@@ -193,6 +193,7 @@ export class CodexAcpClient {
             modelProvider: this.getModelProvider(),
             path: null,
             personality: null,
+            persistExtendedHistory: false,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -217,6 +218,7 @@ export class CodexAcpClient {
             modelProvider: this.getModelProvider(),
             path: null,
             personality: null,
+            persistExtendedHistory: false,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -243,7 +245,8 @@ export class CodexAcpClient {
             developerInstructions: null,
             personality: null,
             ephemeral: null,
-            experimentalRawEvents: false
+            experimentalRawEvents: false,
+            persistExtendedHistory: false
         });
 
         const codexModels = await this.fetchAvailableModels();

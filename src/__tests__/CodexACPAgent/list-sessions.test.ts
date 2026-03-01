@@ -18,11 +18,15 @@ describe("CodexACPAgent - list sessions", () => {
             modelProvider: "openai",
             createdAt: 100,
             updatedAt: 200,
+            status: { type: "idle" },
             path: null,
             cwd: "/repo/project",
             cliVersion: "0.0.0",
             source: "cli",
+            agentNickname: null,
+            agentRole: null,
             gitInfo: null,
+            name: null,
             turns: [],
         };
         const threadB: Thread = {
@@ -31,11 +35,15 @@ describe("CodexACPAgent - list sessions", () => {
             modelProvider: "openai",
             createdAt: 300,
             updatedAt: 400,
+            status: { type: "idle" },
             path: null,
             cwd: "/repo/other",
             cliVersion: "0.0.0",
             source: "cli",
+            agentNickname: null,
+            agentRole: null,
             gitInfo: null,
+            name: null,
             turns: [],
         };
 

@@ -48,6 +48,7 @@
     "sandboxPolicy": {
       "type": "workspaceWrite",
       "writableRoots": [],
+      "readOnlyAccess": "readOnlyAccess",
       "networkAccess": false,
       "excludeTmpdirEnvVar": false,
       "excludeSlashTmp": false

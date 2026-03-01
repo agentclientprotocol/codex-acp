@@ -1,4 +1,8 @@
-import type {ServerNotification} from "./app-server";
+import type {
+    FuzzyFileSearchSessionCompletedNotification,
+    FuzzyFileSearchSessionUpdatedNotification,
+    ServerNotification
+} from "./app-server";
 import type {SessionState} from "./CodexAcpServer";
 import * as acp from "@agentclientprotocol/sdk";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
@@ -12,14 +16,19 @@ import type {
     ErrorNotification,
     ItemCompletedNotification,
     ItemStartedNotification, ThreadItem,
+    ModelReroutedNotification,
     ThreadTokenUsageUpdatedNotification,
     TurnPlanUpdatedNotification
 } from "./app-server/v2";
 import {toTokenCount} from "./TokenCount";
 import {
     createCommandExecutionUpdate,
+    createDynamicToolCallUpdate,
     createFileChangeUpdate,
+    createFuzzyFileSearchComplete,
+    createFuzzyFileSearchStartOrUpdate,
     createMcpToolCallUpdate,
+    fuzzyFileSearchToolCallId,
 } from "./CodexToolCallMapper";
 import { stripShellPrefix } from "./CommandUtils";
 
@@ -30,6 +39,7 @@ export class CodexEventHandler {
     private readonly connection: acp.AgentSideConnection;
     private readonly sessionState: SessionState;
     private failure: RequestError | null = null;
+    private readonly activeFuzzyFileSearchSessions = new Set<string>();
 
     constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
@@ -102,6 +112,16 @@ export class CodexEventHandler {
                     }
                 };
             case "windows/worldWritableWarning":
+            case "thread/status/changed":
+            case "thread/archived":
+            case "thread/unarchived":
+            case "thread/closed":
+            case "thread/realtime/started":
+            case "thread/realtime/itemAdded":
+            case "thread/realtime/outputAudio/delta":
+            case "thread/realtime/error":
+            case "thread/realtime/closed":
+            case "windowsSandbox/setupCompleted":
             case "account/login/completed":
             case "authStatusChange":
             case "loginChatGptComplete":
@@ -114,6 +134,12 @@ export class CodexEventHandler {
             case "item/plan/delta":
             case "app/list/updated":
                 return null;
+            case "model/rerouted":
+                return this.createModelReroutedEvent(notification.params);
+            case "fuzzyFileSearch/sessionUpdated":
+                return this.handleFuzzyFileSearchSessionUpdated(notification.params);
+            case "fuzzyFileSearch/sessionCompleted":
+                return this.handleFuzzyFileSearchSessionCompleted(notification.params);
         }
     }
 
@@ -138,6 +164,16 @@ export class CodexEventHandler {
         }
     }
 
+    private createModelReroutedEvent(event: ModelReroutedNotification): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+                type: "text",
+                text: `Model rerouted from ${event.fromModel} to ${event.toModel} (${event.reason}).\n\n`
+            }
+        };
+    }
+
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
@@ -146,6 +182,8 @@ export class CodexEventHandler {
                 return await createCommandExecutionUpdate(event.item);
             case "mcpToolCall":
                 return await createMcpToolCallUpdate(event.item);
+            case "dynamicToolCall":
+                return await createDynamicToolCallUpdate(event.item);
             case "collabAgentToolCall":
             case "userMessage":
             case "agentMessage":
@@ -171,6 +209,12 @@ export class CodexEventHandler {
                 }
             case "commandExecution":
                 return this.completeCommandExecutionEvent(event.item);
+            case "dynamicToolCall":
+                return {
+                    sessionUpdate: "tool_call_update",
+                    toolCallId: event.item.id,
+                    status: event.item.status === "completed" ? "completed" : "failed"
+                }
             case "reasoning":
                 const summary = event.item.summary[0];
                 if (!summary) return null;
@@ -278,10 +322,28 @@ export class CodexEventHandler {
         if (!this.sessionState.rateLimits) {
             this.sessionState.rateLimits = new Map();
         }
-        this.sessionState.rateLimits.set(params.limitId, {
-            limitId: params.limitId,
-            limitName: params.limitName,
+        const limitId = params.rateLimits.limitId ?? params.rateLimits.limitName ?? "unknown";
+        this.sessionState.rateLimits.set(limitId, {
+            limitId: limitId,
+            limitName: params.rateLimits.limitName ?? limitId,
             snapshot: params.rateLimits,
         });
+    }
+
+    private handleFuzzyFileSearchSessionUpdated(
+        params: FuzzyFileSearchSessionUpdatedNotification
+    ): UpdateSessionEvent {
+        const toolCallId = fuzzyFileSearchToolCallId(params.sessionId);
+        const started = !this.activeFuzzyFileSearchSessions.has(toolCallId);
+        this.activeFuzzyFileSearchSessions.add(toolCallId);
+        return createFuzzyFileSearchStartOrUpdate(params, started);
+    }
+
+    private handleFuzzyFileSearchSessionCompleted(
+        params: FuzzyFileSearchSessionCompletedNotification
+    ): UpdateSessionEvent {
+        const toolCallId = fuzzyFileSearchToolCallId(params.sessionId);
+        this.activeFuzzyFileSearchSessions.delete(toolCallId);
+        return createFuzzyFileSearchComplete(params);
     }
 }

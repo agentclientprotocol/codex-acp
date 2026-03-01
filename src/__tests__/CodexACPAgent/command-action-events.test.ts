@@ -283,4 +283,30 @@ describe('CodexEventHandler - command action events', () => {
             'data/mcp-tool-in-progress.json'
         );
     });
+
+    it('should handle dynamic tools', async () => {
+        const dynamicToolNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: "dynamicToolCall",
+                    id: "dyn-call-id",
+                    tool: "list_apps",
+                    arguments: { includeDisabled: false },
+                    status: "inProgress",
+                    contentItems: null,
+                    success: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        await setupAndSendNotifications([dynamicToolNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/dynamic-tool-in-progress.json'
+        );
+    });
 });

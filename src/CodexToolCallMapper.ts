@@ -1,18 +1,24 @@
 import type { ToolCallContent } from "@agentclientprotocol/sdk";
 import { applyPatch } from "diff";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
 import { stripShellPrefix } from "./CommandUtils";
 import type {
+    FuzzyFileSearchSessionCompletedNotification,
+    FuzzyFileSearchSessionUpdatedNotification
+} from "./app-server";
+import type {
     CommandAction,
     CommandExecutionStatus,
+    DynamicToolCallStatus,
     FileUpdateChange,
     McpToolCallStatus,
     PatchApplyStatus,
     ThreadItem,
 } from "./app-server/v2";
 
-type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus;
+type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
 
 function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
@@ -83,6 +89,68 @@ export async function createMcpToolCallUpdate(
         kind: "execute",
         title: `mcp.${item.server}.${item.tool}`,
         status: toAcpStatus(item.status),
+    };
+}
+
+export async function createDynamicToolCallUpdate(
+    item: ThreadItem & { type: "dynamicToolCall" }
+): Promise<UpdateSessionEvent> {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "execute",
+        title: item.tool,
+        status: toAcpStatus(item.status),
+        rawInput: {
+            arguments: item.arguments,
+        },
+    };
+}
+
+export function fuzzyFileSearchToolCallId(sessionId: string): string {
+    return `fuzzyFileSearch.${sessionId}`;
+}
+
+export function createFuzzyFileSearchStartOrUpdate(
+    event: FuzzyFileSearchSessionUpdatedNotification,
+    started: boolean
+): UpdateSessionEvent {
+    const toolCallId = fuzzyFileSearchToolCallId(event.sessionId);
+    const title = createSearchTitle(event.query, null);
+    const locations = event.files.map((file) => ({
+        path: path.isAbsolute(file.path) ? file.path : path.join(file.root, file.path),
+    }));
+
+    if (started) {
+        return {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            kind: "search",
+            title,
+            status: "in_progress",
+            locations,
+            rawInput: {
+                query: event.query,
+            },
+        };
+    }
+
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId,
+        title,
+        status: "in_progress",
+        locations,
+    };
+}
+
+export function createFuzzyFileSearchComplete(
+    event: FuzzyFileSearchSessionCompletedNotification
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: fuzzyFileSearchToolCallId(event.sessionId),
+        status: "completed",
     };
 }
 

@@ -23,7 +23,10 @@ export class AgentMode {
         "Read-only",
         "Requires approval to edit files and run commands.",
         "on-request",
-        {"type": "readOnly"},
+        {
+            "type": "readOnly",
+            "access": {"type": "fullAccess"}
+        },
         "read-only"
     );
     static readonly Agent = new AgentMode(
@@ -34,6 +37,7 @@ export class AgentMode {
         {
             type: "workspaceWrite",
             writableRoots: [],
+            readOnlyAccess: {"type": "fullAccess"},
             networkAccess: false,
             excludeTmpdirEnvVar: false,
             excludeSlashTmp: false

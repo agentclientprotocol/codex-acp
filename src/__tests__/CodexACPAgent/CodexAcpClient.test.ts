@@ -19,7 +19,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.clearAllMocks();
     });
 
-    const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "supportedReasoningEfforts", "reasoningEffort", "model"];
+    const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "supportedReasoningEfforts", "reasoningEffort", "model", "readOnlyAccess"];
 
     it.skip('should start conversation', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -127,6 +127,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 upgrade: null,
                 displayName: "gpt-5",
                 description: "test model",
+                hidden: false,
                 supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "balanced" }],
                 defaultReasoningEffort: "medium",
                 inputModalities: ["text"],
@@ -540,6 +541,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             model: '5.2-codex',
             displayName: 'Codex 5.2',
             description: 'Coding model',
+            hidden: false,
             supportedReasoningEfforts: [
                 { reasoningEffort: 'high', description: 'Deep' },
                 { reasoningEffort: 'medium', description: 'Balanced' }
@@ -555,6 +557,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             model: '5.1',
             displayName: 'Standard 5.1',
             description: 'Standard model',
+            hidden: false,
             supportedReasoningEfforts: [
                 { reasoningEffort: 'low', description: 'Fast' }
             ],
@@ -677,6 +680,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             limitId: "limit-1",
             limitName: "Standard",
             snapshot: {
+                limitId: "limit-1",
+                limitName: "Standard",
                 primary: { usedPercent: 25, resetsAt: null, windowDurationMins: 60 },
                 secondary: null,
                 credits: null,
@@ -687,6 +692,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             limitId: "limit-2",
             limitName: "Fast",
             snapshot: {
+                limitId: "limit-2",
+                limitName: "Fast",
                 primary: { usedPercent: 80, resetsAt: null, windowDurationMins: 1440 },
                 secondary: null,
                 credits: null,
@@ -736,9 +743,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         mockFixture.sendServerNotification({
             method: "account/rateLimits/updated",
             params: {
-                limitId: "standard-limit",
-                limitName: "Standard",
                 rateLimits: {
+                    limitId: "standard-limit",
+                    limitName: "Standard",
                     primary: { usedPercent: 30, resetsAt: null, windowDurationMins: 60 },
                     secondary: null,
                     credits: null,
@@ -750,9 +757,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         mockFixture.sendServerNotification({
             method: "account/rateLimits/updated",
             params: {
-                limitId: "fast-limit",
-                limitName: "Fast",
                 rateLimits: {
+                    limitId: "fast-limit",
+                    limitName: "Fast",
                     primary: { usedPercent: 50, resetsAt: null, windowDurationMins: 1440 },
                     secondary: null,
                     credits: null,
@@ -767,6 +774,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             limitId: "standard-limit",
             limitName: "Standard",
             snapshot: {
+                limitId: "standard-limit",
+                limitName: "Standard",
                 primary: { usedPercent: 30, resetsAt: null, windowDurationMins: 60 },
                 secondary: null,
                 credits: null,
@@ -777,6 +786,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             limitId: "fast-limit",
             limitName: "Fast",
             snapshot: {
+                limitId: "fast-limit",
+                limitName: "Fast",
                 primary: { usedPercent: 50, resetsAt: null, windowDurationMins: 1440 },
                 secondary: null,
                 credits: null,

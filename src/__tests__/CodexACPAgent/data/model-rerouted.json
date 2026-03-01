@@ -1,0 +1,15 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "Model rerouted from gpt-5 to gpt-5-mini (highRiskCyberActivity).\n\n"
+        }
+      }
+    }
+  ]
+}
