@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Update Compat"
+  short_description: "Upgrade Codex and resolve compatibility"
+  default_prompt: "Update Codex, run typecheck/tests, and fix app-server compatibility regressions."
