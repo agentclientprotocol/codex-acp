@@ -22,6 +22,7 @@ import {logger} from "./Logger";
 import {isExtMethodRequest} from "./AcpExtensions";
 import {
     createCommandExecutionUpdate,
+    createDynamicToolCallUpdate,
     createFileChangeUpdate,
     createMcpToolCallUpdate,
 } from "./CodexToolCallMapper";
@@ -401,6 +402,8 @@ export class CodexAcpServer implements acp.Agent {
                 return [await createCommandExecutionUpdate(item)];
             case "mcpToolCall":
                 return [await createMcpToolCallUpdate(item)];
+            case "dynamicToolCall":
+                return [await createDynamicToolCallUpdate(item)];
             case "collabAgentToolCall":
                 return [this.createCollabAgentToolCallUpdate(item)];
             case "webSearch":

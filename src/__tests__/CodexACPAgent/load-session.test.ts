@@ -24,6 +24,7 @@ describe("CodexACPAgent - loadSession", () => {
             upgrade: null,
             displayName: "GPT-5.2",
             description: "Test model",
+            hidden: false,
             supportedReasoningEfforts: [
                 { reasoningEffort: "medium", description: "Medium" },
             ],
@@ -44,11 +45,15 @@ describe("CodexACPAgent - loadSession", () => {
             modelProvider: "openai",
             createdAt: 123,
             updatedAt: 124,
+            status: { type: "idle" },
             path: null,
             cwd: "/test/project",
             cliVersion: "0.0.0",
             source: "cli",
+            agentNickname: null,
+            agentRole: null,
             gitInfo: null,
+            name: null,
             turns: [
                 {
                     id: "turn-1",
@@ -67,6 +72,7 @@ describe("CodexACPAgent - loadSession", () => {
                             type: "agentMessage",
                             id: "item-agent-1",
                             text: "Hello!",
+                            phase: null,
                         },
                         {
                             type: "reasoning",
@@ -113,6 +119,16 @@ describe("CodexACPAgent - loadSession", () => {
                             result: null,
                             error: null,
                             durationMs: null,
+                        },
+                        {
+                            type: "dynamicToolCall",
+                            id: "item-dyn-1",
+                            tool: "list_apps",
+                            arguments: { includeDisabled: false },
+                            status: "completed",
+                            contentItems: [{ type: "inputText", text: "Done" }],
+                            success: true,
+                            durationMs: 3,
                         },
                     ],
                 },

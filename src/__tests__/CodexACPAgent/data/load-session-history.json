@@ -163,3 +163,23 @@
     }
   ]
 }
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "item-dyn-1",
+        "kind": "execute",
+        "title": "list_apps",
+        "status": "completed",
+        "rawInput": {
+          "arguments": {
+            "includeDisabled": false
+          }
+        }
+      }
+    }
+  ]
+}

@@ -188,6 +188,32 @@ describe('CodexEventHandler - terminal output events', () => {
         );
     });
 
+    it('should send status update when dynamic tool call completes', async () => {
+        const dynamicToolCompletedNotification: ServerNotification = {
+            method: 'item/completed',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'dynamicToolCall',
+                    id: 'dyn-tool-123',
+                    tool: 'list_apps',
+                    arguments: { includeDisabled: false },
+                    status: 'completed',
+                    contentItems: [{ type: "inputText", text: "Done" }],
+                    success: true,
+                    durationMs: 25,
+                },
+            },
+        };
+
+        await setupAndSendNotifications([dynamicToolCompletedNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/dynamic-tool-completed.json'
+        );
+    });
+
     it('should handle full terminal output flow: start -> delta -> complete', async () => {
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
