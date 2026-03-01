@@ -44,8 +44,20 @@
     "developerInstructions": null,
     "personality": null,
     "ephemeral": null,
-    "experimentalRawEvents": false
+    "experimentalRawEvents": false,
+    "persistExtendedHistory": false
   }
+}
+{
+  "eventType": "notification",
+  "method": "thread/status/changed",
+  "params": {
+    "threadId": "threadId",
+    "status": {
+      "type": "idle"
+    }
+  },
+  "jsonrpc": "2.0"
 }
 {
   "eventType": "response",
@@ -80,8 +92,9 @@
       "id": "id",
       "model": "model",
       "upgrade": "upgrade",
-      "displayName": "gpt-5.2-codex",
-      "description": "Frontier agentic coding model.",
+      "displayName": "gpt-5.3-codex",
+      "description": "Latest frontier agentic coding model.",
+      "hidden": false,
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "inputModalities": [
@@ -95,8 +108,25 @@
       "id": "id",
       "model": "model",
       "upgrade": "upgrade",
+      "displayName": "gpt-5.2-codex",
+      "description": "Frontier agentic coding model.",
+      "hidden": false,
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
+      "defaultReasoningEffort": "medium",
+      "inputModalities": [
+        "text",
+        "image"
+      ],
+      "supportsPersonality": true,
+      "isDefault": false
+    },
+    {
+      "id": "id",
+      "model": "model",
+      "upgrade": "upgrade",
       "displayName": "gpt-5.1-codex-max",
       "description": "Codex-optimized flagship for deep and fast reasoning.",
+      "hidden": false,
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "inputModalities": [
@@ -112,6 +142,7 @@
       "upgrade": "upgrade",
       "displayName": "gpt-5.2",
       "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
+      "hidden": false,
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "inputModalities": [
@@ -127,6 +158,7 @@
       "upgrade": "upgrade",
       "displayName": "gpt-5.1-codex-mini",
       "description": "Optimized for codex. Cheaper, faster, but less capable.",
+      "hidden": false,
       "supportedReasoningEfforts": "supportedReasoningEfforts",
       "defaultReasoningEffort": "medium",
       "inputModalities": [
