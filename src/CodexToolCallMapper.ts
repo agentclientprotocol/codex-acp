@@ -17,6 +17,7 @@ import type {
     PatchApplyStatus,
     ThreadItem,
 } from "./app-server/v2";
+import type { JsonValue } from "./app-server/serde_json/JsonValue";
 
 type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -83,27 +84,26 @@ export async function createCommandExecutionUpdate(
 export async function createMcpToolCallUpdate(
     item: ThreadItem & { type: "mcpToolCall" }
 ): Promise<UpdateSessionEvent> {
-    return {
-        sessionUpdate: "tool_call",
-        toolCallId: item.id,
-        kind: "execute",
-        title: `mcp.${item.server}.${item.tool}`,
-        status: toAcpStatus(item.status),
-    };
+    return createExecuteToolCallUpdate(item, `mcp.${item.server}.${item.tool}`);
 }
-
 export async function createDynamicToolCallUpdate(
     item: ThreadItem & { type: "dynamicToolCall" }
+): Promise<UpdateSessionEvent> {
+    return createExecuteToolCallUpdate(item, item.tool, { arguments: item.arguments })
+}
+
+export async function createExecuteToolCallUpdate(
+    item: ThreadItem & ({ type: "mcpToolCall" } | { type: "dynamicToolCall" }),
+    title: string,
+    rawInput?: { arguments: JsonValue }
 ): Promise<UpdateSessionEvent> {
     return {
         sessionUpdate: "tool_call",
         toolCallId: item.id,
         kind: "execute",
-        title: item.tool,
+        title: title,
         status: toAcpStatus(item.status),
-        rawInput: {
-            arguments: item.arguments,
-        },
+        rawInput: rawInput,
     };
 }
 
