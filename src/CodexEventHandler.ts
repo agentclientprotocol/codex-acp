@@ -202,6 +202,7 @@ export class CodexEventHandler {
         switch (event.item.type) {
             case "mcpToolCall":
             case "fileChange":
+            case "dynamicToolCall":
                 return {
                     sessionUpdate: "tool_call_update",
                     toolCallId: event.item.id,
@@ -209,12 +210,6 @@ export class CodexEventHandler {
                 }
             case "commandExecution":
                 return this.completeCommandExecutionEvent(event.item);
-            case "dynamicToolCall":
-                return {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: event.item.id,
-                    status: event.item.status === "completed" ? "completed" : "failed"
-                }
             case "reasoning":
                 const summary = event.item.summary[0];
                 if (!summary) return null;
