@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
-import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
+import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
 import { AgentMode } from "../../AgentMode";
 
 describe('CodexEventHandler - terminal output events', () => {
@@ -18,36 +18,6 @@ describe('CodexEventHandler - terminal output events', () => {
         currentModelId: 'model-id[effort]',
         agentMode: AgentMode.DEFAULT_AGENT_MODE
     });
-
-    async function setupAndSendNotifications(notifications: ServerNotification[]) {
-        const codexAcpAgent = mockFixture.getCodexAcpAgent();
-
-        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
-            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
-        });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
-            threadId: sessionId,
-            turn: { id: "turn-id", items: [], status: "completed", error: null }
-        });
-
-        vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
-
-        await codexAcpAgent.prompt({
-            sessionId,
-            prompt: [{ type: 'text', text: 'test prompt' }],
-        });
-
-        mockFixture.clearAcpConnectionDump();
-
-        for (const notification of notifications) {
-            mockFixture.sendServerNotification(notification);
-        }
-
-        await vi.waitFor(() => {
-            const dump = mockFixture.getAcpConnectionDump([]);
-            expect(dump.length).toBeGreaterThan(0);
-        });
-    }
 
     it('should send terminal info when command execution starts', async () => {
         const commandStartNotification: ServerNotification = {
@@ -70,7 +40,7 @@ describe('CodexEventHandler - terminal output events', () => {
             },
         };
 
-        await setupAndSendNotifications([commandStartNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [commandStartNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/terminal-command-started.json'
@@ -106,7 +76,7 @@ describe('CodexEventHandler - terminal output events', () => {
             },
         };
 
-        await setupAndSendNotifications([commandStartNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [commandStartNotification]);
 
         const dump = mockFixture.getAcpConnectionDump([]);
         const parsed = JSON.parse(dump);
@@ -125,7 +95,7 @@ describe('CodexEventHandler - terminal output events', () => {
             },
         };
 
-        await setupAndSendNotifications([outputDeltaNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [outputDeltaNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/terminal-output-delta.json'
@@ -153,7 +123,7 @@ describe('CodexEventHandler - terminal output events', () => {
             },
         };
 
-        await setupAndSendNotifications([commandCompletedNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [commandCompletedNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/terminal-command-completed.json'
@@ -181,7 +151,7 @@ describe('CodexEventHandler - terminal output events', () => {
             },
         };
 
-        await setupAndSendNotifications([commandFailedNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [commandFailedNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/terminal-command-failed.json'
@@ -207,7 +177,7 @@ describe('CodexEventHandler - terminal output events', () => {
             },
         };
 
-        await setupAndSendNotifications([dynamicToolCompletedNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [dynamicToolCompletedNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/dynamic-tool-completed.json'
@@ -265,7 +235,7 @@ describe('CodexEventHandler - terminal output events', () => {
             },
         };
 
-        await setupAndSendNotifications([
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
             commandStartNotification,
             outputDeltaNotification,
             commandCompletedNotification
@@ -307,7 +277,7 @@ describe('CodexEventHandler - terminal output events', () => {
             },
         };
 
-        await setupAndSendNotifications([delta1, delta2, delta3]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [delta1, delta2, delta3]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/terminal-output-multiple-deltas.json'

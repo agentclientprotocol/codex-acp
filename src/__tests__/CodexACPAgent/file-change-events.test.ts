@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
-import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
+import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
 import {AgentMode} from "../../AgentMode";
 
 const { mockFiles, mockFileContent, clearMockFiles } = vi.hoisted(() => {
@@ -39,36 +39,6 @@ describe('CodexEventHandler - file change events', () => {
         agentMode: AgentMode.DEFAULT_AGENT_MODE
     });
 
-    async function setupAndSendNotifications(notifications: ServerNotification[]) {
-        const codexAcpAgent = mockFixture.getCodexAcpAgent();
-
-        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
-            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
-        });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
-            threadId: sessionId,
-            turn: { id: "turn-id", items: [], status: "completed", error: null }
-        });
-
-        vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
-
-        await codexAcpAgent.prompt({
-            sessionId,
-            prompt: [{ type: 'text', text: 'test prompt' }],
-        });
-
-        mockFixture.clearAcpConnectionDump();
-
-        for (const notification of notifications) {
-            mockFixture.sendServerNotification(notification);
-        }
-
-        await vi.waitFor(() => {
-            const dump = mockFixture.getAcpConnectionDump([]);
-            expect(dump.length).toBeGreaterThan(0);
-        });
-    }
-
     it('should handle new file creation', async () => {
         const newFileNotification: ServerNotification = {
             method: 'item/started',
@@ -97,7 +67,7 @@ describe('CodexEventHandler - file change events', () => {
             },
         };
 
-        await setupAndSendNotifications([newFileNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [newFileNotification]);
 
         await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
             'data/file-change-add-new-file.json'
@@ -136,7 +106,7 @@ describe('CodexEventHandler - file change events', () => {
             },
         };
 
-        await setupAndSendNotifications([multiFileNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [multiFileNotification]);
 
         await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
             'data/file-change-add-multiple-files.json'
@@ -165,7 +135,7 @@ describe('CodexEventHandler - file change events', () => {
             },
         };
 
-        await setupAndSendNotifications([newFileNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [newFileNotification]);
 
         await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
             'data/file-change-add-raw-content.json'
@@ -198,7 +168,7 @@ describe('CodexEventHandler - file change events', () => {
             },
         };
 
-        await setupAndSendNotifications([deleteFileNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [deleteFileNotification]);
 
         await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
             'data/file-change-delete-file.json'
@@ -229,7 +199,7 @@ describe('CodexEventHandler - file change events', () => {
             },
         };
 
-        await setupAndSendNotifications([deletedFileNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [deletedFileNotification]);
 
         await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
             'data/file-change-delete-raw-content.json'

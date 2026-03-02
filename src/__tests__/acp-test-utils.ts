@@ -8,6 +8,7 @@ import type {MessageConnection} from "vscode-jsonrpc/node";
 import path from "node:path";
 import fs from "node:fs";
 import {AgentMode} from "../AgentMode";
+import {expect, vi} from "vitest";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -259,4 +260,41 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
         ...overrides,
     };
+}
+
+export async function setupPromptAndSendNotifications(
+    fixture: CodexMockTestFixture,
+    sessionId: string,
+    sessionState: SessionState,
+    notifications: ServerNotification[]
+): Promise<void> {
+    const codexAcpAgent = fixture.getCodexAcpAgent();
+    const codexAppServerClient = fixture.getCodexAppServerClient();
+    const turn = { id: "turn-id", items: [], status: "inProgress" as const, error: null };
+
+    codexAppServerClient.turnStart = vi.fn().mockResolvedValue({
+        turn,
+    });
+    codexAppServerClient.awaitTurnCompleted = vi.fn().mockResolvedValue({
+        threadId: sessionId,
+        turn: { ...turn, status: "completed" },
+    });
+
+    vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+    await codexAcpAgent.prompt({
+        sessionId,
+        prompt: [{ type: "text", text: "test prompt" }],
+    });
+
+    fixture.clearAcpConnectionDump();
+
+    for (const notification of notifications) {
+        fixture.sendServerNotification(notification);
+    }
+
+    await vi.waitFor(() => {
+        const dump = fixture.getAcpConnectionDump([]);
+        expect(dump.length).toBeGreaterThan(0);
+    });
 }
