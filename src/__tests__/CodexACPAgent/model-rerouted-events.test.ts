@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SessionState } from "../../CodexAcpServer";
 import type { ServerNotification } from "../../app-server";
-import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from "../acp-test-utils";
+import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from "../acp-test-utils";
 import { AgentMode } from "../../AgentMode";
 
 describe("CodexEventHandler - model rerouted events", () => {
@@ -19,36 +19,6 @@ describe("CodexEventHandler - model rerouted events", () => {
         agentMode: AgentMode.DEFAULT_AGENT_MODE
     });
 
-    async function setupAndSendNotifications(notifications: ServerNotification[]) {
-        const codexAcpAgent = mockFixture.getCodexAcpAgent();
-
-        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
-            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
-        });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
-            threadId: sessionId,
-            turn: { id: "turn-id", items: [], status: "completed", error: null }
-        });
-
-        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
-
-        await codexAcpAgent.prompt({
-            sessionId,
-            prompt: [{ type: "text", text: "test prompt" }],
-        });
-
-        mockFixture.clearAcpConnectionDump();
-
-        for (const notification of notifications) {
-            mockFixture.sendServerNotification(notification);
-        }
-
-        await vi.waitFor(() => {
-            const dump = mockFixture.getAcpConnectionDump([]);
-            expect(dump.length).toBeGreaterThan(0);
-        });
-    }
-
     it("maps model reroute to agent thought chunk", async () => {
         const modelReroutedNotification: ServerNotification = {
             method: "model/rerouted",
@@ -61,7 +31,7 @@ describe("CodexEventHandler - model rerouted events", () => {
             }
         };
 
-        await setupAndSendNotifications([modelReroutedNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [modelReroutedNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             "data/model-rerouted.json"

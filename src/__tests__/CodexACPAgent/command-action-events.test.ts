@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
-import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
+import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
 import {AgentMode} from "../../AgentMode";
 
 describe('CodexEventHandler - command action events', () => {
@@ -18,36 +18,6 @@ describe('CodexEventHandler - command action events', () => {
         currentModelId: 'model-id[effort]',
         agentMode: AgentMode.DEFAULT_AGENT_MODE
     });
-
-    async function setupAndSendNotifications(notifications: ServerNotification[]) {
-        const codexAcpAgent = mockFixture.getCodexAcpAgent();
-
-        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
-            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
-        });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
-            threadId: sessionId,
-            turn: { id: "turn-id", items: [], status: "completed", error: null }
-        });
-
-        vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
-
-        await codexAcpAgent.prompt({
-            sessionId,
-            prompt: [{ type: 'text', text: 'test prompt' }],
-        });
-
-        mockFixture.clearAcpConnectionDump();
-
-        for (const notification of notifications) {
-            mockFixture.sendServerNotification(notification);
-        }
-
-        await vi.waitFor(() => {
-            const dump = mockFixture.getAcpConnectionDump([]);
-            expect(dump.length).toBeGreaterThan(0);
-        });
-    }
 
     it('should handle list files command with explicit path', async () => {
         const listFilesNotification: ServerNotification = {
@@ -76,7 +46,7 @@ describe('CodexEventHandler - command action events', () => {
             },
         };
 
-        await setupAndSendNotifications([listFilesNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [listFilesNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/command-list-files-with-path.json'
@@ -110,7 +80,7 @@ describe('CodexEventHandler - command action events', () => {
             },
         };
 
-        await setupAndSendNotifications([listFilesNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [listFilesNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/command-list-files-without-path.json'
@@ -145,7 +115,7 @@ describe('CodexEventHandler - command action events', () => {
             },
         };
 
-        await setupAndSendNotifications([searchNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [searchNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/command-search-with-query-and-path.json'
@@ -180,7 +150,7 @@ describe('CodexEventHandler - command action events', () => {
             },
         };
 
-        await setupAndSendNotifications([searchNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [searchNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/command-search-with-query-only.json'
@@ -215,7 +185,7 @@ describe('CodexEventHandler - command action events', () => {
             },
         };
 
-        await setupAndSendNotifications([searchNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [searchNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/command-search-with-path-only.json'
@@ -250,7 +220,7 @@ describe('CodexEventHandler - command action events', () => {
             },
         };
 
-        await setupAndSendNotifications([searchNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [searchNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/command-search-no-query-no-path.json'
@@ -277,7 +247,7 @@ describe('CodexEventHandler - command action events', () => {
             },
         };
 
-        await setupAndSendNotifications([searchNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [searchNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/mcp-tool-in-progress.json'
@@ -303,7 +273,7 @@ describe('CodexEventHandler - command action events', () => {
             },
         };
 
-        await setupAndSendNotifications([dynamicToolNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [dynamicToolNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/dynamic-tool-in-progress.json'

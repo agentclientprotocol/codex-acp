@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SessionState } from "../../CodexAcpServer";
 import type { ServerNotification } from "../../app-server";
-import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from "../acp-test-utils";
+import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from "../acp-test-utils";
 import { AgentMode } from "../../AgentMode";
 
 describe("CodexEventHandler - fuzzy file search events", () => {
@@ -19,37 +19,12 @@ describe("CodexEventHandler - fuzzy file search events", () => {
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
     });
 
-    async function setupAndSendNotifications(notifications: ServerNotification[]) {
-        const codexAcpAgent = mockFixture.getCodexAcpAgent();
-
-        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
-            turn: { id: "turn-id", items: [], status: "inProgress", error: null },
-        });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
-            threadId: sessionId,
-            turn: { id: "turn-id", items: [], status: "completed", error: null },
-        });
-
-        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
-
-        await codexAcpAgent.prompt({
-            sessionId,
-            prompt: [{ type: "text", text: "test prompt" }],
-        });
-
-        mockFixture.clearAcpConnectionDump();
-
-        for (const notification of notifications) {
-            mockFixture.sendServerNotification(notification);
-        }
-
-        await vi.waitFor(() => {
-            const dump = mockFixture.getAcpConnectionDump([]);
-            expect(dump.length).toBeGreaterThan(0);
-        });
-    }
-
     it("maps fuzzy file search as search tool call flow", async () => {
+        const events: { method: string; args: any[] }[] = [];
+        mockFixture.onAcpConnectionEvent((event) => {
+            events.push(event);
+        });
+
         const updated1: ServerNotification = {
             method: "fuzzyFileSearch/sessionUpdated",
             params: {
@@ -78,10 +53,58 @@ describe("CodexEventHandler - fuzzy file search events", () => {
             },
         };
 
-        await setupAndSendNotifications([updated1, updated2, completed]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [updated1, updated2, completed]);
 
-        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
-            "data/fuzzy-file-search-flow.json"
-        );
+        expect(events).toHaveLength(3);
+        expect(events[0]).toEqual({
+            method: "sessionUpdate",
+            args: [
+                {
+                    sessionId: "test-session-id",
+                    update: {
+                        sessionUpdate: "tool_call",
+                        toolCallId: "fuzzyFileSearch.search-1",
+                        kind: "search",
+                        title: "Search for 'event handler'",
+                        status: "in_progress",
+                        locations: [
+                            { path: "/repo/src/CodexEventHandler.ts" },
+                            { path: "/repo/src/CodexToolCallMapper.ts" },
+                        ],
+                        rawInput: {
+                            query: "event handler",
+                        },
+                    },
+                },
+            ],
+        });
+        expect(events[1]).toEqual({
+            method: "sessionUpdate",
+            args: [
+                {
+                    sessionId: "test-session-id",
+                    update: {
+                        sessionUpdate: "tool_call_update",
+                        toolCallId: "fuzzyFileSearch.search-1",
+                        title: "Search for 'event handler'",
+                        status: "in_progress",
+                        locations: [{ path: "/repo/src/CodexEventHandler.ts" }],
+                    },
+                },
+            ],
+        });
+        expect(events[2]).toEqual({
+            method: "sessionUpdate",
+            args: [
+                {
+                    sessionId: "test-session-id",
+                    update: {
+                        sessionUpdate: "tool_call_update",
+                        toolCallId: "fuzzyFileSearch.search-1",
+                        status: "completed",
+                    },
+                },
+            ],
+        });
     });
 });
