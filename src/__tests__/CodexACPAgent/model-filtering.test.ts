@@ -16,6 +16,9 @@ describe("Model filtering", () => {
             {
                 id: "gpt-5.2",
                 model: "gpt-5.2-model-field",
+                upgrade: null,
+                upgradeInfo: null,
+                availabilityNux: null,
                 displayName: "GPT-5.2",
                 description: "Allowed by id.",
                 hidden: false,
@@ -23,12 +26,14 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 isDefault: false,
-                upgrade: null,
                 inputModalities: []
             },
             {
                 id: "other-id",
                 model: "gpt-5.2",
+                upgrade: null,
+                upgradeInfo: null,
+                availabilityNux: null,
                 displayName: "gpt-5.2",
                 description: "Allowed",
                 hidden: false,
@@ -36,12 +41,14 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 isDefault: false,
-                upgrade: null,
                 inputModalities: []
             },
             {
                 id: "gpt-5.1-codex-mini",
                 model: "other-model",
+                upgrade: null,
+                upgradeInfo: null,
+                availabilityNux: null,
                 displayName: "Other",
                 description: "Allowed by id.",
                 hidden: false,
@@ -49,12 +56,14 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 isDefault: false,
-                upgrade: null,
                 inputModalities: []
             },
             {
                 id: "gpt-4o",
                 model: "gpt-4o",
+                upgrade: null,
+                upgradeInfo: null,
+                availabilityNux: null,
                 displayName: "gpt-4o",
                 description: "Allowed.",
                 hidden: false,
@@ -62,7 +71,6 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 isDefault: false,
-                upgrade: null,
                 inputModalities: []
             },
         ];
