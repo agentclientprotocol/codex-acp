@@ -1,6 +1,9 @@
 // noinspection ES6RedundantAwait
 
 import {describe, expect, it, vi, beforeEach} from 'vitest';
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type {CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk";
 import {createTestFixture, createCodexMockTestFixture, createTestSessionState, type TestFixture} from "../acp-test-utils";
@@ -10,6 +13,26 @@ import {AgentMode} from "../../AgentMode";
 import type {ListMcpServerStatusResponse, Model, SkillsListResponse} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
+
+const CODEX_HOME_ENV = "CODEX_HOME";
+
+async function overrideCodexHome<T>(configToml: string, run: () => Promise<T>): Promise<T> {
+    const previousCodexHome = process.env[CODEX_HOME_ENV];
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-codex-home-"));
+    fs.writeFileSync(path.join(codexHome, "config.toml"), configToml, "utf8");
+    process.env[CODEX_HOME_ENV] = codexHome;
+
+    try {
+        return await run();
+    } finally {
+        if (previousCodexHome === undefined) {
+            delete process.env[CODEX_HOME_ENV];
+        } else {
+            process.env[CODEX_HOME_ENV] = previousCodexHome;
+        }
+        fs.rmSync(codexHome, { recursive: true, force: true });
+    }
+}
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -50,31 +73,35 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('should authenticate with key', async () => {
-        const codexAcpAgent = fixture.getCodexAcpAgent();
+        // In sandboxed environments Codex may fail when trying to write to the OS keychain (`Operation not permitted`).
+        await overrideCodexHome('cli_auth_credentials_store = "file"', async () => {
+            const keyFixture = createTestFixture();
+            const codexAcpAgent = keyFixture.getCodexAcpAgent();
 
-        await codexAcpAgent.initialize({protocolVersion: 1});
-        await fixture.getCodexAcpClient().logout();
+            await codexAcpAgent.initialize({protocolVersion: 1});
+            await keyFixture.getCodexAcpClient().logout();
 
 
-        const unauthenticatedResponse = await fixture.getCodexAcpAgent().extMethod("authentication/status", {});
-        expect(unauthenticatedResponse).toEqual({type: "unauthenticated"});
+            const unauthenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
+            expect(unauthenticatedResponse).toEqual({type: "unauthenticated"});
 
-        fixture.clearCodexConnectionDump();
+            keyFixture.clearCodexConnectionDump();
 
-        const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}}
-        await codexAcpAgent.authenticate(authRequest);
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
-        expect(newSessionResponse.sessionId).toBeDefined()
+            const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}}
+            await codexAcpAgent.authenticate(authRequest);
+            const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+            expect(newSessionResponse.sessionId).toBeDefined()
 
-        const transportDump = fixture.getCodexConnectionDump([...ignoredFields, "upgrade"]);
-        await expect(transportDump).toMatchFileSnapshot("data/auth-with-key.json");
+            const transportDump = keyFixture.getCodexConnectionDump([...ignoredFields, "upgrade"]);
+            await expect(transportDump).toMatchFileSnapshot("data/auth-with-key.json");
 
-        const authenticatedResponse = await fixture.getCodexAcpAgent().extMethod("authentication/status", {});
-        expect(authenticatedResponse).toEqual({type: "api-key"});
+            const authenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
+            expect(authenticatedResponse).toEqual({type: "api-key"});
 
-        await fixture.getCodexAcpAgent().extMethod("authentication/logout", {});
-        const logoutResponse = await fixture.getCodexAcpAgent().extMethod("authentication/status", {});
-        expect(logoutResponse).toEqual({type: "unauthenticated"});
+            await keyFixture.getCodexAcpAgent().extMethod("authentication/logout", {});
+            const logoutResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
+            expect(logoutResponse).toEqual({type: "unauthenticated"});
+        });
     });
 
     it('should authenticate with a gateway', async () => {
