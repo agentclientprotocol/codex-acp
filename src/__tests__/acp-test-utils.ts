@@ -40,12 +40,16 @@ export interface TestFixture {
     getCodexAcpAgent(): CodexAcpServer,
 
     onCodexConnectionEvent(handler: (event: CodexConnectionEvent) => void): void,
-    getCodexConnectionDump(ignoredFields: string[]): string,
+    getCodexConnectionDump(ignoredFields: string[], options?: CodexConnectionDumpOptions): string,
     clearCodexConnectionDump(): void,
 
     onAcpConnectionEvent(handler: (event: MethodCallEvent) => void): void,
     getAcpConnectionDump(ignoredFields: string[]): string,
     clearAcpConnectionDump(): void,
+}
+
+export interface CodexConnectionDumpOptions {
+    placeholderResponseMethods?: string[];
 }
 
 export interface AcpConnectionConfig {
@@ -86,8 +90,29 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         getCodexAcpClient(): CodexAcpClient {
             return codexAcpClient;
         },
-        getCodexConnectionDump(ignoredFields: string[]): string {
-            return createArrayDump(transportEvents, ignoredFields);
+        getCodexConnectionDump(ignoredFields: string[], options?: CodexConnectionDumpOptions): string {
+            const placeholderResponseMethods = new Set(options?.placeholderResponseMethods ?? []);
+            const pendingRequestMethods: string[] = [];
+
+            const filteredEvents = transportEvents.flatMap((event) => {
+                switch (event.eventType) {
+                    case "request":
+                        pendingRequestMethods.push(event.method);
+                        break;
+                    case "response":
+                        const requestMethod = pendingRequestMethods.shift();
+                        if (requestMethod && placeholderResponseMethods.has(requestMethod)) {
+                            return [{
+                                eventType: "response" as const,
+                                placeholder: requestMethod,
+                            }];
+                        }
+                        break;
+                }
+
+                return [event];
+            });
+            return createArrayDump(filteredEvents, ignoredFields);
         },
         onCodexConnectionEvent(handler: (event: CodexConnectionEvent) => void): void {
             codexEventHandlers.push(handler);
