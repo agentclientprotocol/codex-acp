@@ -22,6 +22,8 @@ describe("CodexACPAgent - loadSession", () => {
             id: "gpt-5.2",
             model: "gpt-5.2",
             upgrade: null,
+            upgradeInfo: null,
+            availabilityNux: null,
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -42,6 +44,7 @@ describe("CodexACPAgent - loadSession", () => {
         const thread: Thread = {
             id: "session-1",
             preview: "Hi",
+            ephemeral: false,
             modelProvider: "openai",
             createdAt: 123,
             updatedAt: 124,

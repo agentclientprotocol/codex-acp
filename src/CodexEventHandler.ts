@@ -96,6 +96,7 @@ export class CodexEventHandler {
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
             case "item/mcpToolCall/progress":
+            case "serverRequest/resolved":
             case "account/updated":
                 return null;
             case "account/rateLimits/updated":

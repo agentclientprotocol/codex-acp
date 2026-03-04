@@ -92,6 +92,8 @@
       "id": "id",
       "model": "model",
       "upgrade": "upgrade",
+      "upgradeInfo": null,
+      "availabilityNux": null,
       "displayName": "gpt-5.3-codex",
       "description": "Latest frontier agentic coding model.",
       "hidden": false,
@@ -108,6 +110,13 @@
       "id": "id",
       "model": "model",
       "upgrade": "upgrade",
+      "upgradeInfo": {
+        "model": "model",
+        "upgradeCopy": null,
+        "modelLink": null,
+        "migrationMarkdown": "**Codex just got an upgrade. Introducing {model_to}.**\n\nCodex is now powered by {model_to}, our most capable agentic coding model yet. It's built for long-running, project-scale work, with mid-turn steering + frequent progress updates so you can collaborate while it runs (and it's faster too).\n\nLearn more: https://openai.com/index/introducing-gpt-5-3-codex/\n\nYou can keep using {model_from} if you prefer.\n"
+      },
+      "availabilityNux": null,
       "displayName": "gpt-5.2-codex",
       "description": "Frontier agentic coding model.",
       "hidden": false,
@@ -124,6 +133,13 @@
       "id": "id",
       "model": "model",
       "upgrade": "upgrade",
+      "upgradeInfo": {
+        "model": "model",
+        "upgradeCopy": null,
+        "modelLink": null,
+        "migrationMarkdown": "**Codex just got an upgrade. Introducing {model_to}.**\n\nCodex is now powered by {model_to}, our most capable agentic coding model yet. It's built for long-running, project-scale work, with mid-turn steering + frequent progress updates so you can collaborate while it runs (and it's faster too).\n\nLearn more: https://openai.com/index/introducing-gpt-5-3-codex/\n\nYou can keep using {model_from} if you prefer.\n"
+      },
+      "availabilityNux": null,
       "displayName": "gpt-5.1-codex-max",
       "description": "Codex-optimized flagship for deep and fast reasoning.",
       "hidden": false,
@@ -140,6 +156,13 @@
       "id": "id",
       "model": "model",
       "upgrade": "upgrade",
+      "upgradeInfo": {
+        "model": "model",
+        "upgradeCopy": null,
+        "modelLink": null,
+        "migrationMarkdown": "**Codex just got an upgrade. Introducing {model_to}.**\n\nCodex is now powered by {model_to}, our most capable agentic coding model yet. It's built for long-running, project-scale work, with mid-turn steering + frequent progress updates so you can collaborate while it runs (and it's faster too).\n\nLearn more: https://openai.com/index/introducing-gpt-5-3-codex/\n\nYou can keep using {model_from} if you prefer.\n"
+      },
+      "availabilityNux": null,
       "displayName": "gpt-5.2",
       "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
       "hidden": false,
@@ -156,6 +179,13 @@
       "id": "id",
       "model": "model",
       "upgrade": "upgrade",
+      "upgradeInfo": {
+        "model": "model",
+        "upgradeCopy": null,
+        "modelLink": null,
+        "migrationMarkdown": "**Codex just got an upgrade. Introducing {model_to}.**\n\nCodex is now powered by {model_to}, our most capable agentic coding model yet. It's built for long-running, project-scale work, with mid-turn steering + frequent progress updates so you can collaborate while it runs (and it's faster too).\n\nLearn more: https://openai.com/index/introducing-gpt-5-3-codex/\n\nYou can keep using {model_from} if you prefer.\n"
+      },
+      "availabilityNux": null,
       "displayName": "gpt-5.1-codex-mini",
       "description": "Optimized for codex. Cheaper, faster, but less capable.",
       "hidden": false,
