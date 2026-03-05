@@ -7,9 +7,7 @@ import open from "open";
 import type {
     ClientInfo,
     ReasoningEffort,
-    ServerNotification,
-    SetDefaultModelParams,
-    SetDefaultModelResponse
+    ServerNotification
 } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
@@ -376,10 +374,6 @@ export class CodexAcpClient {
         // Wait for turn completion
         // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
         return await this.codexClient.awaitTurnCompleted();
-    }
-
-    async setDefaultModel(params: SetDefaultModelParams): Promise<SetDefaultModelResponse> {
-        return this.codexClient.setModelRequest(params);
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {

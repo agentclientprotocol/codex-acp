@@ -25,7 +25,8 @@ export class AgentMode {
         "on-request",
         {
             "type": "readOnly",
-            "access": {"type": "fullAccess"}
+            "access": {"type": "fullAccess"},
+            "networkAccess": false
         },
         "read-only"
     );

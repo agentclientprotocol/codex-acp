@@ -124,9 +124,7 @@ export class CodexEventHandler {
             case "thread/realtime/closed":
             case "windowsSandbox/setupCompleted":
             case "account/login/completed":
-            case "authStatusChange":
-            case "loginChatGptComplete":
-            case "sessionConfigured":
+            case "skills/changed":
             case "deprecationNotice":
             case "mcpServer/oauthLogin/completed":
             case "rawResponseItem/completed":
