@@ -3,7 +3,7 @@ import type {
     ClientRequest, ConversationId,
     InitializeParams,
     InitializeResponse, McpStartupCompleteEvent,
-    ServerNotification, SetDefaultModelParams, SetDefaultModelResponse
+    ServerNotification
 } from "./app-server";
 import type {
     AccountLoginCompletedNotification, AccountUpdatedNotification,
@@ -181,11 +181,6 @@ export class CodexAppServerClient {
                 resolve(event);
             });
         });
-    }
-
-
-    async setModelRequest(params: SetDefaultModelParams): Promise<SetDefaultModelResponse> {
-        return await this.sendRequest({ method: "setDefaultModel", params });
     }
 
     async listModels(params: ModelListParams = {cursor: null, limit: null}): Promise<ModelListResponse> {
