@@ -55,7 +55,7 @@
   "modelProvider": "openai",
   "serviceTier": null,
   "cwd": "cwd",
-  "approvalPolicy": "untrusted",
+  "approvalPolicy": "on-request",
   "sandbox": "sandbox",
   "reasoningEffort": "reasoningEffort"
 }
