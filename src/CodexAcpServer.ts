@@ -410,6 +410,8 @@ export class CodexAcpServer implements acp.Agent {
                 return [this.createWebSearchUpdate(item)];
             case "imageView":
                 return [this.createImageViewUpdate(item)];
+            case "imageGeneration":
+                return [];
             case "enteredReviewMode":
                 return [this.createReviewModeUpdate(item, true)];
             case "exitedReviewMode":

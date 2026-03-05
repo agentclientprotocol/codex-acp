@@ -189,6 +189,7 @@ export class CodexEventHandler {
             case "reasoning":
             case "webSearch":
             case "imageView":
+            case "imageGeneration":
             case "enteredReviewMode":
             case "exitedReviewMode":
             case "contextCompaction":
@@ -224,6 +225,7 @@ export class CodexEventHandler {
             case "agentMessage":
             case "webSearch":
             case "imageView":
+            case "imageGeneration":
             case "enteredReviewMode":
             case "exitedReviewMode":
             case "contextCompaction":
