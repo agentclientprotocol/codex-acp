@@ -124,9 +124,7 @@ export class CodexEventHandler {
             case "thread/realtime/closed":
             case "windowsSandbox/setupCompleted":
             case "account/login/completed":
-            case "authStatusChange":
-            case "loginChatGptComplete":
-            case "sessionConfigured":
+            case "skills/changed":
             case "deprecationNotice":
             case "mcpServer/oauthLogin/completed":
             case "rawResponseItem/completed":
@@ -191,6 +189,7 @@ export class CodexEventHandler {
             case "reasoning":
             case "webSearch":
             case "imageView":
+            case "imageGeneration":
             case "enteredReviewMode":
             case "exitedReviewMode":
             case "contextCompaction":
@@ -226,6 +225,7 @@ export class CodexEventHandler {
             case "agentMessage":
             case "webSearch":
             case "imageView":
+            case "imageGeneration":
             case "enteredReviewMode":
             case "exitedReviewMode":
             case "contextCompaction":
