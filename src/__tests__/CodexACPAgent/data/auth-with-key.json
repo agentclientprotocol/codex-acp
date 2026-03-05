@@ -49,23 +49,13 @@
   }
 }
 {
-  "eventType": "notification",
-  "method": "thread/status/changed",
-  "params": {
-    "threadId": "threadId",
-    "status": {
-      "type": "idle"
-    }
-  },
-  "jsonrpc": "2.0"
-}
-{
   "eventType": "response",
   "thread": "thread",
   "model": "model",
   "modelProvider": "openai",
+  "serviceTier": null,
   "cwd": "cwd",
-  "approvalPolicy": "on-request",
+  "approvalPolicy": "untrusted",
   "sandbox": "sandbox",
   "reasoningEffort": "reasoningEffort"
 }
