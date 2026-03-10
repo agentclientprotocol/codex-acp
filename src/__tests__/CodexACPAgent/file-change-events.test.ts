@@ -4,11 +4,12 @@ import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
 import {AgentMode} from "../../AgentMode";
 
-const { mockFiles, mockFileContent, clearMockFiles } = vi.hoisted(() => {
+const { mockFiles, mockFileContent, removeMockFile, clearMockFiles } = vi.hoisted(() => {
     const files = new Map<string, string>();
     return {
         mockFiles: files,
         mockFileContent: (path: string, content: string) => files.set(path, content),
+        removeMockFile: (path: string) => files.delete(path),
         clearMockFiles: () => files.clear(),
     };
 });
@@ -179,6 +180,71 @@ describe('CodexEventHandler - file change events', () => {
         mockFileContent('/test/project/RawDeleteFile.kt', 'fun main() {\n    println("Hello, World!")\n}\n');
 
         // Codex sends raw file content (not unified diff) for deleted files
+        const deletedFileNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-delete-raw',
+                    changes: [
+                        {
+                            path: '/test/project/RawDeleteFile.kt',
+                            kind: { type: 'delete' },
+                            diff: 'fun main() {\n    println("Hello, World!")\n}\n',
+                        },
+                    ],
+                    status: 'completed',
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [deletedFileNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
+            'data/file-change-delete-raw-content.json'
+        );
+    });
+
+    it('should handle file deletion when old file is already missing', async () => {
+        removeMockFile('/test/project/OldFile.kt');
+
+        const deleteFileNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-change-3',
+                    changes: [
+                        {
+                            path: '/test/project/OldFile.kt',
+                            kind: { type: 'delete' },
+                            diff: `--- /test/project/OldFile.kt
++++ /dev/null
+@@ -1,3 +0,0 @@
+-package test.project
+-
+-class OldFile {}`,
+                        },
+                    ],
+                    status: 'completed',
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [deleteFileNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
+            'data/file-change-delete-file.json'
+        );
+    });
+
+    it('should handle file deletion with raw content when old file is already missing', async () => {
+        removeMockFile('/test/project/RawDeleteFile.kt');
+
         const deletedFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
