@@ -13,7 +13,7 @@
           {
             "type": "diff",
             "oldText": "fun main() {\n    println(\"Hello, World!\")\n}\n",
-            "newText": "fun main() {\n    println(\"Hello, World!\")\n}\n",
+            "newText": "",
             "path": "/test/project/RawDeleteFile.kt",
             "_meta": {
               "kind": "delete"
