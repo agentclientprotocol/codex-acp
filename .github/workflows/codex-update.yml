@@ -63,7 +63,7 @@ jobs:
           git add package.json package-lock.json src/app-server
           git commit -m "Update codex to ${{ env.VERSION }}"
 
-      - name: Finalize update with Codex Action (placeholder prompt)
+      - name: Finalize update with Codex
         id: codex-finalize
         uses: openai/codex-action@v1
         with:
