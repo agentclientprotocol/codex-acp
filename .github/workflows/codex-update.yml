@@ -62,6 +62,17 @@ jobs:
           npm run generate-types
           git add package.json package-lock.json src/app-server
           git commit -m "Update codex to ${{ env.VERSION }}"
+
+      - name: Finalize update with Codex Action (placeholder prompt)
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          codex-version: ${{ env.VERSION }}
+          allow-bots: true
+          prompt: "Finalize the update using codex-update-compat skill. Commit the changes."
+
+      - name: Push branch updates
+        run: |
           git push origin "${{ env.BRANCH }}"
 
       - name: Generate GitHub App token
