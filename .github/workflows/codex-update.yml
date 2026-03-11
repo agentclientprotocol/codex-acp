@@ -7,6 +7,8 @@ on:
 
 env:
   CODEX_PACKAGE: '@openai/codex'
+  CODEX_UPDATE_LABEL: 'codex-update'
+  GITHUB_BOT_USERNAME: 'github-actions[bot]'
 
 jobs:
   check:
@@ -52,7 +54,7 @@ jobs:
 
       - name: Configure git user and prepare branch
         run: |
-          git config user.name "github-actions[bot]"
+          git config user.name "${{ env.GITHUB_BOT_USERNAME }}"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "${{ env.BRANCH }}"
 
@@ -79,4 +81,33 @@ jobs:
             --base main \
             --title "Update codex to ${{ env.VERSION }}" \
             --body "[What's new](https://github.com/openai/codex/releases/tag/rust-v${{ env.VERSION }})" \
-            --label "codex-update"
+            --label "${{ env.CODEX_UPDATE_LABEL }}"
+
+      - name: Close obsolete PRs
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin main --no-tags
+
+          gh pr list \
+            --state open \
+            --label "${{ env.CODEX_UPDATE_LABEL }}" \
+            --json number,headRefName \
+            --jq '.[] | [.number, .headRefName] | @tsv' |
+          while IFS=$'\t' read -r pr_number head_ref; do
+            if [[ "$head_ref" == "${{ env.BRANCH }}" || "$head_ref" != codex-update/* ]]; then
+              continue
+            fi
+
+            git fetch origin "$head_ref" --no-tags
+
+            # If there are any non-bot commits, don't close the PR
+            if git log --format='%cn' "origin/main..origin/${head_ref}" | grep -Fvxq "${{ env.GITHUB_BOT_USERNAME }}"; then
+              continue
+            fi
+
+            gh pr close "$pr_number" \
+              --comment "Closing obsolete update PR"
+          done
