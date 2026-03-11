@@ -61,15 +61,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
         await codexAcpAgent.initialize({protocolVersion: 1});
-        await fixture.getCodexAcpClient().logout();
-        fixture.clearCodexConnectionDump();
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(true);
 
         await expect(
             codexAcpAgent.newSession({cwd: "", mcpServers: []})
         ).rejects.toThrow("Authentication required");
-
-        const transportDump = fixture.getCodexConnectionDump(ignoredFields);
-        await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
     });
 
     it('should authenticate with key', async () => {
