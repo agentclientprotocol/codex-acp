@@ -93,9 +93,12 @@ export class CodexEventHandler {
             //skipped events
             case "item/reasoning/textDelta": //for raw output
             case "turn/diff/updated":
+            case "command/exec/outputDelta":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
             case "item/mcpToolCall/progress":
+            case "hook/started":
+            case "hook/completed":
             case "serverRequest/resolved":
             case "account/updated":
                 return null;

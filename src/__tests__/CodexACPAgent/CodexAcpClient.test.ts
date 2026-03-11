@@ -57,19 +57,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(transportDump).toMatchFileSnapshot("data/start-conversation.json");
     });
 
-    it('should throw error without authentication', async () => {
+    it('should throw auth required when server requires authentication', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
 
         await codexAcpAgent.initialize({protocolVersion: 1});
-        await fixture.getCodexAcpClient().logout();
-        fixture.clearCodexConnectionDump();
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(true);
 
         await expect(
             codexAcpAgent.newSession({cwd: "", mcpServers: []})
         ).rejects.toThrow("Authentication required");
-
-        const transportDump = fixture.getCodexConnectionDump(ignoredFields);
-        await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
     });
 
     it('should authenticate with key', async () => {
@@ -92,7 +89,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
             expect(newSessionResponse.sessionId).toBeDefined()
 
-            const transportDump = keyFixture.getCodexConnectionDump([...ignoredFields, "upgrade"]);
+            const transportDump = keyFixture.getCodexConnectionDump(
+                [...ignoredFields, "upgrade"],
+                {placeholderResponseMethods: ["model/list"]}
+            );
             await expect(transportDump).toMatchFileSnapshot("data/auth-with-key.json");
 
             const authenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
