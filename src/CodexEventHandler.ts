@@ -83,6 +83,9 @@ export class CodexEventHandler {
             case "turn/completed":
                 this.sessionState.currentTurnId = null;
                 return null;
+            case "hook/started":
+            case "hook/completed":
+                return null;
             case "thread/tokenUsage/updated":
                 this.handleTokenUsageUpdated(notification.params);
                 return null;
@@ -92,6 +95,7 @@ export class CodexEventHandler {
             case "item/reasoning/summaryPartAdded":
             //skipped events
             case "item/reasoning/textDelta": //for raw output
+            case "command/exec/outputDelta":
             case "turn/diff/updated":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":

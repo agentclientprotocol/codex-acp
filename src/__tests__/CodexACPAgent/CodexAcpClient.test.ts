@@ -57,19 +57,25 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(transportDump).toMatchFileSnapshot("data/start-conversation.json");
     });
 
-    it('should throw error without authentication', async () => {
+    it('should handle new session without authentication based on server policy', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
         await codexAcpAgent.initialize({protocolVersion: 1});
         await fixture.getCodexAcpClient().logout();
         fixture.clearCodexConnectionDump();
 
-        await expect(
-            codexAcpAgent.newSession({cwd: "", mcpServers: []})
-        ).rejects.toThrow("Authentication required");
+        if (await fixture.getCodexAcpClient().authRequired()) {
+            await expect(
+                codexAcpAgent.newSession({cwd: "", mcpServers: []})
+            ).rejects.toThrow("Authentication required");
 
-        const transportDump = fixture.getCodexConnectionDump(ignoredFields);
-        await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
+            const transportDump = fixture.getCodexConnectionDump(ignoredFields);
+            await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
+            return;
+        }
+
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        expect(newSessionResponse.sessionId).toBeDefined();
     });
 
     it('should authenticate with key', async () => {
