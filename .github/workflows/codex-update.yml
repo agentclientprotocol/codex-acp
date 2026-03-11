@@ -64,6 +64,7 @@ jobs:
           git commit -m "Update codex to ${{ env.VERSION }}"
 
       - name: Finalize update with Codex Action (placeholder prompt)
+        id: codex-finalize
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -89,5 +90,5 @@ jobs:
           gh pr create \
             --base main \
             --title "Update codex to ${{ env.VERSION }}" \
-            --body "[What's new](https://github.com/openai/codex/releases/tag/rust-v${{ env.VERSION }})" \
+            --body "[What's new](https://github.com/openai/codex/releases/tag/rust-v${{ env.VERSION }})<br/><br/>${{ steps.codex-finalize.outputs.final-message }}" \
             --label "codex-update"
