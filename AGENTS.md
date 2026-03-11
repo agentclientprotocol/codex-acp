@@ -20,7 +20,7 @@
 - Tests live under `src/__tests__/` and use Vitest.
 - Favor event-driven assertions (see `src/__tests__/CodexACPAgent/*`).
 - Prefer snapshot-based tests using `toMatchFileSnapshot()` over inline assertions.
-- When snapshot response data drifts, prefer replacing that response payload with a stable placeholder over asserting fragile fields.
+- When snapshot response data drifts, prefer replacing that response payload with a stable placeholder over asserting fragile fields (except for 'model/list').
 - Focus on behavior and outputs rather than implementation details.
 - Use `/run-codex` skill (`.claude/skills/run-codex/`) to test with real Codex and observe actual events.
 
