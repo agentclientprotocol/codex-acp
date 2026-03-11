@@ -74,7 +74,7 @@ jobs:
           prompt: >
             Finalize the update using codex-update-compat skill. 
             Commit the changes, the message should mention that types or/and tests after the update were fixed. 
-            Do not include validation run details to the final message.
+            Do not include validation run details to the final message, mention only what you changed and why.
 
       - name: Push branch updates
         run: |
