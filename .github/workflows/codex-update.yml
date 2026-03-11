@@ -68,8 +68,8 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           codex-version: ${{ env.VERSION }}
-          allow-bots: true
-          prompt: "Finalize the update using codex-update-compat skill. Commit the changes."
+          codex-args: '-c shell_environment_policy.inherit=none'
+          prompt: 'Finalize the update using codex-update-compat skill. Commit the changes, the message should mention that types or/and tests after the update were fixed.'
 
       - name: Push branch updates
         run: |
