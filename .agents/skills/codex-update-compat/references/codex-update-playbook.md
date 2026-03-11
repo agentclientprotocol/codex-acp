@@ -66,6 +66,7 @@ Approach:
 2. Run focused tests for touched event/file.
 3. Update snapshots only after confirming expected behavior.
 4. Run full suite at end.
+5. Do not change the logic of authentication tests.
 
 ## Known Env-Dependent Failures
 

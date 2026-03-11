@@ -58,18 +58,21 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('should throw error without authentication', async () => {
-        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await overrideCodexHome('cli_auth_credentials_store = "file"', async () => {
+            const authFixture = createTestFixture();
+            const codexAcpAgent = authFixture.getCodexAcpAgent();
 
-        await codexAcpAgent.initialize({protocolVersion: 1});
-        await fixture.getCodexAcpClient().logout();
-        fixture.clearCodexConnectionDump();
+            await codexAcpAgent.initialize({protocolVersion: 1});
+            await authFixture.getCodexAcpClient().logout();
+            authFixture.clearCodexConnectionDump();
 
-        await expect(
-            codexAcpAgent.newSession({cwd: "", mcpServers: []})
-        ).rejects.toThrow("Authentication required");
+            await expect(
+                codexAcpAgent.newSession({cwd: "", mcpServers: []})
+            ).rejects.toThrow("Authentication required");
 
-        const transportDump = fixture.getCodexConnectionDump(ignoredFields);
-        await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
+            const transportDump = authFixture.getCodexConnectionDump(ignoredFields);
+            await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
+        });
     });
 
     it('should authenticate with key', async () => {
