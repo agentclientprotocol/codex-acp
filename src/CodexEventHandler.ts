@@ -88,6 +88,10 @@ export class CodexEventHandler {
                 return null;
             case "item/commandExecution/outputDelta":
                 return this.createCommandOutputDeltaEvent(notification.params);
+            case "command/exec/outputDelta":
+            case "hook/started":
+            case "hook/completed":
+                return null;
             case "item/reasoning/summaryTextDelta": //TODO streaming reasoning?
             case "item/reasoning/summaryPartAdded":
             //skipped events
