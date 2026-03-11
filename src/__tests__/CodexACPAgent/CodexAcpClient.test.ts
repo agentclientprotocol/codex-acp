@@ -57,19 +57,22 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(transportDump).toMatchFileSnapshot("data/start-conversation.json");
     });
 
-    it('should throw error without authentication', async () => {
+    it('should allow unauthenticated session when auth is not required', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
         await codexAcpAgent.initialize({protocolVersion: 1});
         await fixture.getCodexAcpClient().logout();
         fixture.clearCodexConnectionDump();
 
-        await expect(
-            codexAcpAgent.newSession({cwd: "", mcpServers: []})
-        ).rejects.toThrow("Authentication required");
+        const authStatus = await codexAcpAgent.extMethod("authentication/status", {});
+        expect(authStatus["type"]).not.toEqual("api-key");
+        expect(authStatus["type"]).not.toEqual("chat-gpt");
+
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        expect(newSessionResponse.sessionId).toBeDefined();
 
         const transportDump = fixture.getCodexConnectionDump(ignoredFields);
-        await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
+        await expect(transportDump).toMatchFileSnapshot("data/auth-without-key.json");
     });
 
     it('should authenticate with key', async () => {
@@ -92,7 +95,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
             expect(newSessionResponse.sessionId).toBeDefined()
 
-            const transportDump = keyFixture.getCodexConnectionDump([...ignoredFields, "upgrade"]);
+            const transportDump = keyFixture.getCodexConnectionDump(
+                [...ignoredFields, "upgrade"],
+                {placeholderResponseMethods: ["model/list"]}
+            );
             await expect(transportDump).toMatchFileSnapshot("data/auth-with-key.json");
 
             const authenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});

@@ -91,6 +91,9 @@ export class CodexEventHandler {
             case "item/reasoning/summaryTextDelta": //TODO streaming reasoning?
             case "item/reasoning/summaryPartAdded":
             //skipped events
+            case "command/exec/outputDelta":
+            case "hook/started":
+            case "hook/completed":
             case "item/reasoning/textDelta": //for raw output
             case "turn/diff/updated":
             case "item/commandExecution/terminalInteraction":

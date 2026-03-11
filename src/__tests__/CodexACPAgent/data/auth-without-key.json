@@ -1,0 +1,262 @@
+{
+  "eventType": "request",
+  "method": "config/read",
+  "params": {
+    "includeLayers": false
+  }
+}
+{
+  "eventType": "response",
+  "config": {
+    "model": "model",
+    "review_model": null,
+    "model_context_window": null,
+    "model_auto_compact_token_limit": null,
+    "model_provider": "codex-action-responses-proxy",
+    "approval_policy": null,
+    "sandbox_mode": null,
+    "sandbox_workspace_write": null,
+    "forced_chatgpt_workspace_id": null,
+    "forced_login_method": null,
+    "web_search": null,
+    "tools": null,
+    "profile": null,
+    "profiles": {},
+    "instructions": null,
+    "developer_instructions": null,
+    "compact_prompt": null,
+    "model_reasoning_effort": null,
+    "model_reasoning_summary": null,
+    "model_verbosity": null,
+    "service_tier": null,
+    "analytics": null,
+    "apps": null,
+    "model_providers": {
+      "codex-action-responses-proxy": {
+        "base_url": "http://127.0.0.1:44387/v1",
+        "name": "Codex Action Responses Proxy",
+        "wire_api": "responses"
+      }
+    }
+  },
+  "origins": "origins"
+}
+{
+  "eventType": "request",
+  "method": "account/read",
+  "params": {
+    "refreshToken": false
+  }
+}
+{
+  "eventType": "response",
+  "account": null,
+  "requiresOpenaiAuth": false
+}
+{
+  "eventType": "request",
+  "method": "thread/start",
+  "params": {
+    "config": {
+      "projects": {
+        "": {
+          "trust_level": "trusted"
+        }
+      }
+    },
+    "modelProvider": null,
+    "model": "model",
+    "cwd": "cwd",
+    "approvalPolicy": null,
+    "sandbox": "sandbox",
+    "baseInstructions": null,
+    "developerInstructions": null,
+    "personality": null,
+    "ephemeral": null,
+    "experimentalRawEvents": false,
+    "persistExtendedHistory": false
+  }
+}
+{
+  "eventType": "response",
+  "thread": "thread",
+  "model": "model",
+  "modelProvider": "codex-action-responses-proxy",
+  "serviceTier": null,
+  "cwd": "cwd",
+  "approvalPolicy": "on-request",
+  "sandbox": "sandbox",
+  "reasoningEffort": "reasoningEffort"
+}
+{
+  "eventType": "request",
+  "method": "model/list",
+  "params": {
+    "cursor": null,
+    "limit": null
+  }
+}
+{
+  "eventType": "notification",
+  "method": "thread/started",
+  "params": {
+    "thread": "thread"
+  },
+  "jsonrpc": "2.0"
+}
+{
+  "eventType": "response",
+  "data": [
+    {
+      "id": "id",
+      "model": "model",
+      "upgrade": "gpt-5.4",
+      "upgradeInfo": {
+        "model": "model",
+        "upgradeCopy": null,
+        "modelLink": null,
+        "migrationMarkdown": "Introducing GPT-5.4\n\nCodex just got an upgrade with GPT-5.4, our most capable model for professional work. It outperforms prior models while being more token efficient, with notable improvements on long-running tasks, tool calling, computer use, and frontend development.\n\nLearn more: https://openai.com/index/introducing-gpt-5-4\n\nYou can always keep using GPT-5.3-Codex if you prefer.\n"
+      },
+      "availabilityNux": null,
+      "displayName": "gpt-5.3-codex",
+      "description": "Latest frontier agentic coding model.",
+      "hidden": false,
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
+      "defaultReasoningEffort": "medium",
+      "inputModalities": [
+        "text",
+        "image"
+      ],
+      "supportsPersonality": true,
+      "isDefault": true
+    },
+    {
+      "id": "id",
+      "model": "model",
+      "upgrade": null,
+      "upgradeInfo": null,
+      "availabilityNux": null,
+      "displayName": "gpt-5.4",
+      "description": "Latest frontier agentic coding model.",
+      "hidden": false,
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
+      "defaultReasoningEffort": "medium",
+      "inputModalities": [
+        "text",
+        "image"
+      ],
+      "supportsPersonality": true,
+      "isDefault": false
+    },
+    {
+      "id": "id",
+      "model": "model",
+      "upgrade": "gpt-5.4",
+      "upgradeInfo": {
+        "model": "model",
+        "upgradeCopy": null,
+        "modelLink": null,
+        "migrationMarkdown": "Introducing GPT-5.4\n\nCodex just got an upgrade with GPT-5.4, our most capable model for professional work. It outperforms prior models while being more token efficient, with notable improvements on long-running tasks, tool calling, computer use, and frontend development.\n\nLearn more: https://openai.com/index/introducing-gpt-5-4\n\nYou can always keep using GPT-5.3-Codex if you prefer.\n"
+      },
+      "availabilityNux": null,
+      "displayName": "gpt-5.2-codex",
+      "description": "Frontier agentic coding model.",
+      "hidden": false,
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
+      "defaultReasoningEffort": "medium",
+      "inputModalities": [
+        "text",
+        "image"
+      ],
+      "supportsPersonality": true,
+      "isDefault": false
+    },
+    {
+      "id": "id",
+      "model": "model",
+      "upgrade": "gpt-5.4",
+      "upgradeInfo": {
+        "model": "model",
+        "upgradeCopy": null,
+        "modelLink": null,
+        "migrationMarkdown": "Introducing GPT-5.4\n\nCodex just got an upgrade with GPT-5.4, our most capable model for professional work. It outperforms prior models while being more token efficient, with notable improvements on long-running tasks, tool calling, computer use, and frontend development.\n\nLearn more: https://openai.com/index/introducing-gpt-5-4\n\nYou can always keep using GPT-5.3-Codex if you prefer.\n"
+      },
+      "availabilityNux": null,
+      "displayName": "gpt-5.1-codex-max",
+      "description": "Codex-optimized flagship for deep and fast reasoning.",
+      "hidden": false,
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
+      "defaultReasoningEffort": "medium",
+      "inputModalities": [
+        "text",
+        "image"
+      ],
+      "supportsPersonality": false,
+      "isDefault": false
+    },
+    {
+      "id": "id",
+      "model": "model",
+      "upgrade": "gpt-5.4",
+      "upgradeInfo": {
+        "model": "model",
+        "upgradeCopy": null,
+        "modelLink": null,
+        "migrationMarkdown": "Introducing GPT-5.4\n\nCodex just got an upgrade with GPT-5.4, our most capable model for professional work. It outperforms prior models while being more token efficient, with notable improvements on long-running tasks, tool calling, computer use, and frontend development.\n\nLearn more: https://openai.com/index/introducing-gpt-5-4\n\nYou can always keep using GPT-5.3-Codex if you prefer.\n"
+      },
+      "availabilityNux": null,
+      "displayName": "gpt-5.2",
+      "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
+      "hidden": false,
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
+      "defaultReasoningEffort": "medium",
+      "inputModalities": [
+        "text",
+        "image"
+      ],
+      "supportsPersonality": false,
+      "isDefault": false
+    },
+    {
+      "id": "id",
+      "model": "model",
+      "upgrade": "gpt-5.4",
+      "upgradeInfo": {
+        "model": "model",
+        "upgradeCopy": null,
+        "modelLink": null,
+        "migrationMarkdown": "Introducing GPT-5.4\n\nCodex just got an upgrade with GPT-5.4, our most capable model for professional work. It outperforms prior models while being more token efficient, with notable improvements on long-running tasks, tool calling, computer use, and frontend development.\n\nLearn more: https://openai.com/index/introducing-gpt-5-4\n\nYou can always keep using GPT-5.3-Codex if you prefer.\n"
+      },
+      "availabilityNux": null,
+      "displayName": "gpt-5.1-codex-mini",
+      "description": "Optimized for codex. Cheaper, faster, but less capable.",
+      "hidden": false,
+      "supportedReasoningEfforts": "supportedReasoningEfforts",
+      "defaultReasoningEffort": "medium",
+      "inputModalities": [
+        "text",
+        "image"
+      ],
+      "supportsPersonality": false,
+      "isDefault": false
+    }
+  ],
+  "nextCursor": null
+}
+{
+  "eventType": "request",
+  "method": "account/read",
+  "params": {
+    "refreshToken": false
+  }
+}
+{
+  "eventType": "response",
+  "account": null,
+  "requiresOpenaiAuth": false
+}
+{
+  "eventType": "request",
+  "method": "skills/list",
+  "params": {}
+}
