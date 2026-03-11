@@ -61,7 +61,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
         await codexAcpAgent.initialize({protocolVersion: 1});
-        await fixture.getCodexAcpClient().logout();
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(true);
         fixture.clearCodexConnectionDump();
 
         await expect(
