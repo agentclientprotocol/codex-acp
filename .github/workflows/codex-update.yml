@@ -62,6 +62,26 @@ jobs:
           npm run generate-types
           git add package.json package-lock.json src/app-server
           git commit -m "Update codex to ${{ env.VERSION }}"
+
+      - name: Finalize update with Codex
+        id: codex-finalize
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          codex-version: ${{ env.VERSION }}
+          codex-args: '-c shell_environment_policy.inherit=none'
+          output-file: pr-body.md
+          prompt: >
+            Finalize the update using codex-update-compat skill. 
+            Commit the changes, the message should mention that types or/and tests after the update were fixed. 
+            When creating the final message do not mention:
+            * Validation run details.
+            * Commits.
+            * Hyperlinks. 
+            Mention only previously failed tests with failure reasons, also what you changed and why.
+
+      - name: Push branch updates
+        run: |
           git push origin "${{ env.BRANCH }}"
 
       - name: Generate GitHub App token
@@ -75,8 +95,10 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          echo -e "[What's new](https://github.com/openai/codex/releases/tag/rust-v${{ env.VERSION }})\n\n$(cat pr-body.md 2>/dev/null || true)" > pr-body.md
+
           gh pr create \
             --base main \
             --title "Update codex to ${{ env.VERSION }}" \
-            --body "[What's new](https://github.com/openai/codex/releases/tag/rust-v${{ env.VERSION }})" \
+            --body-file pr-body.md \
             --label "codex-update"
