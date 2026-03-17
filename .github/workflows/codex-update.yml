@@ -69,7 +69,6 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           codex-version: ${{ env.VERSION }}
-          codex-args: '-c shell_environment_policy.inherit=none'
           output-file: pr-body.md
           prompt: >
             Finalize the update using codex-update-compat skill. 
