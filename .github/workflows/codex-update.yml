@@ -102,4 +102,3 @@ jobs:
             --base main \
             --title "Update codex to ${{ env.VERSION }}" \
             --body-file pr-body.md \
-            --label "codex-update"
