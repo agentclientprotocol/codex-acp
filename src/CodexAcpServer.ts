@@ -127,7 +127,6 @@ export class CodexAcpServer implements acp.Agent {
 
     async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, SessionModelState, SessionModeState]> {
         await this.checkAuthorization();
-        const pendingMcpServers: Promise<Array<string>> = this.codexAcpClient.awaitMcpServers();
 
         let sessionMetadata: SessionMetadata;
         if ("sessionId" in request) {
@@ -140,8 +139,7 @@ export class CodexAcpServer implements acp.Agent {
 
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models} = sessionMetadata;
-        logger.log(`Waiting MCP servers to start...`)
-        const sessionMcpServers = await pendingMcpServers;
+        const sessionMcpServers = request.mcpServers?.map((server) => server.name) ?? [];
         const currentModel = this.findCurrentModel(models, currentModelId);
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -332,7 +330,6 @@ export class CodexAcpServer implements acp.Agent {
         thread: Thread;
     }> {
         await this.checkAuthorization();
-        const pendingMcpServers: Promise<Array<string>> = this.codexAcpClient.awaitMcpServers();
 
         logger.log(`Load existing session: ${request.sessionId}...`);
         const sessionMetadata: SessionMetadataWithThread = await this.runWithProcessCheck(() =>
@@ -341,8 +338,7 @@ export class CodexAcpServer implements acp.Agent {
 
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models, thread} = sessionMetadata;
-        logger.log("Waiting MCP servers to start...");
-        const sessionMcpServers = await pendingMcpServers;
+        const sessionMcpServers = request.mcpServers?.map((server) => server.name) ?? [];
         const currentModel = this.findCurrentModel(models, currentModelId);
         const sessionState: SessionState = {
             sessionId: sessionId,

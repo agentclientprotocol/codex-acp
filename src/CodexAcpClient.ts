@@ -68,6 +68,7 @@ export class CodexAcpClient {
             throw RequestError.invalidRequest();
         }
 
+        let loginId: string | null = null;
         switch (authRequest.methodId) {
             case "api-key":
                 if (!authRequest._meta || !authRequest._meta["api-key"]) throw RequestError.invalidRequest();
@@ -75,13 +76,17 @@ export class CodexAcpClient {
                     type: "apiKey",
                     apiKey: authRequest._meta["api-key"].apiKey
                 });
-                break;
+                this.gatewayConfig = null;
+                return true;
             case "chat-gpt":
                 const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
                 if (loginResponse.type == "chatgpt") {
+                    loginId = loginResponse.loginId;
                     await open(loginResponse.authUrl);
+                    break;
                 }
-                break;
+                this.gatewayConfig = null;
+                return loginResponse.type === "chatgptAuthTokens";
             case "gateway":
                 if (!authRequest._meta) throw RequestError.invalidRequest();
 
@@ -112,7 +117,7 @@ export class CodexAcpClient {
         // Reset the gateway config to null if another authentication method was used
         this.gatewayConfig = null;
 
-        const result = await this.codexClient.awaitLoginCompleted()
+        const result = await this.codexClient.awaitLoginCompleted(loginId)
         return result.success;
     }
 
@@ -259,11 +264,6 @@ export class CodexAcpClient {
         };
     }
 
-    async awaitMcpServers(): Promise<Array<string>>{
-        const response = await this.codexClient.awaitMcpStartup();
-        return response.ready;
-    }
-
     private createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): JsonObject {
         const mergedConfig = {
             ...mergeGatewayConfig(this.config, this.gatewayConfig),
@@ -382,6 +382,11 @@ export class CodexAcpClient {
 
     async listMcpServers(params: ListMcpServerStatusParams = { cursor: null, limit: null }): Promise<ListMcpServerStatusResponse> {
         return this.codexClient.listMcpServerStatus(params);
+    }
+
+    async awaitMcpServers(): Promise<Array<string>> {
+        const response = await this.listMcpServers();
+        return response.data.map((server) => server.name);
     }
 
     async listSessions(request: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {

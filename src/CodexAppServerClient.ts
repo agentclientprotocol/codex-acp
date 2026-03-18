@@ -146,9 +146,12 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "config/read", params: params });
     }
 
-    async awaitLoginCompleted(): Promise<AccountLoginCompletedNotification> {
+    async awaitLoginCompleted(loginId: string | null = null): Promise<AccountLoginCompletedNotification> {
         return await new Promise((resolve) => {
             this.connection.onNotification("account/login/completed", (event: AccountLoginCompletedNotification) => {
+                if (loginId !== null && event.loginId !== loginId) {
+                    return;
+                }
                 resolve(event);
             });
         });

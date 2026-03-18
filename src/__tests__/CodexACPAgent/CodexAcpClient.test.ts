@@ -108,31 +108,32 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('should authenticate with a gateway', async () => {
-        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await overrideCodexHome('cli_auth_credentials_store = "file"', async () => {
+            const codexAcpAgent = fixture.getCodexAcpAgent();
 
-        await codexAcpAgent.initialize({protocolVersion: 1});
-        await fixture.getCodexAcpClient().logout();
+            await codexAcpAgent.initialize({protocolVersion: 1});
 
-        const authRequest: CodexAuthRequest = {
-            methodId: "gateway",
-            _meta: {
-                "gateway": {
-                    baseUrl: "https://www.example.com",
-                    headers: {
-                        "Custom-Auth-Header": "TOKEN"
+            const authRequest: CodexAuthRequest = {
+                methodId: "gateway",
+                _meta: {
+                    "gateway": {
+                        baseUrl: "https://www.example.com",
+                        headers: {
+                            "Custom-Auth-Header": "TOKEN"
+                        }
                     }
                 }
-            }
-        };
+            };
 
-        await codexAcpAgent.authenticate(authRequest);
-        expect(await fixture.getCodexAcpClient().authRequired()).toBe(false);
+            await codexAcpAgent.authenticate(authRequest);
+            expect(await fixture.getCodexAcpClient().authRequired()).toBe(false);
 
-        const authenticatedResponse = await fixture.getCodexAcpAgent().extMethod("authentication/status", {});
-        expect(authenticatedResponse).toEqual({type: "gateway", name: "custom-gateway"});
+            const authenticatedResponse = await fixture.getCodexAcpAgent().extMethod("authentication/status", {});
+            expect(authenticatedResponse).toEqual({type: "gateway", name: "custom-gateway"});
 
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
-        expect(newSessionResponse.sessionId).toBeDefined()
+            const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+            expect(newSessionResponse.sessionId).toBeDefined()
+        });
     })
 
     it('prefetches session additional skill roots before thread start', async () => {

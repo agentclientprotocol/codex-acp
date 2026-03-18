@@ -83,8 +83,15 @@ export class CodexEventHandler {
             case "turn/completed":
                 this.sessionState.currentTurnId = null;
                 return null;
+            case "hook/started":
+            case "hook/completed":
+            case "item/autoApprovalReview/started":
+            case "item/autoApprovalReview/completed":
+                return null;
             case "thread/tokenUsage/updated":
                 this.handleTokenUsageUpdated(notification.params);
+                return null;
+            case "command/exec/outputDelta":
                 return null;
             case "item/commandExecution/outputDelta":
                 return this.createCommandOutputDeltaEvent(notification.params);
