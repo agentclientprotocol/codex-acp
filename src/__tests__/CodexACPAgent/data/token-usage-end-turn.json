@@ -4,7 +4,7 @@
     "quota": {
       "token_count": {
         "totalTokens": 2500,
-        "inputTokens": 2000,
+        "inputTokens": 1500,
         "cachedInputTokens": 500,
         "outputTokens": 450,
         "reasoningOutputTokens": 50
@@ -14,7 +14,7 @@
           "model": "model-id",
           "token_count": {
             "totalTokens": 2500,
-            "inputTokens": 2000,
+            "inputTokens": 1500,
             "cachedInputTokens": 500,
             "outputTokens": 450,
             "reasoningOutputTokens": 50
