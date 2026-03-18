@@ -173,7 +173,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             cwd: "/workspace",
             mcpServers: [],
             _meta: {
-                additionalRoots: ["/skills/one", " /skills/two ", 7]
+                additionalDirectories: ["/skills/one", " /skills/two ", 7]
             }
         });
 
@@ -211,7 +211,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             sessionId: "session-id",
             prompt: [{ type: "text", text: "Hello" }],
             _meta: {
-                additionalRoots: ["/skills/one", " /skills/two ", 7]
+                additionalDirectories: ["/skills/one", " /skills/two ", 7]
             }
         };
         await codexAcpAgent.prompt(promptRequest);

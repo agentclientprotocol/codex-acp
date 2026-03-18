@@ -290,13 +290,13 @@ export class CodexAcpClient {
         if (!cwd) {
             return;
         }
-        const additionalRoots = readAdditionalRoots(meta);
+        const additionalDirectories = readAdditionalDirectories(meta);
         await this.codexClient.listSkills({
             cwds: [cwd],
             forceReload: true,
             perCwdExtraUserRoots: [{
                 cwd: cwd,
-                extraUserRoots: additionalRoots
+                extraUserRoots: additionalDirectories
             }]
         });
     }
@@ -577,13 +577,13 @@ interface GatewayConfig {
     }
 }
 
-function readAdditionalRoots(meta: Record<string, unknown> | null | undefined): string[] {
-    const rawRoots = meta?.["additionalRoots"];
-    if (!Array.isArray(rawRoots)) {
+function readAdditionalDirectories(meta: Record<string, unknown> | null | undefined): string[] {
+    const rawDirectories = meta?.["additionalDirectories"];
+    if (!Array.isArray(rawDirectories)) {
         return [];
     }
 
-    return Array.from(new Set(rawRoots
+    return Array.from(new Set(rawDirectories
         .filter((value): value is string => typeof value === "string")
         .map(value => value.trim())
         .filter(value => value.length > 0)));
