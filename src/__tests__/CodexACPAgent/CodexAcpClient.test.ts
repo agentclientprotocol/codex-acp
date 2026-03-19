@@ -80,9 +80,68 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await overrideCodexHome('cli_auth_credentials_store = "file"', async () => {
             const keyFixture = createTestFixture();
             const codexAcpAgent = keyFixture.getCodexAcpAgent();
+            const codexAppServerClient = keyFixture.getCodexAppServerClient();
+            const codexAcpClient = keyFixture.getCodexAcpClient();
+            let authenticatedAccount: { type: "apiKey" } | null = null;
 
             await codexAcpAgent.initialize({protocolVersion: 1});
-            await keyFixture.getCodexAcpClient().logout();
+            vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+                config: { model_provider: null },
+                origins: {},
+                layers: null
+            } as any);
+            vi.spyOn(codexAppServerClient, "accountRead").mockImplementation(async () => ({
+                account: authenticatedAccount,
+                requiresOpenaiAuth: true
+            }));
+            vi.spyOn(codexAppServerClient, "accountLogin").mockImplementation(async () => {
+                authenticatedAccount = { type: "apiKey" };
+                return { type: "apiKey" };
+            });
+            vi.spyOn(codexAppServerClient, "awaitLoginCompleted").mockResolvedValue({
+                loginId: "login-id",
+                success: true,
+                error: null
+            });
+            vi.spyOn(codexAppServerClient, "accountLogout").mockImplementation(async () => {
+                authenticatedAccount = null;
+                return {};
+            });
+            vi.spyOn(codexAppServerClient, "awaitAccountUpdated").mockResolvedValue({
+                account: null,
+                loginState: "loggedOut"
+            } as any);
+            vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({ data: [] });
+            vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+                thread: { id: "thread-id" },
+                model: "gpt-5",
+                modelProvider: "openai",
+                cwd: "/workspace",
+                approvalPolicy: "on-request",
+                sandbox: "workspace-write",
+                reasoningEffort: "medium",
+            } as any);
+            vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+                data: [{
+                    id: "gpt-5",
+                    model: "gpt-5",
+                    upgrade: null,
+                    upgradeInfo: null,
+                    availabilityNux: null,
+                    displayName: "gpt-5",
+                    description: "test model",
+                    hidden: false,
+                    supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "balanced" }],
+                    defaultReasoningEffort: "medium",
+                    inputModalities: ["text"],
+                    supportsPersonality: false,
+                    isDefault: true
+                }],
+                nextCursor: null
+            });
+            vi.spyOn(codexAcpClient, "awaitMcpServers").mockResolvedValue([]);
+            vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+            await codexAcpClient.logout();
 
 
             const unauthenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
@@ -109,9 +168,46 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
     it('should authenticate with a gateway', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+        const codexAcpClient = fixture.getCodexAcpClient();
 
         await codexAcpAgent.initialize({protocolVersion: 1});
-        await fixture.getCodexAcpClient().logout();
+        vi.spyOn(codexAppServerClient, "accountLogout").mockResolvedValue({});
+        vi.spyOn(codexAppServerClient, "awaitAccountUpdated").mockResolvedValue({
+            account: null,
+            loginState: "loggedOut"
+        } as any);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({ data: [] });
+        vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+            thread: { id: "thread-id" } as any,
+            model: "gpt-5",
+            modelProvider: "custom-gateway",
+            cwd: "/workspace",
+            approvalPolicy: "on-request",
+            sandbox: "workspace-write",
+            reasoningEffort: "medium",
+        } as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [{
+                id: "gpt-5",
+                model: "gpt-5",
+                upgrade: null,
+                upgradeInfo: null,
+                availabilityNux: null,
+                displayName: "gpt-5",
+                description: "test model",
+                hidden: false,
+                supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "balanced" }],
+                defaultReasoningEffort: "medium",
+                inputModalities: ["text"],
+                supportsPersonality: false,
+                isDefault: true
+            }],
+            nextCursor: null
+        });
+        vi.spyOn(codexAcpClient, "awaitMcpServers").mockResolvedValue([]);
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        await codexAcpClient.logout();
 
         const authRequest: CodexAuthRequest = {
             methodId: "gateway",
