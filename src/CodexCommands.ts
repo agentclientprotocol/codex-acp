@@ -245,8 +245,9 @@ export class CodexCommands {
         }
         const total = this.formatTokenCount(usage.totalTokens);
         const input = this.formatTokenCount(usage.inputTokens);
+        const cachedInput = this.formatTokenCount(usage.cachedInputTokens);
         const output = this.formatTokenCount(usage.outputTokens);
-        return `${total} total  (${input} input + ${output} output)`;
+        return `${total} total  (${input} input + ${cachedInput} cached input, ${output} output)`;
     }
 
     private formatContextWindow(usage: TokenCount | null, contextWindow: number | null): string {

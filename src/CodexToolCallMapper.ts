@@ -1,5 +1,5 @@
 import type { ToolCallContent } from "@agentclientprotocol/sdk";
-import { applyPatch } from "diff";
+import { applyPatch, parsePatch } from "diff";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
@@ -86,6 +86,7 @@ export async function createMcpToolCallUpdate(
 ): Promise<UpdateSessionEvent> {
     return createExecuteToolCallUpdate(item, `mcp.${item.server}.${item.tool}`);
 }
+
 export async function createDynamicToolCallUpdate(
     item: ThreadItem & { type: "dynamicToolCall" }
 ): Promise<UpdateSessionEvent> {
@@ -235,7 +236,28 @@ async function createPatchContent(change: FileUpdateChange): Promise<ToolCallCon
         };
     }
 
-    const oldContent = change.kind.type === "add" ? "" : await readFile(change.path, { encoding: "utf8" });
+    if (change.kind.type === "delete") {
+        // If the patch deletes a file, the old content may be only available from the diff.
+        const oldContent = await readFile(change.path, { encoding: "utf8"} ).catch(() =>
+            isUnifiedDiff(change.diff) ? patchToDeletedContent(change.diff) : change.diff
+        );
+
+        return {
+            type: "diff",
+            oldText: oldContent,
+            newText: "",
+            path: change.path,
+            _meta: {
+                kind: "delete",
+            }
+        }
+    }
+
+    const oldContent = change.kind.type === "add" ? "" : await readFile(change.path, { encoding: "utf8" }).catch(() => null);
+    if (oldContent === null) {
+        return null;
+    }
+
     const newContent = applyPatch(oldContent, change.diff);
     if (newContent === false) {
         return null;
@@ -253,4 +275,41 @@ async function createPatchContent(change: FileUpdateChange): Promise<ToolCallCon
 
 function isUnifiedDiff(content: string): boolean {
     return content.startsWith("--- ") || content.includes("\n--- ");
+}
+
+/**
+ * Recreates the content of a deleted file from the unified diff.
+ * @param unifiedDiff The unified diff of the file deletion patch
+ */
+function patchToDeletedContent(unifiedDiff: string): string | null {
+    try {
+        const [patch] = parsePatch(unifiedDiff);
+        if (!patch || patch.hunks.length === 0) {
+            return null;
+        }
+
+        const oldLines: string[] = [];
+        let hasNoTrailingNewlineMarker = false;
+
+        for (const hunk of patch.hunks) {
+            for (const line of hunk.lines) {
+                if (line === "\\ No newline at end of file") {
+                    hasNoTrailingNewlineMarker = true;
+                    continue;
+                }
+                if (line.startsWith("-") || line.startsWith(" ")) {
+                    oldLines.push(line.slice(1));
+                }
+            }
+        }
+
+        if (oldLines.length === 0) {
+            return "";
+        }
+
+        const oldText = oldLines.join("\n");
+        return hasNoTrailingNewlineMarker || !unifiedDiff.endsWith("\n") ? oldText : `${oldText}\n`;
+    } catch {
+        return null;
+    }
 }

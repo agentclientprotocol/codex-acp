@@ -69,8 +69,9 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           codex-version: ${{ env.VERSION }}
-          codex-args: '-c shell_environment_policy.inherit=none'
           output-file: pr-body.md
+          codex-args: >-
+            -c sandbox_workspace_write.writable_roots=["${{ github.workspace }}/.git"]
           prompt: >
             Finalize the update using codex-update-compat skill. 
             Commit the changes, the message should mention that types or/and tests after the update were fixed. 
