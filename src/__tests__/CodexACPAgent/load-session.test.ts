@@ -76,6 +76,7 @@ describe("CodexACPAgent - loadSession", () => {
                             id: "item-agent-1",
                             text: "Hello!",
                             phase: null,
+                            memoryCitation: null,
                         },
                         {
                             type: "reasoning",

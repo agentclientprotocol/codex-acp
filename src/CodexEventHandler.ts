@@ -71,6 +71,9 @@ export class CodexEventHandler {
                 return await this.createTextEvent(notification.params);
             case "item/started":
                 return await this.createItemEvent(notification.params);
+            case "item/autoApprovalReview/started":
+            case "item/autoApprovalReview/completed":
+                return null;
             case "item/completed":
                 return await this.completeItemEvent(notification.params);
             case "turn/plan/updated":
