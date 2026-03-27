@@ -13,6 +13,8 @@ import type {
     CommandExecutionStatus,
     DynamicToolCallStatus,
     FileUpdateChange,
+    McpToolCallError,
+    McpToolCallResult,
     McpToolCallStatus,
     PatchApplyStatus,
     ThreadItem,
@@ -84,7 +86,12 @@ export async function createCommandExecutionUpdate(
 export async function createMcpToolCallUpdate(
     item: ThreadItem & { type: "mcpToolCall" }
 ): Promise<UpdateSessionEvent> {
-    return createExecuteToolCallUpdate(item, `mcp.${item.server}.${item.tool}`);
+    return createExecuteToolCallUpdate(
+        item,
+        `mcp.${item.server}.${item.tool}`,
+        createMcpRawInput(item.server, item.tool, item.arguments),
+        createMcpRawOutput([], item.result, item.error),
+    );
 }
 
 export async function createDynamicToolCallUpdate(
@@ -96,7 +103,8 @@ export async function createDynamicToolCallUpdate(
 export async function createExecuteToolCallUpdate(
     item: ThreadItem & ({ type: "mcpToolCall" } | { type: "dynamicToolCall" }),
     title: string,
-    rawInput?: { arguments: JsonValue }
+    rawInput?: Record<string, JsonValue | string>,
+    rawOutput?: Record<string, JsonValue | string | null>,
 ): Promise<UpdateSessionEvent> {
     return {
         sessionUpdate: "tool_call",
@@ -105,7 +113,86 @@ export async function createExecuteToolCallUpdate(
         title: title,
         status: toAcpStatus(item.status),
         rawInput: rawInput,
+        rawOutput: rawOutput,
     };
+}
+
+export function createMcpRawInput(server: string, tool: string, argumentsValue: JsonValue): Record<string, JsonValue | string> {
+    const invocation = `Called ${server}.${tool} (${formatJsonInline(argumentsValue)})`;
+    return {
+        server,
+        tool,
+        arguments: argumentsValue,
+        invocation,
+        prettyArguments: formatJsonPretty(argumentsValue),
+    };
+}
+
+export function createMcpRawOutput(
+    logs: Array<string>,
+    result: McpToolCallResult | null,
+    error: McpToolCallError | null,
+): Record<string, JsonValue | string | null> | undefined {
+    const logLines = normalizeMcpLogLines(logs, error, result);
+    if (logLines.length === 0) {
+        return undefined;
+    }
+
+    return {
+        formatted_output: logLines.join("\n\n"),
+        result,
+        error,
+    };
+}
+
+function formatMcpResult(result: McpToolCallResult | null): string | null {
+    if (!result) {
+        return null;
+    }
+
+    const parts: string[] = [];
+    if (result.content.length > 0) {
+        parts.push(result.content.map((contentItem) => formatJsonPretty(contentItem)).join("\n"));
+    }
+    if (result.structuredContent !== null) {
+        parts.push(formatJsonPretty(result.structuredContent));
+    }
+
+    return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
+function normalizeMcpLogLines(
+    logs: Array<string>,
+    error: McpToolCallError | null,
+    result: McpToolCallResult | null,
+): Array<string> {
+    const lines: string[] = [];
+    const seen = new Set<string>();
+
+    const append = (value: string | null | undefined) => {
+        const cleaned = value?.trim();
+        if (!cleaned || seen.has(cleaned)) {
+            return;
+        }
+        seen.add(cleaned);
+        lines.push(cleaned);
+    };
+
+    for (const log of logs) {
+        append(log);
+    }
+    append(error?.message);
+    append(formatMcpResult(result));
+
+    return lines;
+}
+
+function formatJsonInline(value: JsonValue): string {
+    return JSON.stringify(value);
+}
+
+function formatJsonPretty(value: JsonValue): string {
+    return JSON.stringify(value, null, 2);
 }
 
 export function fuzzyFileSearchToolCallId(sessionId: string): string {

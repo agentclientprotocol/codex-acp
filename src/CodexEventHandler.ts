@@ -25,6 +25,8 @@ import {
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
+    createMcpRawInput,
+    createMcpRawOutput,
     createFuzzyFileSearchComplete,
     createFuzzyFileSearchStartOrUpdate,
     createMcpToolCallUpdate,
@@ -101,12 +103,13 @@ export class CodexEventHandler {
             case "turn/diff/updated":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
-            case "item/mcpToolCall/progress":
             case "serverRequest/resolved":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
                 return null;
+            case "item/mcpToolCall/progress":
+                return this.createMcpToolProgressEvent(notification.params);
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
                 return null;
@@ -213,10 +216,19 @@ export class CodexEventHandler {
             case "mcpToolCall":
             case "fileChange":
             case "dynamicToolCall":
+                const mcpLogs = event.item.type === "mcpToolCall"
+                    ? this.consumeMcpToolLogs(event.item.id)
+                    : [];
                 return {
                     sessionUpdate: "tool_call_update",
                     toolCallId: event.item.id,
-                    status: event.item.status === "completed" ? "completed" : "failed"
+                    status: event.item.status === "completed" ? "completed" : "failed",
+                    rawInput: event.item.type === "mcpToolCall"
+                        ? createMcpRawInput(event.item.server, event.item.tool, event.item.arguments)
+                        : undefined,
+                    rawOutput: event.item.type === "mcpToolCall"
+                        ? createMcpRawOutput(mcpLogs, event.item.result, event.item.error)
+                        : undefined,
                 }
             case "commandExecution":
                 return this.completeCommandExecutionEvent(event.item);
@@ -256,6 +268,37 @@ export class CodexEventHandler {
                 }
             }
         }
+    }
+
+    private createMcpToolProgressEvent(event: { itemId: string, message: string }): UpdateSessionEvent {
+        const logs = this.appendMcpToolLog(event.itemId, event.message);
+        return {
+            sessionUpdate: "tool_call_update",
+            toolCallId: event.itemId,
+            rawOutput: {
+                formatted_output: logs.join("\n\n"),
+            }
+        };
+    }
+
+    private appendMcpToolLog(toolCallId: string, message: string): Array<string> {
+        const cleaned = message.trim();
+        if (cleaned.length === 0) {
+            return this.sessionState.mcpToolLogs.get(toolCallId) ?? [];
+        }
+
+        const logs = this.sessionState.mcpToolLogs.get(toolCallId) ?? [];
+        if (logs.at(-1) !== cleaned && !logs.includes(cleaned)) {
+            logs.push(cleaned);
+        }
+        this.sessionState.mcpToolLogs.set(toolCallId, logs);
+        return logs;
+    }
+
+    private consumeMcpToolLogs(toolCallId: string): Array<string> {
+        const logs = this.sessionState.mcpToolLogs.get(toolCallId) ?? [];
+        this.sessionState.mcpToolLogs.delete(toolCallId);
+        return logs;
     }
 
     private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {

@@ -8,7 +8,16 @@
         "toolCallId": "call-id",
         "kind": "execute",
         "title": "mcp.server-name.tool-name",
-        "status": "in_progress"
+        "status": "in_progress",
+        "rawInput": {
+          "server": "server-name",
+          "tool": "tool-name",
+          "arguments": {
+            "argument": "example"
+          },
+          "invocation": "Called server-name.tool-name ({\"argument\":\"example\"})",
+          "prettyArguments": "{\n  \"argument\": \"example\"\n}"
+        }
       }
     }
   ]
