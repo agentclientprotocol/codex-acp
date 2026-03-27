@@ -83,6 +83,9 @@ export class CodexEventHandler {
             case "turn/completed":
                 this.sessionState.currentTurnId = null;
                 return null;
+            case "item/autoApprovalReview/started":
+            case "item/autoApprovalReview/completed":
+                return null;
             case "thread/tokenUsage/updated":
                 this.handleTokenUsageUpdated(notification.params);
                 return null;
@@ -102,6 +105,7 @@ export class CodexEventHandler {
             case "item/mcpToolCall/progress":
             case "serverRequest/resolved":
             case "account/updated":
+            case "fs/changed":
                 return null;
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
@@ -131,11 +135,13 @@ export class CodexEventHandler {
             case "skills/changed":
             case "deprecationNotice":
             case "mcpServer/oauthLogin/completed":
+            case "mcpServer/startupStatus/updated":
             case "rawResponseItem/completed":
             case "thread/started":
             case "thread/name/updated":
             case "item/plan/delta":
             case "app/list/updated":
+            case "thread/realtime/transcriptUpdated":
                 return null;
             case "model/rerouted":
                 return this.createModelReroutedEvent(notification.params);
@@ -189,6 +195,7 @@ export class CodexEventHandler {
                 return await createDynamicToolCallUpdate(event.item);
             case "collabAgentToolCall":
             case "userMessage":
+            case "hookPrompt":
             case "agentMessage":
             case "reasoning":
             case "webSearch":
@@ -226,6 +233,7 @@ export class CodexEventHandler {
                 }
             case "collabAgentToolCall":
             case "userMessage":
+            case "hookPrompt":
             case "agentMessage":
             case "webSearch":
             case "imageView":

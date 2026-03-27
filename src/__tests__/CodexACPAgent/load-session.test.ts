@@ -76,6 +76,7 @@ describe("CodexACPAgent - loadSession", () => {
                             id: "item-agent-1",
                             text: "Hello!",
                             phase: null,
+                            memoryCitation: null,
                         },
                         {
                             type: "reasoning",
@@ -89,6 +90,7 @@ describe("CodexACPAgent - loadSession", () => {
                             command: "ls",
                             cwd: "/test/project",
                             processId: null,
+                            source: "agent",
                             status: "completed",
                             commandActions: [],
                             aggregatedOutput: null,

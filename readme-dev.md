@@ -72,3 +72,8 @@ npm run package:all
 1. Update Codex dependency: `package.json`
 2. Regenerate Codex types in `src/app-server/`: `npm run generate-types`
 3. Ensure there are no type errors or failed tests: `npm run typecheck` and `npm run test`
+
+### Integration test toggle
+
+- `CODEX_INTEGRATION_TESTS=1` enables tests that require running a real Codex process and external auth/runtime behavior.
+- By default, these tests are skipped to keep local/CI test runs deterministic in sandboxed environments.

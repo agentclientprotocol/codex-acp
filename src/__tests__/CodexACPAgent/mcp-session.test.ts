@@ -4,6 +4,8 @@ import {describe, expect, it, vi, beforeEach} from 'vitest';
 import {createTestFixture, type TestFixture} from "../acp-test-utils";
 import type {McpServerStdio} from "@agentclientprotocol/sdk";
 
+const integrationTest = process.env["CODEX_INTEGRATION_TESTS"] === "1" ? it : it.skip;
+
 describe('MCP session configuration', { timeout: 40_000 }, () => {
 
     let fixture: TestFixture;
@@ -13,7 +15,7 @@ describe('MCP session configuration', { timeout: 40_000 }, () => {
     });
 
 
-    it('should return configured mcp', async () => {
+    integrationTest('should return configured mcp', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
 

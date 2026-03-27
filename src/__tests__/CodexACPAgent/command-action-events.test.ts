@@ -31,6 +31,7 @@ describe('CodexEventHandler - command action events', () => {
                     command: 'ls /test/project',
                     cwd: '/test/project',
                     processId: null,
+                    source: "agent",
                     status: 'inProgress',
                     commandActions: [
                         {
@@ -65,6 +66,7 @@ describe('CodexEventHandler - command action events', () => {
                     command: 'ls',
                     cwd: '/test/project',
                     processId: null,
+                    source: "agent",
                     status: 'completed',
                     commandActions: [
                         {
@@ -99,6 +101,7 @@ describe('CodexEventHandler - command action events', () => {
                     command: 'rg "Service" src',
                     cwd: '/test/project',
                     processId: null,
+                    source: "agent",
                     status: 'inProgress',
                     commandActions: [
                         {
@@ -134,6 +137,7 @@ describe('CodexEventHandler - command action events', () => {
                     command: 'rg "Service"',
                     cwd: '/test/project',
                     processId: null,
+                    source: "agent",
                     status: 'inProgress',
                     commandActions: [
                         {
@@ -169,6 +173,7 @@ describe('CodexEventHandler - command action events', () => {
                     command: 'rg --files -g "*service*"',
                     cwd: '/test/project',
                     processId: null,
+                    source: "agent",
                     status: 'inProgress',
                     commandActions: [
                         {
@@ -204,6 +209,7 @@ describe('CodexEventHandler - command action events', () => {
                     command: 'rg',
                     cwd: '/test/project',
                     processId: null,
+                    source: "agent",
                     status: 'inProgress',
                     commandActions: [
                         {

@@ -15,6 +15,7 @@ import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 
 const CODEX_HOME_ENV = "CODEX_HOME";
+const integrationTest = process.env["CODEX_INTEGRATION_TESTS"] === "1" ? it : it.skip;
 
 async function overrideCodexHome<T>(configToml: string, run: () => Promise<T>): Promise<T> {
     const previousCodexHome = process.env[CODEX_HOME_ENV];
@@ -75,7 +76,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
-    it('should authenticate with key', async () => {
+    integrationTest('should authenticate with key', async () => {
         // In sandboxed environments Codex may fail when trying to write to the OS keychain (`Operation not permitted`).
         await overrideCodexHome('cli_auth_credentials_store = "file"', async () => {
             const keyFixture = createTestFixture();
@@ -107,7 +108,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
-    it('should authenticate with a gateway', async () => {
+    integrationTest('should authenticate with a gateway', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
         await codexAcpAgent.initialize({protocolVersion: 1});
