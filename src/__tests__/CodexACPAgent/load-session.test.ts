@@ -15,7 +15,7 @@ describe("CodexACPAgent - loadSession", () => {
             account: null,
             requiresOpenaiAuth: false,
         });
-        codexAcpClient.awaitMcpServers = vi.fn().mockResolvedValue([]);
+        codexAcpClient.awaitMcpStartup = vi.fn().mockResolvedValue([]);
         codexAcpClient.listSkills = vi.fn().mockResolvedValue({ data: [] });
 
         const model: Model = {
@@ -161,5 +161,78 @@ describe("CodexACPAgent - loadSession", () => {
         await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             "data/load-session-history.json"
         );
+    });
+
+    it("should recover session mcp servers during loadSession when request omits them", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+
+        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.getAccount = vi.fn().mockResolvedValue({
+            account: null,
+            requiresOpenaiAuth: false,
+        });
+        codexAcpClient.listSkills = vi.fn().mockResolvedValue({ data: [] });
+
+        const awaitMcpStartupSpy = vi.spyOn(codexAcpClient, "awaitMcpStartup").mockResolvedValue(["persisted-mcp"]);
+
+        const model: Model = {
+            id: "gpt-5.2",
+            model: "gpt-5.2",
+            upgrade: null,
+            upgradeInfo: null,
+            availabilityNux: null,
+            displayName: "GPT-5.2",
+            description: "Test model",
+            hidden: false,
+            supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "Medium" }],
+            defaultReasoningEffort: "medium",
+            inputModalities: ["text"],
+            supportsPersonality: false,
+            isDefault: true,
+        };
+
+        codexAppServerClient.listModels = vi.fn().mockResolvedValue({
+            data: [model],
+            nextCursor: null,
+        });
+        codexAppServerClient.threadResume = vi.fn().mockResolvedValue({
+            thread: {
+                id: "session-1",
+                preview: "",
+                ephemeral: false,
+                modelProvider: "openai",
+                createdAt: 0,
+                updatedAt: 0,
+                status: { type: "idle" },
+                path: null,
+                cwd: "/test/project",
+                cliVersion: "0.0.0",
+                source: "cli",
+                agentNickname: null,
+                agentRole: null,
+                gitInfo: null,
+                name: null,
+                turns: [],
+            },
+            model: model.id,
+            modelProvider: "openai",
+            cwd: "/test/project",
+            approvalPolicy: "never",
+            sandbox: { type: "dangerFullAccess" },
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+
+        await codexAcpAgent.initialize({ protocolVersion: 1 });
+        await codexAcpAgent.loadSession({
+            sessionId: "session-1",
+            cwd: "/test/project",
+            mcpServers: [],
+        });
+
+        expect(awaitMcpStartupSpy).toHaveBeenCalledWith(0);
+        expect(codexAcpAgent.getSessionState("session-1").sessionMcpServers).toEqual(["persisted-mcp"]);
     });
 });
