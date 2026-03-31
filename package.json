@@ -3,7 +3,18 @@
   "version": "0.0.31",
   "description": "",
   "main": "dist/index.js",
+  "bin": {
+    "codex-acp": "dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
+    "prepublishOnly": "npm run build",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --external:@openai/codex --banner:js=\"import { createRequire as __createRequire } from 'module'; const require = __createRequire(import.meta.url);\"",
     "bundle:all": "npm run bundle:linux-x64 && npm run bundle:linux-arm64 && npm run bundle:darwin-x64 && npm run bundle:darwin-arm64 && npm run bundle:win-x64",
     "bundle:linux-x64": "bun build src/index.ts --minify --sourcemap --compile --target=bun-linux-x64-baseline --outfile dist/bin/codex-acp-x64-linux",
     "bundle:linux-arm64": "bun build src/index.ts --minify --sourcemap --compile --target=bun-linux-arm64 --outfile dist/bin/codex-acp-arm64-linux",
@@ -28,7 +39,11 @@
   "license": "ISC",
   "type": "module",
   "devDependencies": {
-    "@openai/codex": "^0.114.0",
+    "@agentclientprotocol/sdk": "^0.12.0",
+    "vscode-jsonrpc": "^8.2.1",
+    "open": "^11.0.0",
+    "diff": "^8.0.3",
+    "esbuild": "^0.25.0",
     "@types/node": "^24.10.1",
     "mcp-hello-world": "^1.1.2",
     "tsx": "^4.20.6",
@@ -36,9 +51,6 @@
     "vitest": "^4.0.10"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.12.0",
-    "diff": "^8.0.3",
-    "open": "^11.0.0",
-    "vscode-jsonrpc": "^8.2.1"
+    "@openai/codex": "^0.114.0"
   }
 }
