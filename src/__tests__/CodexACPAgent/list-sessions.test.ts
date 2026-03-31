@@ -65,6 +65,21 @@ describe("CodexACPAgent - list sessions", () => {
         };
         const response = await codexAcpAgent.unstable_listSessions(params);
 
+        expect(codexAppServerClient.threadList).toHaveBeenCalledWith(expect.objectContaining({
+            sourceKinds: [
+                "cli",
+                "vscode",
+                "exec",
+                "appServer",
+                "custom",
+                "subAgent",
+                "subAgentReview",
+                "subAgentCompact",
+                "subAgentThreadSpawn",
+                "subAgentOther",
+                "unknown",
+            ],
+        }));
         await expect(JSON.stringify(response, null, 2)).toMatchFileSnapshot(
             "data/list-sessions.json"
         );

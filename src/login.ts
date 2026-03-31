@@ -89,6 +89,7 @@ async function login(options: LoginOptions): Promise<boolean> {
         }
 
         logger.log("Starting ChatGPT login...");
+        const loginCompletedVersion = appServerClient.getAccountLoginCompletedVersion();
         const loginResponse = await appServerClient.accountLogin({type: "chatgpt"});
 
         if (loginResponse.type === "chatgpt") {
@@ -100,7 +101,7 @@ async function login(options: LoginOptions): Promise<boolean> {
         }
 
         logger.log("Waiting for login completion...");
-        const result = await appServerClient.awaitLoginCompleted();
+        const result = await appServerClient.awaitLoginCompleted(loginCompletedVersion);
 
         if (result.success) {
             logger.log("Login successful!");

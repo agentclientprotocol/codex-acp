@@ -42,7 +42,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.clearAllMocks();
     });
 
-    const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "supportedReasoningEfforts", "reasoningEffort", "model", "readOnlyAccess"];
+    const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "supportedReasoningEfforts", "reasoningEffort", "model", "readOnlyAccess", "approvalsReviewer"];
 
     it.skip('should start conversation', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -95,9 +95,50 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
             expect(newSessionResponse.sessionId).toBeDefined()
 
-            const transportDump = keyFixture.getCodexConnectionDump([...ignoredFields, "upgrade"]);
-            await expect(transportDump).toMatchFileSnapshot("data/auth-with-key.json");
-
+            const transportEvents = keyFixture.getCodexConnectionEvents([...ignoredFields, "upgrade"]);
+            const transportMethods = transportEvents.flatMap(event => "method" in event ? [event.method] : []);
+            const loginRequest = transportEvents.find(event =>
+                event.eventType === "request" &&
+                "method" in event &&
+                event.method === "account/login/start"
+            );
+            const loginResponse = transportEvents.find(event =>
+                event.eventType === "response" &&
+                "type" in event &&
+                event.type === "apiKey"
+            );
+            const threadStartResponse = transportEvents.find(event =>
+                event.eventType === "response" &&
+                "modelProvider" in event &&
+                "approvalPolicy" in event
+            );
+            expect(transportMethods).toEqual([
+                "account/login/start",
+                "account/read",
+                "thread/start",
+                "model/list",
+                "thread/started",
+                "account/read",
+                "skills/list",
+            ]);
+            expect(loginRequest).toEqual({
+                eventType: "request",
+                method: "account/login/start",
+                params: {
+                    type: "apiKey",
+                    apiKey: "TOKEN",
+                }
+            });
+            expect(loginResponse).toEqual({
+                eventType: "response",
+                type: "apiKey",
+            });
+            expect(threadStartResponse).toMatchObject({
+                eventType: "response",
+                modelProvider: "openai",
+                approvalPolicy: "on-request",
+                approvalsReviewer: "approvalsReviewer",
+            });
             const authenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
             expect(authenticatedResponse).toEqual({type: "api-key"});
 
@@ -108,31 +149,34 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('should authenticate with a gateway', async () => {
-        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await overrideCodexHome('cli_auth_credentials_store = "file"', async () => {
+            const gatewayFixture = createTestFixture();
+            const codexAcpAgent = gatewayFixture.getCodexAcpAgent();
 
-        await codexAcpAgent.initialize({protocolVersion: 1});
-        await fixture.getCodexAcpClient().logout();
+            await codexAcpAgent.initialize({protocolVersion: 1});
+            await gatewayFixture.getCodexAcpClient().logout();
 
-        const authRequest: CodexAuthRequest = {
-            methodId: "gateway",
-            _meta: {
-                "gateway": {
-                    baseUrl: "https://www.example.com",
-                    headers: {
-                        "Custom-Auth-Header": "TOKEN"
+            const authRequest: CodexAuthRequest = {
+                methodId: "gateway",
+                _meta: {
+                    "gateway": {
+                        baseUrl: "https://www.example.com",
+                        headers: {
+                            "Custom-Auth-Header": "TOKEN"
+                        }
                     }
                 }
-            }
-        };
+            };
 
-        await codexAcpAgent.authenticate(authRequest);
-        expect(await fixture.getCodexAcpClient().authRequired()).toBe(false);
+            await codexAcpAgent.authenticate(authRequest);
+            expect(await gatewayFixture.getCodexAcpClient().authRequired()).toBe(false);
 
-        const authenticatedResponse = await fixture.getCodexAcpAgent().extMethod("authentication/status", {});
-        expect(authenticatedResponse).toEqual({type: "gateway", name: "custom-gateway"});
+            const authenticatedResponse = await gatewayFixture.getCodexAcpAgent().extMethod("authentication/status", {});
+            expect(authenticatedResponse).toEqual({type: "gateway", name: "custom-gateway"});
 
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
-        expect(newSessionResponse.sessionId).toBeDefined()
+            const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+            expect(newSessionResponse.sessionId).toBeDefined()
+        });
     })
 
     it('prefetches session additional skill roots before thread start', async () => {
@@ -186,6 +230,30 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             }]
         });
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
+    });
+
+    it('waits for mcp startup completion and returns ready servers', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        const startupPromise = codexAcpClient.awaitMcpStartup(codexAppServerClient.getMcpStartupCompleteVersion());
+
+        mockFixture.sendServerNotification({
+            method: "codex/event/mcp_startup_complete",
+            params: {
+                msg: {
+                    type: "mcp_startup_complete",
+                    ready: ["alpha", "beta"],
+                    failed: [],
+                    cancelled: [],
+                }
+            }
+        });
+
+        const mcpServers = await startupPromise;
+
+        expect(mcpServers).toEqual(["alpha", "beta"]);
     });
 
     it('prefetches session additional skill roots before turn start', async () => {

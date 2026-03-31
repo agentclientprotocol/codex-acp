@@ -10,7 +10,7 @@ import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
-import type {Account, CollabAgentToolCallStatus, Model, RateLimitSnapshot, Thread, ThreadItem, UserInput, ReasoningEffortOption} from "./app-server/v2";
+import type {Account, CollabAgentToolCallStatus, Model, Thread, ThreadItem, UserInput, ReasoningEffortOption} from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import type {InputModality, ReasoningEffort} from "./app-server";
 import {ModelId} from "./ModelId";
@@ -127,7 +127,6 @@ export class CodexAcpServer implements acp.Agent {
 
     async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, SessionModelState, SessionModeState]> {
         await this.checkAuthorization();
-        const pendingMcpServers: Promise<Array<string>> = this.codexAcpClient.awaitMcpServers();
 
         let sessionMetadata: SessionMetadata;
         if ("sessionId" in request) {
@@ -139,9 +138,8 @@ export class CodexAcpServer implements acp.Agent {
         }
 
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
-        const {sessionId, currentModelId, models} = sessionMetadata;
-        logger.log(`Waiting MCP servers to start...`)
-        const sessionMcpServers = await pendingMcpServers;
+        const {sessionId, currentModelId, models, mcpStartupVersion} = sessionMetadata;
+        const sessionMcpServers = await this.resolveSessionMcpServers(request.mcpServers ?? [], mcpStartupVersion, "sessionId" in request);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -332,7 +330,6 @@ export class CodexAcpServer implements acp.Agent {
         thread: Thread;
     }> {
         await this.checkAuthorization();
-        const pendingMcpServers: Promise<Array<string>> = this.codexAcpClient.awaitMcpServers();
 
         logger.log(`Load existing session: ${request.sessionId}...`);
         const sessionMetadata: SessionMetadataWithThread = await this.runWithProcessCheck(() =>
@@ -340,9 +337,8 @@ export class CodexAcpServer implements acp.Agent {
         );
 
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
-        const {sessionId, currentModelId, models, thread} = sessionMetadata;
-        logger.log("Waiting MCP servers to start...");
-        const sessionMcpServers = await pendingMcpServers;
+        const {sessionId, currentModelId, models, thread, mcpStartupVersion} = sessionMetadata;
+        const sessionMcpServers = await this.resolveSessionMcpServers(request.mcpServers ?? [], mcpStartupVersion, true);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -603,6 +599,22 @@ export class CodexAcpServer implements acp.Agent {
         return sessionState;
     }
 
+    private async resolveSessionMcpServers(
+        mcpServers: Array<acp.McpServer>,
+        mcpStartupVersion: number,
+        recoverFromStartup: boolean,
+    ): Promise<Array<string>> {
+        const requestedServerNames = getRequestedMcpServerNames(mcpServers);
+        if (requestedServerNames.length > 0) {
+            return requestedServerNames;
+        }
+        if (!recoverFromStartup) {
+            return [];
+        }
+        logger.log("Recovering MCP servers from startup state...");
+        return await this.runWithProcessCheck(() => this.codexAcpClient.awaitMcpStartup(mcpStartupVersion));
+    }
+
     async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
         logger.log("Prompt received", {
             sessionId: params.sessionId,
@@ -748,4 +760,8 @@ export class CodexAcpServer implements acp.Agent {
             logger.error(`Cancel - turnInterrupt failed`, err);
         }
     }
+}
+
+function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
+    return Array.from(new Set(mcpServers.map(server => server.name)));
 }
