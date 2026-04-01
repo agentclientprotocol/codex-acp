@@ -13,6 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
       - name: Install zip
         run: |
           for i in 1 2 3; do
@@ -55,6 +57,7 @@ jobs:
           SERVICE_ACCOUNT_TOKEN: ${{ secrets.SERVICE_ACCOUNT_TOKEN }}
         run: |
           ./codesign-client-linux-amd64 -extensions "jsign_replace=true" dist/bin/codex-acp-x64-windows.exe
+          ./codesign-client-linux-amd64 -extensions "jsign_replace=true" dist/bin/codex-acp-arm64-windows.exe
 
       - name: Package macOS binaries for signing
         run: |
@@ -145,6 +148,7 @@ jobs:
             dist/bin/codex-acp-x64-darwin.zip
             dist/bin/codex-acp-arm64-darwin.zip
             dist/bin/codex-acp-x64-windows.zip
+            dist/bin/codex-acp-arm64-windows.zip
           generate_release_notes: true
 
       - name: Upload release artifacts
