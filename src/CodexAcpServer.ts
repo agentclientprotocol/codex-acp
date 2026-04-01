@@ -389,6 +389,8 @@ export class CodexAcpServer implements acp.Agent {
         switch (item.type) {
             case "userMessage":
                 return this.createUserMessageUpdates(item);
+            case "hookPrompt":
+                return [];
             case "agentMessage":
                 return [{
                     sessionUpdate: "agent_message_chunk",

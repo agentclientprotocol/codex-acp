@@ -31,8 +31,8 @@ describe("CodexEventHandler - fuzzy file search events", () => {
                 sessionId: "search-1",
                 query: "event handler",
                 files: [
-                    { root: "/repo", path: "src/CodexEventHandler.ts", file_name: "CodexEventHandler.ts", score: 0.98, indices: [0, 1] },
-                    { root: "/repo", path: "src/CodexToolCallMapper.ts", file_name: "CodexToolCallMapper.ts", score: 0.85, indices: [2, 3] },
+                    { root: "/repo", path: "src/CodexEventHandler.ts", match_type: "file", file_name: "CodexEventHandler.ts", score: 0.98, indices: [0, 1] },
+                    { root: "/repo", path: "src/CodexToolCallMapper.ts", match_type: "file", file_name: "CodexToolCallMapper.ts", score: 0.85, indices: [2, 3] },
                 ],
             },
         };
@@ -42,7 +42,7 @@ describe("CodexEventHandler - fuzzy file search events", () => {
                 sessionId: "search-1",
                 query: "event handler",
                 files: [
-                    { root: "/repo", path: "src/CodexEventHandler.ts", file_name: "CodexEventHandler.ts", score: 0.99, indices: [0, 1] },
+                    { root: "/repo", path: "src/CodexEventHandler.ts", match_type: "file", file_name: "CodexEventHandler.ts", score: 0.99, indices: [0, 1] },
                 ],
             },
         };
