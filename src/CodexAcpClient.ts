@@ -402,7 +402,6 @@ export class CodexAcpClient {
             "vscode",
             "exec",
             "appServer",
-            "custom",
             "subAgent",
             "subAgentReview",
             "subAgentCompact",

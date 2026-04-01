@@ -71,7 +71,6 @@ describe("CodexACPAgent - list sessions", () => {
                 "vscode",
                 "exec",
                 "appServer",
-                "custom",
                 "subAgent",
                 "subAgentReview",
                 "subAgentCompact",
