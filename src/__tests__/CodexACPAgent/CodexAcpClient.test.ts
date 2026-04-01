@@ -30,7 +30,27 @@ async function overrideCodexHome<T>(configToml: string, run: () => Promise<T>): 
         } else {
             process.env[CODEX_HOME_ENV] = previousCodexHome;
         }
-        fs.rmSync(codexHome, { recursive: true, force: true });
+        await removeDirectoryWithRetry(codexHome);
+    }
+}
+
+async function removeDirectoryWithRetry(directory: string): Promise<void> {
+    let lastError: NodeJS.ErrnoException | null = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+            fs.rmSync(directory, { recursive: true, force: true });
+            return;
+        } catch (error) {
+            const err = error as NodeJS.ErrnoException;
+            if (err.code !== "ENOTEMPTY" && err.code !== "EBUSY") {
+                throw err;
+            }
+            lastError = err;
+            await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+        }
+    }
+    if (lastError) {
+        throw lastError;
     }
 }
 
