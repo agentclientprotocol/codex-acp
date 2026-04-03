@@ -606,13 +606,17 @@ export class CodexAcpServer implements acp.Agent {
         mcpStartupVersion: number,
         recoverFromStartup: boolean,
     ): Promise<Array<string>> {
+        // Explicit MCP servers from the request are the primary source of truth for the session.
         const requestedServerNames = getRequestedMcpServerNames(mcpServers);
         if (requestedServerNames.length > 0) {
             return requestedServerNames;
         }
+        // Fresh sessions without MCP config should not inherit any session MCP state.
         if (!recoverFromStartup) {
             return [];
         }
+        // loadSession/resumeSession may omit mcpServers; in that case recover the ready names
+        // from the startup event associated with this thread start/resume checkpoint.
         logger.log("Recovering MCP servers from startup state...");
         return await this.runWithProcessCheck(() => this.codexAcpClient.awaitMcpStartup(mcpStartupVersion));
     }
