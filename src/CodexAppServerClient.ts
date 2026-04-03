@@ -60,28 +60,12 @@ const FileChangeApprovalRequest = new RequestType<
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
-    private accountLoginCompletedVersion = 0;
-    private lastAccountLoginCompleted: AccountLoginCompletedNotification | null = null;
-    private readonly accountLoginCompletedResolvers: Array<SignalResolver<AccountLoginCompletedNotification>> = [];
-    private accountUpdatedVersion = 0;
-    private lastAccountUpdated: AccountUpdatedNotification | null = null;
-    private readonly accountUpdatedResolvers: Array<SignalResolver<AccountUpdatedNotification>> = [];
     private mcpStartupCompleteVersion = 0;
     private lastMcpStartupComplete: McpStartupCompleteEvent | null = null;
     private readonly mcpStartupCompleteResolvers: Array<SignalResolver<McpStartupCompleteEvent>> = [];
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
-        this.connection.onNotification("account/login/completed", (event: AccountLoginCompletedNotification) => {
-            this.accountLoginCompletedVersion += 1;
-            this.lastAccountLoginCompleted = event;
-            this.resolveSignal(event, this.accountLoginCompletedVersion, this.accountLoginCompletedResolvers);
-        });
-        this.connection.onNotification("account/updated", (event: AccountUpdatedNotification) => {
-            this.accountUpdatedVersion += 1;
-            this.lastAccountUpdated = event;
-            this.resolveSignal(event, this.accountUpdatedVersion, this.accountUpdatedResolvers);
-        });
         this.connection.onUnhandledNotification((data) => {
             if (isMcpStartupCompleteNotification(data)) {
                 this.mcpStartupCompleteVersion += 1;
@@ -167,32 +151,6 @@ export class CodexAppServerClient {
 
     async configRead(params: ConfigReadParams): Promise<ConfigReadResponse> {
         return await this.sendRequest({ method: "config/read", params: params });
-    }
-
-    getAccountLoginCompletedVersion(): number {
-        return this.accountLoginCompletedVersion;
-    }
-
-    async awaitLoginCompleted(afterVersion: number): Promise<AccountLoginCompletedNotification> {
-        return await this.awaitSignal(
-            this.lastAccountLoginCompleted,
-            this.accountLoginCompletedVersion,
-            afterVersion,
-            this.accountLoginCompletedResolvers
-        );
-    }
-
-    getAccountUpdatedVersion(): number {
-        return this.accountUpdatedVersion;
-    }
-
-    async awaitAccountUpdated(afterVersion: number): Promise<AccountUpdatedNotification> {
-        return await this.awaitSignal(
-            this.lastAccountUpdated,
-            this.accountUpdatedVersion,
-            afterVersion,
-            this.accountUpdatedResolvers
-        );
     }
 
     getMcpStartupCompleteVersion(): number {

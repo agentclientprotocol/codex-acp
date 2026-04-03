@@ -15,6 +15,8 @@ import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
 import type {
+    AccountLoginCompletedNotification,
+    AccountUpdatedNotification,
     GetAccountResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
@@ -70,23 +72,23 @@ export class CodexAcpClient {
         switch (authRequest.methodId) {
             case "api-key": {
                 if (!authRequest._meta || !authRequest._meta["api-key"]) throw RequestError.invalidRequest();
-                const loginCompletedVersion = this.codexClient.getAccountLoginCompletedVersion();
+                const loginCompletedPromise = this.awaitNextLoginCompleted();
                 await this.codexClient.accountLogin({
                     type: "apiKey",
                     apiKey: authRequest._meta["api-key"].apiKey
                 });
                 this.gatewayConfig = null;
-                const result = await this.codexClient.awaitLoginCompleted(loginCompletedVersion);
+                const result = await loginCompletedPromise;
                 return result.success;
             }
             case "chat-gpt": {
-                const loginCompletedVersion = this.codexClient.getAccountLoginCompletedVersion();
+                const loginCompletedPromise = this.awaitNextLoginCompleted();
                 const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
                 if (loginResponse.type == "chatgpt") {
                     await open(loginResponse.authUrl);
                 }
                 this.gatewayConfig = null;
-                const result = await this.codexClient.awaitLoginCompleted(loginCompletedVersion);
+                const result = await loginCompletedPromise;
                 return result.success;
             }
             case "gateway":
@@ -159,9 +161,9 @@ export class CodexAcpClient {
     }
 
     async logout(): Promise<AuthenticationLogoutResponse> {
-        const accountUpdatedVersion = this.codexClient.getAccountUpdatedVersion();
+        const accountUpdatedPromise = this.awaitNextAccountUpdated();
         await this.codexClient.accountLogout();
-        await this.codexClient.awaitAccountUpdated(accountUpdatedVersion);
+        await accountUpdatedPromise;
         return {};
     }
 
@@ -184,7 +186,6 @@ export class CodexAcpClient {
 
     async resumeSession(request: acp.ResumeSessionRequest): Promise<SessionMetadata> {
         await this.refreshSkills(request.cwd, request._meta);
-        const mcpStartupVersion = this.codexClient.getMcpStartupCompleteVersion();
 
         const response = await this.codexClient.threadResume({
             approvalPolicy: null,
@@ -207,12 +208,10 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
-            mcpStartupVersion,
         }
     }
 
     async loadSession(request: acp.LoadSessionRequest): Promise<SessionMetadataWithThread> {
-        const mcpStartupVersion = this.codexClient.getMcpStartupCompleteVersion();
         const response = await this.codexClient.threadResume({
             approvalPolicy: null,
             sandbox: null,
@@ -235,13 +234,11 @@ export class CodexAcpClient {
             currentModelId: currentModelId,
             models: codexModels,
             thread: response.thread,
-            mcpStartupVersion,
         };
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         await this.refreshSkills(request.cwd, request._meta);
-        const mcpStartupVersion = this.codexClient.getMcpStartupCompleteVersion();
 
         const response = await this.codexClient.threadStart({
             config: this.createSessionConfig(request.cwd, request.mcpServers),
@@ -267,13 +264,16 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
-            mcpStartupVersion,
         };
     }
 
     async awaitMcpStartup(mcpStartupVersion: number): Promise<Array<string>> {
         const startup = await this.codexClient.awaitMcpStartup(mcpStartupVersion);
         return startup.ready;
+    }
+
+    getMcpStartupCompleteVersion(): number {
+        return this.codexClient.getMcpStartupCompleteVersion();
     }
 
     private createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): JsonObject {
@@ -390,6 +390,22 @@ export class CodexAcpClient {
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {
         return this.codexClient.listSkills(params ?? {});
+    }
+
+    private async awaitNextLoginCompleted(): Promise<AccountLoginCompletedNotification> {
+        return await new Promise((resolve) => {
+            this.codexClient.connection.onNotification("account/login/completed", (event: AccountLoginCompletedNotification) => {
+                resolve(event);
+            });
+        });
+    }
+
+    private async awaitNextAccountUpdated(): Promise<AccountUpdatedNotification> {
+        return await new Promise((resolve) => {
+            this.codexClient.connection.onNotification("account/updated", (event: AccountUpdatedNotification) => {
+                resolve(event);
+            });
+        });
     }
 
     async listMcpServers(params: ListMcpServerStatusParams = { cursor: null, limit: null }): Promise<ListMcpServerStatusResponse> {
@@ -535,7 +551,6 @@ export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
     models: Model[],
-    mcpStartupVersion: number,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
