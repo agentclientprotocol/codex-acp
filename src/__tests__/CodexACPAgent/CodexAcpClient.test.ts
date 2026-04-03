@@ -135,6 +135,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             expect(transportMethods).toEqual([
                 "account/login/start",
                 "account/read",
+                "account/updated",
                 "thread/start",
                 "model/list",
                 "thread/started",

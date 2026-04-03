@@ -4,6 +4,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
 import type {ApprovalHandler, CodexAppServerClient} from "./CodexAppServerClient";
 import open from "open";
+import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
     ReasoningEffort,
@@ -40,6 +41,8 @@ export class CodexAcpClient {
     private readonly config: JsonObject;
     private readonly modelProvider: string | null;
     private gatewayConfig: GatewayConfig | null;
+    private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
+    private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
 
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
@@ -393,17 +396,44 @@ export class CodexAcpClient {
     }
 
     private async awaitNextLoginCompleted(): Promise<AccountLoginCompletedNotification> {
-        return await new Promise((resolve) => {
-            this.codexClient.connection.onNotification("account/login/completed", (event: AccountLoginCompletedNotification) => {
-                resolve(event);
-            });
-        });
+        if (this.pendingLoginCompleted !== null) {
+            return await this.pendingLoginCompleted;
+        }
+        this.pendingLoginCompleted = this.awaitSingleNotification(
+            "account/login/completed",
+            (event: AccountLoginCompletedNotification) => event,
+        );
+        try {
+            return await this.pendingLoginCompleted;
+        } finally {
+            this.pendingLoginCompleted = null;
+        }
     }
 
     private async awaitNextAccountUpdated(): Promise<AccountUpdatedNotification> {
+        if (this.pendingAccountUpdated !== null) {
+            return await this.pendingAccountUpdated;
+        }
+        this.pendingAccountUpdated = this.awaitSingleNotification(
+            "account/updated",
+            (event: AccountUpdatedNotification) => event,
+        );
+        try {
+            return await this.pendingAccountUpdated;
+        } finally {
+            this.pendingAccountUpdated = null;
+        }
+    }
+
+    private async awaitSingleNotification<T>(
+        method: "account/login/completed" | "account/updated",
+        mapEvent: (event: T) => T,
+    ): Promise<T> {
         return await new Promise((resolve) => {
-            this.codexClient.connection.onNotification("account/updated", (event: AccountUpdatedNotification) => {
-                resolve(event);
+            let disposable: Disposable | undefined;
+            disposable = this.codexClient.connection.onNotification(method, (event: T) => {
+                disposable?.dispose();
+                resolve(mapEvent(event));
             });
         });
     }
