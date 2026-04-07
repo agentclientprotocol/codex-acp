@@ -40,6 +40,7 @@ export interface TestFixture {
     getCodexAcpAgent(): CodexAcpServer,
 
     onCodexConnectionEvent(handler: (event: CodexConnectionEvent) => void): void,
+    getCodexConnectionEvents(ignoredFields: string[], options?: CodexConnectionDumpOptions): CodexConnectionEvent[],
     getCodexConnectionDump(ignoredFields: string[], options?: CodexConnectionDumpOptions): string,
     clearCodexConnectionDump(): void,
 
@@ -90,11 +91,11 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         getCodexAcpClient(): CodexAcpClient {
             return codexAcpClient;
         },
-        getCodexConnectionDump(ignoredFields: string[], options?: CodexConnectionDumpOptions): string {
+        getCodexConnectionEvents(ignoredFields: string[], options?: CodexConnectionDumpOptions): CodexConnectionEvent[] {
             const placeholderResponseMethods = new Set(options?.placeholderResponseMethods ?? []);
             const pendingRequestMethods: string[] = [];
 
-            const filteredEvents = transportEvents.flatMap((event) => {
+            return transportEvents.flatMap((event) => {
                 switch (event.eventType) {
                     case "request":
                         pendingRequestMethods.push(event.method);
@@ -105,14 +106,17 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
                             return [{
                                 eventType: "response" as const,
                                 placeholder: requestMethod,
-                            }];
+                            } as CodexConnectionEvent];
                         }
                         break;
                 }
 
-                return [event];
+                return [anonymizeValue(event, [], new Set(ignoredFields)) as CodexConnectionEvent];
             });
-            return createArrayDump(filteredEvents, ignoredFields);
+        },
+        getCodexConnectionDump(ignoredFields: string[], options?: CodexConnectionDumpOptions): string {
+            const filteredEvents = this.getCodexConnectionEvents(ignoredFields, options);
+            return createArrayDump(filteredEvents, []);
         },
         onCodexConnectionEvent(handler: (event: CodexConnectionEvent) => void): void {
             codexEventHandlers.push(handler);
@@ -154,7 +158,7 @@ export function createTestFixture(): TestFixture {
 }
 
 export interface CodexMockTestFixture extends TestFixture {
-    sendServerNotification(notification: ServerNotification): void,
+    sendServerNotification(notification: ServerNotification | Record<string, unknown>): void,
     sendServerRequest<T>(method: string, params: unknown): Promise<T>,
     setPermissionResponse(response: RequestPermissionResponse): void,
 }
@@ -210,7 +214,7 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
 
     return {
         ...baseFixture,
-        sendServerNotification(notification: ServerNotification): void {
+        sendServerNotification(notification: ServerNotification | Record<string, unknown>): void {
             if (unhandledNotificationHandler) {
                 unhandledNotificationHandler(notification);
             }
@@ -229,34 +233,32 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
 }
 
 export function createObjectDump(obj: any, anonymizedFields: string[] = []) {
-    const fieldsToAnonymize = new Set(anonymizedFields);
-
-    function anonymizeValue(value: any, path: string[]): any {
-        if (value === null || typeof value !== "object") {
-            return value;
-        }
-
-        if (Array.isArray(value)) {
-            return value.map((item, index) => anonymizeValue(item, [...path, String(index)]));
-        }
-
-        return Object.fromEntries(
-            Object.entries(value).map(([key, val]) => {
-                const nextPath = [...path, key];
-                const pathKey = nextPath.join(".");
-                if (fieldsToAnonymize.has(key) || fieldsToAnonymize.has(pathKey)) {
-                    return [key, key];
-                }
-                return [key, anonymizeValue(val, nextPath)];
-            })
-        );
-    }
-
-    return JSON.stringify(anonymizeValue(obj, []), null, 2);
+    return JSON.stringify(anonymizeValue(obj, [], new Set(anonymizedFields)), null, 2);
 }
 
 export function createArrayDump(objects: any[], anonymizedFields: string[]): string {
     return objects.map(event => createObjectDump(event, anonymizedFields)).join("\n");
+}
+
+function anonymizeValue(value: any, path: string[], fieldsToAnonymize: Set<string>): any {
+    if (value === null || typeof value !== "object") {
+        return value;
+    }
+
+    if (Array.isArray(value)) {
+        return value.map((item, index) => anonymizeValue(item, [...path, String(index)], fieldsToAnonymize));
+    }
+
+    return Object.fromEntries(
+        Object.entries(value).map(([key, val]) => {
+            const nextPath = [...path, key];
+            const pathKey = nextPath.join(".");
+            if (fieldsToAnonymize.has(key) || fieldsToAnonymize.has(pathKey)) {
+                return [key, key];
+            }
+            return [key, anonymizeValue(val, nextPath, fieldsToAnonymize)];
+        })
+    );
 }
 
 /**

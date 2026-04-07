@@ -89,6 +89,8 @@ export class CodexEventHandler {
             case "item/commandExecution/outputDelta":
                 return this.createCommandOutputDeltaEvent(notification.params);
             case "command/exec/outputDelta":
+            case "item/autoApprovalReview/started":
+            case "item/autoApprovalReview/completed":
             case "hook/started":
             case "hook/completed":
                 return null;
@@ -102,6 +104,8 @@ export class CodexEventHandler {
             case "item/mcpToolCall/progress":
             case "serverRequest/resolved":
             case "account/updated":
+            case "fs/changed":
+            case "mcpServer/startupStatus/updated":
                 return null;
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
@@ -123,6 +127,7 @@ export class CodexEventHandler {
             case "thread/closed":
             case "thread/realtime/started":
             case "thread/realtime/itemAdded":
+            case "thread/realtime/transcriptUpdated":
             case "thread/realtime/outputAudio/delta":
             case "thread/realtime/error":
             case "thread/realtime/closed":
@@ -189,6 +194,7 @@ export class CodexEventHandler {
                 return await createDynamicToolCallUpdate(event.item);
             case "collabAgentToolCall":
             case "userMessage":
+            case "hookPrompt":
             case "agentMessage":
             case "reasoning":
             case "webSearch":
@@ -226,6 +232,7 @@ export class CodexEventHandler {
                 }
             case "collabAgentToolCall":
             case "userMessage":
+            case "hookPrompt":
             case "agentMessage":
             case "webSearch":
             case "imageView":

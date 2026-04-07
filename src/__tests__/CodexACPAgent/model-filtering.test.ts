@@ -82,7 +82,6 @@ describe("Model filtering", () => {
             models,
         });
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
-        vi.spyOn(codexAcpClient, "awaitMcpServers").mockResolvedValue([]);
 
         const newSessionResponse = await codexAcpAgent.newSession({ cwd: "", mcpServers: [] });
         const sessionModels = newSessionResponse.models;

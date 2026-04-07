@@ -89,6 +89,7 @@ async function login(options: LoginOptions): Promise<boolean> {
         }
 
         logger.log("Starting ChatGPT login...");
+        const loginCompletedPromise = waitForNextLoginCompleted(appServerClient);
         const loginResponse = await appServerClient.accountLogin({type: "chatgpt"});
 
         if (loginResponse.type === "chatgpt") {
@@ -100,7 +101,7 @@ async function login(options: LoginOptions): Promise<boolean> {
         }
 
         logger.log("Waiting for login completion...");
-        const result = await appServerClient.awaitLoginCompleted();
+        const result = await loginCompletedPromise;
 
         if (result.success) {
             logger.log("Login successful!");
@@ -113,6 +114,14 @@ async function login(options: LoginOptions): Promise<boolean> {
         codexConnection.connection.dispose();
         codexConnection.process.kill();
     }
+}
+
+function waitForNextLoginCompleted(appServerClient: CodexAppServerClient): Promise<{ success: boolean }> {
+    return new Promise((resolve) => {
+        appServerClient.connection.onNotification("account/login/completed", (event: { success: boolean }) => {
+            resolve(event);
+        });
+    });
 }
 
 /**

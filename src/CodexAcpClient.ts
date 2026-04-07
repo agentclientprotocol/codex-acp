@@ -4,6 +4,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
 import type {ApprovalHandler, CodexAppServerClient} from "./CodexAppServerClient";
 import open from "open";
+import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
     ReasoningEffort,
@@ -15,6 +16,8 @@ import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
 import type {
+    AccountLoginCompletedNotification,
+    AccountUpdatedNotification,
     GetAccountResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
@@ -34,11 +37,12 @@ import type {AuthenticationLogoutResponse, AuthenticationStatusResponse} from ".
  * Converts ACP requests into corresponding app-server operations.
  */
 export class CodexAcpClient {
-
     private readonly codexClient: CodexAppServerClient;
     private readonly config: JsonObject;
     private readonly modelProvider: string | null;
     private gatewayConfig: GatewayConfig | null;
+    private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
+    private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
 
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
@@ -69,19 +73,27 @@ export class CodexAcpClient {
         }
 
         switch (authRequest.methodId) {
-            case "api-key":
+            case "api-key": {
                 if (!authRequest._meta || !authRequest._meta["api-key"]) throw RequestError.invalidRequest();
+                const loginCompletedPromise = this.awaitNextLoginCompleted();
                 await this.codexClient.accountLogin({
                     type: "apiKey",
                     apiKey: authRequest._meta["api-key"].apiKey
                 });
-                break;
-            case "chat-gpt":
+                this.gatewayConfig = null;
+                const result = await loginCompletedPromise;
+                return result.success;
+            }
+            case "chat-gpt": {
+                const loginCompletedPromise = this.awaitNextLoginCompleted();
                 const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
                 if (loginResponse.type == "chatgpt") {
                     await open(loginResponse.authUrl);
                 }
-                break;
+                this.gatewayConfig = null;
+                const result = await loginCompletedPromise;
+                return result.success;
+            }
             case "gateway":
                 if (!authRequest._meta) throw RequestError.invalidRequest();
 
@@ -111,9 +123,7 @@ export class CodexAcpClient {
 
         // Reset the gateway config to null if another authentication method was used
         this.gatewayConfig = null;
-
-        const result = await this.codexClient.awaitLoginCompleted()
-        return result.success;
+        return false;
     }
 
 
@@ -154,8 +164,9 @@ export class CodexAcpClient {
     }
 
     async logout(): Promise<AuthenticationLogoutResponse> {
+        const accountUpdatedPromise = this.awaitNextAccountUpdated();
         await this.codexClient.accountLogout();
-        await this.codexClient.awaitAccountUpdated();
+        await accountUpdatedPromise;
         return {};
     }
 
@@ -259,9 +270,13 @@ export class CodexAcpClient {
         };
     }
 
-    async awaitMcpServers(): Promise<Array<string>>{
-        const response = await this.codexClient.awaitMcpStartup();
-        return response.ready;
+    async awaitMcpStartup(mcpStartupVersion: number): Promise<Array<string>> {
+        const startup = await this.codexClient.awaitMcpStartup(mcpStartupVersion);
+        return startup.ready;
+    }
+
+    getMcpStartupCompleteVersion(): number {
+        return this.codexClient.getMcpStartupCompleteVersion();
     }
 
     private createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): JsonObject {
@@ -378,6 +393,49 @@ export class CodexAcpClient {
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {
         return this.codexClient.listSkills(params ?? {});
+    }
+
+    private async awaitNextLoginCompleted(): Promise<AccountLoginCompletedNotification> {
+        if (this.pendingLoginCompleted !== null) {
+            return await this.pendingLoginCompleted;
+        }
+        this.pendingLoginCompleted = this.awaitSingleNotification(
+            "account/login/completed",
+            (event: AccountLoginCompletedNotification) => event,
+        );
+        try {
+            return await this.pendingLoginCompleted;
+        } finally {
+            this.pendingLoginCompleted = null;
+        }
+    }
+
+    private async awaitNextAccountUpdated(): Promise<AccountUpdatedNotification> {
+        if (this.pendingAccountUpdated !== null) {
+            return await this.pendingAccountUpdated;
+        }
+        this.pendingAccountUpdated = this.awaitSingleNotification(
+            "account/updated",
+            (event: AccountUpdatedNotification) => event,
+        );
+        try {
+            return await this.pendingAccountUpdated;
+        } finally {
+            this.pendingAccountUpdated = null;
+        }
+    }
+
+    private async awaitSingleNotification<T>(
+        method: "account/login/completed" | "account/updated",
+        mapEvent: (event: T) => T,
+    ): Promise<T> {
+        return await new Promise((resolve) => {
+            let disposable: Disposable | undefined;
+            disposable = this.codexClient.connection.onNotification(method, (event: T) => {
+                disposable?.dispose();
+                resolve(mapEvent(event));
+            });
+        });
     }
 
     async listMcpServers(params: ListMcpServerStatusParams = { cursor: null, limit: null }): Promise<ListMcpServerStatusResponse> {
