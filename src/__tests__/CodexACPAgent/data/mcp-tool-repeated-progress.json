@@ -1,0 +1,93 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-id",
+        "rawOutput": {
+          "formatted_output": "Polling for status"
+        },
+        "_meta": {
+          "mcp_output_delta": {
+            "data": "Polling for status"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-id",
+        "rawOutput": {
+          "formatted_output": "Polling for status\n\nPolling for status"
+        },
+        "_meta": {
+          "mcp_output_delta": {
+            "data": "Polling for status"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-id",
+        "status": "failed",
+        "rawInput": {
+          "server": "server-name",
+          "tool": "tool-name",
+          "arguments": {
+            "argument": "example"
+          },
+          "invocation": "Called server-name.tool-name ({\"argument\":\"example\"})",
+          "prettyArguments": "{\n  \"argument\": \"example\"\n}"
+        },
+        "rawOutput": {
+          "formatted_output": "Polling for status\n\nPolling for status",
+          "result": null,
+          "error": {
+            "message": "Polling for status"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-id",
+        "kind": "execute",
+        "title": "mcp.server-name.tool-name",
+        "status": "in_progress",
+        "rawInput": {
+          "server": "server-name",
+          "tool": "tool-name",
+          "arguments": {
+            "argument": "example"
+          },
+          "invocation": "Called server-name.tool-name ({\"argument\":\"example\"})",
+          "prettyArguments": "{\n  \"argument\": \"example\"\n}"
+        }
+      }
+    }
+  ]
+}
