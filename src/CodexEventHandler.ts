@@ -271,28 +271,28 @@ export class CodexEventHandler {
     }
 
     private createMcpToolProgressEvent(event: { itemId: string, message: string }): UpdateSessionEvent {
-        const logs = this.appendMcpToolLog(event.itemId, event.message);
+        const logDelta = this.appendMcpToolLog(event.itemId, event.message);
         return {
             sessionUpdate: "tool_call_update",
             toolCallId: event.itemId,
-            rawOutput: {
-                formatted_output: logs.join("\n\n"),
+            _meta: {
+                mcp_output_delta: {
+                    data: logDelta,
+                }
             }
         };
     }
 
-    private appendMcpToolLog(toolCallId: string, message: string): Array<string> {
+    private appendMcpToolLog(toolCallId: string, message: string): string {
         const cleaned = message.trim();
         if (cleaned.length === 0) {
-            return this.sessionState.mcpToolLogs.get(toolCallId) ?? [];
+            return "";
         }
 
         const logs = this.sessionState.mcpToolLogs.get(toolCallId) ?? [];
-        if (logs.at(-1) !== cleaned && !logs.includes(cleaned)) {
-            logs.push(cleaned);
-        }
+        logs.push(cleaned);
         this.sessionState.mcpToolLogs.set(toolCallId, logs);
-        return logs;
+        return cleaned;
     }
 
     private consumeMcpToolLogs(toolCallId: string): Array<string> {

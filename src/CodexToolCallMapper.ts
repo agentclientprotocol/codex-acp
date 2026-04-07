@@ -166,23 +166,20 @@ function normalizeMcpLogLines(
     error: McpToolCallError | null,
     result: McpToolCallResult | null,
 ): Array<string> {
-    const lines: string[] = [];
-    const seen = new Set<string>();
+    const lines = logs
+        .map((log) => log.trim())
+        .filter((log) => log.length > 0);
 
-    const append = (value: string | null | undefined) => {
+    const appendTrailingUnique = (value: string | null | undefined) => {
         const cleaned = value?.trim();
-        if (!cleaned || seen.has(cleaned)) {
+        if (!cleaned || lines.at(-1) === cleaned) {
             return;
         }
-        seen.add(cleaned);
         lines.push(cleaned);
     };
 
-    for (const log of logs) {
-        append(log);
-    }
-    append(error?.message);
-    append(formatMcpResult(result));
+    appendTrailingUnique(error?.message);
+    appendTrailingUnique(formatMcpResult(result));
 
     return lines;
 }
