@@ -11,6 +11,7 @@ import type {
     GetAccountParams,
     GetAccountResponse, LoginAccountParams, LoginAccountResponse, LogoutAccountResponse, ModelListParams,
     ModelListResponse,
+    McpServerStatusUpdatedNotification,
     ThreadStartParams,
     ThreadStartResponse,
     ThreadLoadedListParams,
@@ -63,6 +64,12 @@ export class CodexAppServerClient {
     private mcpStartupCompleteVersion = 0;
     private lastMcpStartupComplete: McpStartupCompleteEvent | null = null;
     private readonly mcpStartupCompleteResolvers: Array<SignalResolver<McpStartupCompleteEvent>> = [];
+    private mcpServerStatusVersion = 0;
+    private readonly mcpServerStatusUpdatedHandlers: Array<(event: McpServerStatusUpdatedNotification) => void> = [];
+    private readonly mcpServerStatusHistory: Array<{
+        version: number;
+        event: McpServerStatusUpdatedNotification;
+    }> = [];
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -76,8 +83,10 @@ export class CodexAppServerClient {
                 }
                 return;
             }
-
             const serverNotification = data as ServerNotification;
+            if (serverNotification.method === "mcpServer/startupStatus/updated") {
+                this.recordMcpServerStatusUpdated(serverNotification.params);
+            }
             this.notify(serverNotification);
             for (const callback of this.codexEventHandlers) {
                 callback({ eventType: "notification", ...serverNotification });
@@ -166,6 +175,20 @@ export class CodexAppServerClient {
         );
     }
 
+    onMcpServerStatusUpdated(handler: (event: McpServerStatusUpdatedNotification) => void): void {
+        this.mcpServerStatusUpdatedHandlers.push(handler);
+    }
+
+    getMcpServerStatusVersion(): number {
+        return this.mcpServerStatusVersion;
+    }
+
+    getMcpServerStatusUpdates(afterVersion: number): Array<McpServerStatusUpdatedNotification> {
+        return this.mcpServerStatusHistory
+            .filter(entry => entry.version > afterVersion)
+            .map(entry => entry.event);
+    }
+
     async accountRead(params: GetAccountParams): Promise<GetAccountResponse> {
         return await this.sendRequest({ method: "account/read", params: params });
     }
@@ -235,6 +258,17 @@ export class CodexAppServerClient {
         return await new Promise((resolve) => {
             resolvers.push({afterVersion, resolve});
         });
+    }
+
+    private recordMcpServerStatusUpdated(event: McpServerStatusUpdatedNotification): void {
+        this.mcpServerStatusVersion += 1;
+        this.mcpServerStatusHistory.push({
+            version: this.mcpServerStatusVersion,
+            event,
+        });
+        for (const handler of this.mcpServerStatusUpdatedHandlers) {
+            handler(event);
+        }
     }
 
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
