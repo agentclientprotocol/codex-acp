@@ -14,7 +14,6 @@ import type {McpStartupCompleteEvent, InputModality, ReasoningEffort} from "./ap
 import type {
     Account,
     CollabAgentToolCallStatus,
-    McpServerStatusUpdatedNotification,
     Model,
     Thread,
     ThreadItem,
@@ -55,8 +54,6 @@ export interface SessionState {
 
 interface PendingMcpStartupSession {
     requestedServers: Set<string>;
-    terminalServers: Set<string>;
-    publishedFailures: Set<string>;
 }
 
 export class CodexAcpServer implements acp.Agent {
@@ -86,9 +83,6 @@ export class CodexAcpServer implements acp.Agent {
             codexAcpClient,
             (operation) => this.runWithProcessCheck(operation)
         );
-        this.codexAcpClient.onMcpServerStatusUpdated((event) => {
-            void this.handleMcpServerStatusUpdated(event);
-        });
     }
 
     async initialize(
@@ -149,7 +143,6 @@ export class CodexAcpServer implements acp.Agent {
     async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, SessionModelState, SessionModeState]> {
         await this.checkAuthorization();
         const mcpStartupVersion = this.codexAcpClient.getMcpStartupCompleteVersion();
-        const mcpStatusVersion = this.codexAcpClient.getMcpServerStatusVersion();
 
         let sessionMetadata: SessionMetadata;
         if ("sessionId" in request) {
@@ -186,10 +179,7 @@ export class CodexAcpServer implements acp.Agent {
         if (requestedMcpServers.length > 0) {
             this.pendingMcpStartupSessions.set(sessionId, {
                 requestedServers: new Set(requestedMcpServers.map(server => server.name)),
-                terminalServers: new Set(),
-                publishedFailures: new Set(),
             });
-            await this.replayBufferedMcpStartupStatus(sessionId, mcpStatusVersion);
             this.publishMcpStartupStatusAsync(sessionId, mcpStartupVersion);
         }
 
@@ -393,6 +383,14 @@ export class CodexAcpServer implements acp.Agent {
             mcpToolLogs: new Map(),
         };
         this.sessions.set(sessionId, sessionState);
+
+        const requestedMcpServers = request.mcpServers ?? [];
+        if (requestedMcpServers.length > 0) {
+            this.pendingMcpStartupSessions.set(sessionId, {
+                requestedServers: new Set(requestedMcpServers.map(server => server.name)),
+            });
+            this.publishMcpStartupStatusAsync(sessionId, mcpStartupVersion);
+        }
 
         await this.availableCommands.publish(sessionId);
         const sessionModelState: SessionModelState = this.createModelState(models, currentModelId);
@@ -661,10 +659,13 @@ export class CodexAcpServer implements acp.Agent {
             try {
                 const mcpStartup = await this.runWithProcessCheck(() => this.codexAcpClient.awaitMcpStartupResult(mcpStartupVersion));
                 const sessionState = this.sessions.get(sessionId);
-                if (sessionState) {
-                    sessionState.sessionMcpServers = mcpStartup.ready;
+                const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
+                if (sessionState && pendingStartup) {
+                    sessionState.sessionMcpServers = mcpStartup.ready.filter(serverName =>
+                        pendingStartup.requestedServers.has(serverName)
+                    );
                 }
-                await this.publishMcpStartupStatus(sessionId, mcpStartup);
+                await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup?.requestedServers);
                 this.pendingMcpStartupSessions.delete(sessionId);
             } catch (err) {
                 logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
@@ -672,61 +673,24 @@ export class CodexAcpServer implements acp.Agent {
         })();
     }
 
-    private async publishMcpStartupStatus(sessionId: string, mcpStartup: McpStartupCompleteEvent): Promise<void> {
-        for (const update of CodexEventHandler.createMcpStartupUpdates(mcpStartup)) {
+    private async publishMcpStartupStatus(
+        sessionId: string,
+        mcpStartup: McpStartupCompleteEvent,
+        requestedServers?: Set<string>
+    ): Promise<void> {
+        const filteredStartup = requestedServers
+            ? {
+                ready: mcpStartup.ready.filter(server => requestedServers.has(server)),
+                failed: mcpStartup.failed.filter(server => requestedServers.has(server.server)),
+                cancelled: mcpStartup.cancelled.filter(server => requestedServers.has(server)),
+            }
+            : mcpStartup;
+
+        for (const update of CodexEventHandler.createMcpStartupUpdates(filteredStartup)) {
             await this.connection.sessionUpdate({
                 sessionId,
                 update,
             });
-        }
-    }
-
-    private async handleMcpServerStatusUpdated(event: McpServerStatusUpdatedNotification): Promise<void> {
-        for (const [sessionId, pending] of this.pendingMcpStartupSessions) {
-            if (!pending.requestedServers.has(event.name)) {
-                continue;
-            }
-
-            if (event.status === "ready") {
-                pending.terminalServers.add(event.name);
-                const sessionState = this.sessions.get(sessionId);
-                if (sessionState && !(sessionState.sessionMcpServers ?? []).includes(event.name)) {
-                    sessionState.sessionMcpServers = [...(sessionState.sessionMcpServers ?? []), event.name];
-                }
-            } else if (event.status === "failed" || event.status === "cancelled") {
-                pending.terminalServers.add(event.name);
-                if (!pending.publishedFailures.has(event.name)) {
-                    pending.publishedFailures.add(event.name);
-                    const updates = CodexEventHandler.createMcpStartupUpdates({
-                        ready: [],
-                        failed: event.status === "failed" ? [{
-                            server: event.name,
-                            error: event.error ?? "Unknown MCP startup error",
-                        }] : [],
-                        cancelled: event.status === "cancelled" ? [event.name] : [],
-                    });
-                    for (const update of updates) {
-                        await this.connection.sessionUpdate({
-                            sessionId,
-                            update,
-                        });
-                    }
-                }
-            }
-
-            if (pending.terminalServers.size >= pending.requestedServers.size) {
-                this.pendingMcpStartupSessions.delete(sessionId);
-            }
-        }
-    }
-
-    private async replayBufferedMcpStartupStatus(sessionId: string, afterVersion: number): Promise<void> {
-        const updates = this.codexAcpClient.getMcpServerStatusUpdates(afterVersion);
-        for (const update of updates) {
-            await this.handleMcpServerStatusUpdated(update);
-            if (!this.pendingMcpStartupSessions.has(sessionId)) {
-                return;
-            }
         }
     }
 
