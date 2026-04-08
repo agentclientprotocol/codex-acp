@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION_TAG="$VERSION_TAG"
+VERSION_TAG="$1"
 DIST_DIR="dist/bin"
-IDEA_CODEX_BIN_DIR="${IDEA_CODEX_BIN_DIR:-}"
+IDEA_CODEX_BIN_DIR="$2"
 PACKAGE_JSON="package.json"
 PACKAGE_JSON_BAK="$(mktemp)"
+
+if [[ -z "${VERSION_TAG}" || -z "${IDEA_CODEX_BIN_DIR}" ]]; then
+  echo "Usage: $0 <version-tag> <idea-codex-bin-dir>"
+  exit 1
+fi
 
 cp "$PACKAGE_JSON" "$PACKAGE_JSON_BAK"
 
@@ -59,34 +64,30 @@ ls -lh \
   "$DIST_DIR/codex-acp-x64-darwin.zip" \
   "$DIST_DIR/codex-acp-arm64-darwin.zip"
 
-if [[ -n "$IDEA_CODEX_BIN_DIR" ]]; then
-  echo "Copying local macOS binaries to IntelliJ dev Codex bin dir..."
-  COPIED_ARTIFACTS=()
+echo "Copying local macOS binaries to IntelliJ dev Codex bin dir..."
+COPIED_ARTIFACTS=()
 
-  for artifact in \
-    "codex-acp-x64-darwin" \
-    "codex-acp-arm64-darwin" \
-    "codex-acp-x64-darwin.zip" \
-    "codex-acp-arm64-darwin.zip"; do
-    source_path="$DIST_DIR/$artifact"
-    target_path="$IDEA_CODEX_BIN_DIR/$artifact"
+for artifact in \
+  "codex-acp-x64-darwin" \
+  "codex-acp-arm64-darwin" \
+  "codex-acp-x64-darwin.zip" \
+  "codex-acp-arm64-darwin.zip"; do
+  source_path="$DIST_DIR/$artifact"
+  target_path="$IDEA_CODEX_BIN_DIR/$artifact"
 
-    if [[ -e "$target_path" ]]; then
-      cp -f "$source_path" "$target_path"
-      COPIED_ARTIFACTS+=("$target_path")
-    else
-      echo "Skipping missing target: $target_path"
-    fi
-  done
-
-  echo "Copied artifacts:"
-  if [[ ${#COPIED_ARTIFACTS[@]} -gt 0 ]]; then
-    ls -lh "${COPIED_ARTIFACTS[@]}"
+  if [[ -e "$target_path" ]]; then
+    cp -f "$source_path" "$target_path"
+    COPIED_ARTIFACTS+=("$target_path")
   else
-    echo "No existing target artifacts were updated."
+    echo "Skipping missing target: $target_path"
   fi
+done
+
+echo "Copied artifacts:"
+if [[ ${#COPIED_ARTIFACTS[@]} -gt 0 ]]; then
+  ls -lh "${COPIED_ARTIFACTS[@]}"
 else
-  echo "IDEA_CODEX_BIN_DIR is not set; skipping IntelliJ artifact copy."
+  echo "No existing target artifacts were updated."
 fi
 
 echo "Embedded version: ${VERSION_TAG}"

@@ -13,6 +13,8 @@ import type {
     CommandExecutionStatus,
     DynamicToolCallStatus,
     FileUpdateChange,
+    McpToolCallError,
+    McpToolCallResult,
     McpToolCallStatus,
     PatchApplyStatus,
     ThreadItem,
@@ -84,7 +86,12 @@ export async function createCommandExecutionUpdate(
 export async function createMcpToolCallUpdate(
     item: ThreadItem & { type: "mcpToolCall" }
 ): Promise<UpdateSessionEvent> {
-    return createExecuteToolCallUpdate(item, `mcp.${item.server}.${item.tool}`);
+    return createExecuteToolCallUpdate(
+        item,
+        `mcp.${item.server}.${item.tool}`,
+        createMcpRawInput(item.server, item.tool, item.arguments),
+        createMcpRawOutput([], item.result, item.error),
+    );
 }
 
 export async function createDynamicToolCallUpdate(
@@ -96,7 +103,8 @@ export async function createDynamicToolCallUpdate(
 export async function createExecuteToolCallUpdate(
     item: ThreadItem & ({ type: "mcpToolCall" } | { type: "dynamicToolCall" }),
     title: string,
-    rawInput?: { arguments: JsonValue }
+    rawInput?: Record<string, JsonValue | string>,
+    rawOutput?: Record<string, JsonValue | string | null>,
 ): Promise<UpdateSessionEvent> {
     return {
         sessionUpdate: "tool_call",
@@ -105,6 +113,30 @@ export async function createExecuteToolCallUpdate(
         title: title,
         status: toAcpStatus(item.status),
         rawInput: rawInput,
+        rawOutput: rawOutput,
+    };
+}
+
+export function createMcpRawInput(server: string, tool: string, argumentsValue: JsonValue): Record<string, JsonValue | string> {
+    return {
+        server,
+        tool,
+        arguments: argumentsValue,
+    };
+}
+
+export function createMcpRawOutput(
+    _logs: Array<string>,
+    result: McpToolCallResult | null,
+    error: McpToolCallError | null,
+): Record<string, JsonValue | string | null> | undefined {
+    if (result === null && error === null) {
+        return undefined;
+    }
+
+    return {
+        result,
+        error,
     };
 }
 

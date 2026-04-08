@@ -50,6 +50,7 @@ export interface SessionState {
     account: Account | null;
     cwd: string;
     sessionMcpServers?: Array<string>;
+    mcpToolLogs: Map<string, Array<string>>;
 }
 
 interface PendingMcpStartupSession {
@@ -177,6 +178,7 @@ export class CodexAcpServer implements acp.Agent {
             account: accountResponse.account,
             cwd: request.cwd,
             sessionMcpServers: sessionMcpServers,
+            mcpToolLogs: new Map(),
         }
         this.sessions.set(sessionId, sessionState);
 
@@ -388,6 +390,7 @@ export class CodexAcpServer implements acp.Agent {
             account: accountResponse.account,
             cwd: request.cwd,
             sessionMcpServers: sessionMcpServers,
+            mcpToolLogs: new Map(),
         };
         this.sessions.set(sessionId, sessionState);
 

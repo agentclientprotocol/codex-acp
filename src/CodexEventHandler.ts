@@ -26,6 +26,8 @@ import {
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
+    createMcpRawInput,
+    createMcpRawOutput,
     createFuzzyFileSearchComplete,
     createFuzzyFileSearchStartOrUpdate,
     createMcpToolCallUpdate,
@@ -102,12 +104,13 @@ export class CodexEventHandler {
             case "turn/diff/updated":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
-            case "item/mcpToolCall/progress":
             case "serverRequest/resolved":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
                 return null;
+            case "item/mcpToolCall/progress":
+                return this.createMcpToolProgressEvent(notification.params);
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
                 return null;
@@ -211,13 +214,24 @@ export class CodexEventHandler {
 
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
-            case "mcpToolCall":
             case "fileChange":
             case "dynamicToolCall":
                 return {
                     sessionUpdate: "tool_call_update",
                     toolCallId: event.item.id,
-                    status: event.item.status === "completed" ? "completed" : "failed"
+                    status: event.item.status === "completed" ? "completed" : "failed",
+                }
+            case "mcpToolCall":
+                return {
+                    sessionUpdate: "tool_call_update",
+                    toolCallId: event.item.id,
+                    status: event.item.status === "completed" ? "completed" : "failed",
+                    rawInput: createMcpRawInput(event.item.server, event.item.tool, event.item.arguments),
+                    rawOutput: createMcpRawOutput(
+                        this.consumeMcpToolLogs(event.item.id),
+                        event.item.result,
+                        event.item.error,
+                    ),
                 }
             case "commandExecution":
                 return this.completeCommandExecutionEvent(event.item);
@@ -257,6 +271,37 @@ export class CodexEventHandler {
                 }
             }
         }
+    }
+
+    private createMcpToolProgressEvent(event: { itemId: string, message: string }): UpdateSessionEvent {
+        const logDelta = this.appendMcpToolLog(event.itemId, event.message);
+        return {
+            sessionUpdate: "tool_call_update",
+            toolCallId: event.itemId,
+            _meta: {
+                mcp_output_delta: {
+                    data: logDelta,
+                }
+            }
+        };
+    }
+
+    private appendMcpToolLog(toolCallId: string, message: string): string {
+        const cleaned = message.trim();
+        if (cleaned.length === 0) {
+            return "";
+        }
+
+        const logs = this.sessionState.mcpToolLogs.get(toolCallId) ?? [];
+        logs.push(cleaned);
+        this.sessionState.mcpToolLogs.set(toolCallId, logs);
+        return cleaned;
+    }
+
+    private consumeMcpToolLogs(toolCallId: string): Array<string> {
+        const logs = this.sessionState.mcpToolLogs.get(toolCallId) ?? [];
+        this.sessionState.mcpToolLogs.delete(toolCallId);
+        return logs;
     }
 
     static createMcpStartupUpdates(event: McpStartupCompleteEvent): UpdateSessionEvent[] {

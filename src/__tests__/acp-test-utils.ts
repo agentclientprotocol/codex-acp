@@ -274,6 +274,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         rateLimits: null,
         account: null,
         cwd: "/test/cwd",
+        mcpToolLogs: new Map(),
         sessionId: "session-id",
         currentModelId: "model-id[effort]",
         supportedReasoningEfforts: [],
