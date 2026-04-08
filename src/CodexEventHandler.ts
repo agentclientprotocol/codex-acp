@@ -20,6 +20,7 @@ import type {
     ThreadTokenUsageUpdatedNotification,
     TurnPlanUpdatedNotification
 } from "./app-server/v2";
+import type { McpStartupCompleteEvent } from "./app-server";
 import {toTokenCount} from "./TokenCount";
 import {
     createCommandExecutionUpdate,
@@ -256,6 +257,40 @@ export class CodexEventHandler {
                 }
             }
         }
+    }
+
+    static createMcpStartupUpdates(event: McpStartupCompleteEvent): UpdateSessionEvent[] {
+        const failedUpdates = event.failed.map((server: McpStartupCompleteEvent["failed"][number]) => this.createMcpStartupToolCallUpdate(
+            server.server,
+            `[codex-acp forwarded startup error] MCP server \`${server.server}\` failed to start: ${server.error}`
+        ));
+        const cancelledUpdates = event.cancelled.map((server: McpStartupCompleteEvent["cancelled"][number]) => this.createMcpStartupToolCallUpdate(
+            server,
+            `[codex-acp forwarded startup error] MCP server \`${server}\` startup was cancelled.`
+        ));
+
+        return [...failedUpdates, ...cancelledUpdates];
+    }
+
+    private static createMcpStartupToolCallUpdate(serverName: string, message: string): UpdateSessionEvent {
+        return {
+            sessionUpdate: "tool_call",
+            toolCallId: this.getMcpStartupToolCallId(serverName),
+            kind: "other",
+            title: `mcp__${serverName}__startup`,
+            status: "failed",
+            content: [{
+                type: "content",
+                content: {
+                    type: "text",
+                    text: message,
+                },
+            }],
+        };
+    }
+
+    private static getMcpStartupToolCallId(serverName: string): string {
+        return `mcp_startup.${encodeURIComponent(serverName)}`;
     }
 
     private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {
