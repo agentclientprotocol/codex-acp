@@ -30,8 +30,7 @@ if (process.argv[2] === "login") {
 }
 
 function startAcpServer() {
-    const defaultCodexPath = createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js");
-    const codexPath = process.env["CODEX_PATH"] ?? defaultCodexPath;
+    const codexPath = resolveCodexPath();
     const configString = process.env["CODEX_CONFIG"];
     const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
     const modelProvider = process.env["MODEL_PROVIDER"];
@@ -70,4 +69,20 @@ function startAcpServer() {
     }
 
     new acp.AgentSideConnection(createAgent, acpJsonStream);
+}
+
+function resolveCodexPath(): string {
+    const configuredCodexPath = process.env["CODEX_PATH"];
+    if (configuredCodexPath) {
+        return configuredCodexPath;
+    }
+
+    try {
+        return createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js");
+    } catch (error) {
+        logger.log("Falling back to codex from PATH because @openai/codex/bin/codex.js could not be resolved", {
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return "codex";
+    }
 }
