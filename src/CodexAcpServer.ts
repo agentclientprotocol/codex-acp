@@ -652,22 +652,25 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     private publishMcpStartupStatusAsync(sessionId: string, mcpStartupVersion: number): void {
-        void (async () => {
-            try {
-                const mcpStartup = await this.runWithProcessCheck(() => this.codexAcpClient.awaitMcpStartupResult(mcpStartupVersion));
-                const sessionState = this.sessions.get(sessionId);
-                const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
-                if (sessionState && pendingStartup) {
-                    sessionState.sessionMcpServers = mcpStartup.ready.filter(serverName =>
-                        pendingStartup.requestedServers.has(serverName)
-                    );
-                }
-                await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup?.requestedServers);
-                this.pendingMcpStartupSessions.delete(sessionId);
-            } catch (err) {
-                logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
+        void this.doPublishMcpStartupStatus(sessionId, mcpStartupVersion);
+    }
+
+    private async doPublishMcpStartupStatus(sessionId: string, mcpStartupVersion: number): Promise<void> {
+        try {
+            const mcpStartup = await this.runWithProcessCheck(() => this.codexAcpClient.awaitMcpStartupResult(mcpStartupVersion));
+            const sessionState = this.sessions.get(sessionId);
+            const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
+            if (sessionState && pendingStartup) {
+                sessionState.sessionMcpServers = mcpStartup.ready.filter(serverName =>
+                    pendingStartup.requestedServers.has(serverName)
+                );
             }
-        })();
+            await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup?.requestedServers);
+        } catch (err) {
+            logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
+        } finally {
+            this.pendingMcpStartupSessions.delete(sessionId);
+        }
     }
 
     private async publishMcpStartupStatus(
