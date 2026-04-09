@@ -22,7 +22,6 @@ import type {
     GetAccountResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
-    McpServerStatusUpdatedNotification,
     Model,
     SkillsListParams,
     SkillsListResponse,
