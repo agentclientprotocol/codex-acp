@@ -281,18 +281,6 @@ export class CodexAcpClient {
         return await this.codexClient.awaitMcpStartup(mcpStartupVersion);
     }
 
-    onMcpServerStatusUpdated(handler: (event: McpServerStatusUpdatedNotification) => void): void {
-        this.codexClient.onMcpServerStatusUpdated(handler);
-    }
-
-    getMcpServerStatusVersion(): number {
-        return this.codexClient.getMcpServerStatusVersion();
-    }
-
-    getMcpServerStatusUpdates(afterVersion: number): Array<McpServerStatusUpdatedNotification> {
-        return this.codexClient.getMcpServerStatusUpdates(afterVersion);
-    }
-
     getMcpStartupCompleteVersion(): number {
         return this.codexClient.getMcpStartupCompleteVersion();
     }
