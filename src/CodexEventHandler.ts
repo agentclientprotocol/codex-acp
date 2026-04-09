@@ -227,11 +227,7 @@ export class CodexEventHandler {
                     toolCallId: event.item.id,
                     status: event.item.status === "completed" ? "completed" : "failed",
                     rawInput: createMcpRawInput(event.item.server, event.item.tool, event.item.arguments),
-                    rawOutput: createMcpRawOutput(
-                        this.consumeMcpToolLogs(event.item.id),
-                        event.item.result,
-                        event.item.error,
-                    ),
+                    rawOutput: createMcpRawOutput(event.item.result, event.item.error),
                 }
             case "commandExecution":
                 return this.completeCommandExecutionEvent(event.item);
@@ -274,7 +270,7 @@ export class CodexEventHandler {
     }
 
     private createMcpToolProgressEvent(event: { itemId: string, message: string }): UpdateSessionEvent {
-        const logDelta = this.appendMcpToolLog(event.itemId, event.message);
+        const logDelta = event.message.trim();
         return {
             sessionUpdate: "tool_call_update",
             toolCallId: event.itemId,
@@ -284,24 +280,6 @@ export class CodexEventHandler {
                 }
             }
         };
-    }
-
-    private appendMcpToolLog(toolCallId: string, message: string): string {
-        const cleaned = message.trim();
-        if (cleaned.length === 0) {
-            return "";
-        }
-
-        const logs = this.sessionState.mcpToolLogs.get(toolCallId) ?? [];
-        logs.push(cleaned);
-        this.sessionState.mcpToolLogs.set(toolCallId, logs);
-        return cleaned;
-    }
-
-    private consumeMcpToolLogs(toolCallId: string): Array<string> {
-        const logs = this.sessionState.mcpToolLogs.get(toolCallId) ?? [];
-        this.sessionState.mcpToolLogs.delete(toolCallId);
-        return logs;
     }
 
     static createMcpStartupUpdates(event: McpStartupCompleteEvent): UpdateSessionEvent[] {

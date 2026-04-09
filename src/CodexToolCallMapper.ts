@@ -90,7 +90,7 @@ export async function createMcpToolCallUpdate(
         item,
         `mcp.${item.server}.${item.tool}`,
         createMcpRawInput(item.server, item.tool, item.arguments),
-        createMcpRawOutput([], item.result, item.error),
+        createMcpRawOutput(item.result, item.error),
     );
 }
 
@@ -126,7 +126,6 @@ export function createMcpRawInput(server: string, tool: string, argumentsValue: 
 }
 
 export function createMcpRawOutput(
-    _logs: Array<string>,
     result: McpToolCallResult | null,
     error: McpToolCallError | null,
 ): Record<string, JsonValue | string | null> | undefined {
