@@ -260,6 +260,132 @@ describe('CodexEventHandler - command action events', () => {
         );
     });
 
+    it('should include mcp progress and final logs', async () => {
+        const notifications: ServerNotification[] = [
+            {
+                method: 'item/started',
+                params: {
+                    threadId: 'thread-1',
+                    turnId: 'turn-1',
+                    item: {
+                        type: "mcpToolCall",
+                        id: "call-id",
+                        server: "ijproxy",
+                        tool: "read_file",
+                        status: "inProgress",
+                        arguments: { file_path: ".ai/local.md", mode: "slice", start_line: 1, max_lines: 200 },
+                        result: null,
+                        error: null,
+                        durationMs: null,
+                    },
+                },
+            },
+            {
+                method: 'item/mcpToolCall/progress',
+                params: {
+                    threadId: 'thread-1',
+                    turnId: 'turn-1',
+                    itemId: 'call-id',
+                    message: "File /Users/aleksandr.slapoguzov/Projects/ultimate/.ai/local.md doesn't exist or can't be opened",
+                },
+            },
+            {
+                method: 'item/completed',
+                params: {
+                    threadId: 'thread-1',
+                    turnId: 'turn-1',
+                    item: {
+                        type: "mcpToolCall",
+                        id: "call-id",
+                        server: "ijproxy",
+                        tool: "read_file",
+                        status: "failed",
+                        arguments: { file_path: ".ai/local.md", mode: "slice", start_line: 1, max_lines: 200 },
+                        result: null,
+                        error: {
+                            message: "File /Users/aleksandr.slapoguzov/Projects/ultimate/.ai/local.md doesn't exist or can't be opened",
+                        },
+                        durationMs: 15,
+                    },
+                },
+            },
+        ];
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/mcp-tool-completed-with-logs.json'
+        );
+    });
+
+    it('should preserve repeated mcp progress messages in final output', async () => {
+        const repeatedMessage = 'Polling for status';
+        const notifications: ServerNotification[] = [
+            {
+                method: 'item/started',
+                params: {
+                    threadId: 'thread-1',
+                    turnId: 'turn-1',
+                    item: {
+                        type: "mcpToolCall",
+                        id: "call-id",
+                        server: "server-name",
+                        tool: "tool-name",
+                        status: "inProgress",
+                        arguments: { argument: "example" },
+                        result: null,
+                        error: null,
+                        durationMs: null,
+                    },
+                },
+            },
+            {
+                method: 'item/mcpToolCall/progress',
+                params: {
+                    threadId: 'thread-1',
+                    turnId: 'turn-1',
+                    itemId: 'call-id',
+                    message: repeatedMessage,
+                },
+            },
+            {
+                method: 'item/mcpToolCall/progress',
+                params: {
+                    threadId: 'thread-1',
+                    turnId: 'turn-1',
+                    itemId: 'call-id',
+                    message: repeatedMessage,
+                },
+            },
+            {
+                method: 'item/completed',
+                params: {
+                    threadId: 'thread-1',
+                    turnId: 'turn-1',
+                    item: {
+                        type: "mcpToolCall",
+                        id: "call-id",
+                        server: "server-name",
+                        tool: "tool-name",
+                        status: "failed",
+                        arguments: { argument: "example" },
+                        result: null,
+                        error: {
+                            message: repeatedMessage,
+                        },
+                        durationMs: 15,
+                    },
+                },
+            },
+        ];
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/mcp-tool-repeated-progress.json'
+        );
+    });
+
     it('should handle dynamic tools', async () => {
         const dynamicToolNotification: ServerNotification = {
             method: 'item/started',

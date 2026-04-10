@@ -158,7 +158,12 @@
         "toolCallId": "item-mcp-1",
         "kind": "execute",
         "title": "mcp.github.search",
-        "status": "completed"
+        "status": "completed",
+        "rawInput": {
+          "server": "github",
+          "tool": "search",
+          "arguments": {}
+        }
       }
     }
   ]

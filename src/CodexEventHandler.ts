@@ -20,11 +20,14 @@ import type {
     ThreadTokenUsageUpdatedNotification,
     TurnPlanUpdatedNotification
 } from "./app-server/v2";
+import type { McpStartupCompleteEvent } from "./app-server";
 import {toTokenCount} from "./TokenCount";
 import {
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
+    createMcpRawInput,
+    createMcpRawOutput,
     createFuzzyFileSearchComplete,
     createFuzzyFileSearchStartOrUpdate,
     createMcpToolCallUpdate,
@@ -101,12 +104,13 @@ export class CodexEventHandler {
             case "turn/diff/updated":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
-            case "item/mcpToolCall/progress":
             case "serverRequest/resolved":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
                 return null;
+            case "item/mcpToolCall/progress":
+                return this.createMcpToolProgressEvent(notification.params);
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
                 return null;
@@ -210,13 +214,20 @@ export class CodexEventHandler {
 
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
-            case "mcpToolCall":
             case "fileChange":
             case "dynamicToolCall":
                 return {
                     sessionUpdate: "tool_call_update",
                     toolCallId: event.item.id,
-                    status: event.item.status === "completed" ? "completed" : "failed"
+                    status: event.item.status === "completed" ? "completed" : "failed",
+                }
+            case "mcpToolCall":
+                return {
+                    sessionUpdate: "tool_call_update",
+                    toolCallId: event.item.id,
+                    status: event.item.status === "completed" ? "completed" : "failed",
+                    rawInput: createMcpRawInput(event.item.server, event.item.tool, event.item.arguments),
+                    rawOutput: createMcpRawOutput(event.item.result, event.item.error),
                 }
             case "commandExecution":
                 return this.completeCommandExecutionEvent(event.item);
@@ -256,6 +267,53 @@ export class CodexEventHandler {
                 }
             }
         }
+    }
+
+    private createMcpToolProgressEvent(event: { itemId: string, message: string }): UpdateSessionEvent {
+        const logDelta = event.message.trim();
+        return {
+            sessionUpdate: "tool_call_update",
+            toolCallId: event.itemId,
+            _meta: {
+                mcp_output_delta: {
+                    data: logDelta,
+                }
+            }
+        };
+    }
+
+    static createMcpStartupUpdates(event: McpStartupCompleteEvent): UpdateSessionEvent[] {
+        const failedUpdates = event.failed.map((server: McpStartupCompleteEvent["failed"][number]) => this.createMcpStartupToolCallUpdate(
+            server.server,
+            `[codex-acp forwarded startup error] MCP server \`${server.server}\` failed to start: ${server.error}`
+        ));
+        const cancelledUpdates = event.cancelled.map((server: McpStartupCompleteEvent["cancelled"][number]) => this.createMcpStartupToolCallUpdate(
+            server,
+            `[codex-acp forwarded startup error] MCP server \`${server}\` startup was cancelled.`
+        ));
+
+        return [...failedUpdates, ...cancelledUpdates];
+    }
+
+    private static createMcpStartupToolCallUpdate(serverName: string, message: string): UpdateSessionEvent {
+        return {
+            sessionUpdate: "tool_call",
+            toolCallId: this.getMcpStartupToolCallId(serverName),
+            kind: "other",
+            title: `mcp__${serverName}__startup`,
+            status: "failed",
+            content: [{
+                type: "content",
+                content: {
+                    type: "text",
+                    text: message,
+                },
+            }],
+        };
+    }
+
+    private static getMcpStartupToolCallId(serverName: string): string {
+        return `mcp_startup.${encodeURIComponent(serverName)}`;
     }
 
     private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {

@@ -7,6 +7,7 @@ import open from "open";
 import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
+    McpStartupCompleteEvent,
     ReasoningEffort,
     ServerNotification
 } from "./app-server";
@@ -273,6 +274,10 @@ export class CodexAcpClient {
     async awaitMcpStartup(mcpStartupVersion: number): Promise<Array<string>> {
         const startup = await this.codexClient.awaitMcpStartup(mcpStartupVersion);
         return startup.ready;
+    }
+
+    async awaitMcpStartupResult(mcpStartupVersion: number): Promise<McpStartupCompleteEvent> {
+        return await this.codexClient.awaitMcpStartup(mcpStartupVersion);
     }
 
     getMcpStartupCompleteVersion(): number {

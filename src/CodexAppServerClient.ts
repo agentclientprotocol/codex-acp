@@ -76,7 +76,6 @@ export class CodexAppServerClient {
                 }
                 return;
             }
-
             const serverNotification = data as ServerNotification;
             this.notify(serverNotification);
             for (const callback of this.codexEventHandlers) {
