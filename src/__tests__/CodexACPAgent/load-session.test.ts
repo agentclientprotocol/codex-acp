@@ -33,6 +33,7 @@ describe("CodexACPAgent - loadSession", () => {
             defaultReasoningEffort: "medium",
             inputModalities: ["text", "image"],
             supportsPersonality: false,
+            additionalSpeedTiers: [],
             isDefault: true,
         };
 
@@ -43,6 +44,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         const thread: Thread = {
             id: "session-1",
+            forkedFromId: null,
             preview: "Hi",
             ephemeral: false,
             modelProvider: "openai",
@@ -62,6 +64,9 @@ describe("CodexACPAgent - loadSession", () => {
                     id: "turn-1",
                     status: "completed",
                     error: null,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
                     items: [
                         {
                             type: "userMessage",
@@ -192,6 +197,7 @@ describe("CodexACPAgent - loadSession", () => {
             defaultReasoningEffort: "medium",
             inputModalities: ["text"],
             supportsPersonality: false,
+            additionalSpeedTiers: [],
             isDefault: true,
         };
 
@@ -202,6 +208,7 @@ describe("CodexACPAgent - loadSession", () => {
         codexAppServerClient.threadResume = vi.fn().mockResolvedValue({
             thread: {
                 id: "session-1",
+                forkedFromId: null,
                 preview: "",
                 ephemeral: false,
                 modelProvider: "openai",
@@ -263,6 +270,7 @@ describe("CodexACPAgent - loadSession", () => {
             defaultReasoningEffort: "medium",
             inputModalities: ["text"],
             supportsPersonality: false,
+            additionalSpeedTiers: [],
             isDefault: true,
         };
 
@@ -273,6 +281,7 @@ describe("CodexACPAgent - loadSession", () => {
         codexAppServerClient.threadResume = vi.fn().mockResolvedValue({
             thread: {
                 id: "session-1",
+                forkedFromId: null,
                 preview: "",
                 ephemeral: false,
                 modelProvider: "openai",

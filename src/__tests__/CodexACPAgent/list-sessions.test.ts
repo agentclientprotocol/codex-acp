@@ -14,6 +14,7 @@ describe("CodexACPAgent - list sessions", () => {
 
         const threadA: Thread = {
             id: "sess-1",
+            forkedFromId: null,
             preview: "First session",
             ephemeral: false,
             modelProvider: "openai",
@@ -32,6 +33,7 @@ describe("CodexACPAgent - list sessions", () => {
         };
         const threadB: Thread = {
             id: "sess-2",
+            forkedFromId: null,
             preview: "Other session",
             ephemeral: false,
             modelProvider: "openai",
