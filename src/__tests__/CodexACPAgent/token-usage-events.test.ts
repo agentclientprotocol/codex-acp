@@ -162,7 +162,7 @@ describe('Token Usage Events', () => {
     });
 
     describe('session/update usage_update', () => {
-        function setupPromptAndReturnDump(notifications: ServerNotification[], turnStatus: string = "completed") {
+        function setupPromptAndReturnEvents(notifications: ServerNotification[], turnStatus: string = "completed") {
             const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
             mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
@@ -186,12 +186,12 @@ describe('Token Usage Events', () => {
                     sessionId,
                     prompt: [{ type: 'text', text: 'test prompt' }],
                 });
-                return mockFixture.getAcpConnectionDump([]);
+                return mockFixture.getAcpConnectionEvents([]);
             };
         }
 
         it('should emit usage_update with cumulative context usage', async () => {
-            const dump = await setupPromptAndReturnDump([
+            const events = await setupPromptAndReturnEvents([
                 createTokenUsageNotification(sessionId, {
                     total: {
                         totalTokens: 5000,
@@ -211,11 +211,11 @@ describe('Token Usage Events', () => {
                 }),
             ])();
 
-            await expect(`${dump}\n`).toMatchFileSnapshot('data/token-usage-session-update.json');
+            await expect(`${JSON.stringify(events[0], null, 2)}\n`).toMatchFileSnapshot('data/token-usage-session-update.json');
         });
 
         it('should emit latest cumulative usage from multiple updates', async () => {
-            const dump = await setupPromptAndReturnDump([
+            const events = await setupPromptAndReturnEvents([
                 createTokenUsageNotification(sessionId, {
                     total: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
                     last: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
@@ -233,11 +233,11 @@ describe('Token Usage Events', () => {
                 }),
             ])();
 
-            await expect(`${dump}\n`).toMatchFileSnapshot('data/token-usage-session-update-multiple.txt');
+            await expect(`${JSON.stringify(events, null, 2)}\n`).toMatchFileSnapshot('data/token-usage-session-update-multiple.json');
         });
 
         it('should skip usage_update when model context window is unavailable', async () => {
-            const dump = await setupPromptAndReturnDump([
+            const events = await setupPromptAndReturnEvents([
                 createTokenUsageNotification(sessionId, {
                     total: { totalTokens: 5000, inputTokens: 4000, cachedInputTokens: 1000, outputTokens: 900, reasoningOutputTokens: 100 },
                     last: { totalTokens: 2500, inputTokens: 2000, cachedInputTokens: 500, outputTokens: 450, reasoningOutputTokens: 50 },
@@ -245,7 +245,7 @@ describe('Token Usage Events', () => {
                 }),
             ])();
 
-            expect(dump).toBe('');
+            expect(events).toEqual([]);
         });
     });
 });

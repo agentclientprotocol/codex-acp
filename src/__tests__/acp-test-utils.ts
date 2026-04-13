@@ -45,6 +45,7 @@ export interface TestFixture {
     clearCodexConnectionDump(): void,
 
     onAcpConnectionEvent(handler: (event: MethodCallEvent) => void): void,
+    getAcpConnectionEvents(ignoredFields: string[]): MethodCallEvent[],
     getAcpConnectionDump(ignoredFields: string[]): string,
     clearAcpConnectionDump(): void,
 }
@@ -130,8 +131,11 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         onAcpConnectionEvent(handler: (event: MethodCallEvent) => void): void {
             acpEventHandlers.push(handler);
         },
+        getAcpConnectionEvents(ignoredFields: string[]): MethodCallEvent[] {
+            return acpConnectionEvents.map(event => anonymizeValue(event, [], new Set(ignoredFields)) as MethodCallEvent);
+        },
         getAcpConnectionDump(ignoredFields: string[]): string {
-            return createArrayDump(acpConnectionEvents, ignoredFields);
+            return createArrayDump(this.getAcpConnectionEvents(ignoredFields), []);
         },
         clearAcpConnectionDump() {
             acpConnectionEvents.splice(0, acpConnectionEvents.length);
