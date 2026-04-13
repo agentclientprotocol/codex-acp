@@ -1,5 +1,12 @@
 {
   "stopReason": "end_turn",
+  "usage": {
+    "totalTokens": 2500,
+    "inputTokens": 1500,
+    "cachedReadTokens": 500,
+    "outputTokens": 450,
+    "thoughtTokens": 50
+  },
   "_meta": {
     "quota": {
       "token_count": {
