@@ -1,6 +1,6 @@
 {
   "name": "@jetbrains/codex-acp",
-  "version": "0.0.32",
+  "version": "0.0.34",
   "description": "",
   "main": "dist/index.js",
   "bin": {
@@ -50,7 +50,7 @@
     "vitest": "^4.0.10"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.12.0",
+    "@agentclientprotocol/sdk": "^0.16.1",
     "diff": "^8.0.3",
     "open": "^11.0.0",
     "vscode-jsonrpc": "^8.2.1"
