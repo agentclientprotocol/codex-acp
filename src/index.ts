@@ -30,8 +30,7 @@ if (process.argv[2] === "login") {
 }
 
 function startAcpServer() {
-    const defaultCodexPath = createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js");
-    const codexPath = process.env["CODEX_PATH"] ?? defaultCodexPath;
+    const codexPath = process.env["CODEX_PATH"] ?? createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js");
     const configString = process.env["CODEX_CONFIG"];
     const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
     const modelProvider = process.env["MODEL_PROVIDER"];
