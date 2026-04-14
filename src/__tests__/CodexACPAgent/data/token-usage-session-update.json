@@ -1,0 +1,13 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 5000,
+        "size": 128000
+      }
+    }
+  ]
+}

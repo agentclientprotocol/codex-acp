@@ -24,6 +24,7 @@ import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import type {TokenCount} from "./TokenCount";
+import {toPromptUsage} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
@@ -714,6 +715,7 @@ export class CodexAcpServer implements acp.Agent {
                 logger.log("Prompt handled by a command");
                 return {
                     stopReason: "end_turn",
+                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
                     _meta: this.buildQuotaMeta(sessionState),
                 };
             }
@@ -751,6 +753,7 @@ export class CodexAcpServer implements acp.Agent {
                 });
                 return {
                     stopReason: "cancelled",
+                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
                     _meta: this.buildQuotaMeta(sessionState),
                 };
             }
@@ -763,6 +766,7 @@ export class CodexAcpServer implements acp.Agent {
 
             return {
                 stopReason: "end_turn",
+                usage: this.buildPromptUsage(sessionState.lastTokenUsage),
                 _meta: this.buildQuotaMeta(sessionState),
             };
         } catch (err) {
@@ -791,6 +795,13 @@ export class CodexAcpServer implements acp.Agent {
                 model_usage: modelUsage
             }
         };
+    }
+
+    private buildPromptUsage(lastTokenUsage: TokenCount | null): acp.Usage | null {
+        if (lastTokenUsage == null) {
+            return null;
+        }
+        return toPromptUsage(lastTokenUsage);
     }
 
     private async runWithProcessCheck<T>(operation: () => Promise<T>): Promise<T> {

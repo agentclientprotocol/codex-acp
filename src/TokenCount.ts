@@ -1,3 +1,4 @@
+import type {Usage} from "@agentclientprotocol/sdk";
 import type {TokenUsageBreakdown} from "./app-server/v2";
 
 /**
@@ -31,5 +32,20 @@ export function toTokenCount(usage: TokenUsageBreakdown): TokenCount {
         cachedInputTokens: usage.cachedInputTokens,
         outputTokens: usage.outputTokens,
         reasoningOutputTokens: usage.reasoningOutputTokens,
+    };
+}
+
+/**
+ * Maps our per-turn token breakdown to ACP PromptResponse usage fields.
+ * Cached input tokens are reported as ACP cache reads, and reasoning output
+ * tokens are exposed through ACP's thoughtTokens field.
+ */
+export function toPromptUsage(tokenCount: TokenCount): Usage {
+    return {
+        totalTokens: tokenCount.totalTokens,
+        inputTokens: tokenCount.inputTokens,
+        cachedReadTokens: tokenCount.cachedInputTokens,
+        outputTokens: tokenCount.outputTokens,
+        thoughtTokens: tokenCount.reasoningOutputTokens,
     };
 }

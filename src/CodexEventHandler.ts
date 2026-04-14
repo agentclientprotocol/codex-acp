@@ -87,8 +87,7 @@ export class CodexEventHandler {
                 this.sessionState.currentTurnId = null;
                 return null;
             case "thread/tokenUsage/updated":
-                this.handleTokenUsageUpdated(notification.params);
-                return null;
+                return this.createUsageUpdate(notification.params);
             case "item/commandExecution/outputDelta":
                 return this.createCommandOutputDeltaEvent(notification.params);
             case "command/exec/outputDelta":
@@ -381,6 +380,22 @@ export class CodexEventHandler {
         this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
         this.sessionState.totalTokenUsage = toTokenCount(params.tokenUsage.total);
         this.sessionState.modelContextWindow = params.tokenUsage.modelContextWindow;
+    }
+
+    private createUsageUpdate(params: ThreadTokenUsageUpdatedNotification): UpdateSessionEvent | null {
+        this.handleTokenUsageUpdated(params);
+
+        const used = this.sessionState.totalTokenUsage?.totalTokens;
+        const size = this.sessionState.modelContextWindow;
+        if (used == null || size == null || size <= 0) {
+            return null;
+        }
+
+        return {
+            sessionUpdate: "usage_update",
+            used,
+            size,
+        };
     }
 
     private handleRateLimitsUpdated(params: AccountRateLimitsUpdatedNotification): void {
