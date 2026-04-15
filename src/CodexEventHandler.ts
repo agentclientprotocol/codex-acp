@@ -132,6 +132,7 @@ export class CodexEventHandler {
             case "thread/realtime/itemAdded":
             case "thread/realtime/transcriptUpdated":
             case "thread/realtime/outputAudio/delta":
+            case "thread/realtime/sdp":
             case "thread/realtime/error":
             case "thread/realtime/closed":
             case "windowsSandbox/setupCompleted":

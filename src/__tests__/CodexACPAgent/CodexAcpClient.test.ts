@@ -229,6 +229,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 defaultReasoningEffort: "medium",
                 inputModalities: ["text"],
                 supportsPersonality: false,
+                additionalSpeedTiers: [],
                 isDefault: true
             }],
             nextCursor: null
@@ -524,7 +525,15 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
             threadId: "session-id",
-            turn: { id: "turn-id", items: [], status: "completed", error: null }
+            turn: {
+                id: "turn-id",
+                items: [],
+                status: "completed",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            }
         });
 
         const sessionState: SessionState = createTestSessionState();
@@ -735,6 +744,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             ],
             defaultReasoningEffort: 'medium',
             supportsPersonality: false,
+            additionalSpeedTiers: [],
             isDefault: false,
             inputModalities: []
         },
@@ -752,6 +762,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             ],
             defaultReasoningEffort: 'low',
             supportsPersonality: false,
+            additionalSpeedTiers: [],
             isDefault: true,
             inputModalities: []
         }
@@ -775,11 +786,27 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const sessionState = createTestSessionState(sessionOverrides);
         const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart").mockResolvedValue({
-            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+            turn: {
+                id: "turn-id",
+                items: [],
+                status: "inProgress",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            }
         });
         vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted").mockResolvedValue({
             threadId: sessionState.sessionId,
-            turn: { id: "turn-id", items: [], status: "completed", error: null }
+            turn: {
+                id: "turn-id",
+                items: [],
+                status: "completed",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            }
         });
         vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
         return { mockFixture, sessionState, turnStartSpy };
