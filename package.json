@@ -41,7 +41,7 @@
   "license": "ISC",
   "type": "module",
   "devDependencies": {
-    "@openai/codex": "^0.120.0",
+    "@openai/codex": "^0.121.0",
     "@types/node": "^24.10.1",
     "esbuild": "^0.25.0",
     "mcp-hello-world": "^1.1.2",
