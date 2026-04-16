@@ -34,6 +34,7 @@ import {
     fuzzyFileSearchToolCallId,
 } from "./CodexToolCallMapper";
 import { stripShellPrefix } from "./CommandUtils";
+import type { PendingMcpApprovals } from "./PendingMcpApprovals";
 
 export { stripShellPrefix };
 
@@ -43,10 +44,12 @@ export class CodexEventHandler {
     private readonly sessionState: SessionState;
     private failure: RequestError | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
+    private readonly pendingMcpApprovals: PendingMcpApprovals | undefined;
 
-    constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
+    constructor(connection: acp.AgentSideConnection, sessionState: SessionState, pendingMcpApprovals?: PendingMcpApprovals) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.pendingMcpApprovals = pendingMcpApprovals;
     }
 
     getFailure(): RequestError | null {
@@ -193,6 +196,7 @@ export class CodexEventHandler {
             case "commandExecution":
                 return await createCommandExecutionUpdate(event.item);
             case "mcpToolCall":
+                this.pendingMcpApprovals?.record(event.threadId, event.item.server, event.item.id);
                 return await createMcpToolCallUpdate(event.item);
             case "dynamicToolCall":
                 return await createDynamicToolCallUpdate(event.item);

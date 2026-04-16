@@ -2,7 +2,7 @@ import {isCodexAuthRequest} from "./CodexAuthMethod";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
-import type {ApprovalHandler, CodexAppServerClient} from "./CodexAppServerClient";
+import type {ApprovalHandler, CodexAppServerClient, ElicitationHandler} from "./CodexAppServerClient";
 import open from "open";
 import type {Disposable} from "vscode-jsonrpc";
 import type {
@@ -360,10 +360,12 @@ export class CodexAcpClient {
     async subscribeToSessionEvents(
         sessionId: string,
         eventHandler: (result: ServerNotification) => void,
-        approvalHandler: ApprovalHandler
+        approvalHandler: ApprovalHandler,
+        elicitationHandler: ElicitationHandler
     ) {
         this.codexClient.onServerNotification(sessionId, eventHandler);
         this.codexClient.onApprovalRequest(sessionId, approvalHandler);
+        this.codexClient.onElicitationRequest(sessionId, elicitationHandler);
     }
 
     async sendPrompt(
