@@ -1,0 +1,61 @@
+{
+  "method": "requestPermission",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "toolCall": {
+        "toolCallId": "mcp-elicitation:filesystem:turn-1",
+        "kind": "execute",
+        "status": "pending",
+        "title": "Approve write_file",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Allow filesystem.write_file?\n\nSource: filesystem\n\nWrite a file to disk\n\nArguments:\n- Path: /tmp/example.txt\n- Content: "
+            }
+          }
+        ],
+        "rawInput": {
+          "server": "filesystem",
+          "kind": "mcp_tool_call",
+          "request": {
+            "threadId": "test-session-id",
+            "turnId": "turn-1",
+            "serverName": "filesystem",
+            "mode": "form",
+            "message": "Allow filesystem.write_file?",
+            "_meta": "_meta",
+            "requestedSchema": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        }
+      },
+      "options": [
+        {
+          "optionId": "approved",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "approved-for-session",
+          "name": "Allow for Session",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "approved-always",
+          "name": "Allow and Don't Ask Again",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Cancel",
+          "kind": "reject_once"
+        }
+      ]
+    }
+  ]
+}

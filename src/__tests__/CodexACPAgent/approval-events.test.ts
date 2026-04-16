@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { CommandExecutionRequestApprovalParams, FileChangeRequestApprovalParams } from '../../app-server/v2';
+import type {
+    CommandExecutionRequestApprovalParams,
+    FileChangeRequestApprovalParams,
+    McpServerElicitationRequestParams,
+    PermissionsRequestApprovalParams
+} from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { SessionState } from '../../CodexAcpServer';
 import {AgentMode} from "../../AgentMode";
@@ -316,6 +321,199 @@ describe('Approval Events', () => {
 
             await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot(
                 'data/approval-file-change.json'
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+    });
+
+    describe('Additional permissions approval', () => {
+        const baseParams: PermissionsRequestApprovalParams = {
+            threadId: sessionId,
+            turnId: 'turn-1',
+            itemId: 'permissions-item',
+            reason: 'MCP tool needs network access',
+            permissions: {
+                network: { enabled: true },
+                fileSystem: {
+                    read: ['/workspace/input.txt'],
+                    write: ['/workspace/output.txt'],
+                },
+            },
+        };
+
+        it('should grant requested permissions for turn when allow_once is selected', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+
+            const response = await fixture.sendServerRequest(
+                'item/permissions/requestApproval',
+                baseParams
+            );
+
+            expect(response).toEqual({
+                permissions: {
+                    network: { enabled: true },
+                    fileSystem: {
+                        read: ['/workspace/input.txt'],
+                        write: ['/workspace/output.txt'],
+                    },
+                },
+                scope: 'turn',
+            });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should grant requested permissions for session when allow_always is selected', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_always' }
+            });
+
+            const response = await fixture.sendServerRequest(
+                'item/permissions/requestApproval',
+                baseParams
+            );
+
+            expect(response).toEqual({
+                permissions: {
+                    network: { enabled: true },
+                    fileSystem: {
+                        read: ['/workspace/input.txt'],
+                        write: ['/workspace/output.txt'],
+                    },
+                },
+                scope: 'session',
+            });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should deny requested permissions when reject is selected', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'reject_once' }
+            });
+
+            const response = await fixture.sendServerRequest(
+                'item/permissions/requestApproval',
+                baseParams
+            );
+
+            expect(response).toEqual({
+                permissions: {},
+                scope: 'turn',
+            });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should convert additional permissions to ACP permission request format', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+
+            await fixture.sendServerRequest(
+                'item/permissions/requestApproval',
+                baseParams
+            );
+
+            await expect(`${fixture.getAcpConnectionDump(['_meta'])}\n`).toMatchFileSnapshot(
+                'data/approval-permissions-allow-once.json'
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+    });
+
+    describe('MCP elicitation approval', () => {
+        const baseParams: McpServerElicitationRequestParams = {
+            threadId: sessionId,
+            turnId: 'turn-1',
+            serverName: 'filesystem',
+            mode: 'form',
+            message: 'Allow filesystem.write_file?',
+            _meta: {
+                codex_approval_kind: 'mcp_tool_call',
+                persist: ['session', 'always'],
+                connector_name: 'filesystem',
+                tool_title: 'write_file',
+                tool_description: 'Write a file to disk',
+                tool_params_display: [
+                    { display_name: 'Path', name: 'path', value: '/tmp/example.txt' },
+                    { display_name: 'Content', name: 'content', value: '' },
+                ],
+            },
+            requestedSchema: {
+                type: 'object',
+                properties: {},
+            },
+        };
+
+        it('should accept MCP tool approval elicitations', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'approved' }
+            });
+
+            const response = await fixture.sendServerRequest(
+                'mcpServer/elicitation/request',
+                baseParams
+            );
+
+            expect(response).toEqual({
+                action: 'accept',
+                content: null,
+                _meta: null,
+            });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should decline MCP tool approval elicitations on reject', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'cancel' }
+            });
+
+            const response = await fixture.sendServerRequest(
+                'mcpServer/elicitation/request',
+                baseParams
+            );
+
+            expect(response).toEqual({
+                action: 'cancel',
+                content: null,
+                _meta: null,
+            });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should convert MCP tool approval elicitations to ACP permission requests', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'approved' }
+            });
+
+            await fixture.sendServerRequest(
+                'mcpServer/elicitation/request',
+                baseParams
+            );
+
+            await expect(`${fixture.getAcpConnectionDump(['_meta'])}\n`).toMatchFileSnapshot(
+                'data/approval-mcp-elicitation-allow-once.json'
             );
 
             completeTurn();

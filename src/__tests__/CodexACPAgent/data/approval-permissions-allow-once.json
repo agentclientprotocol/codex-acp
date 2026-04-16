@@ -1,0 +1,52 @@
+{
+  "method": "requestPermission",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "toolCall": {
+        "toolCallId": "permissions-item",
+        "kind": "fetch",
+        "status": "pending",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "MCP tool needs network access\nRequested permissions: network access; read /workspace/input.txt; write /workspace/output.txt"
+            }
+          }
+        ],
+        "rawInput": {
+          "network": {
+            "enabled": true
+          },
+          "fileSystem": {
+            "read": [
+              "/workspace/input.txt"
+            ],
+            "write": [
+              "/workspace/output.txt"
+            ]
+          }
+        }
+      },
+      "options": [
+        {
+          "optionId": "allow_once",
+          "name": "Allow Once",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "allow_always",
+          "name": "Allow for Session",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "reject_once",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    }
+  ]
+}

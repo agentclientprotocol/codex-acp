@@ -59,7 +59,9 @@ export class CodexAcpClient {
 
     async initialize(request: acp.InitializeRequest): Promise<void> {
         await this.codexClient.initialize({
-            capabilities: null,
+            capabilities: {
+                experimentalApi: true,
+            },
             clientInfo: {
                 name: request.clientInfo?.name ?? this.defaultClientInfo.name,
                 version: request.clientInfo?.version ?? this.defaultClientInfo.version,

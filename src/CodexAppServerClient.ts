@@ -7,7 +7,6 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
-    AccountLoginCompletedNotification, AccountUpdatedNotification,
     GetAccountParams,
     GetAccountResponse, LoginAccountParams, LoginAccountResponse, LogoutAccountResponse, ModelListParams,
     ModelListResponse,
@@ -28,6 +27,10 @@ import type {
     CommandExecutionRequestApprovalResponse,
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
+    PermissionsRequestApprovalParams,
+    PermissionsRequestApprovalResponse,
+    McpServerElicitationRequestParams,
+    McpServerElicitationRequestResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
     SkillsListParams,
@@ -39,6 +42,8 @@ import type {
 export interface ApprovalHandler {
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
     handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse>;
+    handlePermissionsRequest(params: PermissionsRequestApprovalParams): Promise<PermissionsRequestApprovalResponse>;
+    handleMcpElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
 }
 
 const CommandExecutionApprovalRequest = new RequestType<
@@ -52,6 +57,18 @@ const FileChangeApprovalRequest = new RequestType<
     FileChangeRequestApprovalResponse,
     void
 >('item/fileChange/requestApproval');
+
+const PermissionsApprovalRequest = new RequestType<
+    PermissionsRequestApprovalParams,
+    PermissionsRequestApprovalResponse,
+    void
+>('item/permissions/requestApproval');
+
+const McpServerElicitationRequest = new RequestType<
+    McpServerElicitationRequestParams,
+    McpServerElicitationRequestResponse,
+    void
+>('mcpServer/elicitation/request');
 
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
@@ -97,6 +114,22 @@ export class CodexAppServerClient {
                 return { decision: "cancel" };
             }
             return await handler.handleFileChange(params);
+        });
+
+        this.connection.onRequest(PermissionsApprovalRequest, async (params) => {
+            const handler = this.approvalHandlers.get(params.threadId);
+            if (!handler) {
+                return { permissions: {}, scope: "turn" };
+            }
+            return await handler.handlePermissionsRequest(params);
+        });
+
+        this.connection.onRequest(McpServerElicitationRequest, async (params) => {
+            const handler = this.approvalHandlers.get(params.threadId);
+            if (!handler) {
+                return { action: "cancel", content: null, _meta: null };
+            }
+            return await handler.handleMcpElicitation(params);
         });
     }
 
