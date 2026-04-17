@@ -34,6 +34,7 @@ import {
     fuzzyFileSearchToolCallId,
 } from "./CodexToolCallMapper";
 import { stripShellPrefix } from "./CommandUtils";
+import type { ApprovalContextStore } from "./CodexApprovalContext";
 
 export { stripShellPrefix };
 
@@ -41,12 +42,14 @@ export class CodexEventHandler {
 
     private readonly connection: acp.AgentSideConnection;
     private readonly sessionState: SessionState;
+    private readonly approvalContext: ApprovalContextStore;
     private failure: RequestError | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
 
-    constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
+    constructor(connection: acp.AgentSideConnection, sessionState: SessionState, approvalContext: ApprovalContextStore) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.approvalContext = approvalContext;
     }
 
     getFailure(): RequestError | null {
@@ -85,6 +88,8 @@ export class CodexEventHandler {
                 return null;
             case "turn/completed":
                 this.sessionState.currentTurnId = null;
+                this.approvalContext.fileChangesByItemId.clear();
+                this.approvalContext.turnDiffsByTurnId.clear();
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
@@ -100,13 +105,15 @@ export class CodexEventHandler {
             case "item/reasoning/summaryPartAdded":
             //skipped events
             case "item/reasoning/textDelta": //for raw output
-            case "turn/diff/updated":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
             case "serverRequest/resolved":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
+                return null;
+            case "turn/diff/updated":
+                this.approvalContext.turnDiffsByTurnId.set(notification.params.turnId, notification.params.diff);
                 return null;
             case "item/mcpToolCall/progress":
                 return this.createMcpToolProgressEvent(notification.params);
@@ -189,6 +196,7 @@ export class CodexEventHandler {
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
+                this.approvalContext.fileChangesByItemId.set(event.item.id, event.item);
                 return await createFileChangeUpdate(event.item);
             case "commandExecution":
                 return await createCommandExecutionUpdate(event.item);
@@ -215,6 +223,12 @@ export class CodexEventHandler {
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
+                this.approvalContext.fileChangesByItemId.set(event.item.id, event.item);
+                return {
+                    sessionUpdate: "tool_call_update",
+                    toolCallId: event.item.id,
+                    status: event.item.status === "completed" ? "completed" : "failed",
+                }
             case "dynamicToolCall":
                 return {
                     sessionUpdate: "tool_call_update",

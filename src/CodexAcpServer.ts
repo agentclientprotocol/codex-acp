@@ -35,6 +35,7 @@ import {
     createFileChangeUpdate,
     createMcpToolCallUpdate,
 } from "./CodexToolCallMapper";
+import { createApprovalContextStore } from "./CodexApprovalContext";
 
 export interface SessionState {
     sessionId: string,
@@ -705,8 +706,9 @@ export class CodexAcpServer implements acp.Agent {
         sessionState.lastTokenUsage = null;
 
         try {
-            const eventHandler = new CodexEventHandler(this.connection, sessionState);
-            const approvalHandler = new CodexApprovalHandler(this.connection, sessionState);
+            const approvalContext = createApprovalContextStore();
+            const eventHandler = new CodexEventHandler(this.connection, sessionState, approvalContext);
+            const approvalHandler = new CodexApprovalHandler(this.connection, sessionState, approvalContext);
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 (event) => eventHandler.handleNotification(event),
                 approvalHandler);
