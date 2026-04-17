@@ -34,11 +34,14 @@ import type {
     SkillsListResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse, ConfigReadParams, ConfigReadResponse,
+    McpServerElicitationRequestParams,
+    McpServerElicitationRequestResponse,
 } from "./app-server/v2";
 
 export interface ApprovalHandler {
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
     handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse>;
+    handleMcpServerElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
 }
 
 const CommandExecutionApprovalRequest = new RequestType<
@@ -52,6 +55,12 @@ const FileChangeApprovalRequest = new RequestType<
     FileChangeRequestApprovalResponse,
     void
 >('item/fileChange/requestApproval');
+
+const McpServerElicitationRequest = new RequestType<
+    McpServerElicitationRequestParams,
+    McpServerElicitationRequestResponse,
+    void
+>('mcpServer/elicitation/request');
 
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
@@ -97,6 +106,14 @@ export class CodexAppServerClient {
                 return { decision: "cancel" };
             }
             return await handler.handleFileChange(params);
+        });
+
+        this.connection.onRequest(McpServerElicitationRequest, async (params) => {
+            const handler = this.approvalHandlers.get(params.threadId);
+            if (!handler) {
+                return { action: "cancel", content: null, _meta: null };
+            }
+            return await handler.handleMcpServerElicitation(params);
         });
     }
 
