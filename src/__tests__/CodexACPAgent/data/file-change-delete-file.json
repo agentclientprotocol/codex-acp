@@ -6,7 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-change-3",
-        "title": "Editing files",
+        "title": "/test/project/OldFile.kt",
         "kind": "edit",
         "status": "completed",
         "content": [
@@ -19,7 +19,23 @@
               "kind": "delete"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/OldFile.kt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/OldFile.kt",
+              "kind": {
+                "type": "delete"
+              },
+              "diff": "--- /test/project/OldFile.kt\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-package test.project\n-\n-class OldFile {}"
+            }
+          ]
+        }
       }
     }
   ]

@@ -37,7 +37,7 @@ describe('Approval Events', () => {
     function setupSessionWithPendingPrompt() {
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
-        let resolveTurnCompleted: (value: { threadId: string; turn: { id: string; items: never[]; status: string; error: null } }) => void;
+        let resolveTurnCompleted: (value: { threadId: string; turn: { id: string; items: never[]; status: string; error: null } }) => void = () => {};
         const turnCompletedPromise = new Promise<{ threadId: string; turn: { id: string; items: never[]; status: string; error: null } }>((resolve) => {
             resolveTurnCompleted = resolve;
         });
@@ -61,7 +61,7 @@ describe('Approval Events', () => {
 
         return {
             promptPromise,
-            completeTurn: () => resolveTurnCompleted!({
+            completeTurn: () => resolveTurnCompleted({
                 threadId: sessionId,
                 turn: { id: "turn-id", items: [], status: "completed", error: null }
             })
@@ -395,6 +395,52 @@ describe('Approval Events', () => {
 
             await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot(
                 'data/approval-file-change-with-diff.json'
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should include diff content from turn diff when file change item is unavailable', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+            mockFileContent('/test/project/config.json', '{"feature":false}');
+
+            const notification: ServerNotification = {
+                method: 'turn/diff/updated',
+                params: {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    diff: `diff --git a/test/project/config.json b/test/project/config.json
+index 0000000..1111111 100644
+--- a/test/project/config.json
++++ b/test/project/config.json
+@@ -1 +1 @@
+-{"feature":false}
++{"feature":true}`,
+                },
+            };
+
+            fixture.sendServerNotification(notification);
+            await Promise.resolve();
+
+            const params: FileChangeRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'file-change-from-turn-diff',
+                reason: 'Updating config file',
+                grantRoot: null,
+            };
+
+            await fixture.sendServerRequest(
+                'item/fileChange/requestApproval',
+                params
+            );
+
+            await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot(
+                'data/approval-file-change-from-turn-diff.json'
             );
 
             completeTurn();

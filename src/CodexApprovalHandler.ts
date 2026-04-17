@@ -6,7 +6,6 @@ import type {
     CommandExecutionRequestApprovalResponse,
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
-    FileUpdateChange,
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse
 } from "./app-server/v2";
@@ -15,7 +14,12 @@ import type {ToolCallContent} from "@agentclientprotocol/sdk/dist/schema/types.g
 import {logger} from "./Logger";
 import {stripShellPrefix} from "./CodexEventHandler";
 import type {ApprovalContextStore} from "./CodexApprovalContext";
-import {createFileChangeContents} from "./CodexToolCallMapper";
+import {
+    createFileChangeContents,
+    createFileChangeLocations,
+    createRawFileChangeInput,
+    parseUnifiedDiffChanges,
+} from "./CodexToolCallMapper";
 
 const APPROVAL_OPTIONS: acp.PermissionOption[] = [
     { optionId: "allow_once", name: "Allow Once", kind: "allow_once" },
@@ -119,46 +123,38 @@ export class CodexApprovalHandler implements ApprovalHandler {
         }
     }
 
-    private createTextContents(...texts: Array<string | null | undefined>): Array<ToolCallContent> | null {
-        const contents = texts
-            .map(text => this.createTextContent(text ?? null))
-            .filter((content): content is ToolCallContent => content !== null)
-        return contents.length > 0 ? contents : null
-    }
-
     private async buildFileChangePermissionRequest(
         sessionId: string,
         params: FileChangeRequestApprovalParams
     ): Promise<acp.RequestPermissionRequest> {
         const reasonContent = this.createTextContent(params.reason ?? null);
         const fileChange = this.approvalContext.fileChangesByItemId.get(params.itemId);
-        const diffContent = fileChange ? await createFileChangeContents(fileChange.changes) : [];
+        const content: ToolCallContent[] = reasonContent ? [reasonContent] : [];
         const toolCall: acp.ToolCallUpdate = {
             toolCallId: params.itemId,
             kind: "edit",
             status: "pending",
         };
-        const content = [
-            ...(reasonContent ? [reasonContent] : []),
-            ...diffContent,
-        ];
-        if (content.length > 0) {
-            toolCall.content = content;
-        }
         if (fileChange) {
-            toolCall.locations = dedupePaths(fileChange.changes).map(path => ({ path }));
-            toolCall.rawInput = {
-                changes: fileChange.changes.map(change => ({
-                    path: change.path,
-                    kind: change.kind.type,
-                    diff: change.diff,
-                })),
-            };
+            content.push(...await createFileChangeContents(fileChange.changes));
+            toolCall.locations = createFileChangeLocations(fileChange.changes);
+            toolCall.rawInput = createRawFileChangeInput(fileChange.changes);
         } else {
             const turnDiff = this.approvalContext.turnDiffsByTurnId.get(params.turnId);
             if (turnDiff) {
-                toolCall.rawInput = { unifiedDiff: turnDiff };
+                const parsedChanges = parseUnifiedDiffChanges(turnDiff);
+                content.push(...await createFileChangeContents(parsedChanges));
+                const locations = createFileChangeLocations(parsedChanges);
+                if (locations.length > 0) {
+                    toolCall.locations = locations;
+                }
+                toolCall.rawInput = parsedChanges.length > 0
+                    ? { unifiedDiff: turnDiff, ...createRawFileChangeInput(parsedChanges) }
+                    : { unifiedDiff: turnDiff };
             }
+        }
+        if (content.length > 0) {
+            toolCall.content = content;
         }
         return {
             sessionId,
@@ -179,6 +175,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         const toolDescription = typeof meta?.["tool_description"] === "string"
             ? meta["tool_description"]
             : null;
+        const toolDescriptionContent = this.createTextContent(toolDescription);
         const rawInput = this.tryToJsonValue(meta?.["tool_params"]) ?? null;
 
         return {
@@ -188,7 +185,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
                 title: params.message !== "" ? params.message : "MCP permission request",
                 kind: "other",
                 status: "pending",
-                content: this.createTextContents(toolDescription),
+                content: toolDescriptionContent ? [toolDescriptionContent] : null,
                 rawInput,
             },
             options: this.buildMcpServerElicitationOptions(persistOptions),
@@ -349,8 +346,4 @@ export class CodexApprovalHandler implements ApprovalHandler {
     private createCancelledMcpServerElicitationResponse(): McpServerElicitationRequestResponse {
         return { action: "cancel", content: null, _meta: null }
     }
-}
-
-function dedupePaths(changes: Array<FileUpdateChange>): Array<string> {
-    return Array.from(new Set(changes.map(change => change.path)));
 }
