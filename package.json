@@ -32,6 +32,7 @@
     "start": "node --import tsx src/index.ts",
     "generate-types": "./node_modules/.bin/codex app-server generate-ts --out src/app-server",
     "test": "vitest run",
+    "test:e2e": "npm run build && RUN_E2E_TESTS=true vitest run src/__tests__/CodexACPAgent/e2e",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "codex-test": "tsx .claude/skills/run-codex/scripts/run-codex-test.ts"
