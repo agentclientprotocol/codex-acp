@@ -175,7 +175,7 @@ function createTestCodexHome(): string {
     return codexHome;
 }
 
-function removeDirectoryWithRetry(directory: string): void {
+export function removeDirectoryWithRetry(directory: string): void {
     for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
             fs.rmSync(directory, { recursive: true, force: true });
