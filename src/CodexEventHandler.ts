@@ -25,6 +25,7 @@ import {toTokenCount} from "./TokenCount";
 import {
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
+    createFileChangeCompletionUpdate,
     createFileChangeUpdate,
     createMcpRawInput,
     createMcpRawOutput,
@@ -88,8 +89,6 @@ export class CodexEventHandler {
                 return null;
             case "turn/completed":
                 this.sessionState.currentTurnId = null;
-                this.approvalContext.fileChangesByItemId.clear();
-                this.approvalContext.turnDiffsByTurnId.clear();
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
@@ -224,11 +223,7 @@ export class CodexEventHandler {
         switch (event.item.type) {
             case "fileChange":
                 this.approvalContext.fileChangesByItemId.set(event.item.id, event.item);
-                return {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: event.item.id,
-                    status: event.item.status === "completed" ? "completed" : "failed",
-                }
+                return createFileChangeCompletionUpdate(event.item);
             case "dynamicToolCall":
                 return {
                     sessionUpdate: "tool_call_update",

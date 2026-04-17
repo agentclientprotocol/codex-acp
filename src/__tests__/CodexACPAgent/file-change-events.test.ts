@@ -271,4 +271,71 @@ describe('CodexEventHandler - file change events', () => {
             'data/file-change-delete-raw-content.json'
         );
     });
+
+    it('should keep file path details on file change completion updates', async () => {
+        const updateDiff = [
+            '--- /test/project/OldFile.kt',
+            '+++ /test/project/OldFile.kt',
+            '@@ -1,3 +1,3 @@',
+            ' package test.project',
+            ' ',
+            '-class OldFile {}',
+            '+class OldFile { fun hello() = "Hello" }',
+        ].join('\n');
+
+        const startedNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-change-complete',
+                    changes: [
+                        {
+                            path: '/test/project/OldFile.kt',
+                            kind: { type: 'update' },
+                            diff: updateDiff,
+                        },
+                    ],
+                    status: 'inProgress',
+                },
+            },
+        } as ServerNotification;
+        const completedNotification = {
+            method: 'item/completed',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-change-complete',
+                    changes: [
+                        {
+                            path: '/test/project/OldFile.kt',
+                            kind: { type: 'update' },
+                            diff: updateDiff,
+                        },
+                    ],
+                    status: 'completed',
+                },
+            },
+        } as ServerNotification;
+        const notifications = [startedNotification, completedNotification];
+        let sessionUpdateCount = 0;
+        mockFixture.onAcpConnectionEvent((event) => {
+            if (event.method === 'sessionUpdate') {
+                sessionUpdateCount += 1;
+            }
+        });
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+        await vi.waitFor(() => {
+            expect(sessionUpdateCount).toBe(2);
+        });
+
+        await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
+            'data/file-change-completion-update.json'
+        );
+    });
 });

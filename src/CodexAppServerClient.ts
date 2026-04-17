@@ -37,6 +37,7 @@ import type {
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse,
 } from "./app-server/v2";
+import { logger } from "./Logger";
 
 export interface ApprovalHandler {
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
@@ -69,6 +70,8 @@ const McpServerElicitationRequest = new RequestType<
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
+    private readonly notificationHandlers = new Map<string, (event: ServerNotification) => void | Promise<void>>();
+    private readonly notificationQueues = new Map<string, Promise<void> | null>();
     private mcpStartupCompleteVersion = 0;
     private lastMcpStartupComplete: McpStartupCompleteEvent | null = null;
     private readonly mcpStartupCompleteResolvers: Array<SignalResolver<McpStartupCompleteEvent>> = [];
@@ -207,8 +210,9 @@ export class CodexAppServerClient {
      * Registers a notification handler for a specific session.
      * Replaces any existing handler for the same session, preventing handler accumulation.
      */
-    onServerNotification(sessionId: string, callback: (event: ServerNotification) => void) {
+    onServerNotification(sessionId: string, callback: (event: ServerNotification) => void | Promise<void>) {
         this.notificationHandlers.set(sessionId, callback);
+        this.notificationQueues.set(sessionId, null);
     }
 
     private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
@@ -216,11 +220,44 @@ export class CodexAppServerClient {
         this.codexEventHandlers.push(callback);
     }
 
-    private notificationHandlers = new Map<string, (event: ServerNotification) => void>();
     private notify(notification: ServerNotification) {
-        for (const notificationHandler of this.notificationHandlers.values()) {
-            notificationHandler(notification);
+        for (const [sessionId, notificationHandler] of this.notificationHandlers.entries()) {
+            const queue = this.notificationQueues.get(sessionId);
+            if (queue) {
+                const next = queue
+                    .then(() => notificationHandler(notification))
+                    .catch((error) => {
+                        logger.error("Error handling server notification", error);
+                    });
+                this.notificationQueues.set(sessionId, this.trackNotificationQueue(sessionId, next));
+                continue;
+            }
+
+            try {
+                const result = notificationHandler(notification);
+                if (result instanceof Promise) {
+                    const next = result.catch((error) => {
+                        logger.error("Error handling server notification", error);
+                    });
+                    this.notificationQueues.set(sessionId, this.trackNotificationQueue(sessionId, next));
+                }
+            } catch (error) {
+                logger.error("Error handling server notification", error);
+            }
         }
+    }
+
+    async flushServerNotifications(sessionId: string): Promise<void> {
+        await (this.notificationQueues.get(sessionId) ?? Promise.resolve());
+    }
+
+    private trackNotificationQueue(sessionId: string, queue: Promise<void>): Promise<void> {
+        const trackedQueue = queue.finally(() => {
+            if (this.notificationQueues.get(sessionId) === trackedQueue) {
+                this.notificationQueues.set(sessionId, null);
+            }
+        });
+        return trackedQueue;
     }
 
     private resolveSignal<T>(

@@ -4,6 +4,31 @@
     {
       "sessionId": "test-session-id",
       "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-id",
+        "kind": "execute",
+        "title": "mcp.ijproxy.read_file",
+        "status": "in_progress",
+        "rawInput": {
+          "server": "ijproxy",
+          "tool": "read_file",
+          "arguments": {
+            "file_path": ".ai/local.md",
+            "mode": "slice",
+            "start_line": 1,
+            "max_lines": 200
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "call-id",
         "_meta": {
@@ -38,31 +63,6 @@
           "result": null,
           "error": {
             "message": "File /Users/aleksandr.slapoguzov/Projects/ultimate/.ai/local.md doesn't exist or can't be opened"
-          }
-        }
-      }
-    }
-  ]
-}
-{
-  "method": "sessionUpdate",
-  "args": [
-    {
-      "sessionId": "test-session-id",
-      "update": {
-        "sessionUpdate": "tool_call",
-        "toolCallId": "call-id",
-        "kind": "execute",
-        "title": "mcp.ijproxy.read_file",
-        "status": "in_progress",
-        "rawInput": {
-          "server": "ijproxy",
-          "tool": "read_file",
-          "arguments": {
-            "file_path": ".ai/local.md",
-            "mode": "slice",
-            "start_line": 1,
-            "max_lines": 200
           }
         }
       }

@@ -362,7 +362,7 @@ export class CodexAcpClient {
 
     async subscribeToSessionEvents(
         sessionId: string,
-        eventHandler: (result: ServerNotification) => void,
+        eventHandler: (result: ServerNotification) => void | Promise<void>,
         approvalHandler: ApprovalHandler
     ) {
         this.codexClient.onServerNotification(sessionId, eventHandler);
@@ -396,7 +396,9 @@ export class CodexAcpClient {
 
         // Wait for turn completion
         // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
-        return await this.codexClient.awaitTurnCompleted();
+        const turnCompleted = await this.codexClient.awaitTurnCompleted();
+        await this.codexClient.flushServerNotifications(request.sessionId);
+        return turnCompleted;
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {
