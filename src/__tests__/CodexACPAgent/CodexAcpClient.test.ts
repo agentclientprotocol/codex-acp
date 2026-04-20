@@ -64,19 +64,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
     const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "supportedReasoningEfforts", "reasoningEffort", "model", "readOnlyAccess", "approvalsReviewer"];
 
-    it.skip('should start conversation', async () => {
-        const codexAcpAgent = fixture.getCodexAcpAgent();
-        await codexAcpAgent.initialize({protocolVersion: 1});
-
-        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
-        // noinspection ES6MissingAwait - we're only check initialization
-        codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "Hi!"}]});
-
-        const transportDump = fixture.getCodexConnectionDump(ignoredFields);
-        await expect(transportDump).toMatchFileSnapshot("data/start-conversation.json");
-    });
-
     it('should throw error without authentication', async () => {
         await overrideCodexHome('cli_auth_credentials_store = "file"', async () => {
             const authFixture = createTestFixture();
@@ -549,46 +536,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await codexAcpAgent.prompt({ sessionId: "session-id", prompt });
 
         await expect(mockFixture.getCodexConnectionDump(ignoredFields)).toMatchFileSnapshot("data/send-attachments-turn-start.json");
-    });
-
-    async function createSessionInSeparateInstance(): Promise<string> {
-        const initFixture = createTestFixture();
-        initFixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
-        await initFixture.getCodexAcpAgent().initialize({protocolVersion: 1});
-        const newSessionResponse = await initFixture.getCodexAcpAgent().newSession({
-            cwd: "",
-            mcpServers: []
-        });
-        try {
-            await initFixture.getCodexAcpAgent().prompt({
-                sessionId: newSessionResponse.sessionId,
-                prompt: [{type: "text", text: "Hi!"}]
-            });
-        } catch (e) {}
-
-        return newSessionResponse.sessionId;
-    }
-
-    // too long, requires auth
-    it.skip('should resume session', async () => {
-        const sessionId = await createSessionInSeparateInstance();
-
-        await fixture.getCodexAcpAgent().initialize({protocolVersion: 1});
-        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
-        fixture.clearCodexConnectionDump();
-
-        await fixture.getCodexAcpAgent().unstable_resumeSession({
-            cwd: "",
-            sessionId: sessionId
-        });
-        await expect(fixture.getCodexConnectionDump(ignoredFields.concat("data", "model"))).toMatchFileSnapshot("data/thread-resume.json");
-
-        const promptResult: Promise<acp.PromptResponse> = fixture.getCodexAcpAgent().prompt({
-            sessionId: sessionId,
-            prompt: []
-        });
-
-        expect(promptResult).toBeDefined();
     });
 
     it('should fail on wrong sessionId', async () => {
