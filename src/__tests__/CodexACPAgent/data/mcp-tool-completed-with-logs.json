@@ -64,6 +64,9 @@
             "start_line": 1,
             "max_lines": 200
           }
+        },
+        "_meta": {
+          "is_mcp_tool_call": true
         }
       }
     }

@@ -5,7 +5,7 @@
       "sessionId": "test-session-id",
       "toolCall": {
         "toolCallId": "elicitation-tool-server",
-        "kind": "other",
+        "kind": "execute",
         "status": "pending",
         "content": [
           {
