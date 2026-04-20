@@ -11,10 +11,11 @@ export interface CodexConnection {
     readonly process: ChildProcessWithoutNullStreams;
 }
 
-export function startCodexConnection(codexPath: string): CodexConnection {
+export function startCodexConnection(codexPath: string, env?: NodeJS.ProcessEnv): CodexConnection {
+    const spawnEnv = env ?? process.env;
     const codex: ChildProcessWithoutNullStreams = process.platform === 'win32'
-        ? spawn(`"${codexPath}" app-server`, { shell: true })
-        : spawn(codexPath, ['app-server']);
+        ? spawn(`"${codexPath}" app-server`, { shell: true, env: spawnEnv })
+        : spawn(codexPath, ['app-server'], { env: spawnEnv });
 
     attachLogs(codex);
 

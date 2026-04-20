@@ -7,6 +7,7 @@ import type {ServerNotification} from "../app-server";
 import type {MessageConnection} from "vscode-jsonrpc/node";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import {AgentMode} from "../AgentMode";
 import {expect, vi} from "vitest";
 
@@ -153,12 +154,39 @@ export function createTestFixture(): TestFixture {
         throw new Error(`Codex binary not found at ${pathToCodex}. Did you run 'npm install'?`);
     }
 
-    const codexConnection = startCodexConnection(pathToCodex);
+    const codexHome = createTestCodexHome();
+    const codexConnection = startCodexConnection(pathToCodex, {
+        ...process.env,
+        CODEX_HOME: codexHome,
+    });
+    codexConnection.process.on("exit", () => {
+        removeDirectoryWithRetry(codexHome);
+    });
 
     return createBaseTestFixture({
         connection: codexConnection.connection,
         getExitCode: () => codexConnection.process.exitCode
     });
+}
+
+function createTestCodexHome(): string {
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-codex-home-"));
+    fs.writeFileSync(path.join(codexHome, "config.toml"), 'cli_auth_credentials_store = "file"\n', "utf8");
+    return codexHome;
+}
+
+function removeDirectoryWithRetry(directory: string): void {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+            fs.rmSync(directory, { recursive: true, force: true });
+            return;
+        } catch (error) {
+            const err = error as NodeJS.ErrnoException;
+            if (err.code !== "ENOTEMPTY" && err.code !== "EBUSY") {
+                return;
+            }
+        }
+    }
 }
 
 export interface CodexMockTestFixture extends TestFixture {
