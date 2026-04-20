@@ -86,8 +86,17 @@ export class CodexElicitationHandler implements ElicitationHandler {
         params: McpServerElicitationRequestParams
     ): Promise<McpServerElicitationRequestResponse> {
         try {
-            const request = this.buildPermissionRequest(params);
+            const { request, correlatedCallId } = this.buildPermissionRequest(params);
             const response = await this.connection.requestPermission(request);
+            if (correlatedCallId !== undefined && response.outcome.outcome !== "cancelled") {
+                const optionId = response.outcome.optionId;
+                if (optionId !== "decline") {
+                    await this.connection.sessionUpdate({
+                        sessionId: this.sessionState.sessionId,
+                        update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
+                    });
+                }
+            }
             return this.convertResponse(response);
         } catch (error) {
             logger.error("Error handling MCP elicitation request", error);
@@ -97,7 +106,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
 
     private buildPermissionRequest(
         params: McpServerElicitationRequestParams
-    ): acp.RequestPermissionRequest {
+    ): { request: acp.RequestPermissionRequest; correlatedCallId: string | undefined } {
         const sessionId = this.sessionState.sessionId;
         const messageContent: acp.ToolCallContent = {
             type: "content",
@@ -119,39 +128,48 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 // item/started was emitted before the elicitation request. Sending content or
                 // rawInput here would duplicate that information in the approval widget.
                 return {
-                    sessionId,
-                    toolCall: {
-                        toolCallId: correlatedCallId,
-                        kind: "execute",
-                        status: "pending",
-                        // content: [messageContent],   — omitted: already rendered via item/started
-                        // rawInput: { ... }            — omitted: same reason
+                    request: {
+                        sessionId,
+                        toolCall: {
+                            toolCallId: correlatedCallId,
+                            kind: "execute",
+                            status: "pending",
+                            // content: [messageContent],   — omitted: already rendered via item/started
+                            // rawInput: { ... }            — omitted: same reason
+                        },
+                        options,
                     },
-                    options,
+                    correlatedCallId,
                 };
             }
             return {
-                sessionId,
-                toolCall: {
-                    toolCallId: `elicitation-${params.serverName}`,
-                    kind: isToolApproval ? "execute" : "other",
-                    status: "pending",
-                    content: [messageContent],
-                    rawInput: { serverName: params.serverName, schema: params.requestedSchema },
+                request: {
+                    sessionId,
+                    toolCall: {
+                        toolCallId: `elicitation-${params.serverName}`,
+                        kind: isToolApproval ? "execute" : "other",
+                        status: "pending",
+                        content: [messageContent],
+                        rawInput: { serverName: params.serverName, schema: params.requestedSchema },
+                    },
+                    options,
                 },
-                options,
+                correlatedCallId: undefined,
             };
         } else {
             return {
-                sessionId,
-                toolCall: {
-                    toolCallId: `elicitation-${params.elicitationId}`,
-                    kind: "fetch",
-                    status: "pending",
-                    content: [messageContent],
-                    rawInput: { serverName: params.serverName, url: params.url },
+                request: {
+                    sessionId,
+                    toolCall: {
+                        toolCallId: `elicitation-${params.elicitationId}`,
+                        kind: "fetch",
+                        status: "pending",
+                        content: [messageContent],
+                        rawInput: { serverName: params.serverName, url: params.url },
+                    },
+                    options,
                 },
-                options,
+                correlatedCallId: undefined,
             };
         }
     }
