@@ -235,6 +235,9 @@ export class CodexElicitationHandler implements ElicitationHandler {
         if (event.item.type !== "mcpToolCall") {
             return;
         }
+        // This may run after the elicitation path already consumed the same entry.
+        // That double-pop is intentional: approvals pop on request correlation, while
+        // auto-approved or interrupted calls need completion-side cleanup.
         this.popPendingApproval(event.threadId, event.item.server);
     }
 
