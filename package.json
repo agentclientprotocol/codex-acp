@@ -41,7 +41,6 @@
   "license": "ISC",
   "type": "module",
   "devDependencies": {
-    "@openai/codex": "^0.120.0",
     "@types/node": "^24.10.1",
     "esbuild": "^0.25.0",
     "mcp-hello-world": "^1.1.2",
@@ -51,6 +50,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.16.1",
+    "@openai/codex": "^0.120.0",
     "diff": "^8.0.3",
     "open": "^11.0.0",
     "vscode-jsonrpc": "^8.2.1"
