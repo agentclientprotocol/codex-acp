@@ -39,12 +39,7 @@ function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
 export async function createFileChangeUpdate(
     item: ThreadItem & { type: "fileChange" }
 ): Promise<UpdateSessionEvent> {
-    const patches: ToolCallContent[] = [];
-    for (const change of item.changes) {
-        const content = await createPatchContent(change);
-        if (content) patches.push(content);
-        // ignore unparseable diffs
-    }
+    const patches = await createFileChangeContents(item.changes);
     return {
         sessionUpdate: "tool_call",
         toolCallId: item.id,
@@ -53,6 +48,16 @@ export async function createFileChangeUpdate(
         status: toAcpStatus(item.status),
         content: patches,
     };
+}
+
+export async function createFileChangeContents(changes: Array<FileUpdateChange>): Promise<ToolCallContent[]> {
+    const patches: ToolCallContent[] = [];
+    for (const change of changes) {
+        const content = await createPatchContent(change);
+        if (content) patches.push(content);
+        // ignore unparseable diffs
+    }
+    return patches;
 }
 
 export async function createCommandExecutionUpdate(

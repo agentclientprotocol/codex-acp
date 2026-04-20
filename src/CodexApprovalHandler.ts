@@ -5,11 +5,14 @@ import type {
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
     FileChangeRequestApprovalParams,
-    FileChangeRequestApprovalResponse
+    FileChangeRequestApprovalResponse,
+    FileUpdateChange,
 } from "./app-server/v2";
 import type {ToolCallContent} from "@agentclientprotocol/sdk/dist/schema/types.gen";
 import {logger} from "./Logger";
 import {stripShellPrefix} from "./CodexEventHandler";
+import type {ApprovalContextStore} from "./CodexApprovalContext";
+import {createFileChangeContents} from "./CodexToolCallMapper";
 
 const APPROVAL_OPTIONS: acp.PermissionOption[] = [
     { optionId: "allow_once", name: "Allow Once", kind: "allow_once" },
@@ -20,13 +23,16 @@ const APPROVAL_OPTIONS: acp.PermissionOption[] = [
 export class CodexApprovalHandler implements ApprovalHandler {
     private readonly connection: acp.AgentSideConnection;
     private readonly sessionState: SessionState;
+    private readonly approvalContext: ApprovalContextStore;
 
     constructor(
         connection: acp.AgentSideConnection,
-        sessionState: SessionState
+        sessionState: SessionState,
+        approvalContext: ApprovalContextStore,
     ) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.approvalContext = approvalContext;
     }
 
     async handleCommandExecution(
@@ -48,7 +54,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
     ): Promise<FileChangeRequestApprovalResponse> {
         try {
             const sessionId = this.sessionState.sessionId;
-            const acpRequest = this.buildFileChangePermissionRequest(sessionId, params);
+            const acpRequest = await this.buildFileChangePermissionRequest(sessionId, params);
             const response = await this.connection.requestPermission(acpRequest);
             return this.convertFileChangeResponse(response);
         } catch (error) {
@@ -61,7 +67,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         sessionId: string,
         params: CommandExecutionRequestApprovalParams
     ): acp.RequestPermissionRequest {
-        const reasonContent = this.createContentFromReason(params.reason ?? null);
+        const reasonContent = this.createTextContent(params.reason ?? null);
         return {
             sessionId,
             toolCall: {
@@ -75,32 +81,56 @@ export class CodexApprovalHandler implements ApprovalHandler {
         };
     }
 
-    private createContentFromReason(reason: string | null): ToolCallContent | null {
-        if (reason === null || reason === "") {
+    private createTextContent(text: string | null): ToolCallContent | null {
+        if (text === null || text === "") {
             return null;
         }
         return {
             type: "content",
             content: {
                 type: "text",
-                text: reason
+                text
             }
         }
     }
 
-    private buildFileChangePermissionRequest(
+    private async buildFileChangePermissionRequest(
         sessionId: string,
         params: FileChangeRequestApprovalParams
-    ): acp.RequestPermissionRequest {
-        const reasonContent = this.createContentFromReason(params.reason ?? null);
+    ): Promise<acp.RequestPermissionRequest> {
+        const reasonContent = this.createTextContent(params.reason ?? null);
+        const fileChange = this.approvalContext.fileChangesByItemId.get(params.itemId);
+        const diffContent = fileChange ? await createFileChangeContents(fileChange.changes) : [];
+        const toolCall: acp.ToolCallUpdate = {
+            toolCallId: params.itemId,
+            kind: "edit",
+            status: "pending",
+        };
+        const content = [
+            ...(reasonContent ? [reasonContent] : []),
+            ...diffContent,
+        ];
+        if (content.length > 0) {
+            toolCall.content = content;
+        }
+        if (fileChange) {
+            toolCall.locations = dedupePaths(fileChange.changes).map(path => ({ path }));
+            toolCall.rawInput = {
+                changes: fileChange.changes.map(change => ({
+                    path: change.path,
+                    kind: change.kind.type,
+                    diff: change.diff,
+                })),
+            };
+        } else {
+            const turnDiff = this.approvalContext.turnDiffsByTurnId.get(params.turnId);
+            if (turnDiff) {
+                toolCall.rawInput = { unifiedDiff: turnDiff };
+            }
+        }
         return {
             sessionId,
-            toolCall: {
-                toolCallId: params.itemId,
-                kind: "edit",
-                status: "pending",
-                content: reasonContent ? [reasonContent] : null,
-            },
+            toolCall,
             options: APPROVAL_OPTIONS,
         };
     }
@@ -138,4 +168,8 @@ export class CodexApprovalHandler implements ApprovalHandler {
             return { decision: "cancel" };
         }
     }
+}
+
+function dedupePaths(changes: Array<FileUpdateChange>): Array<string> {
+    return Array.from(new Set(changes.map(change => change.path)));
 }

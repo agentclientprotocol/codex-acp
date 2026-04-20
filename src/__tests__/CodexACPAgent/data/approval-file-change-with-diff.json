@@ -1,0 +1,60 @@
+{
+  "method": "requestPermission",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "toolCall": {
+        "toolCallId": "file-change-with-diff",
+        "kind": "edit",
+        "status": "pending",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Updating config file"
+            }
+          },
+          {
+            "type": "diff",
+            "oldText": "{\"feature\":false}",
+            "newText": "{\"feature\":true}",
+            "path": "/test/project/config.json",
+            "_meta": "_meta"
+          }
+        ],
+        "locations": [
+          {
+            "path": "/test/project/config.json"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/config.json",
+              "kind": "update",
+              "diff": "--- /test/project/config.json\n+++ /test/project/config.json\n@@ -1 +1 @@\n-{\"feature\":false}\n+{\"feature\":true}"
+            }
+          ]
+        }
+      },
+      "options": [
+        {
+          "optionId": "allow_once",
+          "name": "Allow Once",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "allow_always",
+          "name": "Allow for Session",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "reject_once",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    }
+  ]
+}
