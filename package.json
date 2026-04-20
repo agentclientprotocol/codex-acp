@@ -7,7 +7,7 @@
     "codex-acp": "dist/index.js"
   },
   "files": [
-    "dist/",
+    "dist/index.js",
     "README.md",
     "LICENSE",
     "package.json"
