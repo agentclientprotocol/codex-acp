@@ -6,7 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-change-2",
-        "title": "Editing files",
+        "title": "/test/project/FileA.kt, /test/project/FileB.kt",
         "kind": "edit",
         "status": "completed",
         "content": [
@@ -28,7 +28,33 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/FileA.kt"
+          },
+          {
+            "path": "/test/project/FileB.kt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/FileA.kt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "--- /dev/null\n+++ /test/project/FileA.kt\n@@ -0,0 +1 @@\n+class FileA"
+            },
+            {
+              "path": "/test/project/FileB.kt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "--- /dev/null\n+++ /test/project/FileB.kt\n@@ -0,0 +1 @@\n+class FileB"
+            }
+          ]
+        }
       }
     }
   ]

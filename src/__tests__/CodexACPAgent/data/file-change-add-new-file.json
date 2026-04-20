@@ -6,7 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-change-1",
-        "title": "Editing files",
+        "title": "/test/project/NewFile.kt",
         "kind": "edit",
         "status": "completed",
         "content": [
@@ -19,7 +19,23 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/NewFile.kt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/NewFile.kt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "--- /dev/null\n+++ /test/project/NewFile.kt\n@@ -0,0 +1,5 @@\n+package test.project\n+\n+class NewFile {\n+    fun hello() = \"Hello\"\n+}"
+            }
+          ]
+        }
       }
     }
   ]

@@ -40,13 +40,26 @@ export async function createFileChangeUpdate(
     item: ThreadItem & { type: "fileChange" }
 ): Promise<UpdateSessionEvent> {
     const patches = await createFileChangeContents(item.changes);
+    const details = createFileChangeDetails(item.changes);
     return {
         sessionUpdate: "tool_call",
         toolCallId: item.id,
-        title: "Editing files",
+        title: details.title,
         kind: "edit",
         status: toAcpStatus(item.status),
         content: patches,
+        locations: details.locations,
+        rawInput: details.rawInput,
+    };
+}
+
+export function createFileChangeCompletionUpdate(
+    item: ThreadItem & { type: "fileChange" }
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        status: toAcpStatus(item.status),
     };
 }
 
@@ -58,6 +71,67 @@ export async function createFileChangeContents(changes: Array<FileUpdateChange>)
         // ignore unparseable diffs
     }
     return patches;
+}
+
+export function createFileChangeLocations(changes: Array<FileUpdateChange>): Array<{ path: string }> {
+    return Array.from(new Set(changes.map(change => change.path))).map(path => ({ path }));
+}
+
+export function createRawFileChangeInput(changes: Array<FileUpdateChange>): {
+    changes: Array<{
+        path: string;
+        kind: FileUpdateChange["kind"];
+        diff: string;
+    }>;
+} {
+    return {
+        changes: changes.map(change => ({
+            path: change.path,
+            kind: change.kind,
+            diff: change.diff,
+        })),
+    };
+}
+
+export function parseUnifiedDiffChanges(unifiedDiff: string): Array<FileUpdateChange> {
+    try {
+        return parsePatch(unifiedDiff)
+            .map(patch => {
+                const oldFileName = normalizeDiffPath(patch.oldFileName);
+                const newFileName = normalizeDiffPath(patch.newFileName);
+                const path = newFileName === "/dev/null" ? oldFileName : newFileName;
+                if (!path) {
+                    return null;
+                }
+                return {
+                    path,
+                    kind: toPatchChangeKind(oldFileName, newFileName),
+                    diff: formatParsedPatch(patch, oldFileName, newFileName),
+                } satisfies FileUpdateChange;
+            })
+            .filter((change): change is FileUpdateChange => change !== null);
+    } catch {
+        return [];
+    }
+}
+
+function createFileChangeDetails(changes: Array<FileUpdateChange>): {
+    title: string;
+    locations: Array<{ path: string }>;
+    rawInput: {
+        changes: Array<{
+            path: string;
+            kind: FileUpdateChange["kind"];
+            diff: string;
+        }>;
+    };
+} {
+    const uniquePaths = createFileChangeLocations(changes);
+    return {
+        title: uniquePaths.length > 0 ? uniquePaths.map(location => location.path).join(", ") : "File change",
+        locations: uniquePaths,
+        rawInput: createRawFileChangeInput(changes),
+    };
 }
 
 export async function createCommandExecutionUpdate(
@@ -311,6 +385,52 @@ async function createPatchContent(change: FileUpdateChange): Promise<ToolCallCon
 
 function isUnifiedDiff(content: string): boolean {
     return content.startsWith("--- ") || content.includes("\n--- ");
+}
+
+function normalizeDiffPath(fileName: string | undefined): string | undefined {
+    if (!fileName || fileName === "/dev/null") {
+        return fileName;
+    }
+    return fileName.replace(/^[ab]\//, "");
+}
+
+function toPatchChangeKind(oldFileName: string | undefined, newFileName: string | undefined): FileUpdateChange["kind"] {
+    if (oldFileName === "/dev/null") {
+        return { type: "add" };
+    }
+    if (newFileName === "/dev/null") {
+        return { type: "delete" };
+    }
+    return {
+        type: "update",
+        move_path: oldFileName && newFileName && oldFileName !== newFileName ? oldFileName : null,
+    };
+}
+
+function formatParsedPatch(
+    patch: ReturnType<typeof parsePatch>[number],
+    oldFileName: string | undefined,
+    newFileName: string | undefined,
+): string {
+    const lines = [
+        `--- ${oldFileName ?? "/dev/null"}`,
+        `+++ ${newFileName ?? "/dev/null"}`,
+    ];
+    for (const hunk of patch.hunks) {
+        lines.push(`@@ -${formatHunkRange(hunk.oldStart, hunk.oldLines)} +${formatHunkRange(hunk.newStart, hunk.newLines)} @@`);
+        lines.push(...hunk.lines);
+    }
+    return lines.join("\n");
+}
+
+function formatHunkRange(start: number, lineCount: number): string {
+    if (lineCount === 0) {
+        return `${start - 1},0`;
+    }
+    if (lineCount === 1) {
+        return `${start}`;
+    }
+    return `${start},${lineCount}`;
 }
 
 /**
