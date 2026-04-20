@@ -15,13 +15,29 @@ export class PendingMcpApprovals {
     private readonly pending = new Map<string, string>();
 
     record(threadId: string, serverName: string, callId: string): void {
-        this.pending.set(`${threadId}:${serverName}`, callId);
+        this.pending.set(this.key(threadId, serverName), callId);
     }
 
     pop(threadId: string, serverName: string): string | undefined {
-        const key = `${threadId}:${serverName}`;
+        const key = this.key(threadId, serverName);
         const callId = this.pending.get(key);
         this.pending.delete(key);
         return callId;
+    }
+
+    clearThread(threadId: string): void {
+        for (const key of this.pending.keys()) {
+            if (this.belongsToThread(key, threadId)) {
+                this.pending.delete(key);
+            }
+        }
+    }
+
+    private key(threadId: string, serverName: string): string {
+        return `${threadId}:${serverName}`;
+    }
+
+    private belongsToThread(key: string, threadId: string): boolean {
+        return key.startsWith(`${threadId}:`);
     }
 }

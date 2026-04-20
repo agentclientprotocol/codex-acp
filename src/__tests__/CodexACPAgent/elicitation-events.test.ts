@@ -306,6 +306,58 @@ describe('Elicitation Events', () => {
             completeTurn();
             await promptPromise;
         });
+
+        it('should not reuse a stale call id after serverRequest/resolved clears interrupted approval state', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: 'allow_once' } });
+
+            const startedNotification: ServerNotification = {
+                method: 'item/started',
+                params: {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    item: {
+                        type: "mcpToolCall",
+                        id: "interrupted-call-id",
+                        server: "tool-server",
+                        tool: "tool-name",
+                        status: "inProgress",
+                        arguments: { argument: "example" },
+                        result: null,
+                        error: null,
+                        durationMs: null,
+                    },
+                },
+            };
+            const resolvedNotification: ServerNotification = {
+                method: 'serverRequest/resolved',
+                params: {
+                    threadId: sessionId,
+                    requestId: 'request-1',
+                },
+            };
+
+            fixture.sendServerNotification(startedNotification);
+            fixture.sendServerNotification(resolvedNotification);
+            fixture.clearAcpConnectionDump();
+
+            const params: McpServerElicitationRequestParams = {
+                threadId: sessionId, turnId: 'turn-2', serverName: 'tool-server',
+                mode: 'form',
+                _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'] },
+                message: 'Allow tool call?',
+                requestedSchema: { type: 'object', properties: {} },
+            };
+
+            await fixture.sendServerRequest('mcpServer/elicitation/request', params);
+
+            const [requestPermissionEvent] = fixture.getAcpConnectionEvents(['_meta']);
+            expect(requestPermissionEvent?.method).toBe('requestPermission');
+            expect(requestPermissionEvent?.args[0].toolCall.toolCallId).toBe('elicitation-tool-server');
+
+            completeTurn();
+            await promptPromise;
+        });
     });
 
     describe('URL mode elicitation', () => {
