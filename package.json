@@ -29,7 +29,7 @@
     "package:darwin-arm64": "cd dist/bin && zip codex-acp-arm64-darwin.zip codex-acp-arm64-darwin",
     "package:win-x64": "cd dist/bin && zip codex-acp-x64-windows.zip codex-acp-x64-windows.exe",
     "package:win-arm64": "cd dist/bin && zip codex-acp-arm64-windows.zip codex-acp-arm64-windows.exe",
-    "start": "bun run src/index.ts",
+    "start": "node --import tsx src/index.ts",
     "generate-types": "./node_modules/.bin/codex app-server generate-ts --out src/app-server",
     "test": "vitest run",
     "test:watch": "vitest",
