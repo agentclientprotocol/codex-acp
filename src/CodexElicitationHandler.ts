@@ -165,6 +165,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                             // content: [messageContent],   — omitted: already rendered via item/started
                             // rawInput: { ... }            — omitted: same reason
                         },
+                        _meta: { is_mcp_tool_approval: true },
                         options,
                     },
                     correlatedCallId,
@@ -180,6 +181,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                         content: [messageContent],
                         rawInput: { serverName: params.serverName, schema: params.requestedSchema },
                     },
+                    ...(isToolApproval ? { _meta: { is_mcp_tool_approval: true } } : {}),
                     options,
                 },
                 correlatedCallId: undefined,

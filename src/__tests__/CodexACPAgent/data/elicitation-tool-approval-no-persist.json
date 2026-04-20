@@ -24,6 +24,7 @@
           }
         }
       },
+      "_meta": "_meta",
       "options": [
         {
           "optionId": "allow_once",
