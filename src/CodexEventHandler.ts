@@ -226,6 +226,7 @@ export class CodexEventHandler {
                     status: event.item.status === "completed" ? "completed" : "failed",
                 }
             case "mcpToolCall":
+                this.pendingMcpApprovals?.pop(event.threadId, event.item.server);
                 return {
                     sessionUpdate: "tool_call_update",
                     toolCallId: event.item.id,

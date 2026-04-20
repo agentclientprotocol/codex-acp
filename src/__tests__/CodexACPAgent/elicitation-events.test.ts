@@ -3,6 +3,7 @@ import type { McpServerElicitationRequestParams } from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { SessionState } from '../../CodexAcpServer';
 import { AgentMode } from "../../AgentMode";
+import type { ServerNotification } from "../../app-server";
 
 describe('Elicitation Events', () => {
     let fixture: CodexMockTestFixture;
@@ -238,6 +239,69 @@ describe('Elicitation Events', () => {
 
             await fixture.sendServerRequest('mcpServer/elicitation/request', params);
             await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot('data/elicitation-tool-approval-no-persist.json');
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should not reuse a completed auto-approved call id for a later approval request', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: 'allow_once' } });
+
+            const startedNotification: ServerNotification = {
+                method: 'item/started',
+                params: {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    item: {
+                        type: "mcpToolCall",
+                        id: "completed-call-id",
+                        server: "tool-server",
+                        tool: "tool-name",
+                        status: "inProgress",
+                        arguments: { argument: "example" },
+                        result: null,
+                        error: null,
+                        durationMs: null,
+                    },
+                },
+            };
+            const completedNotification: ServerNotification = {
+                method: 'item/completed',
+                params: {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    item: {
+                        type: "mcpToolCall",
+                        id: "completed-call-id",
+                        server: "tool-server",
+                        tool: "tool-name",
+                        status: "completed",
+                        arguments: { argument: "example" },
+                        result: { content: [], structuredContent: null, _meta: null },
+                        error: null,
+                        durationMs: 15,
+                    },
+                },
+            };
+
+            fixture.sendServerNotification(startedNotification);
+            fixture.sendServerNotification(completedNotification);
+            fixture.clearAcpConnectionDump();
+
+            const params: McpServerElicitationRequestParams = {
+                threadId: sessionId, turnId: 'turn-2', serverName: 'tool-server',
+                mode: 'form',
+                _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'] },
+                message: 'Allow tool call?',
+                requestedSchema: { type: 'object', properties: {} },
+            };
+
+            await fixture.sendServerRequest('mcpServer/elicitation/request', params);
+
+            const [requestPermissionEvent] = fixture.getAcpConnectionEvents(['_meta']);
+            expect(requestPermissionEvent?.method).toBe('requestPermission');
+            expect(requestPermissionEvent?.args[0].toolCall.toolCallId).toBe('elicitation-tool-server');
 
             completeTurn();
             await promptPromise;
