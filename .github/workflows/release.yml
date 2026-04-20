@@ -228,3 +228,24 @@ jobs:
             filename=$(basename "$file")
             echo "  ${BASE_URL}/latest/${filename}"
           done
+
+  publish-to-npm:
+    name: Publish to NPM
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish to NPM
+        run: npm publish --access public --tag beta
