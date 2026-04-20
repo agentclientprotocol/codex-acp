@@ -49,6 +49,7 @@ export interface GatewayAuthRequest extends AuthenticateRequest {
         "gateway": {
             baseUrl: string;
             headers: Record<string, string>;
+            providerName?: string;
         }
     };
 }
