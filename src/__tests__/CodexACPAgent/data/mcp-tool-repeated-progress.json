@@ -4,6 +4,28 @@
     {
       "sessionId": "test-session-id",
       "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-id",
+        "kind": "execute",
+        "title": "mcp.server-name.tool-name",
+        "status": "in_progress",
+        "rawInput": {
+          "server": "server-name",
+          "tool": "tool-name",
+          "arguments": {
+            "argument": "example"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "call-id",
         "_meta": {
@@ -52,28 +74,6 @@
           "result": null,
           "error": {
             "message": "Polling for status"
-          }
-        }
-      }
-    }
-  ]
-}
-{
-  "method": "sessionUpdate",
-  "args": [
-    {
-      "sessionId": "test-session-id",
-      "update": {
-        "sessionUpdate": "tool_call",
-        "toolCallId": "call-id",
-        "kind": "execute",
-        "title": "mcp.server-name.tool-name",
-        "status": "in_progress",
-        "rawInput": {
-          "server": "server-name",
-          "tool": "tool-name",
-          "arguments": {
-            "argument": "example"
           }
         }
       }

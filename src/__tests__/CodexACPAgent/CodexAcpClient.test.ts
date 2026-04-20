@@ -983,6 +983,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             }
         });
 
+        await vi.waitFor(() => {
+            expect(sessionState.rateLimits?.size).toBe(2);
+        });
+
         expect(sessionState.rateLimits).not.toBeNull();
         expect(sessionState.rateLimits!.size).toBe(2);
         expect(sessionState.rateLimits!.get("standard-limit")).toEqual({
