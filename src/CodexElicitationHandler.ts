@@ -1,12 +1,14 @@
 import * as acp from "@agentclientprotocol/sdk";
 import type { SessionState } from "./CodexAcpServer";
 import type { ElicitationHandler } from "./CodexAppServerClient";
+import type { ServerNotification } from "./app-server";
 import type {
+    ItemCompletedNotification,
+    ItemStartedNotification,
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse,
 } from "./app-server/v2";
 import { logger } from "./Logger";
-import type { PendingMcpApprovals } from "./PendingMcpApprovals";
 
 // Standard elicitation options (non-tool-call approval).
 const ELICITATION_OPTIONS: acp.PermissionOption[] = [
@@ -70,16 +72,42 @@ function buildToolApprovalOptions(persistOptions: Set<PersistValue>): acp.Permis
 export class CodexElicitationHandler implements ElicitationHandler {
     private readonly connection: acp.AgentSideConnection;
     private readonly sessionState: SessionState;
-    private readonly pendingMcpApprovals: PendingMcpApprovals | undefined;
+    // In Rust, the MCP elicitation handler receives ElicitationRequestEvent directly from the MCP
+    // protocol layer, where id is set to "mcp_tool_call_approval_<call_id>" — the call ID is extracted
+    // by stripping that prefix.
+    //
+    // In TypeScript, Codex speaks the app-server JSON-RPC protocol (v2), where
+    // McpServerElicitationRequestParams omits elicitationId for form mode, so the MCP-level ID never
+    // reaches the client.
+    //
+    // Workaround: before requesting approval, Codex emits an item/started notification with an
+    // mcpToolCall item carrying the call id and server name. We store (threadId, serverName) → callId
+    // here so the elicitation request can correlate back to the already-rendered tool call item.
+    //
+    // Multiple calls are safe because Codex requests approval synchronously — it blocks on one tool
+    // call's elicitation before starting the next, so there is at most one pending approval per
+    // (threadId, serverName).
+    private readonly pendingMcpApprovals = new Map<string, string>();
 
-    constructor(
-        connection: acp.AgentSideConnection,
-        sessionState: SessionState,
-        pendingMcpApprovals?: PendingMcpApprovals
-    ) {
+    constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
         this.sessionState = sessionState;
-        this.pendingMcpApprovals = pendingMcpApprovals;
+    }
+
+    handleNotification(notification: ServerNotification): void {
+        switch (notification.method) {
+            case "item/started":
+                this.handleItemStarted(notification.params);
+                return;
+            case "item/completed":
+                this.handleItemCompleted(notification.params);
+                return;
+            case "serverRequest/resolved":
+                this.clearThread(notification.params.threadId);
+                return;
+            default:
+                return;
+        }
     }
 
     async handleElicitation(
@@ -121,7 +149,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
 
         if (params.mode === "form") {
             const correlatedCallId = isToolApproval
-                ? this.pendingMcpApprovals?.pop(params.threadId, params.serverName)
+                ? this.popPendingApproval(params.threadId, params.serverName)
                 : undefined;
             if (correlatedCallId !== undefined) {
                 // The tool call item is already visible in the IDE conversation history because
@@ -192,5 +220,42 @@ export class CodexElicitationHandler implements ElicitationHandler {
             return { action: "accept", content: null, _meta: null };
         }
         return { action: "decline", content: null, _meta: null };
+    }
+
+    private handleItemStarted(event: ItemStartedNotification): void {
+        if (event.item.type !== "mcpToolCall") {
+            return;
+        }
+        this.pendingMcpApprovals.set(this.key(event.threadId, event.item.server), event.item.id);
+    }
+
+    private handleItemCompleted(event: ItemCompletedNotification): void {
+        if (event.item.type !== "mcpToolCall") {
+            return;
+        }
+        this.popPendingApproval(event.threadId, event.item.server);
+    }
+
+    private popPendingApproval(threadId: string, serverName: string): string | undefined {
+        const key = this.key(threadId, serverName);
+        const callId = this.pendingMcpApprovals.get(key);
+        this.pendingMcpApprovals.delete(key);
+        return callId;
+    }
+
+    private clearThread(threadId: string): void {
+        for (const key of this.pendingMcpApprovals.keys()) {
+            if (this.belongsToThread(key, threadId)) {
+                this.pendingMcpApprovals.delete(key);
+            }
+        }
+    }
+
+    private key(threadId: string, serverName: string): string {
+        return `${threadId}:${serverName}`;
+    }
+
+    private belongsToThread(key: string, threadId: string): boolean {
+        return key.startsWith(`${threadId}:`);
     }
 }

@@ -8,7 +8,6 @@ import {
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
-import {PendingMcpApprovals} from "./PendingMcpApprovals";
 import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -707,12 +706,14 @@ export class CodexAcpServer implements acp.Agent {
         sessionState.lastTokenUsage = null;
 
         try {
-            const pendingMcpApprovals = new PendingMcpApprovals();
-            const eventHandler = new CodexEventHandler(this.connection, sessionState, pendingMcpApprovals);
+            const eventHandler = new CodexEventHandler(this.connection, sessionState);
             const approvalHandler = new CodexApprovalHandler(this.connection, sessionState);
-            const elicitationHandler = new CodexElicitationHandler(this.connection, sessionState, pendingMcpApprovals);
+            const elicitationHandler = new CodexElicitationHandler(this.connection, sessionState);
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
-                (event) => eventHandler.handleNotification(event),
+                (event) => {
+                    elicitationHandler.handleNotification(event);
+                    return eventHandler.handleNotification(event);
+                },
                 approvalHandler,
                 elicitationHandler);
 
