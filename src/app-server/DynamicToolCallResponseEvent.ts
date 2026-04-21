@@ -4,35 +4,35 @@
 import type { DynamicToolCallOutputContentItem } from "./DynamicToolCallOutputContentItem";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type DynamicToolCallResponseEvent = { 
+export type DynamicToolCallResponseEvent = {
 /**
  * Identifier for the corresponding DynamicToolCallRequest.
  */
-call_id: string, 
+call_id: string,
 /**
  * Turn ID that this dynamic tool call belongs to.
  */
-turn_id: string, 
+turn_id: string,
 /**
  * Dynamic tool name.
  */
-tool: string, 
+tool: string,
 /**
  * Dynamic tool call arguments.
  */
-arguments: JsonValue, 
+arguments: JsonValue,
 /**
  * Dynamic tool response content items.
  */
-content_items: Array<DynamicToolCallOutputContentItem>, 
+content_items: Array<DynamicToolCallOutputContentItem>,
 /**
  * Whether the tool call succeeded.
  */
-success: boolean, 
+success: boolean,
 /**
  * Optional error text when the tool call failed before producing a response.
  */
-error: string | null, 
+error: string | null,
 /**
  * The duration of the dynamic tool call.
  */
