@@ -86,12 +86,15 @@ export async function createCommandExecutionUpdate(
 export async function createMcpToolCallUpdate(
     item: ThreadItem & { type: "mcpToolCall" }
 ): Promise<UpdateSessionEvent> {
-    return createExecuteToolCallUpdate(
-        item,
-        `mcp.${item.server}.${item.tool}`,
-        createMcpRawInput(item.server, item.tool, item.arguments),
-        createMcpRawOutput(item.result, item.error),
-    );
+    return {
+        ...await createExecuteToolCallUpdate(
+            item,
+            `mcp.${item.server}.${item.tool}`,
+            createMcpRawInput(item.server, item.tool, item.arguments),
+            createMcpRawOutput(item.result, item.error),
+        ),
+        _meta: { is_mcp_tool_call: true },
+    };
 }
 
 export async function createDynamicToolCallUpdate(

@@ -1,0 +1,48 @@
+{
+  "method": "requestPermission",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "toolCall": {
+        "toolCallId": "elicitation-my-mcp-server",
+        "kind": "other",
+        "status": "pending",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Please provide your GitHub username"
+            }
+          }
+        ],
+        "rawInput": {
+          "serverName": "my-mcp-server",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
+      },
+      "options": [
+        {
+          "optionId": "accept",
+          "name": "Accept",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "decline",
+          "name": "Decline",
+          "kind": "reject_once"
+        }
+      ]
+    }
+  ]
+}

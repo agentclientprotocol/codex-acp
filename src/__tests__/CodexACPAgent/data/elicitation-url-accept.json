@@ -1,0 +1,38 @@
+{
+  "method": "requestPermission",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "toolCall": {
+        "toolCallId": "elicitation-elicit-789",
+        "kind": "fetch",
+        "status": "pending",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Please authorize access to your GitHub account"
+            }
+          }
+        ],
+        "rawInput": {
+          "serverName": "auth-server",
+          "url": "https://example.com/authorize?id=elicit-789"
+        }
+      },
+      "options": [
+        {
+          "optionId": "accept",
+          "name": "Accept",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "decline",
+          "name": "Decline",
+          "kind": "reject_once"
+        }
+      ]
+    }
+  ]
+}
