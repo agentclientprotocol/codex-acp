@@ -190,11 +190,10 @@ export class CodexAcpClient {
 
     async resumeSession(request: acp.ResumeSessionRequest): Promise<SessionMetadata> {
         await this.refreshSkills(request.cwd, request._meta);
-        const mode = AgentMode.getInitialAgentMode();
 
         const response = await this.codexClient.threadResume({
-            approvalPolicy: mode.approvalPolicy,
-            sandbox: mode.sandboxMode,
+            approvalPolicy: null,
+            sandbox: null,
             baseInstructions: null,
             config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
@@ -217,10 +216,9 @@ export class CodexAcpClient {
     }
 
     async loadSession(request: acp.LoadSessionRequest): Promise<SessionMetadataWithThread> {
-        const mode = AgentMode.getInitialAgentMode();
         const response = await this.codexClient.threadResume({
-            approvalPolicy: mode.approvalPolicy,
-            sandbox: mode.sandboxMode,
+            approvalPolicy: null,
+            sandbox: null,
             baseInstructions: null,
             config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
