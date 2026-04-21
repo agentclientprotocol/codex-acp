@@ -1,28 +1,30 @@
 // noinspection ES6RedundantAwait
 
 import {describe, expect, it, vi, beforeEach} from 'vitest';
-import {createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture} from "../acp-test-utils";
+import {createTestFixture, type TestFixture} from "../acp-test-utils";
+import type {McpServerStdio} from "@agentclientprotocol/sdk";
 
 describe('MCP session configuration', { timeout: 40_000 }, () => {
 
-    let fixture: CodexMockTestFixture;
+    let fixture: TestFixture;
     beforeEach(() => {
-        fixture = createCodexMockTestFixture();
+        fixture = createTestFixture();
         vi.clearAllMocks();
     });
 
 
     it('should return configured mcp', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
-        const sessionId = "session-id";
-        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(createTestSessionState({
-            sessionId,
-            sessionMcpServers: ["test-mcp"],
-        }));
-        vi.spyOn(fixture.getCodexAcpClient(), "listMcpServers").mockResolvedValue({ data: [], nextCursor: null });
+        await codexAcpAgent.initialize({protocolVersion: 1});
 
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        const mcpServer: McpServerStdio = {
+            name: "test-mcp", command: "./node_modules/.bin/mcp-hello-world", args: ["example"], env: [{name:"example", value: "example"}]
+        };
+
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: [mcpServer]});
         fixture.clearAcpConnectionDump();
-        await codexAcpAgent.prompt({sessionId, prompt: [{type: "text", text: "/mcp"}]});
+        await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "/mcp"}]});
         const transportDump = fixture.getAcpConnectionDump([]);
         expect(transportDump).contain("Configured MCP servers:");
         expect(transportDump).contain("- test-mcp");
