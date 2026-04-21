@@ -10,8 +10,14 @@ import {removeDirectoryWithRetry} from "../../acp-test-utils";
 export const RUN_E2E_TESTS = process.env["RUN_E2E_TESTS"] === "true";
 const DEFAULT_E2E_SUITE_TIMEOUT_MS = 60_000;
 
-export interface SpawnedAgentFixture {
+export interface SpawnedSessionFixture {
+    readonly response: acp.NewSessionResponse;
     expectPromptText(promptText: string, assertText: (text: string) => void, timeoutMs?: number): Promise<void>;
+}
+
+export interface SpawnedAgentFixture {
+    readonly connection: acp.ClientSideConnection;
+    createSession(): Promise<SpawnedSessionFixture>;
     dispose(): Promise<void>;
 }
 
@@ -113,29 +119,23 @@ export async function createAuthenticatedFixture(
         throw new Error(`Unexpected authentication status: ${JSON.stringify(authenticationStatus)}`);
     }
 
+    const createSession = async (): Promise<SpawnedSessionFixture> => {
+        const newSessionResponse = await connection.newSession({
+            cwd: runtimePaths.workspaceDir,
+            mcpServers: [],
+        });
+
+        return {
+            response: newSessionResponse,
+            async expectPromptText(promptText: string, assertText: (text: string) => void, timeoutMs = 30_000): Promise<void> {
+                await expectPromptTextForSession(connection, client, newSessionResponse.sessionId, promptText, assertText, timeoutMs);
+            },
+        };
+    };
+
     return {
-        async expectPromptText(promptText: string, assertText: (text: string) => void, timeoutMs = 30_000): Promise<void> {
-            const newSessionResponse = await connection.newSession({
-                cwd: runtimePaths.workspaceDir,
-                mcpServers: [],
-            });
-
-            const promptResponse = await connection.prompt({
-                sessionId: newSessionResponse.sessionId,
-                prompt: [{
-                    type: "text",
-                    text: promptText,
-                }],
-            });
-
-            if (promptResponse.stopReason !== "end_turn") {
-                throw new Error(`Unexpected stop reason: ${promptResponse.stopReason}`);
-            }
-
-            await vi.waitFor(() => {
-                assertText(client.readText(newSessionResponse.sessionId));
-            }, {timeout: timeoutMs});
-        },
+        connection,
+        createSession,
         async dispose(): Promise<void> {
             if (!agentProcess.stdin.destroyed && !agentProcess.stdin.writableEnded) {
                 agentProcess.stdin.end();
@@ -202,6 +202,34 @@ function writeSkill(codexHome: string, skill: TestSkill): void {
 
 async function getAuthenticationStatus(connection: acp.ClientSideConnection): Promise<Record<string, unknown>> {
     return await connection.extMethod("authentication/status", {});
+}
+
+async function expectPromptTextForSession(
+    connection: acp.ClientSideConnection,
+    client: RecordingClient,
+    sessionId: string,
+    promptText: string,
+    assertText: (text: string) => void,
+    timeoutMs: number,
+): Promise<void> {
+    const previousText = client.readText(sessionId);
+    const promptResponse = await connection.prompt({
+        sessionId,
+        prompt: [{
+            type: "text",
+            text: promptText,
+        }],
+    });
+
+    if (promptResponse.stopReason !== "end_turn") {
+        throw new Error(`Unexpected stop reason: ${promptResponse.stopReason}`);
+    }
+
+    await vi.waitFor(() => {
+        const sessionText = client.readText(sessionId);
+        const nextText = sessionText.slice(previousText.length);
+        assertText(nextText);
+    }, {timeout: timeoutMs});
 }
 
 function printLogDirectory(logDirectory: string): void {
