@@ -156,8 +156,6 @@ export class CodexEventHandler {
             case "fuzzyFileSearch/sessionCompleted":
                 return this.handleFuzzyFileSearchSessionCompleted(notification.params);
         }
-        const exhaustiveNotification: never = notification;
-        return exhaustiveNotification;
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
