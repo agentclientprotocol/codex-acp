@@ -243,15 +243,14 @@ export class CodexAcpClient {
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         await this.refreshSkills(request.cwd, request._meta);
-        const mode = AgentMode.getInitialAgentMode();
 
         const response = await this.codexClient.threadStart({
             config: this.createSessionConfig(request.cwd, request.mcpServers),
             modelProvider: this.getModelProvider(),
             model: null,
             cwd: request.cwd,
-            approvalPolicy: mode.approvalPolicy,
-            sandbox: mode.sandboxMode,
+            approvalPolicy: null,
+            sandbox: null,
             baseInstructions: null,
             developerInstructions: null,
             personality: null,
