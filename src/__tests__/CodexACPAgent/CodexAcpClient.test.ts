@@ -798,6 +798,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: null,
                 credits: null,
                 planType: null,
+                rateLimitReachedType: null,
             }
         });
         rateLimits.set("limit-2", {
@@ -810,6 +811,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: null,
                 credits: null,
                 planType: null,
+                rateLimitReachedType: null,
             }
         });
 
@@ -862,6 +864,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     secondary: null,
                     credits: null,
                     planType: null,
+                    rateLimitReachedType: null,
                 }
             }
         });
@@ -876,6 +879,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     secondary: null,
                     credits: null,
                     planType: null,
+                    rateLimitReachedType: null,
                 }
             }
         });
@@ -892,6 +896,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: null,
                 credits: null,
                 planType: null,
+                rateLimitReachedType: null,
             }
         });
         expect(sessionState.rateLimits!.get("fast-limit")).toEqual({
@@ -904,6 +909,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: null,
                 credits: null,
                 planType: null,
+                rateLimitReachedType: null,
             }
         });
     });

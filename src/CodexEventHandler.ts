@@ -130,7 +130,8 @@ export class CodexEventHandler {
             case "thread/closed":
             case "thread/realtime/started":
             case "thread/realtime/itemAdded":
-            case "thread/realtime/transcriptUpdated":
+            case "thread/realtime/transcript/delta":
+            case "thread/realtime/transcript/done":
             case "thread/realtime/outputAudio/delta":
             case "thread/realtime/sdp":
             case "thread/realtime/error":
@@ -138,8 +139,10 @@ export class CodexEventHandler {
             case "windowsSandbox/setupCompleted":
             case "account/login/completed":
             case "skills/changed":
+            case "warning":
             case "deprecationNotice":
             case "mcpServer/oauthLogin/completed":
+            case "externalAgentConfig/import/completed":
             case "rawResponseItem/completed":
             case "thread/started":
             case "thread/name/updated":
@@ -153,6 +156,8 @@ export class CodexEventHandler {
             case "fuzzyFileSearch/sessionCompleted":
                 return this.handleFuzzyFileSearchSessionCompleted(notification.params);
         }
+        const exhaustiveNotification: never = notification;
+        return exhaustiveNotification;
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
