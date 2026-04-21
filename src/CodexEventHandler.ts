@@ -18,7 +18,8 @@ import type {
     ItemStartedNotification, ThreadItem,
     ModelReroutedNotification,
     ThreadTokenUsageUpdatedNotification,
-    TurnPlanUpdatedNotification
+    TurnPlanUpdatedNotification,
+    WarningNotification
 } from "./app-server/v2";
 import type { McpStartupCompleteEvent } from "./app-server";
 import {toTokenCount} from "./TokenCount";
@@ -115,6 +116,8 @@ export class CodexEventHandler {
                 return null;
             case "configWarning":
                 return await this.createConfigWarningEvent(notification.params);
+            case "warning":
+                return this.createWarningEvent(notification.params);
             case "thread/compacted":
                 return {
                     sessionUpdate: "agent_message_chunk",
@@ -139,7 +142,6 @@ export class CodexEventHandler {
             case "windowsSandbox/setupCompleted":
             case "account/login/completed":
             case "skills/changed":
-            case "warning":
             case "deprecationNotice":
             case "mcpServer/oauthLogin/completed":
             case "externalAgentConfig/import/completed":
@@ -177,6 +179,16 @@ export class CodexEventHandler {
                 text: `Config warning: ${event.summary}${detailsText}\n\n`
             }
         }
+    }
+
+    private createWarningEvent(event: WarningNotification): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `Warning: ${event.message}\n\n`
+            }
+        };
     }
 
     private createModelReroutedEvent(event: ModelReroutedNotification): UpdateSessionEvent {
