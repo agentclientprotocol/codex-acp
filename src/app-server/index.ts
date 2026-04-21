@@ -194,6 +194,7 @@ export type { RealtimeConversationVersion } from "./RealtimeConversationVersion"
 export type { RealtimeEvent } from "./RealtimeEvent";
 export type { RealtimeHandoffMessage } from "./RealtimeHandoffMessage";
 export type { RealtimeHandoffRequested } from "./RealtimeHandoffRequested";
+export type { RealtimeOutputModality } from "./RealtimeOutputModality";
 export type { RealtimeTranscriptDelta } from "./RealtimeTranscriptDelta";
 export type { RealtimeTranscriptEntry } from "./RealtimeTranscriptEntry";
 export type { RealtimeVoice } from "./RealtimeVoice";
@@ -267,6 +268,7 @@ export type { TextContent } from "./TextContent";
 export type { TextElement } from "./TextElement";
 export type { TextResourceContents } from "./TextResourceContents";
 export type { ThreadId } from "./ThreadId";
+export type { ThreadMemoryMode } from "./ThreadMemoryMode";
 export type { ThreadNameUpdatedEvent } from "./ThreadNameUpdatedEvent";
 export type { ThreadRolledBackEvent } from "./ThreadRolledBackEvent";
 export type { TokenCountEvent } from "./TokenCountEvent";
