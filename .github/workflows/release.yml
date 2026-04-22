@@ -88,7 +88,11 @@ jobs:
           </plist>
           EOF
           ENTITLEMENTS_BASE64=$(gzip -c entitlements.plist | base64 -w 0)
-          echo "ENTITLEMENTS_BASE64=$ENTITLEMENTS_BASE64" >> $GITHUB_ENV
+          {
+            echo "ENTITLEMENTS_BASE64<<EOF"
+            echo "$ENTITLEMENTS_BASE64"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: Sign macOS binaries
         env:
