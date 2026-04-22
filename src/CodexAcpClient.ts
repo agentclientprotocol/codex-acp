@@ -102,6 +102,9 @@ export class CodexAcpClient {
                 if (!gatewaySettings) throw RequestError.invalidRequest();
 
                 const baseUrl = gatewaySettings.baseUrl;
+                const providerName = typeof gatewaySettings.providerName === "string" && gatewaySettings.providerName.trim().length > 0
+                    ? gatewaySettings.providerName
+                    : "User-provided gateway";
                 const headers: Record<string, string> = {
                     "X-Client-Feature-ID": "codex",
                     ...gatewaySettings.headers
@@ -110,7 +113,7 @@ export class CodexAcpClient {
                 this.gatewayConfig = {
                     modelProvider: "custom-gateway",
                     config: {
-                        name: "User-provided gateway",
+                        name: providerName,
                         base_url: baseUrl,
                         http_headers: headers,
                         wire_api: "responses"
