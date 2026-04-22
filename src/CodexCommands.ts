@@ -206,7 +206,7 @@ export class CodexCommands {
         const accountText = this.formatAccountInfo(sessionState.account);
         const tokenUsageText = this.formatTokenUsage(sessionState.totalTokenUsage);
         const contextWindowText = this.formatContextWindow(
-            sessionState.totalTokenUsage,
+            sessionState.lastTokenUsage,
             sessionState.modelContextWindow
         );
 

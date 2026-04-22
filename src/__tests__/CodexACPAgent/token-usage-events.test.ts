@@ -190,7 +190,7 @@ describe('Token Usage Events', () => {
             };
         }
 
-        it('should emit usage_update with cumulative context usage', async () => {
+        it('should emit usage_update with latest turn usage as a context proxy', async () => {
             const events = await setupPromptAndReturnEvents([
                 createTokenUsageNotification(sessionId, {
                     total: {
@@ -214,7 +214,7 @@ describe('Token Usage Events', () => {
             await expect(`${JSON.stringify(events[0], null, 2)}\n`).toMatchFileSnapshot('data/token-usage-session-update.json');
         });
 
-        it('should emit latest cumulative usage from multiple updates', async () => {
+        it('should emit latest turn usage from multiple updates', async () => {
             const events = await setupPromptAndReturnEvents([
                 createTokenUsageNotification(sessionId, {
                     total: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
