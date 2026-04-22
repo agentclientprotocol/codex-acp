@@ -12,9 +12,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v6
         with:
-          bun-version: 1.3.11
+          node-version: '24'
       - name: Install zip
         run: |
           for i in 1 2 3; do
@@ -22,10 +22,13 @@ jobs:
             echo "Attempt $i failed, retrying in 5s..."
             sleep 5
           done
-      - run: bun install
-      - run: bun run typecheck
-      - run: bun run test
-      - run: bun run bundle:all
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - run: npm run bundle:all
 
       - name: Download Codesign Client and signatures
         run: |
@@ -137,7 +140,7 @@ jobs:
           unzip -o dist/bin/codex-acp-arm64-darwin.zip -d dist/bin/
           rm dist/bin/codex-acp-x64-darwin.zip dist/bin/codex-acp-arm64-darwin.zip
 
-      - run: bun run package:all
+      - run: npm run package:all
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -225,3 +228,24 @@ jobs:
             filename=$(basename "$file")
             echo "  ${BASE_URL}/latest/${filename}"
           done
+
+  publish-to-npm:
+    name: Publish to NPM
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish to NPM
+        run: npm publish --access public --tag beta

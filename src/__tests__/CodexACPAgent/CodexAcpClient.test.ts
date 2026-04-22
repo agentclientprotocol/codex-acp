@@ -1,9 +1,6 @@
 // noinspection ES6RedundantAwait
 
 import {describe, expect, it, vi, beforeEach} from 'vitest';
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import type {CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk";
 import {createTestFixture, createCodexMockTestFixture, createTestSessionState, type TestFixture} from "../acp-test-utils";
@@ -13,46 +10,6 @@ import {AgentMode} from "../../AgentMode";
 import type {ListMcpServerStatusResponse, Model, SkillsListResponse} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
-
-const CODEX_HOME_ENV = "CODEX_HOME";
-
-async function overrideCodexHome<T>(configToml: string, run: () => Promise<T>): Promise<T> {
-    const previousCodexHome = process.env[CODEX_HOME_ENV];
-    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-codex-home-"));
-    fs.writeFileSync(path.join(codexHome, "config.toml"), configToml, "utf8");
-    process.env[CODEX_HOME_ENV] = codexHome;
-
-    try {
-        return await run();
-    } finally {
-        if (previousCodexHome === undefined) {
-            delete process.env[CODEX_HOME_ENV];
-        } else {
-            process.env[CODEX_HOME_ENV] = previousCodexHome;
-        }
-        await removeDirectoryWithRetry(codexHome);
-    }
-}
-
-async function removeDirectoryWithRetry(directory: string): Promise<void> {
-    let lastError: NodeJS.ErrnoException | null = null;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-        try {
-            fs.rmSync(directory, { recursive: true, force: true });
-            return;
-        } catch (error) {
-            const err = error as NodeJS.ErrnoException;
-            if (err.code !== "ENOTEMPTY" && err.code !== "EBUSY") {
-                throw err;
-            }
-            lastError = err;
-            await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-        }
-    }
-    if (lastError) {
-        throw lastError;
-    }
-}
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -64,140 +21,120 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
     const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "supportedReasoningEfforts", "reasoningEffort", "model", "readOnlyAccess", "approvalsReviewer"];
 
-    it.skip('should start conversation', async () => {
-        const codexAcpAgent = fixture.getCodexAcpAgent();
-        await codexAcpAgent.initialize({protocolVersion: 1});
-
-        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
-        // noinspection ES6MissingAwait - we're only check initialization
-        codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "Hi!"}]});
-
-        const transportDump = fixture.getCodexConnectionDump(ignoredFields);
-        await expect(transportDump).toMatchFileSnapshot("data/start-conversation.json");
-    });
-
     it('should throw error without authentication', async () => {
-        await overrideCodexHome('cli_auth_credentials_store = "file"', async () => {
-            const authFixture = createTestFixture();
-            const codexAcpAgent = authFixture.getCodexAcpAgent();
+        const authFixture = createTestFixture();
+        const codexAcpAgent = authFixture.getCodexAcpAgent();
 
-            await codexAcpAgent.initialize({protocolVersion: 1});
-            await authFixture.getCodexAcpClient().logout();
-            authFixture.clearCodexConnectionDump();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        await authFixture.getCodexAcpClient().logout();
+        authFixture.clearCodexConnectionDump();
 
-            await expect(
-                codexAcpAgent.newSession({cwd: "", mcpServers: []})
-            ).rejects.toThrow("Authentication required");
+        await expect(
+            codexAcpAgent.newSession({cwd: "", mcpServers: []})
+        ).rejects.toThrow("Authentication required");
 
-            const transportDump = authFixture.getCodexConnectionDump(ignoredFields);
-            await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
-        });
+        const transportDump = authFixture.getCodexConnectionDump(ignoredFields);
+        await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
     });
 
     it('should authenticate with key', async () => {
-        // In sandboxed environments Codex may fail when trying to write to the OS keychain (`Operation not permitted`).
-        await overrideCodexHome('cli_auth_credentials_store = "file"', async () => {
-            const keyFixture = createTestFixture();
-            const codexAcpAgent = keyFixture.getCodexAcpAgent();
+        const keyFixture = createTestFixture();
+        const codexAcpAgent = keyFixture.getCodexAcpAgent();
 
-            await codexAcpAgent.initialize({protocolVersion: 1});
-            await keyFixture.getCodexAcpClient().logout();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        await keyFixture.getCodexAcpClient().logout();
 
 
-            const unauthenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
-            expect(unauthenticatedResponse).toEqual({type: "unauthenticated"});
+        const unauthenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
+        expect(unauthenticatedResponse).toEqual({type: "unauthenticated"});
 
-            keyFixture.clearCodexConnectionDump();
+        keyFixture.clearCodexConnectionDump();
 
-            const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}}
-            await codexAcpAgent.authenticate(authRequest);
-            const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
-            expect(newSessionResponse.sessionId).toBeDefined()
+        const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}}
+        await codexAcpAgent.authenticate(authRequest);
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        expect(newSessionResponse.sessionId).toBeDefined()
 
-            const transportEvents = keyFixture.getCodexConnectionEvents([...ignoredFields, "upgrade"]);
-            const transportMethods = transportEvents.flatMap(event => "method" in event ? [event.method] : []);
-            const loginRequest = transportEvents.find(event =>
-                event.eventType === "request" &&
-                "method" in event &&
-                event.method === "account/login/start"
-            );
-            const loginResponse = transportEvents.find(event =>
-                event.eventType === "response" &&
-                "type" in event &&
-                event.type === "apiKey"
-            );
-            const threadStartResponse = transportEvents.find(event =>
-                event.eventType === "response" &&
-                "modelProvider" in event &&
-                "approvalPolicy" in event
-            );
-            expect(transportMethods).toEqual([
-                "account/login/start",
-                "account/read",
-                "account/updated",
-                "thread/start",
-                "model/list",
-                "thread/started",
-                "account/read",
-                "skills/list",
-            ]);
-            expect(loginRequest).toEqual({
-                eventType: "request",
-                method: "account/login/start",
-                params: {
-                    type: "apiKey",
-                    apiKey: "TOKEN",
-                }
-            });
-            expect(loginResponse).toEqual({
-                eventType: "response",
+        const transportEvents = keyFixture.getCodexConnectionEvents([...ignoredFields, "upgrade"]);
+        const transportMethods = transportEvents.flatMap(event => "method" in event ? [event.method] : []);
+        const loginRequest = transportEvents.find(event =>
+            event.eventType === "request" &&
+            "method" in event &&
+            event.method === "account/login/start"
+        );
+        const loginResponse = transportEvents.find(event =>
+            event.eventType === "response" &&
+            "type" in event &&
+            event.type === "apiKey"
+        );
+        const threadStartResponse = transportEvents.find(event =>
+            event.eventType === "response" &&
+            "modelProvider" in event &&
+            "approvalPolicy" in event
+        );
+        expect(transportMethods).toEqual([
+            "account/login/start",
+            "account/read",
+            "account/updated",
+            "thread/start",
+            "model/list",
+            "thread/started",
+            "account/read",
+            "skills/list",
+        ]);
+        expect(loginRequest).toEqual({
+            eventType: "request",
+            method: "account/login/start",
+            params: {
                 type: "apiKey",
-            });
-            expect(threadStartResponse).toMatchObject({
-                eventType: "response",
-                modelProvider: "openai",
-                approvalPolicy: "on-request",
-                approvalsReviewer: "approvalsReviewer",
-            });
-            const authenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
-            expect(authenticatedResponse).toEqual({type: "api-key"});
-
-            await keyFixture.getCodexAcpAgent().extMethod("authentication/logout", {});
-            const logoutResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
-            expect(logoutResponse).toEqual({type: "unauthenticated"});
+                apiKey: "TOKEN",
+            }
         });
+        expect(loginResponse).toEqual({
+            eventType: "response",
+            type: "apiKey",
+        });
+        expect(threadStartResponse).toMatchObject({
+            eventType: "response",
+            modelProvider: "openai",
+            approvalPolicy: "on-request",
+            approvalsReviewer: "approvalsReviewer",
+        });
+        const authenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
+        expect(authenticatedResponse).toEqual({type: "api-key"});
+
+        await keyFixture.getCodexAcpAgent().extMethod("authentication/logout", {});
+        const logoutResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
+        expect(logoutResponse).toEqual({type: "unauthenticated"});
     });
 
     it('should authenticate with a gateway', async () => {
-        await overrideCodexHome('cli_auth_credentials_store = "file"', async () => {
-            const gatewayFixture = createTestFixture();
-            const codexAcpAgent = gatewayFixture.getCodexAcpAgent();
+        const gatewayFixture = createTestFixture();
+        const codexAcpAgent = gatewayFixture.getCodexAcpAgent();
 
-            await codexAcpAgent.initialize({protocolVersion: 1});
-            await gatewayFixture.getCodexAcpClient().logout();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        await gatewayFixture.getCodexAcpClient().logout();
 
-            const authRequest: CodexAuthRequest = {
-                methodId: "gateway",
-                _meta: {
-                    "gateway": {
-                        baseUrl: "https://www.example.com",
-                        headers: {
-                            "Custom-Auth-Header": "TOKEN"
-                        }
+        const authRequest: CodexAuthRequest = {
+            methodId: "gateway",
+            _meta: {
+                "gateway": {
+                    baseUrl: "https://www.example.com",
+                    headers: {
+                        "Custom-Auth-Header": "TOKEN"
                     }
                 }
-            };
+            }
+        };
 
-            await codexAcpAgent.authenticate(authRequest);
-            expect(await gatewayFixture.getCodexAcpClient().authRequired()).toBe(false);
+        await codexAcpAgent.authenticate(authRequest);
+        expect(await gatewayFixture.getCodexAcpClient().authRequired()).toBe(false);
 
-            const authenticatedResponse = await gatewayFixture.getCodexAcpAgent().extMethod("authentication/status", {});
-            expect(authenticatedResponse).toEqual({type: "gateway", name: "custom-gateway"});
+        const authenticatedResponse = await gatewayFixture.getCodexAcpAgent().extMethod("authentication/status", {});
+        expect(authenticatedResponse).toEqual({type: "gateway", name: "custom-gateway"});
 
-            const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
-            expect(newSessionResponse.sessionId).toBeDefined()
-        });
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        expect(newSessionResponse.sessionId).toBeDefined()
     })
 
     it('prefetches session additional skill roots before thread start', async () => {
@@ -551,46 +488,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(mockFixture.getCodexConnectionDump(ignoredFields)).toMatchFileSnapshot("data/send-attachments-turn-start.json");
     });
 
-    async function createSessionInSeparateInstance(): Promise<string> {
-        const initFixture = createTestFixture();
-        initFixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
-        await initFixture.getCodexAcpAgent().initialize({protocolVersion: 1});
-        const newSessionResponse = await initFixture.getCodexAcpAgent().newSession({
-            cwd: "",
-            mcpServers: []
-        });
-        try {
-            await initFixture.getCodexAcpAgent().prompt({
-                sessionId: newSessionResponse.sessionId,
-                prompt: [{type: "text", text: "Hi!"}]
-            });
-        } catch (e) {}
-
-        return newSessionResponse.sessionId;
-    }
-
-    // too long, requires auth
-    it.skip('should resume session', async () => {
-        const sessionId = await createSessionInSeparateInstance();
-
-        await fixture.getCodexAcpAgent().initialize({protocolVersion: 1});
-        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
-        fixture.clearCodexConnectionDump();
-
-        await fixture.getCodexAcpAgent().unstable_resumeSession({
-            cwd: "",
-            sessionId: sessionId
-        });
-        await expect(fixture.getCodexConnectionDump(ignoredFields.concat("data", "model"))).toMatchFileSnapshot("data/thread-resume.json");
-
-        const promptResult: Promise<acp.PromptResponse> = fixture.getCodexAcpAgent().prompt({
-            sessionId: sessionId,
-            prompt: []
-        });
-
-        expect(promptResult).toBeDefined();
-    });
-
     it('should fail on wrong sessionId', async () => {
         const sessionId = "not-existing-session";
 
@@ -901,6 +798,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: null,
                 credits: null,
                 planType: null,
+                rateLimitReachedType: null,
             }
         });
         rateLimits.set("limit-2", {
@@ -913,6 +811,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: null,
                 credits: null,
                 planType: null,
+                rateLimitReachedType: null,
             }
         });
 
@@ -965,6 +864,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     secondary: null,
                     credits: null,
                     planType: null,
+                    rateLimitReachedType: null,
                 }
             }
         });
@@ -979,6 +879,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     secondary: null,
                     credits: null,
                     planType: null,
+                    rateLimitReachedType: null,
                 }
             }
         });
@@ -995,6 +896,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: null,
                 credits: null,
                 planType: null,
+                rateLimitReachedType: null,
             }
         });
         expect(sessionState.rateLimits!.get("fast-limit")).toEqual({
@@ -1007,6 +909,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: null,
                 credits: null,
                 planType: null,
+                rateLimitReachedType: null,
             }
         });
     });

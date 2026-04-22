@@ -1,13 +1,13 @@
 {
   "name": "@jetbrains/codex-acp",
-  "version": "0.0.36",
+  "version": "0.0.37",
   "description": "",
   "main": "dist/index.js",
   "bin": {
     "codex-acp": "dist/index.js"
   },
   "files": [
-    "dist/",
+    "dist/index.js",
     "README.md",
     "LICENSE",
     "package.json"
@@ -29,16 +29,17 @@
     "package:darwin-arm64": "cd dist/bin && zip codex-acp-arm64-darwin.zip codex-acp-arm64-darwin",
     "package:win-x64": "cd dist/bin && zip codex-acp-x64-windows.zip codex-acp-x64-windows.exe",
     "package:win-arm64": "cd dist/bin && zip codex-acp-arm64-windows.zip codex-acp-arm64-windows.exe",
-    "start": "bun run src/index.ts",
+    "start": "node --import tsx src/index.ts",
     "generate-types": "./node_modules/.bin/codex app-server generate-ts --out src/app-server",
     "test": "vitest run",
+    "test:e2e": "npm run build && RUN_E2E_TESTS=true vitest run src/__tests__/CodexACPAgent/e2e",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "codex-test": "tsx .claude/skills/run-codex/scripts/run-codex-test.ts"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
     "@types/node": "^24.10.1",
@@ -50,7 +51,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.16.1",
-    "@openai/codex": "^0.120.0",
+    "@openai/codex": "^0.122.0",
     "diff": "^8.0.3",
     "open": "^11.0.0",
     "vscode-jsonrpc": "^8.2.1"

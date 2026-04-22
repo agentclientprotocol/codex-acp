@@ -1,0 +1,47 @@
+{
+  "method": "requestPermission",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "toolCall": {
+        "toolCallId": "elicitation-tool-server",
+        "kind": "execute",
+        "status": "pending",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Allow tool call?"
+            }
+          }
+        ],
+        "rawInput": {
+          "serverName": "tool-server",
+          "schema": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      },
+      "_meta": "_meta",
+      "options": [
+        {
+          "optionId": "allow_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "allow_session",
+          "name": "Allow for This Session",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "decline",
+          "name": "Decline",
+          "kind": "reject_once"
+        }
+      ]
+    }
+  ]
+}

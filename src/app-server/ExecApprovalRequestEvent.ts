@@ -9,55 +9,55 @@ import type { ParsedCommand } from "./ParsedCommand";
 import type { PermissionProfile } from "./PermissionProfile";
 import type { ReviewDecision } from "./ReviewDecision";
 
-export type ExecApprovalRequestEvent = { 
+export type ExecApprovalRequestEvent = {
 /**
  * Identifier for the associated command execution item.
  */
-call_id: string, 
+call_id: string,
 /**
  * Identifier for this specific approval callback.
  *
  * When absent, the approval is for the command item itself (`call_id`).
  * This is present for subcommand approvals (via execve intercept).
  */
-approval_id?: string, 
+approval_id?: string,
 /**
  * Turn ID that this command belongs to.
  * Uses `#[serde(default)]` for backwards compatibility.
  */
-turn_id: string, 
+turn_id: string,
 /**
  * The command to be executed.
  */
-command: Array<string>, 
+command: Array<string>,
 /**
  * The command's working directory.
  */
-cwd: string, 
+cwd: string,
 /**
  * Optional human-readable reason for the approval (e.g. retry without sandbox).
  */
-reason: string | null, 
+reason: string | null,
 /**
  * Optional network context for a blocked request that can be approved.
  */
-network_approval_context?: NetworkApprovalContext, 
+network_approval_context?: NetworkApprovalContext,
 /**
  * Proposed execpolicy amendment that can be applied to allow future runs.
  */
-proposed_execpolicy_amendment?: ExecPolicyAmendment, 
+proposed_execpolicy_amendment?: ExecPolicyAmendment,
 /**
  * Proposed network policy amendments (for example allow/deny this host in future).
  */
-proposed_network_policy_amendments?: Array<NetworkPolicyAmendment>, 
+proposed_network_policy_amendments?: Array<NetworkPolicyAmendment>,
 /**
  * Optional additional filesystem permissions requested for this command.
  */
-additional_permissions?: PermissionProfile, 
+additional_permissions?: PermissionProfile,
 /**
  * Optional skill metadata when the approval was triggered by a skill script.
  */
-skill_metadata?: ExecApprovalRequestSkillMetadata, 
+skill_metadata?: ExecApprovalRequestSkillMetadata,
 /**
  * Ordered list of decisions the client may present for this prompt.
  *

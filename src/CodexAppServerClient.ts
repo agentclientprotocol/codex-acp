@@ -28,6 +28,8 @@ import type {
     CommandExecutionRequestApprovalResponse,
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
+    McpServerElicitationRequestParams,
+    McpServerElicitationRequestResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
     SkillsListParams,
@@ -39,6 +41,10 @@ import type {
 export interface ApprovalHandler {
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
     handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse>;
+}
+
+export interface ElicitationHandler {
+    handleElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
 }
 
 const CommandExecutionApprovalRequest = new RequestType<
@@ -53,6 +59,12 @@ const FileChangeApprovalRequest = new RequestType<
     void
 >('item/fileChange/requestApproval');
 
+const McpServerElicitationRequest = new RequestType<
+    McpServerElicitationRequestParams,
+    McpServerElicitationRequestResponse,
+    void
+>('mcpServer/elicitation/request');
+
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
  * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
@@ -60,6 +72,7 @@ const FileChangeApprovalRequest = new RequestType<
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
+    private elicitationHandlers = new Map<string, ElicitationHandler>();
     private mcpStartupCompleteVersion = 0;
     private lastMcpStartupComplete: McpStartupCompleteEvent | null = null;
     private readonly mcpStartupCompleteResolvers: Array<SignalResolver<McpStartupCompleteEvent>> = [];
@@ -98,10 +111,22 @@ export class CodexAppServerClient {
             }
             return await handler.handleFileChange(params);
         });
+
+        this.connection.onRequest(McpServerElicitationRequest, async (params) => {
+            const handler = this.elicitationHandlers.get(params.threadId);
+            if (!handler) {
+                return { action: "cancel", content: null, _meta: null };
+            }
+            return await handler.handleElicitation(params);
+        });
     }
 
     onApprovalRequest(threadId: string, handler: ApprovalHandler): void {
         this.approvalHandlers.set(threadId, handler);
+    }
+
+    onElicitationRequest(threadId: string, handler: ElicitationHandler): void {
+        this.elicitationHandlers.set(threadId, handler);
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {

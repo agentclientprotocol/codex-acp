@@ -18,7 +18,8 @@ import type {
     ItemStartedNotification, ThreadItem,
     ModelReroutedNotification,
     ThreadTokenUsageUpdatedNotification,
-    TurnPlanUpdatedNotification
+    TurnPlanUpdatedNotification,
+    WarningNotification
 } from "./app-server/v2";
 import type { McpStartupCompleteEvent } from "./app-server";
 import {toTokenCount} from "./TokenCount";
@@ -103,10 +104,10 @@ export class CodexEventHandler {
             case "turn/diff/updated":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
-            case "serverRequest/resolved":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
+            case "serverRequest/resolved":
                 return null;
             case "item/mcpToolCall/progress":
                 return this.createMcpToolProgressEvent(notification.params);
@@ -115,6 +116,8 @@ export class CodexEventHandler {
                 return null;
             case "configWarning":
                 return await this.createConfigWarningEvent(notification.params);
+            case "warning":
+                return this.createWarningEvent(notification.params);
             case "thread/compacted":
                 return {
                     sessionUpdate: "agent_message_chunk",
@@ -130,7 +133,8 @@ export class CodexEventHandler {
             case "thread/closed":
             case "thread/realtime/started":
             case "thread/realtime/itemAdded":
-            case "thread/realtime/transcriptUpdated":
+            case "thread/realtime/transcript/delta":
+            case "thread/realtime/transcript/done":
             case "thread/realtime/outputAudio/delta":
             case "thread/realtime/sdp":
             case "thread/realtime/error":
@@ -140,6 +144,7 @@ export class CodexEventHandler {
             case "skills/changed":
             case "deprecationNotice":
             case "mcpServer/oauthLogin/completed":
+            case "externalAgentConfig/import/completed":
             case "rawResponseItem/completed":
             case "thread/started":
             case "thread/name/updated":
@@ -174,6 +179,16 @@ export class CodexEventHandler {
                 text: `Config warning: ${event.summary}${detailsText}\n\n`
             }
         }
+    }
+
+    private createWarningEvent(event: WarningNotification): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `Warning: ${event.message}\n\n`
+            }
+        };
     }
 
     private createModelReroutedEvent(event: ModelReroutedNotification): UpdateSessionEvent {
