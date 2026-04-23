@@ -15,6 +15,9 @@
           "arguments": {
             "argument": "example"
           }
+        },
+        "_meta": {
+          "is_mcp_tool_call": true
         }
       }
     }

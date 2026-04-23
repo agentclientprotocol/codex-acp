@@ -4,7 +4,6 @@ It may not work with versions other than the one specified in package.json.
 ### Quick start
 
 #### Develop on Windows?
-- Download and install [bun](https://bun.com/docs/installation#windows)
 - Download and install [C++ redistributable package](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version)
 
 #### Adjust acp config for IDE
@@ -54,6 +53,8 @@ Run from binaries
 ```
 
 ### Build binaries
+
+Building standalone binaries requires [bun](https://bun.com/docs/installation).
 
 Build single-file executables in `dist/bin` directory:
 

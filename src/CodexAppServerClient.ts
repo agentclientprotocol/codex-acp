@@ -4,22 +4,37 @@ import type {
     ClientRequest,
     InitializeParams,
     InitializeResponse,
-    McpStartupCompleteEvent,
     ServerNotification
 } from "./app-server";
 import type {
     AccountLoginCompletedNotification, AccountUpdatedNotification,
+    ConfigReadParams,
+    ConfigReadResponse,
     GetAccountParams,
-    GetAccountResponse, LoginAccountParams, LoginAccountResponse, LogoutAccountResponse, ModelListParams,
+    GetAccountResponse,
+    ListMcpServerStatusParams,
+    ListMcpServerStatusResponse,
+    LoginAccountParams,
+    LoginAccountResponse,
+    LogoutAccountResponse,
+    McpServerElicitationRequestParams,
+    McpServerElicitationRequestResponse,
+    McpServerStartupState,
+    McpServerStatusUpdatedNotification,
+    ModelListParams,
     ModelListResponse,
-    ThreadStartParams,
-    ThreadStartResponse,
+    SkillsListParams,
+    SkillsListResponse,
     ThreadLoadedListParams,
     ThreadLoadedListResponse,
     ThreadListParams,
     ThreadListResponse,
     ThreadReadParams,
     ThreadReadResponse,
+    ThreadResumeParams,
+    ThreadResumeResponse,
+    ThreadStartParams,
+    ThreadStartResponse,
     TurnCompletedNotification,
     TurnInterruptParams,
     TurnInterruptResponse,
@@ -29,12 +44,6 @@ import type {
     CommandExecutionRequestApprovalResponse,
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
-    ThreadResumeParams,
-    ThreadResumeResponse,
-    SkillsListParams,
-    SkillsListResponse,
-    ListMcpServerStatusParams,
-    ListMcpServerStatusResponse, ConfigReadParams, ConfigReadResponse,
 } from "./app-server/v2";
 import { logger } from "./Logger";
 
@@ -42,6 +51,21 @@ export interface ApprovalHandler {
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
     handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse>;
 }
+
+export interface ElicitationHandler {
+    handleElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
+}
+
+export type McpStartupFailure = {
+    server: string;
+    error: string;
+};
+
+export type McpStartupResult = {
+    ready: Array<string>;
+    failed: Array<McpStartupFailure>;
+    cancelled: Array<string>;
+};
 
 const CommandExecutionApprovalRequest = new RequestType<
     CommandExecutionRequestApprovalParams,
@@ -55,6 +79,12 @@ const FileChangeApprovalRequest = new RequestType<
     void
 >('item/fileChange/requestApproval');
 
+const McpServerElicitationRequest = new RequestType<
+    McpServerElicitationRequestParams,
+    McpServerElicitationRequestResponse,
+    void
+>('mcpServer/elicitation/request');
+
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
  * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
@@ -63,23 +93,24 @@ export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
     private readonly notificationHandlers = new Set<(event: ServerNotification) => Promise<void>>();
-    private mcpStartupCompleteVersion = 0;
-    private lastMcpStartupComplete: McpStartupCompleteEvent | null = null;
-    private readonly mcpStartupCompleteResolvers: Array<SignalResolver<McpStartupCompleteEvent>> = [];
+    private elicitationHandlers = new Map<string, ElicitationHandler>();
+    private mcpServerStartupVersion = 0;
+    private readonly mcpServerStartupStates = new Map<string, McpServerStartupSnapshot>();
+    private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
         this.connection.onUnhandledNotification((data) => {
-            if (isMcpStartupCompleteNotification(data)) {
-                this.mcpStartupCompleteVersion += 1;
-                this.lastMcpStartupComplete = data.params.msg;
-                this.resolveSignal(data.params.msg, this.mcpStartupCompleteVersion, this.mcpStartupCompleteResolvers);
-                for (const callback of this.codexEventHandlers) {
-                    callback({ eventType: "notification", ...data });
-                }
-                return;
-            }
             const serverNotification = data as ServerNotification;
+            if (isMcpServerStatusUpdatedNotification(serverNotification)) {
+                this.mcpServerStartupVersion += 1;
+                this.mcpServerStartupStates.set(serverNotification.params.name, {
+                    status: serverNotification.params.status,
+                    error: serverNotification.params.error,
+                    version: this.mcpServerStartupVersion,
+                });
+                this.resolveMcpServerStartupResolvers();
+            }
             this.notifyServerNotificationHandlers(serverNotification);
             for (const callback of this.codexEventHandlers) {
                 callback({ eventType: "notification", ...serverNotification });
@@ -101,10 +132,22 @@ export class CodexAppServerClient {
             }
             return await handler.handleFileChange(params);
         });
+
+        this.connection.onRequest(McpServerElicitationRequest, async (params) => {
+            const handler = this.elicitationHandlers.get(params.threadId);
+            if (!handler) {
+                return { action: "cancel", content: null, _meta: null };
+            }
+            return await handler.handleElicitation(params);
+        });
     }
 
     onApprovalRequest(threadId: string, handler: ApprovalHandler): void {
         this.approvalHandlers.set(threadId, handler);
+    }
+
+    onElicitationRequest(threadId: string, handler: ElicitationHandler): void {
+        this.elicitationHandlers.set(threadId, handler);
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
@@ -155,17 +198,28 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "config/read", params: params });
     }
 
-    getMcpStartupCompleteVersion(): number {
-        return this.mcpStartupCompleteVersion;
+    getMcpServerStartupVersion(): number {
+        return this.mcpServerStartupVersion;
     }
 
-    async awaitMcpStartup(afterVersion: number): Promise<McpStartupCompleteEvent> {
-        return await this.awaitSignal(
-            this.lastMcpStartupComplete,
-            this.mcpStartupCompleteVersion,
-            afterVersion,
-            this.mcpStartupCompleteResolvers
-        );
+    async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
+        const uniqueServerNames = Array.from(new Set(serverNames.map(serverName => serverName.trim()).filter(serverName => serverName.length > 0)));
+        if (uniqueServerNames.length === 0) {
+            return { ready: [], failed: [], cancelled: [] };
+        }
+
+        const result = this.tryBuildMcpStartupResult(uniqueServerNames, afterVersion);
+        if (result !== null) {
+            return result;
+        }
+
+        return await new Promise((resolve) => {
+            this.mcpServerStartupResolvers.push({
+                serverNames: uniqueServerNames,
+                afterVersion,
+                resolve,
+            });
+        });
     }
 
     async accountRead(params: GetAccountParams): Promise<GetAccountResponse> {
@@ -214,34 +268,49 @@ export class CodexAppServerClient {
         }
     }
 
-    private resolveSignal<T>(
-        event: T,
-        version: number,
-        resolvers: Array<SignalResolver<T>>
-    ): void {
-        const pendingResolvers: Array<SignalResolver<T>> = [];
-        for (const resolver of resolvers) {
-            if (resolver.afterVersion < version) {
-                resolver.resolve(event);
+    private resolveMcpServerStartupResolvers(): void {
+        const pendingResolvers: Array<McpServerStartupResolver> = [];
+        for (const resolver of this.mcpServerStartupResolvers) {
+            const result = this.tryBuildMcpStartupResult(resolver.serverNames, resolver.afterVersion);
+            if (result !== null) {
+                resolver.resolve(result);
             } else {
                 pendingResolvers.push(resolver);
             }
         }
-        resolvers.splice(0, resolvers.length, ...pendingResolvers);
+        this.mcpServerStartupResolvers.splice(0, this.mcpServerStartupResolvers.length, ...pendingResolvers);
     }
 
-    private async awaitSignal<T>(
-        lastEvent: T | null,
-        currentVersion: number,
-        afterVersion: number,
-        resolvers: Array<SignalResolver<T>>
-    ): Promise<T> {
-        if (lastEvent !== null && currentVersion > afterVersion) {
-            return lastEvent;
+    private tryBuildMcpStartupResult(serverNames: Array<string>, afterVersion: number): McpStartupResult | null {
+        const ready: Array<string> = [];
+        const failed: Array<McpStartupFailure> = [];
+        const cancelled: Array<string> = [];
+
+        for (const serverName of serverNames) {
+            const state = this.mcpServerStartupStates.get(serverName);
+            if (!state || state.version <= afterVersion) {
+                return null;
+            }
+
+            switch (state.status) {
+                case "starting":
+                    return null;
+                case "ready":
+                    ready.push(serverName);
+                    break;
+                case "failed":
+                    failed.push({
+                        server: serverName,
+                        error: state.error ?? "unknown MCP startup error",
+                    });
+                    break;
+                case "cancelled":
+                    cancelled.push(serverName);
+                    break;
+            }
         }
-        return await new Promise((resolve) => {
-            resolvers.push({afterVersion, resolve});
-        });
+
+        return { ready, failed, cancelled };
     }
 
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
@@ -265,7 +334,7 @@ export class CodexAppServerClient {
 export type CodexConnectionEvent =
     | ({ eventType: "request" } & CodexRequest)
     | ({ eventType: "response" } & unknown)
-    | ({ eventType: "notification" } & (ServerNotification | McpStartupCompleteNotification));
+    | ({ eventType: "notification" } & ServerNotification);
 
 type CodexRequest = DistributiveOmit<ClientRequest, "id">
 
@@ -273,21 +342,21 @@ type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>
     : never;
 
-type SignalResolver<T> = {
+type McpServerStartupSnapshot = {
+    status: McpServerStartupState;
+    error: string | null;
+    version: number;
+};
+
+type McpServerStartupResolver = {
+    serverNames: Array<string>;
     afterVersion: number;
-    resolve: (event: T) => void;
+    resolve: (result: McpStartupResult) => void;
 };
 
-type McpStartupCompleteNotification = {
-    method: "codex/event/mcp_startup_complete",
-    params: {
-        msg: McpStartupCompleteEvent & { type: "mcp_startup_complete" }
-    }
-};
-
-function isMcpStartupCompleteNotification(value: unknown): value is McpStartupCompleteNotification {
-    return typeof value === "object"
-        && value !== null
-        && "method" in value
-        && value.method === "codex/event/mcp_startup_complete";
+function isMcpServerStatusUpdatedNotification(notification: ServerNotification): notification is {
+    method: "mcpServer/startupStatus/updated";
+    params: McpServerStatusUpdatedNotification;
+} {
+    return notification.method === "mcpServer/startupStatus/updated";
 }

@@ -7,12 +7,12 @@ import type { AbsolutePathBuf } from "./AbsolutePathBuf";
  * Determines how read-only file access is granted inside a restricted
  * sandbox.
  */
-export type ReadOnlyAccess = { "type": "restricted", 
+export type ReadOnlyAccess = { "type": "restricted",
 /**
  * Include built-in platform read roots required for basic process
  * execution.
  */
-include_platform_defaults: boolean, 
+include_platform_defaults: boolean,
 /**
  * Additional absolute roots that should be readable.
  */

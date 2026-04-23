@@ -26,7 +26,8 @@ import type {
     ModelReroutedNotification,
     ThreadItem,
     ThreadTokenUsageUpdatedNotification,
-    TurnPlanUpdatedNotification
+    TurnPlanUpdatedNotification,
+    WarningNotification
 } from "./app-server/v2";
 import {stripShellPrefix} from "./CommandUtils";
 import {logger} from "./Logger";
@@ -148,10 +149,10 @@ export class CodexEventHandler implements ApprovalHandler {
             case "item/reasoning/textDelta":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
-            case "serverRequest/resolved":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
+            case "serverRequest/resolved":
                 return null;
             case "turn/diff/updated":
                 this.turnDiffsByTurnId.set(notification.params.turnId, notification.params.diff);
@@ -163,6 +164,8 @@ export class CodexEventHandler implements ApprovalHandler {
                 return null;
             case "configWarning":
                 return await this.createConfigWarningEvent(notification.params);
+            case "warning":
+                return this.createWarningEvent(notification.params);
             case "thread/compacted":
                 return {
                     sessionUpdate: "agent_message_chunk",
@@ -178,7 +181,8 @@ export class CodexEventHandler implements ApprovalHandler {
             case "thread/closed":
             case "thread/realtime/started":
             case "thread/realtime/itemAdded":
-            case "thread/realtime/transcriptUpdated":
+            case "thread/realtime/transcript/delta":
+            case "thread/realtime/transcript/done":
             case "thread/realtime/outputAudio/delta":
             case "thread/realtime/sdp":
             case "thread/realtime/error":
@@ -188,6 +192,7 @@ export class CodexEventHandler implements ApprovalHandler {
             case "skills/changed":
             case "deprecationNotice":
             case "mcpServer/oauthLogin/completed":
+            case "externalAgentConfig/import/completed":
             case "rawResponseItem/completed":
             case "thread/started":
             case "thread/name/updated":
@@ -220,6 +225,16 @@ export class CodexEventHandler implements ApprovalHandler {
             content: {
                 type: "text",
                 text: `Config warning: ${event.summary}${detailsText}\n\n`
+            }
+        };
+    }
+
+    private createWarningEvent(event: WarningNotification): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `Warning: ${event.message}\n\n`
             }
         };
     }
@@ -550,7 +565,7 @@ export class CodexEventHandler implements ApprovalHandler {
     private createUsageUpdate(params: ThreadTokenUsageUpdatedNotification): UpdateSessionEvent | null {
         this.handleTokenUsageUpdated(params);
 
-        const used = this.sessionState.totalTokenUsage?.totalTokens;
+        const used = this.sessionState.lastTokenUsage?.totalTokens;
         const size = this.sessionState.modelContextWindow;
         if (used == null || size == null || size <= 0) {
             return null;

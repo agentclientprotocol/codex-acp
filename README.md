@@ -1,6 +1,6 @@
-# codex-acp
+# ACP adapter for Codex CLI
+[![npm version](https://img.shields.io/npm/v/%40jetbrains%2Fcodex-acp)](https://www.npmjs.com/package/@jetbrains/codex-acp)
 
-ACP server implementation that exposes Codex CLI functionality for smoother client and IDE integration.
 
 ## Documentation
 

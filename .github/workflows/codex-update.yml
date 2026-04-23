@@ -23,12 +23,12 @@ jobs:
       - name: Check if update is required
         id: check
         run: |
-          if ! npm outdated ${{ env.CODEX_PACKAGE }}; then
+          if ! npm outdated "$CODEX_PACKAGE"; then
             echo "Package is up to date"
             exit 0
           fi
 
-          LATEST=$(npm view ${{ env.CODEX_PACKAGE }} version)
+          LATEST=$(npm view "$CODEX_PACKAGE" version)
           BRANCH="codex-update/$LATEST"
 
           if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
@@ -36,9 +36,9 @@ jobs:
             exit 0
           fi
 
-          echo "version=$LATEST" >> $GITHUB_OUTPUT
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          echo "should_update=true" >> $GITHUB_OUTPUT
+          echo "version=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "should_update=true" >> "$GITHUB_OUTPUT"
 
   update:
     needs: check
@@ -48,20 +48,29 @@ jobs:
       BRANCH: ${{ needs.check.outputs.branch }}
       VERSION: ${{ needs.check.outputs.version }}
     steps:
+      - name: Generate GitHub token
+        uses: actions/create-github-app-token@v2
+        id: generate-token
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
 
       - name: Configure git user and prepare branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "${{ env.BRANCH }}"
+          git checkout -b "$BRANCH" --
 
       - name: Install new version of package and commit
         run: |
-          npm install ${{ env.CODEX_PACKAGE }}@${{ env.VERSION }}
+          npm install "$CODEX_PACKAGE@$VERSION"
           npm run generate-types
           git add package.json package-lock.json src/app-server
-          git commit -m "Update codex to ${{ env.VERSION }}"
+          git commit -m "Update codex to $VERSION"
 
       - name: Finalize update with Codex
         id: codex-finalize
@@ -83,23 +92,16 @@ jobs:
 
       - name: Push branch updates
         run: |
-          git push origin "${{ env.BRANCH }}"
-
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.GH_APP_ID }}
-          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          git push -- origin "$BRANCH"
 
       - name: Create PR
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          echo -e "[What's new](https://github.com/openai/codex/releases/tag/rust-v${{ env.VERSION }})\n\n$(cat pr-body.md 2>/dev/null || true)" > pr-body.md
+          echo -e "[What's new](https://github.com/openai/codex/releases/tag/rust-v${VERSION})\n\n$(cat pr-body.md 2>/dev/null || true)" > pr-body.md
 
           gh pr create \
             --base main \
-            --title "Update codex to ${{ env.VERSION }}" \
+            --title "Update codex to $VERSION" \
             --body-file pr-body.md \
             --label "codex-update"

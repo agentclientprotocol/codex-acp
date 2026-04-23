@@ -5,7 +5,7 @@
       "sessionId": "test-session-id",
       "update": {
         "sessionUpdate": "usage_update",
-        "used": 5000,
+        "used": 2500,
         "size": 128000
       }
     }

@@ -179,6 +179,9 @@
           "server": "github",
           "tool": "search",
           "arguments": {}
+        },
+        "_meta": {
+          "is_mcp_tool_call": true
         }
       }
     }
