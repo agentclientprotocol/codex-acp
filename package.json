@@ -1,5 +1,5 @@
 {
-  "name": "@jetbrains/codex-acp",
+  "name": "@agentclientprotocol/codex-acp",
   "version": "0.0.38",
   "description": "",
   "main": "dist/index.js",
