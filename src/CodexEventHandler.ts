@@ -401,7 +401,7 @@ export class CodexEventHandler {
     private createUsageUpdate(params: ThreadTokenUsageUpdatedNotification): UpdateSessionEvent | null {
         this.handleTokenUsageUpdated(params);
 
-        const used = this.sessionState.totalTokenUsage?.totalTokens;
+        const used = this.sessionState.lastTokenUsage?.totalTokens;
         const size = this.sessionState.modelContextWindow;
         if (used == null || size == null || size <= 0) {
             return null;
