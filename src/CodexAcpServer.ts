@@ -6,7 +6,6 @@ import {
     type SessionModeState
 } from "@agentclientprotocol/sdk";
 import {CodexEventHandler} from "./CodexEventHandler";
-import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -35,7 +34,6 @@ import {
     createFileChangeUpdate,
     createMcpToolCallUpdate,
 } from "./CodexToolCallMapper";
-import { createApprovalContextStore } from "./CodexApprovalContext";
 
 export interface SessionState {
     sessionId: string,
@@ -706,12 +704,12 @@ export class CodexAcpServer implements acp.Agent {
         sessionState.lastTokenUsage = null;
 
         try {
-            const approvalContext = createApprovalContextStore();
-            const eventHandler = new CodexEventHandler(this.connection, sessionState, approvalContext);
-            const approvalHandler = new CodexApprovalHandler(this.connection, sessionState, approvalContext);
-            await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
+            const eventHandler = new CodexEventHandler(this.connection, sessionState);
+            this.codexAcpClient.subscribeToSessionEvents(
+                params.sessionId,
                 (event) => eventHandler.handleNotification(event),
-                approvalHandler);
+                eventHandler
+            );
 
             if (await this.availableCommands.tryHandle(params.prompt, sessionState)) {
                 logger.log("Prompt handled by a command");

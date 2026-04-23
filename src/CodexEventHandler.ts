@@ -1,67 +1,110 @@
 import type {
     FuzzyFileSearchSessionCompletedNotification,
     FuzzyFileSearchSessionUpdatedNotification,
+    McpStartupCompleteEvent,
     ServerNotification
 } from "./app-server";
 import type {SessionState} from "./CodexAcpServer";
 import * as acp from "@agentclientprotocol/sdk";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
+import type {ToolCallContent} from "@agentclientprotocol/sdk/dist/schema/types.gen";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
+import type {ApprovalHandler} from "./CodexAppServerClient";
 import type {
     AccountRateLimitsUpdatedNotification,
     AgentMessageDeltaNotification,
     CodexErrorInfo,
     CommandExecutionOutputDeltaNotification,
+    CommandExecutionRequestApprovalParams,
+    CommandExecutionRequestApprovalResponse,
     ConfigWarningNotification,
     ErrorNotification,
+    FileChangeRequestApprovalParams,
+    FileChangeRequestApprovalResponse,
     ItemCompletedNotification,
-    ItemStartedNotification, ThreadItem,
+    ItemStartedNotification,
     ModelReroutedNotification,
+    ThreadItem,
     ThreadTokenUsageUpdatedNotification,
     TurnPlanUpdatedNotification
 } from "./app-server/v2";
-import type { McpStartupCompleteEvent } from "./app-server";
+import {stripShellPrefix} from "./CommandUtils";
+import {logger} from "./Logger";
 import {toTokenCount} from "./TokenCount";
 import {
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeCompletionUpdate,
+    createFileChangeContents,
+    createFileChangeLocations,
     createFileChangeUpdate,
-    createMcpRawInput,
-    createMcpRawOutput,
     createFuzzyFileSearchComplete,
     createFuzzyFileSearchStartOrUpdate,
+    createMcpRawInput,
+    createMcpRawOutput,
     createMcpToolCallUpdate,
+    createRawFileChangeInput,
     fuzzyFileSearchToolCallId,
+    parseUnifiedDiffChanges,
 } from "./CodexToolCallMapper";
-import { stripShellPrefix } from "./CommandUtils";
-import type { ApprovalContextStore } from "./CodexApprovalContext";
 
-export { stripShellPrefix };
+const APPROVAL_OPTIONS: acp.PermissionOption[] = [
+    { optionId: "allow_once", name: "Allow Once", kind: "allow_once" },
+    { optionId: "allow_always", name: "Allow for Session", kind: "allow_always" },
+    { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+];
 
-export class CodexEventHandler {
+export class CodexEventHandler implements ApprovalHandler {
 
     private readonly connection: acp.AgentSideConnection;
     private readonly sessionState: SessionState;
-    private readonly approvalContext: ApprovalContextStore;
+    private readonly fileChangesByItemId = new Map<string, ThreadItem & { type: "fileChange" }>();
+    private readonly turnDiffsByTurnId = new Map<string, string>();
     private failure: RequestError | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
 
-    constructor(connection: acp.AgentSideConnection, sessionState: SessionState, approvalContext: ApprovalContextStore) {
+    constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
         this.sessionState = sessionState;
-        this.approvalContext = approvalContext;
     }
 
     getFailure(): RequestError | null {
         return this.failure;
     }
 
-    async handleNotification(notification: ServerNotification) {
+    async handleNotification(notification: ServerNotification): Promise<void> {
         const session = new ACPSessionConnection(this.connection, this.sessionState.sessionId);
         const updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
             await session.update(updateEvent);
+        }
+    }
+
+    async handleCommandExecution(
+        params: CommandExecutionRequestApprovalParams
+    ): Promise<CommandExecutionRequestApprovalResponse> {
+        try {
+            const response = await this.connection.requestPermission(
+                this.buildCommandPermissionRequest(this.sessionState.sessionId, params)
+            );
+            return this.convertCommandResponse(response);
+        } catch (error) {
+            logger.error("Error requesting command execution permission", error);
+            return { decision: "cancel" };
+        }
+    }
+
+    async handleFileChange(
+        params: FileChangeRequestApprovalParams
+    ): Promise<FileChangeRequestApprovalResponse> {
+        try {
+            const response = await this.connection.requestPermission(
+                await this.buildFileChangePermissionRequest(this.sessionState.sessionId, params)
+            );
+            return this.convertFileChangeResponse(response);
+        } catch (error) {
+            logger.error("Error requesting file change permission", error);
+            return { decision: "cancel" };
         }
     }
 
@@ -100,10 +143,9 @@ export class CodexEventHandler {
             case "hook/started":
             case "hook/completed":
                 return null;
-            case "item/reasoning/summaryTextDelta": //TODO streaming reasoning?
+            case "item/reasoning/summaryTextDelta":
             case "item/reasoning/summaryPartAdded":
-            //skipped events
-            case "item/reasoning/textDelta": //for raw output
+            case "item/reasoning/textDelta":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
             case "serverRequest/resolved":
@@ -112,7 +154,7 @@ export class CodexEventHandler {
             case "mcpServer/startupStatus/updated":
                 return null;
             case "turn/diff/updated":
-                this.approvalContext.turnDiffsByTurnId.set(notification.params.turnId, notification.params.diff);
+                this.turnDiffsByTurnId.set(notification.params.turnId, notification.params.diff);
                 return null;
             case "item/mcpToolCall/progress":
                 return this.createMcpToolProgressEvent(notification.params);
@@ -168,7 +210,7 @@ export class CodexEventHandler {
                 type: "text",
                 text: event.delta
             }
-        }
+        };
     }
 
     private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
@@ -179,7 +221,7 @@ export class CodexEventHandler {
                 type: "text",
                 text: `Config warning: ${event.summary}${detailsText}\n\n`
             }
-        }
+        };
     }
 
     private createModelReroutedEvent(event: ModelReroutedNotification): UpdateSessionEvent {
@@ -195,7 +237,7 @@ export class CodexEventHandler {
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                this.approvalContext.fileChangesByItemId.set(event.item.id, event.item);
+                this.fileChangesByItemId.set(event.item.id, event.item);
                 return await createFileChangeUpdate(event.item);
             case "commandExecution":
                 return await createCommandExecutionUpdate(event.item);
@@ -222,14 +264,14 @@ export class CodexEventHandler {
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                this.approvalContext.fileChangesByItemId.set(event.item.id, event.item);
+                this.fileChangesByItemId.set(event.item.id, event.item);
                 return createFileChangeCompletionUpdate(event.item);
             case "dynamicToolCall":
                 return {
                     sessionUpdate: "tool_call_update",
                     toolCallId: event.item.id,
                     status: event.item.status === "completed" ? "completed" : "failed",
-                }
+                };
             case "mcpToolCall":
                 return {
                     sessionUpdate: "tool_call_update",
@@ -237,19 +279,22 @@ export class CodexEventHandler {
                     status: event.item.status === "completed" ? "completed" : "failed",
                     rawInput: createMcpRawInput(event.item.server, event.item.tool, event.item.arguments),
                     rawOutput: createMcpRawOutput(event.item.result, event.item.error),
-                }
+                };
             case "commandExecution":
                 return this.completeCommandExecutionEvent(event.item);
-            case "reasoning":
+            case "reasoning": {
                 const summary = event.item.summary[0];
-                if (!summary) return null;
+                if (!summary) {
+                    return null;
+                }
                 return {
                     sessionUpdate: "agent_thought_chunk",
                     content: {
                         type: "text",
                         text: summary
                     }
-                }
+                };
+            }
             case "collabAgentToolCall":
             case "userMessage":
             case "hookPrompt":
@@ -275,7 +320,115 @@ export class CodexEventHandler {
                     terminal_id: event.itemId
                 }
             }
+        };
+    }
+
+    private buildCommandPermissionRequest(
+        sessionId: string,
+        params: CommandExecutionRequestApprovalParams
+    ): acp.RequestPermissionRequest {
+        const reasonContent = this.createTextContent(params.reason ?? null);
+        return {
+            sessionId,
+            toolCall: {
+                toolCallId: params.itemId,
+                kind: "execute",
+                status: "pending",
+                content: reasonContent ? [reasonContent] : null,
+                rawInput: params.command ? { command: stripShellPrefix(params.command), cwd: params.cwd } : null,
+            },
+            options: APPROVAL_OPTIONS,
+        };
+    }
+
+    private createTextContent(text: string | null): ToolCallContent | null {
+        if (text === null || text === "") {
+            return null;
         }
+        return {
+            type: "content",
+            content: {
+                type: "text",
+                text
+            }
+        };
+    }
+
+    private async buildFileChangePermissionRequest(
+        sessionId: string,
+        params: FileChangeRequestApprovalParams
+    ): Promise<acp.RequestPermissionRequest> {
+        const reasonContent = this.createTextContent(params.reason ?? null);
+        const fileChange = this.fileChangesByItemId.get(params.itemId);
+        const content: ToolCallContent[] = reasonContent ? [reasonContent] : [];
+        const toolCall: acp.ToolCallUpdate = {
+            toolCallId: params.itemId,
+            kind: "edit",
+            status: "pending",
+        };
+
+        if (fileChange) {
+            content.push(...await createFileChangeContents(fileChange.changes));
+            toolCall.locations = createFileChangeLocations(fileChange.changes);
+            toolCall.rawInput = createRawFileChangeInput(fileChange.changes);
+        } else {
+            const turnDiff = this.turnDiffsByTurnId.get(params.turnId);
+            if (turnDiff) {
+                const parsedChanges = parseUnifiedDiffChanges(turnDiff);
+                content.push(...await createFileChangeContents(parsedChanges));
+                const locations = createFileChangeLocations(parsedChanges);
+                if (locations.length > 0) {
+                    toolCall.locations = locations;
+                }
+                toolCall.rawInput = parsedChanges.length > 0
+                    ? { unifiedDiff: turnDiff, ...createRawFileChangeInput(parsedChanges) }
+                    : { unifiedDiff: turnDiff };
+            }
+        }
+
+        if (content.length > 0) {
+            toolCall.content = content;
+        }
+
+        return {
+            sessionId,
+            toolCall,
+            options: APPROVAL_OPTIONS,
+        };
+    }
+
+    private convertCommandResponse(
+        response: acp.RequestPermissionResponse
+    ): CommandExecutionRequestApprovalResponse {
+        if (response.outcome.outcome === "cancelled") {
+            return { decision: "cancel" };
+        }
+
+        const optionId = response.outcome.optionId;
+        if (optionId === "allow_once") {
+            return { decision: "accept" };
+        }
+        if (optionId === "allow_always") {
+            return { decision: "acceptForSession" };
+        }
+        return { decision: "decline" };
+    }
+
+    private convertFileChangeResponse(
+        response: acp.RequestPermissionResponse
+    ): FileChangeRequestApprovalResponse {
+        if (response.outcome.outcome === "cancelled") {
+            return { decision: "cancel" };
+        }
+
+        const optionId = response.outcome.optionId;
+        if (optionId === "allow_once") {
+            return { decision: "accept" };
+        }
+        if (optionId === "allow_always") {
+            return { decision: "acceptForSession" };
+        }
+        return { decision: "cancel" };
     }
 
     private createMcpToolProgressEvent(event: { itemId: string, message: string }): UpdateSessionEvent {
@@ -325,7 +478,7 @@ export class CodexEventHandler {
         return `mcp_startup.${encodeURIComponent(serverName)}`;
     }
 
-    private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {
+    private completeCommandExecutionEvent(item: ThreadItem & { type: "commandExecution" }): UpdateSessionEvent {
         return {
             sessionUpdate: "tool_call_update",
             toolCallId: item.id,
@@ -341,24 +494,23 @@ export class CodexEventHandler {
                     terminal_id: item.id
                 }
             }
-        }
+        };
     }
 
     private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {
         const plan: PlanEntry[] = event.plan.map(value => ({
-                status: value.status == "inProgress" ? "in_progress" : value.status,
-                content: value.step,
-                priority: "medium"
-            })
-        );
+            status: value.status == "inProgress" ? "in_progress" : value.status,
+            content: value.step,
+            priority: "medium"
+        }));
         return {
             sessionUpdate: "plan",
             entries: plan,
-        }
+        };
     }
 
     private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent> {
-        const error = params.error.codexErrorInfo
+        const error = params.error.codexErrorInfo;
         if (error == "unauthorized" || error == "usageLimitExceeded" || this.getHttpStatusCode(error) == 401) {
             this.failure = RequestError.authRequired();
         }
@@ -368,18 +520,21 @@ export class CodexEventHandler {
                 type: "text",
                 text: `${params.error.message}\n\n`
             }
-        }
+        };
     }
 
     private getHttpStatusCode(error: CodexErrorInfo | null): number | null {
         if (error !== null && typeof error === "object") {
             if ("httpConnectionFailed" in error) {
                 return error.httpConnectionFailed.httpStatusCode;
-            } else if ("responseStreamConnectionFailed" in error) {
+            }
+            if ("responseStreamConnectionFailed" in error) {
                 return error.responseStreamConnectionFailed.httpStatusCode;
-            } else if ("responseStreamDisconnected" in error) {
+            }
+            if ("responseStreamDisconnected" in error) {
                 return error.responseStreamDisconnected.httpStatusCode;
-            } else if ("responseTooManyFailedAttempts" in error) {
+            }
+            if ("responseTooManyFailedAttempts" in error) {
                 return error.responseTooManyFailedAttempts.httpStatusCode;
             }
         }
