@@ -103,19 +103,18 @@ export class CodexAppServerClient {
         this.connection = connection;
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
-          if (isMcpServerStatusUpdatedNotification(serverNotification)) {
-            this.mcpServerStartupVersion += 1;
-            this.mcpServerStartupStates.set(serverNotification.params.name, {
-              status: serverNotification.params.status,
-              error: serverNotification.params.error,
-              version: this.mcpServerStartupVersion,
-            });
-            this.resolveMcpServerStartupResolvers();
-          }
+            if (isMcpServerStatusUpdatedNotification(serverNotification)) {
+                this.mcpServerStartupVersion += 1;
+                this.mcpServerStartupStates.set(serverNotification.params.name, {
+                    status: serverNotification.params.status,
+                    error: serverNotification.params.error,
+                    version: this.mcpServerStartupVersion,
+                });
+                this.resolveMcpServerStartupResolvers();
+            }
             if (isTurnCompletedNotification(serverNotification)) {
                 this.lastTurnCompletedByThread.set(serverNotification.params.threadId, serverNotification.params);
                 this.resolveTurnCompleted(serverNotification.params);
-          }
             }
             this.notify(serverNotification);
             for (const callback of this.codexEventHandlers) {
@@ -282,6 +281,11 @@ export class CodexAppServerClient {
         this.notificationHandlers.delete(sessionId);
     }
 
+    clearThreadState(threadId: string): void {
+        this.turnCompletedResolvers.delete(threadId);
+        this.lastTurnCompletedByThread.delete(threadId);
+    }
+
     private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
     onClientTransportEvent(callback: (event: CodexConnectionEvent) => void){
         this.codexEventHandlers.push(callback);
@@ -418,12 +422,6 @@ type TurnCompletedResolver = {
     resolve: (event: TurnCompletedNotification) => void;
 };
 
-type McpStartupCompleteNotification = {
-    method: "codex/event/mcp_startup_complete",
-    params: {
-        msg: McpStartupCompleteEvent & { type: "mcp_startup_complete" }
-    }
-};
 
 function isMcpServerStatusUpdatedNotification(notification: ServerNotification): notification is {
     method: "mcpServer/startupStatus/updated";

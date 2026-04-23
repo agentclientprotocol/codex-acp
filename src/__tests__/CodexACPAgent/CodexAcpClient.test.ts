@@ -658,6 +658,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const sessionState: SessionState = createTestSessionState();
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+        // @ts-expect-error seeding private session store for slash-command test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
 
         await codexAcpAgent.prompt({ sessionId: "session-id", prompt: [{ type: "text", text: "/status" }] });
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-status.json");
@@ -670,6 +672,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const sessionState: SessionState = createTestSessionState();
 
         const logoutSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "logout").mockResolvedValue({});
+        // @ts-expect-error seeding private session store for slash-command test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
 
         // @ts-expect-error - exercising private helper
         const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "logout", input: null }, sessionState);
@@ -696,6 +700,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             }]
         };
         const skillsSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue(skillsResponse);
+        // @ts-expect-error seeding private session store for slash-command test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
 
         // @ts-expect-error - exercising private helper
         const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "skills", input: null }, sessionState);
@@ -731,6 +737,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             nextCursor: null
         };
         const mcpSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "listMcpServers").mockResolvedValue(mcpResponse);
+        // @ts-expect-error seeding private session store for slash-command test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
 
         // @ts-expect-error - exercising private helper
         const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "mcp", input: null }, sessionState);
@@ -820,7 +828,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 durationMs: null,
             }
         });
-        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+        // @ts-expect-error seeding private session store for prompt test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
         return { mockFixture, sessionState, turnStartSpy };
     }
 
@@ -1064,6 +1075,24 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(codexAppServerClient.approvalHandlers.has("session-close")).toBe(true);
         // @ts-expect-error verifying test-only access to private maps
         expect(codexAppServerClient.elicitationHandlers.has("session-close")).toBe(true);
+        // @ts-expect-error verifying test-only access to private maps
+        codexAppServerClient.turnCompletedResolvers.set("session-close", [{
+            turnId: "other-turn",
+            resolve: vi.fn(),
+        }]);
+        // @ts-expect-error verifying test-only access to private maps
+        codexAppServerClient.lastTurnCompletedByThread.set("session-close", {
+            threadId: "session-close",
+            turn: {
+                id: "completed-turn",
+                items: [],
+                status: "completed",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            },
+        });
 
         await codexAcpClient.closeSession("session-close", "turn-close");
 
@@ -1088,6 +1117,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(codexAppServerClient.approvalHandlers.has("session-close")).toBe(false);
         // @ts-expect-error verifying test-only access to private maps
         expect(codexAppServerClient.elicitationHandlers.has("session-close")).toBe(false);
+        // @ts-expect-error verifying test-only access to private maps
+        expect(codexAppServerClient.turnCompletedResolvers.has("session-close")).toBe(false);
+        // @ts-expect-error verifying test-only access to private maps
+        expect(codexAppServerClient.lastTurnCompletedByThread.has("session-close")).toBe(false);
     });
 
     it('waits for the matching turn completion before resolving a prompt', async () => {
@@ -1221,6 +1254,45 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(closeSpy).toHaveBeenCalledWith(sessionState.sessionId, "turn-pending");
     });
 
+    it('rejects a prompt if the session closes before turn start begins', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const sessionState = createTestSessionState({
+            sessionId: "session-close",
+        });
+
+        let resolveTryHandle!: (handled: boolean) => void;
+        const tryHandlePromise = new Promise<boolean>((resolve) => {
+            resolveTryHandle = resolve;
+        });
+
+        // @ts-expect-error seeding private session store for focused close-session test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
+        // @ts-expect-error exercising private helper through the availableCommands collaborator
+        const tryHandleSpy = vi.spyOn(codexAcpAgent.availableCommands, "tryHandle").mockReturnValue(tryHandlePromise);
+        const startPromptSpy = vi.spyOn(codexAcpClient, "startPrompt");
+        vi.spyOn(codexAcpClient, "closeSession").mockResolvedValue();
+
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId: sessionState.sessionId,
+            prompt: [{ type: "text", text: "normal prompt" }],
+        });
+
+        await vi.waitFor(() => {
+            expect(tryHandleSpy).toHaveBeenCalled();
+        });
+
+        await expect(
+            codexAcpAgent.unstable_closeSession({sessionId: sessionState.sessionId})
+        ).resolves.toEqual({});
+
+        resolveTryHandle(false);
+
+        await expect(promptPromise).rejects.toThrow("Invalid request");
+        expect(startPromptSpy).not.toHaveBeenCalled();
+    });
+
     it('skips late MCP startup updates after a session is closed', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
@@ -1233,7 +1305,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const startupPromise = new Promise((resolve) => {
             resolveStartup = resolve;
         });
-        vi.spyOn(codexAcpClient, "awaitMcpStartupResult").mockReturnValue(startupPromise as Promise<any>);
+        vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockReturnValue(startupPromise as Promise<any>);
 
         // @ts-expect-error seeding private session store for focused close-session test
         codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
@@ -1295,6 +1367,47 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         await publishPromise;
 
+        expect(mockFixture.getAcpConnectionEvents([])).toEqual([]);
+    });
+
+    it('skips late slash command updates after a session is closed', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const sessionState = createTestSessionState({
+            sessionId: "session-close",
+        });
+
+        let resolveSkills!: (response: SkillsListResponse) => void;
+        const skillsPromise = new Promise<SkillsListResponse>((resolve) => {
+            resolveSkills = resolve;
+        });
+        vi.spyOn(codexAcpClient, "listSkills").mockReturnValue(skillsPromise);
+
+        // @ts-expect-error seeding private session store for focused close-session test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
+
+        // @ts-expect-error exercising private helper through the availableCommands collaborator
+        const commandPromise = codexAcpAgent.availableCommands.handleCommand({ name: "skills", input: null }, sessionState);
+        // @ts-expect-error exercising private helper to simulate close-session cleanup
+        codexAcpAgent.forgetSession(sessionState.sessionId);
+
+        resolveSkills({
+            data: [{
+                cwd: "/workspace",
+                skills: [{
+                    name: "build",
+                    description: "Build the project",
+                    shortDescription: "Build",
+                    path: "/workspace",
+                    scope: "user",
+                    enabled: true,
+                }],
+                errors: [],
+            }],
+        });
+
+        await expect(commandPromise).resolves.toBe(true);
         expect(mockFixture.getAcpConnectionEvents([])).toEqual([]);
     });
 });

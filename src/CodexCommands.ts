@@ -205,7 +205,7 @@ export class CodexCommands {
     }
 
     private async updateSession(sessionId: string, update: UpdateSessionEvent): Promise<void> {
-        if (this.isSessionClosing(sessionId)) {
+        if (this.isSessionClosing(sessionId) || !this.hasTrackedSession(sessionId)) {
             return;
         }
         const session = new ACPSessionConnection(this.connection, sessionId);

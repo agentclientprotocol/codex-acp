@@ -392,6 +392,7 @@ export class CodexAcpClient {
 
         await this.codexClient.threadUnsubscribe({threadId: sessionId});
         this.unsubscribeFromSessionEvents(sessionId);
+        this.codexClient.clearThreadState(sessionId);
     }
 
     async startPrompt(

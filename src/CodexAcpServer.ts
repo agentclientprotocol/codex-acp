@@ -685,6 +685,12 @@ export class CodexAcpServer implements acp.Agent {
         }
     }
 
+    private ensureSessionIsActive(sessionId: string, requireTrackedSession: boolean = false): void {
+        if (this.closingSessions.has(sessionId) || (requireTrackedSession && !this.sessions.has(sessionId))) {
+            throw RequestError.invalidRequest("Session is closing");
+        }
+    }
+
     private forgetSession(sessionId: string): void {
         this.sessions.delete(sessionId);
         this.pendingMcpStartupSessions.delete(sessionId);
@@ -721,20 +727,23 @@ export class CodexAcpServer implements acp.Agent {
             return;
         }
 
+        const requestedServers = pendingStartup.requestedServers;
+        const afterVersion = pendingStartup.afterVersion;
+
         try {
             const mcpStartup = await this.runWithProcessCheck(() =>
                 this.codexAcpClient.awaitMcpServerStartup(
-                    Array.from(pendingStartup.requestedServers),
-                    pendingStartup.afterVersion,
+                    Array.from(requestedServers),
+                    afterVersion,
                 )
             );
             const sessionState = this.sessions.get(sessionId);
-            const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
-            if (sessionState && pendingStartup) {
+            const currentPendingStartup = this.pendingMcpStartupSessions.get(sessionId);
+            if (sessionState && currentPendingStartup) {
                 sessionState.sessionMcpServers = mcpStartup.ready.filter(serverName =>
-                    pendingStartup.requestedServers.has(serverName)
+                    currentPendingStartup.requestedServers.has(serverName)
                 );
-await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.requestedServers);
+                await this.publishMcpStartupStatus(sessionId, mcpStartup, currentPendingStartup.requestedServers);
             } else {
                 logger.log("Skipping MCP startup status for closed session", {sessionId});
             }
@@ -772,9 +781,8 @@ await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.request
             prompt: params.prompt,
         });
         const sessionState = this.getSessionState(params.sessionId);
-        if (this.closingSessions.has(params.sessionId)) {
-            throw RequestError.invalidRequest("Session is closing");
-        }
+        const requireTrackedSession = this.sessions.has(params.sessionId);
+        this.ensureSessionIsActive(params.sessionId, requireTrackedSession);
         sessionState.pendingTurnId = null;
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
@@ -793,6 +801,7 @@ await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.request
                 },
                 approvalHandler,
                 elicitationHandler);
+            this.ensureSessionIsActive(params.sessionId, requireTrackedSession);
 
             if (await this.availableCommands.tryHandle(params.prompt, sessionState)) {
                 logger.log("Prompt handled by a command");
@@ -802,6 +811,8 @@ await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.request
                     _meta: this.buildQuotaMeta(sessionState),
                 };
             }
+
+            this.ensureSessionIsActive(params.sessionId, requireTrackedSession);
 
             const modelId = ModelId.fromString(sessionState.currentModelId);
             const modelLacksReasoning = sessionState.supportedReasoningEfforts.length > 0

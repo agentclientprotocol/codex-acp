@@ -345,8 +345,8 @@ export async function setupPromptAndSendNotifications(
 
     for (const notification of notifications) {
         const routedNotification = (() => {
-            const params = notification.params as { threadId?: unknown };
-            if (typeof params.threadId !== "string") {
+            const params = notification.params;
+            if ("threadId" in params && typeof params.threadId !== "string") {
                 return notification;
             }
             return {
@@ -355,7 +355,7 @@ export async function setupPromptAndSendNotifications(
                     ...notification.params,
                     threadId: sessionId,
                 },
-            } satisfies ServerNotification;
+            } as ServerNotification;
         })();
 
         fixture.sendServerNotification(routedNotification);
