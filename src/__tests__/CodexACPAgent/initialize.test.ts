@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CodexAcpServer } from '../../CodexAcpServer';
 import * as acp from '@agentclientprotocol/sdk';
 import { createMockConnections } from './test-utils';
-import {CodexAuthMethods} from "../../CodexAuthMethod";
+import {getCodexAuthMethods} from "../../CodexAuthMethod";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 
@@ -45,7 +45,28 @@ describe('CodexACPAgent - initialize', () => {
                     sse: false,
                 },
             },
-            authMethods: CodexAuthMethods,
+            authMethods: getCodexAuthMethods(),
         });
+    });
+
+    it('should advertise gateway auth when the client opts into gateway auth metadata', async () => {
+        const params: acp.InitializeRequest = {
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {
+                auth: {
+                    _meta: {
+                        gateway: true,
+                    }
+                }
+            }
+        };
+
+        const result = await agent.initialize(params);
+
+        expect(result.authMethods).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: "gateway",
+            })
+        ]));
     });
 });
