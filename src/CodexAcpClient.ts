@@ -44,6 +44,7 @@ export class CodexAcpClient {
     private gatewayConfig: GatewayConfig | null;
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
+    private readonly sessionNotificationStates = new Map<string, SessionNotificationState>();
 
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
@@ -357,13 +358,12 @@ export class CodexAcpClient {
         return ModelId.create(selectedModel.id, reasoningEffort ?? selectedModel.defaultReasoningEffort);
     }
 
-    async subscribeToSessionEvents(
+    subscribeToSessionEvents(
         sessionId: string,
-        eventHandler: (result: ServerNotification) => void | Promise<void>,
-        approvalHandler: ApprovalHandler
-    ) {
-        this.codexClient.onServerNotification(sessionId, eventHandler);
-        this.codexClient.onApprovalRequest(sessionId, approvalHandler);
+        eventHandler: SessionEventHandler
+    ): void {
+        this.replaceSessionNotificationHandler(sessionId, eventHandler.handleNotification.bind(eventHandler));
+        this.codexClient.onApprovalRequest(sessionId, eventHandler);
     }
 
     async sendPrompt(
@@ -394,7 +394,7 @@ export class CodexAcpClient {
         // Wait for turn completion
         // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
         const turnCompleted = await this.codexClient.awaitTurnCompleted();
-        await this.codexClient.flushServerNotifications(request.sessionId);
+        await this.awaitPendingSessionNotifications(request.sessionId);
         return turnCompleted;
     }
 
@@ -443,6 +443,30 @@ export class CodexAcpClient {
                 resolve(mapEvent(event));
             });
         });
+    }
+
+    private replaceSessionNotificationHandler(
+        sessionId: string,
+        eventHandler: (event: ServerNotification) => Promise<void>,
+    ): void {
+        this.sessionNotificationStates.get(sessionId)?.subscription.dispose();
+        const state: SessionNotificationState = {
+            pending: Promise.resolve(),
+            subscription: { dispose() {} },
+        };
+        state.subscription = this.codexClient.onServerNotification(async (event) => {
+            state.pending = state.pending
+                .then(() => eventHandler(event))
+                .catch((error) => {
+                    logger.error("Error handling server notification", error);
+                });
+            await state.pending;
+        });
+        this.sessionNotificationStates.set(sessionId, state);
+    }
+
+    private async awaitPendingSessionNotifications(sessionId: string): Promise<void> {
+        await (this.sessionNotificationStates.get(sessionId)?.pending ?? Promise.resolve());
     }
 
     async listMcpServers(params: ListMcpServerStatusParams = { cursor: null, limit: null }): Promise<ListMcpServerStatusResponse> {
@@ -583,6 +607,15 @@ export class CodexAcpClient {
 }
 
 export type JsonObject = { [key in string]?: JsonValue }
+
+type SessionEventHandler = ApprovalHandler & {
+    handleNotification(notification: ServerNotification): Promise<void>;
+}
+
+type SessionNotificationState = {
+    pending: Promise<void>;
+    subscription: Disposable;
+}
 
 export type SessionMetadata = {
     sessionId: string,

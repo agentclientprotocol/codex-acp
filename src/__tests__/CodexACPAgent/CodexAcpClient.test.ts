@@ -387,10 +387,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "ll", }},
             { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "o!", }},
         ];
-        function onServerNotification(_sessionId: string, callback: (event: ServerNotification) => void){
+        function onServerNotification(callback: (event: ServerNotification) => Promise<void>){
             for (const notification of serverNotifications) {
-                callback(notification);
+                void callback(notification);
             }
+            return { dispose() {} };
         }
         return onServerNotification;
     }

@@ -705,11 +705,7 @@ export class CodexAcpServer implements acp.Agent {
 
         try {
             const eventHandler = new CodexEventHandler(this.connection, sessionState);
-            this.codexAcpClient.subscribeToSessionEvents(
-                params.sessionId,
-                (event) => eventHandler.handleNotification(event),
-                eventHandler
-            );
+            this.codexAcpClient.subscribeToSessionEvents(params.sessionId, eventHandler);
 
             if (await this.availableCommands.tryHandle(params.prompt, sessionState)) {
                 logger.log("Prompt handled by a command");

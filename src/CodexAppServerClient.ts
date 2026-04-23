@@ -1,3 +1,4 @@
+import type {Disposable} from "vscode-jsonrpc";
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import type {
     ClientRequest,
@@ -61,8 +62,7 @@ const FileChangeApprovalRequest = new RequestType<
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
-    private readonly notificationHandlers = new Map<string, (event: ServerNotification) => void | Promise<void>>();
-    private readonly notificationQueues = new Map<string, Promise<void> | null>();
+    private readonly notificationHandlers = new Set<(event: ServerNotification) => Promise<void>>();
     private mcpStartupCompleteVersion = 0;
     private lastMcpStartupComplete: McpStartupCompleteEvent | null = null;
     private readonly mcpStartupCompleteResolvers: Array<SignalResolver<McpStartupCompleteEvent>> = [];
@@ -80,7 +80,7 @@ export class CodexAppServerClient {
                 return;
             }
             const serverNotification = data as ServerNotification;
-            this.notify(serverNotification);
+            this.notifyServerNotificationHandlers(serverNotification);
             for (const callback of this.codexEventHandlers) {
                 callback({ eventType: "notification", ...serverNotification });
             }
@@ -190,12 +190,15 @@ export class CodexAppServerClient {
     }
 
     /**
-     * Registers a notification handler for a specific session.
-     * Replaces any existing handler for the same session, preventing handler accumulation.
+     * Registers a notification handler for server notifications.
      */
-    onServerNotification(sessionId: string, callback: (event: ServerNotification) => void | Promise<void>) {
-        this.notificationHandlers.set(sessionId, callback);
-        this.notificationQueues.set(sessionId, null);
+    onServerNotification(callback: (event: ServerNotification) => Promise<void>): Disposable {
+        this.notificationHandlers.add(callback);
+        return {
+            dispose: () => {
+                this.notificationHandlers.delete(callback);
+            }
+        };
     }
 
     private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
@@ -203,44 +206,12 @@ export class CodexAppServerClient {
         this.codexEventHandlers.push(callback);
     }
 
-    private notify(notification: ServerNotification) {
-        for (const [sessionId, notificationHandler] of this.notificationHandlers.entries()) {
-            const queue = this.notificationQueues.get(sessionId);
-            if (queue) {
-                const next = queue
-                    .then(() => notificationHandler(notification))
-                    .catch((error) => {
-                        logger.error("Error handling server notification", error);
-                    });
-                this.notificationQueues.set(sessionId, this.trackNotificationQueue(sessionId, next));
-                continue;
-            }
-
-            try {
-                const result = notificationHandler(notification);
-                if (result instanceof Promise) {
-                    const next = result.catch((error) => {
-                        logger.error("Error handling server notification", error);
-                    });
-                    this.notificationQueues.set(sessionId, this.trackNotificationQueue(sessionId, next));
-                }
-            } catch (error) {
+    private notifyServerNotificationHandlers(notification: ServerNotification): void {
+        for (const notificationHandler of this.notificationHandlers) {
+            void notificationHandler(notification).catch((error) => {
                 logger.error("Error handling server notification", error);
-            }
+            });
         }
-    }
-
-    async flushServerNotifications(sessionId: string): Promise<void> {
-        await (this.notificationQueues.get(sessionId) ?? Promise.resolve());
-    }
-
-    private trackNotificationQueue(sessionId: string, queue: Promise<void>): Promise<void> {
-        const trackedQueue = queue.finally(() => {
-            if (this.notificationQueues.get(sessionId) === trackedQueue) {
-                this.notificationQueues.set(sessionId, null);
-            }
-        });
-        return trackedQueue;
     }
 
     private resolveSignal<T>(
