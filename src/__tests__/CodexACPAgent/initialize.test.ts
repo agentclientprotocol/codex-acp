@@ -32,6 +32,9 @@ describe('CodexACPAgent - initialize', () => {
         expect(result).toEqual({
             protocolVersion: acp.PROTOCOL_VERSION,
             agentCapabilities: {
+                auth: {
+                    logout: {},
+                },
                 loadSession: true,
                 promptCapabilities: {
                     image: true

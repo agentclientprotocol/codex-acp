@@ -96,6 +96,9 @@ export class CodexAcpServer implements acp.Agent {
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
             agentCapabilities: {
+                auth: {
+                    logout: {},
+                },
                 loadSession: true,
                 promptCapabilities: {
                     image: true
@@ -121,8 +124,10 @@ export class CodexAcpServer implements acp.Agent {
         switch (methodRequest.method) {
             case "authentication/status":
                 return await this.runWithProcessCheck(() => this.codexAcpClient.getAuthenticationStatus());
-            case "authentication/logout":
-                return await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+            case "authentication/logout": {
+                await this.unstable_logout({});
+                return {};
+            }
         }
     }
 
@@ -268,6 +273,12 @@ export class CodexAcpServer implements acp.Agent {
         }
         logger.log("Authenticate request completed");
         return { };
+    }
+
+    async unstable_logout(_params: acp.LogoutRequest): Promise<void> {
+        logger.log("Logout request received");
+        await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+        logger.log("Logout request completed");
     }
 
     async setSessionMode(
