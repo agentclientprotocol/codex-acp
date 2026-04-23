@@ -1,0 +1,42 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "file-change-already-applied",
+        "title": "/test/project/OldFile.kt",
+        "kind": "edit",
+        "status": "completed",
+        "content": [
+          {
+            "type": "diff",
+            "oldText": "package test.project\n\nclass OldFile {}",
+            "newText": "package test.project\n\nclass OldFile { fun hello() = \"Hello\" }",
+            "path": "/test/project/OldFile.kt",
+            "_meta": {
+              "kind": "update"
+            }
+          }
+        ],
+        "locations": [
+          {
+            "path": "/test/project/OldFile.kt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/OldFile.kt",
+              "kind": {
+                "type": "update"
+              },
+              "diff": "--- /test/project/OldFile.kt\n+++ /test/project/OldFile.kt\n@@ -1,3 +1,3 @@\n package test.project\n \n-class OldFile {}\n+class OldFile { fun hello() = \"Hello\" }"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

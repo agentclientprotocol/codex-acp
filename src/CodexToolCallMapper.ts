@@ -368,22 +368,22 @@ async function createPatchContent(change: FileUpdateChange): Promise<ToolCallCon
 
     const oldContent = change.kind.type === "add" ? "" : await readFile(change.path, { encoding: "utf8" }).catch(() => null);
     if (oldContent === null) {
-        return null;
+        return isUnifiedDiff(change.diff) ? createPatchContentFromUnifiedDiff(change) : null;
     }
 
     const newContent = applyPatch(oldContent, change.diff);
-    if (newContent === false) {
-        return null;
+    if (newContent !== false) {
+        return {
+            type: "diff",
+            oldText: change.kind.type === "add" ? null : oldContent,
+            newText: newContent,
+            path: change.path,
+            _meta: {
+                kind: change.kind.type,
+            },
+        };
     }
-    return {
-        type: "diff",
-        oldText: change.kind.type === "add" ? null : oldContent,
-        newText: newContent,
-        path: change.path,
-        _meta: {
-            kind: change.kind.type,
-        },
-    };
+    return createPatchContentFromUnifiedDiff(change);
 }
 
 function isUnifiedDiff(content: string): boolean {
@@ -468,6 +468,63 @@ function patchToDeletedContent(unifiedDiff: string): string | null {
 
         const oldText = oldLines.join("\n");
         return hasNoTrailingNewlineMarker || !unifiedDiff.endsWith("\n") ? oldText : `${oldText}\n`;
+    } catch {
+        return null;
+    }
+}
+
+function createPatchContentFromUnifiedDiff(change: FileUpdateChange): ToolCallContent | null {
+    const diffContent = patchToDiffContent(change.diff);
+    if (diffContent === null) {
+        return null;
+    }
+
+    return {
+        type: "diff",
+        oldText: change.kind.type === "add" ? null : diffContent.oldText,
+        newText: change.kind.type === "delete" ? "" : diffContent.newText,
+        path: change.path,
+        _meta: {
+            kind: change.kind.type,
+        },
+    };
+}
+
+function patchToDiffContent(unifiedDiff: string): { oldText: string; newText: string } | null {
+    try {
+        const [patch] = parsePatch(unifiedDiff);
+        if (!patch || patch.hunks.length === 0) {
+            return null;
+        }
+
+        const oldLines: string[] = [];
+        const newLines: string[] = [];
+
+        for (const hunk of patch.hunks) {
+            for (const line of hunk.lines) {
+                if (line === "\\ No newline at end of file") {
+                    continue;
+                }
+                if (line.startsWith(" ")) {
+                    const text = line.slice(1);
+                    oldLines.push(text);
+                    newLines.push(text);
+                    continue;
+                }
+                if (line.startsWith("-")) {
+                    oldLines.push(line.slice(1));
+                    continue;
+                }
+                if (line.startsWith("+")) {
+                    newLines.push(line.slice(1));
+                }
+            }
+        }
+
+        return {
+            oldText: oldLines.join("\n"),
+            newText: newLines.join("\n"),
+        };
     } catch {
         return null;
     }

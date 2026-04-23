@@ -32,6 +32,13 @@
               "type": "text",
               "text": "Updating config file"
             }
+          },
+          {
+            "type": "diff",
+            "oldText": "{\"feature\":false}",
+            "newText": "{\"feature\":true}",
+            "path": "test/project/config.json",
+            "_meta": "_meta"
           }
         ]
       },

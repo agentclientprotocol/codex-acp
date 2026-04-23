@@ -338,4 +338,44 @@ describe('CodexEventHandler - file change events', () => {
             'data/file-change-completion-update.json'
         );
     });
+
+    it('should emit diff content when the file is already in the post-edit state', async () => {
+        mockFileContent('/test/project/OldFile.kt', 'package test.project\n\nclass OldFile { fun hello() = "Hello" }');
+
+        const updateDiff = [
+            '--- /test/project/OldFile.kt',
+            '+++ /test/project/OldFile.kt',
+            '@@ -1,3 +1,3 @@',
+            ' package test.project',
+            ' ',
+            '-class OldFile {}',
+            '+class OldFile { fun hello() = "Hello" }',
+        ].join('\n');
+
+        const updateNotification = {
+            method: 'item/started',
+            params: {
+                threadId: 'thread-1',
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-change-already-applied',
+                    changes: [
+                        {
+                            path: '/test/project/OldFile.kt',
+                            kind: { type: 'update' },
+                            diff: updateDiff,
+                        },
+                    ],
+                    status: 'completed',
+                },
+            },
+        } as ServerNotification;
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [updateNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
+            'data/file-change-update-already-applied.json'
+        );
+    });
 });
