@@ -924,4 +924,117 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             }
         });
     });
+
+    it('closes an active session by interrupting the turn, unsubscribing the thread, and removing listeners', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        await codexAcpClient.subscribeToSessionEvents(
+            "session-close",
+            vi.fn(),
+            {
+                handleCommandExecution: vi.fn(),
+                handleFileChange: vi.fn(),
+            },
+            {
+                handleElicitation: vi.fn(),
+            }
+        );
+
+        // @ts-expect-error verifying test-only access to private maps
+        expect(codexAppServerClient.notificationHandlers.has("session-close")).toBe(true);
+        // @ts-expect-error verifying test-only access to private maps
+        expect(codexAppServerClient.approvalHandlers.has("session-close")).toBe(true);
+        // @ts-expect-error verifying test-only access to private maps
+        expect(codexAppServerClient.elicitationHandlers.has("session-close")).toBe(true);
+
+        await codexAcpClient.closeSession("session-close", "turn-close");
+
+        const closeRequests = mockFixture.getCodexConnectionEvents([])
+            .filter((event) => event.eventType === "request");
+        expect(closeRequests).toEqual([
+            {
+                eventType: "request",
+                method: "turn/interrupt",
+                params: {threadId: "session-close", turnId: "turn-close"},
+            },
+            {
+                eventType: "request",
+                method: "thread/unsubscribe",
+                params: {threadId: "session-close"},
+            },
+        ]);
+
+        // @ts-expect-error verifying test-only access to private maps
+        expect(codexAppServerClient.notificationHandlers.has("session-close")).toBe(false);
+        // @ts-expect-error verifying test-only access to private maps
+        expect(codexAppServerClient.approvalHandlers.has("session-close")).toBe(false);
+        // @ts-expect-error verifying test-only access to private maps
+        expect(codexAppServerClient.elicitationHandlers.has("session-close")).toBe(false);
+    });
+
+    it('removes session bookkeeping after unstable_closeSession', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const sessionState = createTestSessionState({
+            sessionId: "session-close",
+            currentTurnId: "turn-close",
+        });
+        const closeSpy = vi.spyOn(codexAcpClient, "closeSession").mockResolvedValue();
+
+        // @ts-expect-error seeding private session store for focused close-session test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
+        // @ts-expect-error seeding private session store for focused close-session test
+        codexAcpAgent.pendingMcpStartupSessions.set(sessionState.sessionId, {
+            requestedServers: new Set(["alpha"]),
+        });
+
+        await expect(
+            codexAcpAgent.unstable_closeSession({sessionId: sessionState.sessionId})
+        ).resolves.toEqual({});
+        expect(closeSpy).toHaveBeenCalledWith(sessionState.sessionId, sessionState.currentTurnId);
+        expect(() => codexAcpAgent.getSessionState(sessionState.sessionId)).toThrow(
+            `Session ${sessionState.sessionId} not found`
+        );
+        // @ts-expect-error verifying test-only access to private map
+        expect(codexAcpAgent.pendingMcpStartupSessions.has(sessionState.sessionId)).toBe(false);
+    });
+
+    it('skips late MCP startup updates after a session is closed', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const sessionState = createTestSessionState({
+            sessionId: "session-close",
+        });
+
+        let resolveStartup!: (event: any) => void;
+        const startupPromise = new Promise((resolve) => {
+            resolveStartup = resolve;
+        });
+        vi.spyOn(codexAcpClient, "awaitMcpStartupResult").mockReturnValue(startupPromise as Promise<any>);
+
+        // @ts-expect-error seeding private session store for focused close-session test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
+        // @ts-expect-error seeding private session store for focused close-session test
+        codexAcpAgent.pendingMcpStartupSessions.set(sessionState.sessionId, {
+            requestedServers: new Set(["alpha"]),
+        });
+
+        // @ts-expect-error exercising private helper to verify close-session race handling
+        const publishPromise = codexAcpAgent.doPublishMcpStartupStatus(sessionState.sessionId, 1);
+        // @ts-expect-error exercising private helper to simulate close-session cleanup
+        codexAcpAgent.forgetSession(sessionState.sessionId);
+
+        resolveStartup({
+            ready: ["alpha"],
+            failed: [],
+            cancelled: [],
+        });
+        await publishPromise;
+
+        expect(mockFixture.getAcpConnectionEvents([])).toEqual([]);
+    });
 });

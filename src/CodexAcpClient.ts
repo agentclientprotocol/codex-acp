@@ -375,6 +375,28 @@ export class CodexAcpClient {
         this.codexClient.onElicitationRequest(sessionId, elicitationHandler);
     }
 
+    unsubscribeFromSessionEvents(sessionId: string): void {
+        this.codexClient.removeServerNotification(sessionId);
+        this.codexClient.removeApprovalRequest(sessionId);
+        this.codexClient.removeElicitationRequest(sessionId);
+    }
+
+    async closeSession(sessionId: string, currentTurnId: string | null): Promise<void> {
+        if (currentTurnId) {
+            try {
+                await this.codexClient.turnInterrupt({
+                    threadId: sessionId,
+                    turnId: currentTurnId,
+                });
+            } catch (err) {
+                logger.error(`Failed to interrupt turn while closing session ${sessionId}`, err);
+            }
+        }
+
+        await this.codexClient.threadUnsubscribe({threadId: sessionId});
+        this.unsubscribeFromSessionEvents(sessionId);
+    }
+
     async sendPrompt(
         request: acp.PromptRequest,
         agentMode: AgentMode,

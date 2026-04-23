@@ -101,6 +101,7 @@ export class CodexAcpServer implements acp.Agent {
                     image: true
                 },
                 sessionCapabilities: {
+                    close: {},
                     resume: { },
                     list: { }
                 },
@@ -236,6 +237,19 @@ export class CodexAcpServer implements acp.Agent {
         logger.log("Listing sessions...", {cwd: params.cwd, cursor: params.cursor});
         await this.checkAuthorization();
         return await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
+    }
+
+    async unstable_closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
+        logger.log("Closing session...", {sessionId: params.sessionId});
+        const sessionState = this.getSessionState(params.sessionId);
+
+        await this.runWithProcessCheck(() =>
+            this.codexAcpClient.closeSession(params.sessionId, sessionState.currentTurnId)
+        );
+        this.forgetSession(params.sessionId);
+
+        logger.log("Session closed", {sessionId: params.sessionId});
+        return {};
     }
 
     async newSession(
@@ -641,6 +655,11 @@ export class CodexAcpServer implements acp.Agent {
         return sessionState;
     }
 
+    private forgetSession(sessionId: string): void {
+        this.sessions.delete(sessionId);
+        this.pendingMcpStartupSessions.delete(sessionId);
+    }
+
     private resolveSessionMcpServers(
         mcpServers: Array<acp.McpServer>,
         recoverFromStartup: boolean,
@@ -678,7 +697,16 @@ export class CodexAcpServer implements acp.Agent {
                     pendingStartup.afterVersion,
                 )
             );
-            await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.requestedServers);
+            const sessionState = this.sessions.get(sessionId);
+            const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
+            if (sessionState && pendingStartup) {
+                sessionState.sessionMcpServers = mcpStartup.ready.filter(serverName =>
+                    pendingStartup.requestedServers.has(serverName)
+                );
+await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.requestedServers);
+            } else {
+                logger.log("Skipping MCP startup status for closed session", {sessionId});
+            }
         } catch (err) {
             logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
         } finally {

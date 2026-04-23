@@ -34,6 +34,8 @@ import type {
     ThreadResumeResponse,
     ThreadStartParams,
     ThreadStartResponse,
+    ThreadUnsubscribeParams,
+    ThreadUnsubscribeResponse,
     TurnCompletedNotification,
     TurnInterruptParams,
     TurnInterruptResponse,
@@ -143,8 +145,16 @@ export class CodexAppServerClient {
         this.approvalHandlers.set(threadId, handler);
     }
 
+    removeApprovalRequest(threadId: string): void {
+        this.approvalHandlers.delete(threadId);
+    }
+
     onElicitationRequest(threadId: string, handler: ElicitationHandler): void {
         this.elicitationHandlers.set(threadId, handler);
+    }
+
+    removeElicitationRequest(threadId: string): void {
+        this.elicitationHandlers.delete(threadId);
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
@@ -177,6 +187,10 @@ export class CodexAppServerClient {
 
     async threadRead(params: ThreadReadParams): Promise<ThreadReadResponse> {
         return await this.sendRequest({ method: "thread/read", params: params });
+    }
+
+    async threadUnsubscribe(params: ThreadUnsubscribeParams): Promise<ThreadUnsubscribeResponse> {
+        return await this.sendRequest({ method: "thread/unsubscribe", params });
     }
 
     async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
@@ -246,6 +260,10 @@ export class CodexAppServerClient {
      */
     onServerNotification(sessionId: string, callback: (event: ServerNotification) => void) {
         this.notificationHandlers.set(sessionId, callback);
+    }
+
+    removeServerNotification(sessionId: string): void {
+        this.notificationHandlers.delete(sessionId);
     }
 
     private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
