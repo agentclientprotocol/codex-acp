@@ -133,6 +133,7 @@ describe("CodexACPAgent - loadSession", () => {
                         {
                             type: "dynamicToolCall",
                             id: "item-dyn-1",
+                            namespace: null,
                             tool: "list_apps",
                             arguments: { includeDisabled: false },
                             status: "completed",
