@@ -299,6 +299,7 @@ function anonymizeValue(value: any, path: string[], fieldsToAnonymize: Set<strin
  */
 export function createTestSessionState(overrides?: Partial<SessionState>): SessionState {
     return {
+        pendingTurnId: null,
         currentTurnId: null,
         lastTokenUsage: null,
         totalTokenUsage: null,
@@ -343,7 +344,21 @@ export async function setupPromptAndSendNotifications(
     fixture.clearAcpConnectionDump();
 
     for (const notification of notifications) {
-        fixture.sendServerNotification(notification);
+        const routedNotification = (() => {
+            const params = notification.params as { threadId?: unknown };
+            if (typeof params.threadId !== "string") {
+                return notification;
+            }
+            return {
+                ...notification,
+                params: {
+                    ...notification.params,
+                    threadId: sessionId,
+                },
+            } satisfies ServerNotification;
+        })();
+
+        fixture.sendServerNotification(routedNotification);
     }
 
     await vi.waitFor(() => {

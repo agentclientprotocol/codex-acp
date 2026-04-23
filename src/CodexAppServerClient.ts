@@ -96,19 +96,26 @@ export class CodexAppServerClient {
     private mcpServerStartupVersion = 0;
     private readonly mcpServerStartupStates = new Map<string, McpServerStartupSnapshot>();
     private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
+    private readonly turnCompletedResolvers = new Map<string, Array<TurnCompletedResolver>>();
+    private readonly lastTurnCompletedByThread = new Map<string, TurnCompletedNotification>();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
-            if (isMcpServerStatusUpdatedNotification(serverNotification)) {
-                this.mcpServerStartupVersion += 1;
-                this.mcpServerStartupStates.set(serverNotification.params.name, {
-                    status: serverNotification.params.status,
-                    error: serverNotification.params.error,
-                    version: this.mcpServerStartupVersion,
-                });
-                this.resolveMcpServerStartupResolvers();
+          if (isMcpServerStatusUpdatedNotification(serverNotification)) {
+            this.mcpServerStartupVersion += 1;
+            this.mcpServerStartupStates.set(serverNotification.params.name, {
+              status: serverNotification.params.status,
+              error: serverNotification.params.error,
+              version: this.mcpServerStartupVersion,
+            });
+            this.resolveMcpServerStartupResolvers();
+          }
+            if (isTurnCompletedNotification(serverNotification)) {
+                this.lastTurnCompletedByThread.set(serverNotification.params.threadId, serverNotification.params);
+                this.resolveTurnCompleted(serverNotification.params);
+          }
             }
             this.notify(serverNotification);
             for (const callback of this.codexEventHandlers) {
@@ -237,13 +244,22 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "account/read", params: params });
     }
 
-    //TODO create type-safe helper
-    async awaitTurnCompleted(): Promise<TurnCompletedNotification> {
+    async awaitTurnCompleted(threadId: string, turnId: string): Promise<TurnCompletedNotification> {
+        const completedTurn = this.lastTurnCompletedByThread.get(threadId);
+        if (completedTurn && completedTurn.turn.id === turnId) {
+            return completedTurn;
+        }
+
         return await new Promise((resolve) => {
-            this.connection.onNotification("turn/completed", (event: TurnCompletedNotification) => {
-                resolve(event);
-            });
+            const resolvers = this.turnCompletedResolvers.get(threadId) ?? [];
+            resolvers.push({turnId, resolve});
+            this.turnCompletedResolvers.set(threadId, resolvers);
         });
+    }
+
+    hasTurnCompleted(threadId: string, turnId: string): boolean {
+        const completedTurn = this.lastTurnCompletedByThread.get(threadId);
+        return completedTurn?.turn.id === turnId;
     }
 
     async listModels(params: ModelListParams = {cursor: null, limit: null}): Promise<ModelListResponse> {
@@ -273,9 +289,20 @@ export class CodexAppServerClient {
 
     private notificationHandlers = new Map<string, (event: ServerNotification) => void>();
     private notify(notification: ServerNotification) {
+        const threadId = this.getThreadId(notification);
+        if (threadId) {
+            this.notificationHandlers.get(threadId)?.(notification);
+            return;
+        }
+
         for (const notificationHandler of this.notificationHandlers.values()) {
             notificationHandler(notification);
         }
+    }
+
+    private getThreadId(notification: ServerNotification): string | null {
+        const params = notification.params as { threadId?: unknown };
+        return typeof params.threadId === "string" ? params.threadId : null;
     }
 
     private resolveMcpServerStartupResolvers(): void {
@@ -323,6 +350,28 @@ export class CodexAppServerClient {
         return { ready, failed, cancelled };
     }
 
+    private resolveTurnCompleted(event: TurnCompletedNotification): void {
+        const resolvers = this.turnCompletedResolvers.get(event.threadId);
+        if (!resolvers) {
+            return;
+        }
+
+        const pendingResolvers: Array<TurnCompletedResolver> = [];
+        for (const resolver of resolvers) {
+            if (resolver.turnId === event.turn.id) {
+                resolver.resolve(event);
+            } else {
+                pendingResolvers.push(resolver);
+            }
+        }
+
+        if (pendingResolvers.length === 0) {
+            this.turnCompletedResolvers.delete(event.threadId);
+        } else {
+            this.turnCompletedResolvers.set(event.threadId, pendingResolvers);
+        }
+    }
+
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "request", ...request});
@@ -364,9 +413,28 @@ type McpServerStartupResolver = {
     resolve: (result: McpStartupResult) => void;
 };
 
+type TurnCompletedResolver = {
+    turnId: string;
+    resolve: (event: TurnCompletedNotification) => void;
+};
+
+type McpStartupCompleteNotification = {
+    method: "codex/event/mcp_startup_complete",
+    params: {
+        msg: McpStartupCompleteEvent & { type: "mcp_startup_complete" }
+    }
+};
+
 function isMcpServerStatusUpdatedNotification(notification: ServerNotification): notification is {
     method: "mcpServer/startupStatus/updated";
     params: McpServerStatusUpdatedNotification;
 } {
     return notification.method === "mcpServer/startupStatus/updated";
+}
+
+function isTurnCompletedNotification(data: ServerNotification): data is {
+    method: "turn/completed";
+    params: TurnCompletedNotification;
+} {
+    return data.method === "turn/completed";
 }

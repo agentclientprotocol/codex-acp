@@ -331,9 +331,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     function loadNotifications(){
         //TODO collect logs form dev run and then load them from file to speedup
         const serverNotifications: ServerNotification[] = [
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "He", }},
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "ll", }},
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "o!", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "He", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "ll", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "o!", }},
         ];
         function onServerNotification(_sessionId: string, callback: (event: ServerNotification) => void){
             for (const notification of serverNotifications) {
@@ -398,9 +398,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         // Trigger notifications after both prompts - should produce only 3 events, not 6
         const serverNotifications: ServerNotification[] = [
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "He", }},
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "ll", }},
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "o!", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "He", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "ll", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "o!", }},
         ];
         for (const notification of serverNotifications) {
             mockFixture.sendServerNotification(notification);
@@ -415,7 +415,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/follow-up-no-duplicates.json");
     });
 
-    it('should handle multiple sessions independently', async () => {
+    it('should route thread-scoped notifications to the matching session only', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
@@ -448,9 +448,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         mockFixture.clearAcpConnectionDump();
 
-        // Trigger notifications - both session handlers should receive them
+        // Trigger notifications for only session-1
         const serverNotifications: ServerNotification[] = [
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "Hello", }},
+            { method: "item/agentMessage/delta", params: { threadId: "session-1", turnId: "string", itemId: "string", delta: "Hello", }},
         ];
         for (const notification of serverNotifications) {
             mockFixture.sendServerNotification(notification);
@@ -462,8 +462,20 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             expect(dump.length).toBeGreaterThan(0);
         });
 
-        // Should have 2 events - one for each session's handler
-        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/multiple-sessions.json");
+        expect(mockFixture.getAcpConnectionEvents([])).toEqual([
+            {
+                method: "sessionUpdate",
+                args: [
+                    {
+                        sessionId: "session-1",
+                        update: {
+                            sessionUpdate: "agent_message_chunk",
+                            content: { type: "text", text: "Hello" },
+                        },
+                    },
+                ],
+            },
+        ]);
     });
 
     it('should send attachments as prompt items', async () => {
@@ -471,6 +483,22 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
 
+        vi.spyOn(codexAppServerClient.connection, "sendRequest").mockImplementation((method: string) => {
+            if (method === "turn/start") {
+                return Promise.resolve({
+                    turn: {
+                        id: "turn-id",
+                        items: [],
+                        status: "inProgress",
+                        error: null,
+                        startedAt: null,
+                        completedAt: null,
+                        durationMs: null,
+                    },
+                });
+            }
+            return Promise.resolve(undefined);
+        });
         vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
             threadId: "session-id",
             turn: {
@@ -496,7 +524,79 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.prompt({ sessionId: "session-id", prompt });
 
-        await expect(mockFixture.getCodexConnectionDump(ignoredFields)).toMatchFileSnapshot("data/send-attachments-turn-start.json");
+        expect(mockFixture.getCodexConnectionEvents(ignoredFields)).toEqual([
+            {
+                eventType: "request",
+                method: "skills/list",
+                params: {
+                    cwds: ["/test/cwd"],
+                    forceReload: true,
+                    perCwdExtraUserRoots: [{
+                        cwd: "cwd",
+                        extraUserRoots: [],
+                    }],
+                },
+            },
+            {
+                eventType: "response",
+            },
+            {
+                eventType: "request",
+                method: "turn/start",
+                params: {
+                    outputSchema: null,
+                    threadId: "threadId",
+                    input: [
+                        {
+                            type: "text",
+                            text: "Hello",
+                            text_elements: [],
+                        },
+                        {
+                            type: "image",
+                            url: "https://example.com/image.png",
+                        },
+                        {
+                            type: "text",
+                            text: "[@report.txt](file:///tmp/report.txt)",
+                            text_elements: [],
+                        },
+                        {
+                            type: "text",
+                            text: "[@notes.txt](file:///tmp/notes.txt)\n<context ref=\"file:///tmp/notes.txt\">\nNotes body\n</context>",
+                            text_elements: [],
+                        },
+                    ],
+                    approvalPolicy: "on-request",
+                    sandboxPolicy: {
+                        type: "workspaceWrite",
+                        writableRoots: [],
+                        readOnlyAccess: "readOnlyAccess",
+                        networkAccess: false,
+                        excludeTmpdirEnvVar: false,
+                        excludeSlashTmp: false,
+                    },
+                    summary: null,
+                    personality: null,
+                    collaborationMode: null,
+                    cwd: "cwd",
+                    effort: "effort",
+                    model: "model",
+                },
+            },
+            {
+                eventType: "response",
+                turn: {
+                    id: "id",
+                    items: [],
+                    status: "inProgress",
+                    error: null,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
+                },
+            },
+        ]);
     });
 
     it('should fail on wrong sessionId', async () => {
@@ -516,6 +616,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
         vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue({ data: [] });
+        // @ts-expect-error seeding private session store for focused publish test
+        codexAcpAgent.sessions.set("session-id", createTestSessionState({ sessionId: "session-id" }));
 
         // @ts-expect-error - exercising private helper
         await codexAcpAgent.availableCommands.publish("session-id");
@@ -541,6 +643,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 errors: []
             }]
         });
+        // @ts-expect-error seeding private session store for focused publish test
+        codexAcpAgent.sessions.set("session-id", createTestSessionState({ sessionId: "session-id" }));
 
         // @ts-expect-error - exercising private helper
         await codexAcpAgent.availableCommands.publish("session-id");
@@ -929,6 +1033,18 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
+            threadId: "session-close",
+            turn: {
+                id: "turn-close",
+                items: [],
+                status: "interrupted",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            },
+        });
 
         await codexAcpClient.subscribeToSessionEvents(
             "session-close",
@@ -974,6 +1090,88 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(codexAppServerClient.elicitationHandlers.has("session-close")).toBe(false);
     });
 
+    it('waits for the matching turn completion before resolving a prompt', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const sessionState = createTestSessionState({
+            sessionId: "session-close",
+            currentModelId: "model-id[effort]",
+            agentMode: AgentMode.DEFAULT_AGENT_MODE,
+        });
+
+        codexAppServerClient.turnStart = vi.fn().mockResolvedValue({
+            turn: {
+                id: "turn-close",
+                items: [],
+                status: "inProgress",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            },
+        });
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+        let promptSettled = false;
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId: "session-close",
+            prompt: [{type: "text", text: "wait for the right turn"}],
+        }).then((result) => {
+            promptSettled = true;
+            return result;
+        });
+
+        await vi.waitFor(() => {
+            expect(sessionState.currentTurnId).toBe("turn-close");
+        });
+
+        mockFixture.sendServerNotification({
+            method: "turn/completed",
+            params: {
+                threadId: "other-session",
+                turn: {
+                    id: "turn-other",
+                    items: [],
+                    status: "completed",
+                    error: null,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
+                },
+            },
+        });
+        await Promise.resolve();
+        expect(promptSettled).toBe(false);
+
+        mockFixture.sendServerNotification({
+            method: "turn/completed",
+            params: {
+                threadId: "session-close",
+                turn: {
+                    id: "turn-close",
+                    items: [],
+                    status: "completed",
+                    error: null,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
+                },
+            },
+        });
+
+        await expect(promptPromise).resolves.toEqual({
+            stopReason: "end_turn",
+            usage: null,
+            _meta: {
+                quota: {
+                    token_count: null,
+                    model_usage: [],
+                },
+            },
+        });
+    });
+
     it('removes session bookkeeping after unstable_closeSession', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
@@ -1000,6 +1198,27 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         );
         // @ts-expect-error verifying test-only access to private map
         expect(codexAcpAgent.pendingMcpStartupSessions.has(sessionState.sessionId)).toBe(false);
+    });
+
+    it('uses the pending turn start when closing before turn/started arrives', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const sessionState = createTestSessionState({
+            sessionId: "session-close",
+            currentTurnId: null,
+            pendingTurnId: Promise.resolve("turn-pending"),
+        });
+        const closeSpy = vi.spyOn(codexAcpClient, "closeSession").mockResolvedValue();
+
+        // @ts-expect-error seeding private session store for focused close-session test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
+
+        await expect(
+            codexAcpAgent.unstable_closeSession({sessionId: sessionState.sessionId})
+        ).resolves.toEqual({});
+
+        expect(closeSpy).toHaveBeenCalledWith(sessionState.sessionId, "turn-pending");
     });
 
     it('skips late MCP startup updates after a session is closed', async () => {
@@ -1032,6 +1251,47 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             ready: ["alpha"],
             failed: [],
             cancelled: [],
+        });
+        await publishPromise;
+
+        expect(mockFixture.getAcpConnectionEvents([])).toEqual([]);
+    });
+
+    it('skips late available commands updates after a session is closed', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const sessionState = createTestSessionState({
+            sessionId: "session-close",
+        });
+
+        let resolveSkills!: (response: SkillsListResponse) => void;
+        const skillsPromise = new Promise<SkillsListResponse>((resolve) => {
+            resolveSkills = resolve;
+        });
+        vi.spyOn(codexAcpClient, "listSkills").mockReturnValue(skillsPromise);
+
+        // @ts-expect-error seeding private session store for focused close-session test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
+
+        // @ts-expect-error exercising private helper through the availableCommands collaborator
+        const publishPromise = codexAcpAgent.availableCommands.publish(sessionState.sessionId);
+        // @ts-expect-error exercising private helper to simulate close-session cleanup
+        codexAcpAgent.forgetSession(sessionState.sessionId);
+
+        resolveSkills({
+            data: [{
+                cwd: "/workspace",
+                skills: [{
+                    name: "build",
+                    description: "Build the project",
+                    shortDescription: "Build",
+                    path: "/workspace",
+                    scope: "user",
+                    enabled: true,
+                }],
+                errors: [],
+            }],
         });
         await publishPromise;
 

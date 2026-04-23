@@ -382,33 +382,30 @@ export class CodexAcpClient {
     }
 
     async closeSession(sessionId: string, currentTurnId: string | null): Promise<void> {
-        if (currentTurnId) {
-            try {
-                await this.codexClient.turnInterrupt({
-                    threadId: sessionId,
-                    turnId: currentTurnId,
-                });
-            } catch (err) {
-                logger.error(`Failed to interrupt turn while closing session ${sessionId}`, err);
-            }
+        if (currentTurnId && !this.codexClient.hasTurnCompleted(sessionId, currentTurnId)) {
+            await this.codexClient.turnInterrupt({
+                threadId: sessionId,
+                turnId: currentTurnId,
+            });
+            await this.codexClient.awaitTurnCompleted(sessionId, currentTurnId);
         }
 
         await this.codexClient.threadUnsubscribe({threadId: sessionId});
         this.unsubscribeFromSessionEvents(sessionId);
     }
 
-    async sendPrompt(
+    async startPrompt(
         request: acp.PromptRequest,
         agentMode: AgentMode,
         modelId: ModelId,
         disableSummary: boolean,
         cwd: string,
-    ): Promise<TurnCompletedNotification> {
+    ): Promise<string> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
 
         await this.refreshSkills(cwd, request._meta);
-        await this.codexClient.turnStart({
+        const response = await this.codexClient.turnStart({
             outputSchema: null,
             threadId: request.sessionId,
             input: input,
@@ -422,9 +419,16 @@ export class CodexAcpClient {
             model: modelId.model,
         });
 
-        // Wait for turn completion
+        return response.turn.id;
+    }
+
+    async awaitTurnCompleted(sessionId: string, turnId: string): Promise<TurnCompletedNotification> {
         // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
-        return await this.codexClient.awaitTurnCompleted();
+        return await this.codexClient.awaitTurnCompleted(sessionId, turnId);
+    }
+
+    hasTurnCompleted(sessionId: string, turnId: string): boolean {
+        return this.codexClient.hasTurnCompleted(sessionId, turnId);
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {

@@ -1,6 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type {AgentSideConnection, AvailableCommand} from "@agentclientprotocol/sdk";
-import {ACPSessionConnection} from "./ACPSessionConnection";
+import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {RateLimitSnapshot, SkillsListEntry} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
@@ -12,27 +12,35 @@ export class CodexCommands {
     private readonly connection: AgentSideConnection;
     private readonly codexAcpClient: CodexAcpClient;
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
+    private readonly hasTrackedSession: (sessionId: string) => boolean;
+    private readonly isSessionClosing: (sessionId: string) => boolean;
 
     constructor(
         connection: AgentSideConnection,
         codexAcpClient: CodexAcpClient,
-        runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>
+        runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>,
+        hasTrackedSession: (sessionId: string) => boolean,
+        isSessionClosing: (sessionId: string) => boolean,
     ) {
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
         this.runWithProcessCheck = runWithProcessCheck;
+        this.hasTrackedSession = hasTrackedSession;
+        this.isSessionClosing = isSessionClosing;
     }
 
     async publish(sessionId: string): Promise<void> {
         try {
+            if (!this.hasTrackedSession(sessionId) || this.isSessionClosing(sessionId)) {
+                return;
+            }
             const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills());
             const availableCommands = this.buildAvailableCommands(skillsResponse?.data ?? []);
-            if (availableCommands.length === 0) {
+            if (availableCommands.length === 0 || !this.hasTrackedSession(sessionId) || this.isSessionClosing(sessionId)) {
                 return;
             }
 
-            const session = new ACPSessionConnection(this.connection, sessionId);
-            await session.update({
+            await this.updateSession(sessionId, {
                 sessionUpdate: "available_commands_update",
                 availableCommands
             });
@@ -124,9 +132,8 @@ export class CodexCommands {
 
         switch (command.name) {
             case "status": {
-                const session = new ACPSessionConnection(this.connection, sessionId);
                 const message = this.buildStatusMessage(sessionState);
-                await session.update({
+                await this.updateSession(sessionId, {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text: message }
                 });
@@ -134,8 +141,7 @@ export class CodexCommands {
             }
             case "logout": {
                 await this.runWithProcessCheck(() => this.codexAcpClient.logout());
-                const session = new ACPSessionConnection(this.connection, sessionId);
-                await session.update({
+                await this.updateSession(sessionId, {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text: "Logged out from Codex account." }
                 });
@@ -151,8 +157,7 @@ export class CodexCommands {
                 const text = lines.length > 0
                     ? ["Available skills:", ...lines].join("\n")
                     : "No skills configured.";
-                const session = new ACPSessionConnection(this.connection, sessionId);
-                await session.update({
+                await this.updateSession(sessionId, {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text }
                 });
@@ -172,8 +177,7 @@ export class CodexCommands {
                 const text = lines.length > 0
                     ? ["Configured MCP servers:", ...lines].join("\n")
                     : "No MCP servers configured.";
-                const session = new ACPSessionConnection(this.connection, sessionId);
-                await session.update({
+                await this.updateSession(sessionId, {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text }
                 });
@@ -194,11 +198,18 @@ export class CodexCommands {
         if (lines.length > 0) {
             text.push(...lines);
         }
-        const session = new ACPSessionConnection(this.connection, sessionId);
-        await session.update({
+        await this.updateSession(sessionId, {
             sessionUpdate: "agent_message_chunk",
             content: { type: "text", text: text.join("\n") }
         });
+    }
+
+    private async updateSession(sessionId: string, update: UpdateSessionEvent): Promise<void> {
+        if (this.isSessionClosing(sessionId)) {
+            return;
+        }
+        const session = new ACPSessionConnection(this.connection, sessionId);
+        await session.update(update);
     }
 
     private buildStatusMessage(sessionState: SessionState): string {
