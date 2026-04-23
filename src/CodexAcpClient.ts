@@ -2,12 +2,16 @@ import {isCodexAuthRequest} from "./CodexAuthMethod";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
-import type {ApprovalHandler, CodexAppServerClient, ElicitationHandler} from "./CodexAppServerClient";
+import type {
+    ApprovalHandler,
+    CodexAppServerClient,
+    ElicitationHandler,
+    McpStartupResult,
+} from "./CodexAppServerClient";
 import open from "open";
 import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
-    McpStartupCompleteEvent,
     ReasoningEffort,
     ServerNotification
 } from "./app-server";
@@ -274,17 +278,12 @@ export class CodexAcpClient {
         };
     }
 
-    async awaitMcpStartup(mcpStartupVersion: number): Promise<Array<string>> {
-        const startup = await this.codexClient.awaitMcpStartup(mcpStartupVersion);
-        return startup.ready;
+    async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
+        return await this.codexClient.awaitMcpServerStartup(serverNames, afterVersion);
     }
 
-    async awaitMcpStartupResult(mcpStartupVersion: number): Promise<McpStartupCompleteEvent> {
-        return await this.codexClient.awaitMcpStartup(mcpStartupVersion);
-    }
-
-    getMcpStartupCompleteVersion(): number {
-        return this.codexClient.getMcpStartupCompleteVersion();
+    getMcpServerStartupVersion(): number {
+        return this.codexClient.getMcpServerStartupVersion();
     }
 
     private createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): JsonObject {

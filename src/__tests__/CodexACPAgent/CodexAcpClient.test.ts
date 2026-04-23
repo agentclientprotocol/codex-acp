@@ -191,28 +191,40 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
     });
 
-    it('waits for mcp startup completion and returns ready servers', async () => {
+    it('waits for typed mcp startup status updates and returns terminal states', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
 
-        const startupPromise = codexAcpClient.awaitMcpStartup(codexAppServerClient.getMcpStartupCompleteVersion());
+        const startupPromise = codexAcpClient.awaitMcpServerStartup(
+            ["alpha", "beta"],
+            codexAppServerClient.getMcpServerStartupVersion()
+        );
 
         mockFixture.sendServerNotification({
-            method: "codex/event/mcp_startup_complete",
-            params: {
-                msg: {
-                    type: "mcp_startup_complete",
-                    ready: ["alpha", "beta"],
-                    failed: [],
-                    cancelled: [],
-                }
-            }
+            method: "mcpServer/startupStatus/updated",
+            params: { name: "alpha", status: "starting", error: null }
+        });
+        mockFixture.sendServerNotification({
+            method: "mcpServer/startupStatus/updated",
+            params: { name: "beta", status: "starting", error: null }
+        });
+        mockFixture.sendServerNotification({
+            method: "mcpServer/startupStatus/updated",
+            params: { name: "alpha", status: "ready", error: null }
+        });
+        mockFixture.sendServerNotification({
+            method: "mcpServer/startupStatus/updated",
+            params: { name: "beta", status: "ready", error: null }
         });
 
-        const mcpServers = await startupPromise;
+        const startup = await startupPromise;
 
-        expect(mcpServers).toEqual(["alpha", "beta"]);
+        expect(startup).toEqual({
+            ready: ["alpha", "beta"],
+            failed: [],
+            cancelled: [],
+        });
     });
 
     it('forwards failed MCP startup as failed tool call updates after new session', async () => {
@@ -253,18 +265,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         mockFixture.sendServerNotification({
-            method: "codex/event/mcp_startup_complete",
-            params: {
-                msg: {
-                    type: "mcp_startup_complete",
-                    ready: [],
-                    failed: [{
-                        server: "broken-mcp",
-                        error: "boom",
-                    }],
-                    cancelled: [],
-                }
-            }
+            method: "mcpServer/startupStatus/updated",
+            params: { name: "broken-mcp", status: "failed", error: "boom" }
         });
 
         await vi.waitFor(() => {
