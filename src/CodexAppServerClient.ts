@@ -53,6 +53,7 @@ export interface ApprovalHandler {
 }
 
 export interface ElicitationHandler {
+    handleNotification(notification: ServerNotification): void;
     handleElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
 }
 
