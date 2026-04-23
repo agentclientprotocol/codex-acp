@@ -15,7 +15,6 @@ describe("CodexACPAgent - loadSession", () => {
             account: null,
             requiresOpenaiAuth: false,
         });
-        codexAcpClient.awaitMcpStartup = vi.fn().mockResolvedValue([]);
         codexAcpClient.listSkills = vi.fn().mockResolvedValue({ data: [] });
 
         const model: Model = {
@@ -169,7 +168,7 @@ describe("CodexACPAgent - loadSession", () => {
         );
     });
 
-    it("should recover session mcp servers during loadSession when request omits them", async () => {
+    it("should not recover session mcp servers during loadSession when request omits them", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
@@ -181,8 +180,6 @@ describe("CodexACPAgent - loadSession", () => {
             requiresOpenaiAuth: false,
         });
         codexAcpClient.listSkills = vi.fn().mockResolvedValue({ data: [] });
-
-        const awaitMcpStartupSpy = vi.spyOn(codexAcpClient, "awaitMcpStartup").mockResolvedValue(["persisted-mcp"]);
 
         const model: Model = {
             id: "gpt-5.2",
@@ -240,8 +237,7 @@ describe("CodexACPAgent - loadSession", () => {
             mcpServers: [],
         });
 
-        expect(awaitMcpStartupSpy).toHaveBeenCalledWith(0);
-        expect(codexAcpAgent.getSessionState("session-1").sessionMcpServers).toEqual(["persisted-mcp"]);
+        expect(codexAcpAgent.getSessionState("session-1").sessionMcpServers).toEqual([]);
     });
 
     it("publishes MCP startup failure for explicitly requested servers during loadSession", async () => {
@@ -324,18 +320,8 @@ describe("CodexACPAgent - loadSession", () => {
         });
 
         fixture.sendServerNotification({
-            method: "codex/event/mcp_startup_complete",
-            params: {
-                msg: {
-                    type: "mcp_startup_complete",
-                    ready: [],
-                    failed: [{
-                        server: "broken-mcp",
-                        error: "boom",
-                    }],
-                    cancelled: [],
-                }
-            }
+            method: "mcpServer/startupStatus/updated",
+            params: { name: "broken-mcp", status: "failed", error: "boom" }
         });
 
         await loadPromise;

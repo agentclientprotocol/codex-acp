@@ -10,8 +10,9 @@ import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
+import type {McpStartupResult} from "./CodexAppServerClient";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
-import type {McpStartupCompleteEvent, InputModality, ReasoningEffort} from "./app-server";
+import type {InputModality, ReasoningEffort} from "./app-server";
 import type {
     Account,
     CollabAgentToolCallStatus,
@@ -55,6 +56,7 @@ export interface SessionState {
 
 interface PendingMcpStartupSession {
     requestedServers: Set<string>;
+    afterVersion: number;
 }
 
 export class CodexAcpServer implements acp.Agent {
@@ -143,7 +145,10 @@ export class CodexAcpServer implements acp.Agent {
 
     async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, SessionModelState, SessionModeState]> {
         await this.checkAuthorization();
-        const mcpStartupVersion = this.codexAcpClient.getMcpStartupCompleteVersion();
+        const requestedMcpServers = request.mcpServers ?? [];
+        const mcpServerStartupVersion = requestedMcpServers.length > 0
+            ? this.codexAcpClient.getMcpServerStartupVersion()
+            : null;
 
         let sessionMetadata: SessionMetadata;
         if ("sessionId" in request) {
@@ -156,7 +161,7 @@ export class CodexAcpServer implements acp.Agent {
 
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models} = sessionMetadata;
-        const sessionMcpServers = await this.resolveSessionMcpServers(request.mcpServers ?? [], mcpStartupVersion, "sessionId" in request);
+        const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, "sessionId" in request);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -175,12 +180,12 @@ export class CodexAcpServer implements acp.Agent {
         }
         this.sessions.set(sessionId, sessionState);
 
-        const requestedMcpServers = request.mcpServers ?? [];
-        if (requestedMcpServers.length > 0) {
+        if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.pendingMcpStartupSessions.set(sessionId, {
                 requestedServers: new Set(requestedMcpServers.map(server => server.name)),
+                afterVersion: mcpServerStartupVersion,
             });
-            this.publishMcpStartupStatusAsync(sessionId, mcpStartupVersion);
+            this.publishMcpStartupStatusAsync(sessionId);
         }
 
         this.publishAvailableCommandsAsync(sessionId);
@@ -355,7 +360,10 @@ export class CodexAcpServer implements acp.Agent {
         thread: Thread;
     }> {
         await this.checkAuthorization();
-        const mcpStartupVersion = this.codexAcpClient.getMcpStartupCompleteVersion();
+        const requestedMcpServers = request.mcpServers ?? [];
+        const mcpServerStartupVersion = requestedMcpServers.length > 0
+            ? this.codexAcpClient.getMcpServerStartupVersion()
+            : null;
 
         logger.log(`Load existing session: ${request.sessionId}...`);
         const sessionMetadata: SessionMetadataWithThread = await this.runWithProcessCheck(() =>
@@ -364,7 +372,7 @@ export class CodexAcpServer implements acp.Agent {
 
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models, thread} = sessionMetadata;
-        const sessionMcpServers = await this.resolveSessionMcpServers(request.mcpServers ?? [], mcpStartupVersion, true);
+        const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -383,12 +391,12 @@ export class CodexAcpServer implements acp.Agent {
         };
         this.sessions.set(sessionId, sessionState);
 
-        const requestedMcpServers = request.mcpServers ?? [];
-        if (requestedMcpServers.length > 0) {
+        if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.pendingMcpStartupSessions.set(sessionId, {
                 requestedServers: new Set(requestedMcpServers.map(server => server.name)),
+                afterVersion: mcpServerStartupVersion,
             });
-            this.publishMcpStartupStatusAsync(sessionId, mcpStartupVersion);
+            this.publishMcpStartupStatusAsync(sessionId);
         }
 
         await this.availableCommands.publish(sessionId);
@@ -633,11 +641,10 @@ export class CodexAcpServer implements acp.Agent {
         return sessionState;
     }
 
-    private async resolveSessionMcpServers(
+    private resolveSessionMcpServers(
         mcpServers: Array<acp.McpServer>,
-        mcpStartupVersion: number,
         recoverFromStartup: boolean,
-    ): Promise<Array<string>> {
+    ): Array<string> {
         // Explicit MCP servers from the request are the primary source of truth for the session.
         const requestedServerNames = getRequestedMcpServerNames(mcpServers);
         if (requestedServerNames.length > 0) {
@@ -647,27 +654,31 @@ export class CodexAcpServer implements acp.Agent {
         if (!recoverFromStartup) {
             return [];
         }
-        // loadSession/resumeSession may omit mcpServers; in that case recover the ready names
-        // from the startup event associated with this thread start/resume checkpoint.
-        logger.log("Recovering MCP servers from startup state...");
-        return await this.runWithProcessCheck(() => this.codexAcpClient.awaitMcpStartup(mcpStartupVersion));
+        // Without a thread-scoped startup completion event, loadSession/resumeSession can no longer
+        // recover omitted session MCP server names. Treat the session set as unknown unless ACP
+        // explicitly provided mcpServers in the request.
+        logger.log("Skipping MCP server recovery for load/resume without explicit mcpServers");
+        return [];
     }
 
-    private publishMcpStartupStatusAsync(sessionId: string, mcpStartupVersion: number): void {
-        void this.doPublishMcpStartupStatus(sessionId, mcpStartupVersion);
+    private publishMcpStartupStatusAsync(sessionId: string): void {
+        void this.doPublishMcpStartupStatus(sessionId);
     }
 
-    private async doPublishMcpStartupStatus(sessionId: string, mcpStartupVersion: number): Promise<void> {
+    private async doPublishMcpStartupStatus(sessionId: string): Promise<void> {
+        const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
+        if (!pendingStartup) {
+            return;
+        }
+
         try {
-            const mcpStartup = await this.runWithProcessCheck(() => this.codexAcpClient.awaitMcpStartupResult(mcpStartupVersion));
-            const sessionState = this.sessions.get(sessionId);
-            const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
-            if (sessionState && pendingStartup) {
-                sessionState.sessionMcpServers = mcpStartup.ready.filter(serverName =>
-                    pendingStartup.requestedServers.has(serverName)
-                );
-            }
-            await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup?.requestedServers);
+            const mcpStartup = await this.runWithProcessCheck(() =>
+                this.codexAcpClient.awaitMcpServerStartup(
+                    Array.from(pendingStartup.requestedServers),
+                    pendingStartup.afterVersion,
+                )
+            );
+            await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.requestedServers);
         } catch (err) {
             logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
         } finally {
@@ -677,7 +688,7 @@ export class CodexAcpServer implements acp.Agent {
 
     private async publishMcpStartupStatus(
         sessionId: string,
-        mcpStartup: McpStartupCompleteEvent,
+        mcpStartup: McpStartupResult,
         requestedServers?: Set<string>
     ): Promise<void> {
         const filteredStartup = requestedServers
