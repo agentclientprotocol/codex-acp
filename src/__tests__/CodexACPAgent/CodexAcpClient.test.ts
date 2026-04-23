@@ -150,7 +150,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
-        const logoutSpy = vi.spyOn(codexAcpAgent, "unstable_logout");
+        const logoutSpy = vi.spyOn(codexAcpAgent, "unstable_logout").mockResolvedValue();
 
         await expect(codexAcpAgent.extMethod("authentication/logout", {})).resolves.toEqual({});
         expect(logoutSpy).toHaveBeenCalledWith({});
@@ -575,7 +575,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const sessionState: SessionState = createTestSessionState();
 
-        const logoutSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "logout");
+        const logoutSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "logout").mockResolvedValue();
 
         // @ts-expect-error - exercising private helper
         const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "logout", input: null }, sessionState);
