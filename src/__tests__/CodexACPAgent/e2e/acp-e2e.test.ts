@@ -2,7 +2,9 @@ import {afterEach, expect, it} from "vitest";
 import {
     createAuthenticatedFixture,
     createFixtureWithSkill,
+    createGatewayFixture,
     describeE2E,
+    requireLiveApiKey,
     type SpawnedAgentFixture,
 } from "./acp-e2e-test-utils";
 
@@ -18,6 +20,18 @@ describeE2E("E2E tests", () => {
 
     it('returns model response', async () => {
         fixture = await createAuthenticatedFixture();
+        const session = await fixture.createSession();
+        await session.expectPromptText("Reply with exactly integration-ok and nothing else.", (text) => {
+            expect(text.toLowerCase()).toContain("integration-ok");
+        });
+    });
+
+    it('returns model response when authenticated via gateway', async () => {
+        const apiKey = requireLiveApiKey();
+        fixture = await createGatewayFixture({
+            baseUrl: "https://api.openai.com/v1",
+            headers: {Authorization: `Bearer ${apiKey}`},
+        });
         const session = await fixture.createSession();
         await session.expectPromptText("Reply with exactly integration-ok and nothing else.", (text) => {
             expect(text.toLowerCase()).toContain("integration-ok");

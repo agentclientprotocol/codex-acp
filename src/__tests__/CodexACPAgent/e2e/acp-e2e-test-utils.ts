@@ -71,6 +71,64 @@ export async function createAuthenticatedFixture(
     runtimePaths = createTemporaryRuntimePaths()
 ): Promise<SpawnedAgentFixture> {
     const apiKey = requireLiveApiKey();
+    return await createSpawnedFixture(async (connection, authMethods) => {
+        if (!authMethods.some((method) => method.id === "api-key")) {
+            throw new Error("API key authentication is not available.");
+        }
+
+        await connection.authenticate({
+            methodId: "api-key",
+            _meta: {
+                "api-key": {
+                    apiKey,
+                },
+            },
+        });
+
+        const authenticationStatus = await getAuthenticationStatus(connection);
+        if (authenticationStatus["type"] !== "api-key") {
+            throw new Error(`Unexpected authentication status: ${JSON.stringify(authenticationStatus)}`);
+        }
+    }, runtimePaths);
+}
+
+export interface GatewayFixtureOptions {
+    readonly baseUrl: string;
+    readonly headers?: Record<string, string>;
+}
+
+export async function createGatewayFixture(
+    options: GatewayFixtureOptions,
+    runtimePaths = createTemporaryRuntimePaths(),
+): Promise<SpawnedAgentFixture> {
+    return await createSpawnedFixture(async (connection, authMethods) => {
+        if (!authMethods.some((method) => method.id === "gateway")) {
+            throw new Error("Gateway authentication is not available.");
+        }
+
+        await connection.authenticate({
+            methodId: "gateway",
+            _meta: {
+                gateway: {
+                    baseUrl: options.baseUrl,
+                    headers: options.headers ?? {},
+                },
+            },
+        });
+
+        const authenticationStatus = await getAuthenticationStatus(connection);
+        if (authenticationStatus["type"] !== "gateway" || authenticationStatus["name"] !== "custom-gateway") {
+            throw new Error(`Unexpected authentication status: ${JSON.stringify(authenticationStatus)}`);
+        }
+    }, runtimePaths);
+}
+
+type Authenticator = (connection: acp.ClientSideConnection, authMethods: acp.AuthMethod[]) => Promise<void>;
+
+async function createSpawnedFixture(
+    authenticate: Authenticator,
+    runtimePaths: RuntimePaths,
+): Promise<SpawnedAgentFixture> {
     const agentProcess = spawn("npm", ["run", "--silent", "start"], {
         cwd: process.cwd(),
         env: {
@@ -101,23 +159,7 @@ export async function createAuthenticatedFixture(
         throw new Error(`Unexpected protocol version: ${initializeResponse.protocolVersion}`);
     }
 
-    if (!initializeResponse.authMethods?.some((method) => method.id === "api-key")) {
-        throw new Error("API key authentication is not available.");
-    }
-
-    await connection.authenticate({
-        methodId: "api-key",
-        _meta: {
-            "api-key": {
-                apiKey,
-            },
-        },
-    });
-
-    const authenticationStatus = await getAuthenticationStatus(connection);
-    if (authenticationStatus["type"] !== "api-key") {
-        throw new Error(`Unexpected authentication status: ${JSON.stringify(authenticationStatus)}`);
-    }
+    await authenticate(connection, initializeResponse.authMethods ?? []);
 
     const createSession = async (): Promise<SpawnedSessionFixture> => {
         const newSessionResponse = await connection.newSession({
@@ -153,7 +195,7 @@ export async function createAuthenticatedFixture(
     };
 }
 
-function requireLiveApiKey(): string {
+export function requireLiveApiKey(): string {
     const apiKey = process.env["CODEX_API_KEY"] ?? process.env["OPENAI_API_KEY"];
     if (!apiKey) {
         throw new Error("Live integration test requires CODEX_API_KEY or OPENAI_API_KEY.");
