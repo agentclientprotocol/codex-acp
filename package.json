@@ -1,5 +1,8 @@
 {
   "name": "@agentclientprotocol/codex-acp",
+  "publishConfig": {
+    "access": "public"
+  },
   "version": "0.0.38",
   "description": "",
   "main": "dist/index.js",
@@ -37,8 +40,16 @@
     "typecheck": "tsc --noEmit",
     "codex-test": "tsx .claude/skills/run-codex/scripts/run-codex-test.ts"
   },
+  "homepage": "https://github.com/agentclientprotocol/codex-acp#readme",
+  "bugs": {
+    "url": "https://github.com/agentclientprotocol/codex-acp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentclientprotocol/codex-acp.git"
+  },
   "keywords": [],
-  "author": "",
+  "author": "Agent Client Protocol",
   "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
