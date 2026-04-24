@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {Readable, Writable} from "node:stream";
 import {describe, expect, vi} from "vitest";
-import {removeDirectoryWithRetry} from "../../acp-test-utils";
+import {removeDirectoryWithRetry, writeCodexHomeConfig} from "../../acp-test-utils";
 
 export const RUN_E2E_TESTS = process.env["RUN_E2E_TESTS"] === "true";
 const DEFAULT_E2E_SUITE_TIMEOUT_MS = 60_000;
@@ -226,7 +226,11 @@ function createTemporaryRuntimePaths(): RuntimePaths {
     fs.mkdirSync(codexHome, {recursive: true});
     fs.mkdirSync(workspaceDir, {recursive: true});
     fs.mkdirSync(appServerLogsDir, {recursive: true});
-    fs.writeFileSync(path.join(codexHome, "config.toml"), 'cli_auth_credentials_store = "file"\n', "utf8");
+    writeCodexHomeConfig(codexHome, {
+        model: "gpt-5.2",
+        model_reasoning_effort: "none",
+        web_search: "disabled",
+    });
 
     return {
         rootDir,
