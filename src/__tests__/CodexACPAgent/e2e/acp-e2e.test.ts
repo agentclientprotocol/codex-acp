@@ -1,9 +1,11 @@
 import {afterEach, expect, it} from "vitest";
+import {AgentMode} from "../../../AgentMode";
 import {
     createAuthenticatedFixture,
     createFixtureWithSkill,
     createGatewayFixture,
     describeE2E,
+    expectStatus,
     requireLiveApiKey,
     type SpawnedAgentFixture,
 } from "./acp-e2e-test-utils";
@@ -60,8 +62,43 @@ describeE2E("E2E tests", () => {
             sessionId: session.response.sessionId,
             modelId: selectedModelId,
         });
-        await session.expectPromptText("/status", (text) => {
-            expect(text).toContain(`**Model:** ${selectedModelId}`);
+        await expectStatus(session, {Model: selectedModelId});
+    });
+
+    it("changes session mode via setSessionMode and reflects it in /status", async () => {
+        fixture = await createAuthenticatedFixture();
+        const session = await fixture.createSession();
+
+        const modes = session.response.modes;
+        expect(modes?.currentModeId).toBe(AgentMode.DEFAULT_AGENT_MODE.id);
+        expect(modes?.availableModes.map((mode) => mode.id)).toEqual(
+            AgentMode.all().map((mode) => mode.id),
+        );
+
+        const targetMode = AgentMode.AgentFullAccess;
+        await fixture.connection.setSessionMode({
+            sessionId: session.response.sessionId,
+            modeId: targetMode.id,
+        });
+
+        await expectStatus(session, {
+            Approval: targetMode.approvalPolicy,
+            Sandbox: targetMode.sandboxMode,
+        });
+    });
+
+    it("respects INITIAL_AGENT_MODE when seeding the initial session mode", async () => {
+        const initialMode = AgentMode.ReadOnly;
+        fixture = await createAuthenticatedFixture(undefined, {
+            INITIAL_AGENT_MODE: initialMode.id,
+        });
+        const session = await fixture.createSession();
+
+        expect(session.response.modes?.currentModeId).toBe(initialMode.id);
+
+        await expectStatus(session, {
+            Approval: initialMode.approvalPolicy,
+            Sandbox: initialMode.sandboxMode,
         });
     });
 

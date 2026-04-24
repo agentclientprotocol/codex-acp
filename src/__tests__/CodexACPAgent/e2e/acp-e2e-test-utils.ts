@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {Readable, Writable} from "node:stream";
-import {describe, vi} from "vitest";
+import {describe, expect, vi} from "vitest";
 import {removeDirectoryWithRetry} from "../../acp-test-utils";
 
 export const RUN_E2E_TESTS = process.env["RUN_E2E_TESTS"] === "true";
@@ -23,6 +23,17 @@ export interface SpawnedAgentFixture {
 
 export function describeE2E(name: string, factory: () => void, timeoutMs = DEFAULT_E2E_SUITE_TIMEOUT_MS): void {
     describe.skipIf(!RUN_E2E_TESTS)(name, {timeout: timeoutMs}, factory);
+}
+
+export async function expectStatus(
+    session: SpawnedSessionFixture,
+    fields: Record<string, unknown>,
+): Promise<void> {
+    await session.expectPromptText("/status", (text) => {
+        for (const [field, value] of Object.entries(fields)) {
+            expect(text).toContain(`**${field}:** ${String(value)}`);
+        }
+    });
 }
 
 interface TestSkill {
@@ -68,7 +79,8 @@ export async function createFixtureWithSkill(skill: TestSkill): Promise<SpawnedA
 }
 
 export async function createAuthenticatedFixture(
-    runtimePaths = createTemporaryRuntimePaths()
+    runtimePaths = createTemporaryRuntimePaths(),
+    extraEnv?: NodeJS.ProcessEnv,
 ): Promise<SpawnedAgentFixture> {
     const apiKey = requireLiveApiKey();
     return await createSpawnedFixture(async (connection, authMethods) => {
@@ -89,7 +101,7 @@ export async function createAuthenticatedFixture(
         if (authenticationStatus["type"] !== "api-key") {
             throw new Error(`Unexpected authentication status: ${JSON.stringify(authenticationStatus)}`);
         }
-    }, runtimePaths);
+    }, runtimePaths, extraEnv);
 }
 
 export interface GatewayFixtureOptions {
@@ -128,6 +140,7 @@ type Authenticator = (connection: acp.ClientSideConnection, authMethods: acp.Aut
 async function createSpawnedFixture(
     authenticate: Authenticator,
     runtimePaths: RuntimePaths,
+    extraEnv?: NodeJS.ProcessEnv,
 ): Promise<SpawnedAgentFixture> {
     const agentProcess = spawn("npm", ["run", "--silent", "start"], {
         cwd: process.cwd(),
@@ -135,6 +148,7 @@ async function createSpawnedFixture(
             ...process.env,
             CODEX_HOME: runtimePaths.codexHome,
             APP_SERVER_LOGS: runtimePaths.appServerLogsDir,
+            ...extraEnv,
         },
         stdio: ["pipe", "pipe", "pipe"],
     });
