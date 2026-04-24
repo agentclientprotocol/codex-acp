@@ -14,6 +14,7 @@ import type {
     CommandExecutionOutputDeltaNotification,
     ConfigWarningNotification,
     ErrorNotification,
+    GuardianWarningNotification,
     ItemCompletedNotification,
     ItemStartedNotification, ThreadItem,
     ModelReroutedNotification,
@@ -104,10 +105,12 @@ export class CodexEventHandler {
             case "turn/diff/updated":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
+            case "item/fileChange/patchUpdated":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
             case "serverRequest/resolved":
+            case "model/verification":
                 return null;
             case "item/mcpToolCall/progress":
                 return this.createMcpToolProgressEvent(notification.params);
@@ -118,6 +121,8 @@ export class CodexEventHandler {
                 return await this.createConfigWarningEvent(notification.params);
             case "warning":
                 return this.createWarningEvent(notification.params);
+            case "guardianWarning":
+                return this.createGuardianWarningEvent(notification.params);
             case "thread/compacted":
                 return {
                     sessionUpdate: "agent_message_chunk",
@@ -187,6 +192,16 @@ export class CodexEventHandler {
             content: {
                 type: "text",
                 text: `Warning: ${event.message}\n\n`
+            }
+        };
+    }
+
+    private createGuardianWarningEvent(event: GuardianWarningNotification): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `Guardian warning: ${event.message}\n\n`
             }
         };
     }
