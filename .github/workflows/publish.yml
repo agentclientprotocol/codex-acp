@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: release # Optional: for enhanced security
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Run e2e tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npm run test:e2e
+
+  publish-to-npm:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release # Optional: for enhanced security
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+      - run: npm publish --access public --tag beta
+
+  create-release:
+    needs: publish-to-npm
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Generate GitHub token
+        uses: actions/create-github-app-token@v2
+        id: generate-token
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          generate_release_notes: true

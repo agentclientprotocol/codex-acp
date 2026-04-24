@@ -20,6 +20,7 @@ import type {
     ErrorNotification,
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
+    GuardianWarningNotification,
     ItemCompletedNotification,
     ItemStartedNotification,
     McpServerElicitationRequestParams,
@@ -255,6 +256,7 @@ export class CodexEventHandler {
             case "item/reasoning/textDelta":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
+            case "item/fileChange/patchUpdated":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
@@ -265,6 +267,8 @@ export class CodexEventHandler {
             case "turn/diff/updated":
                 this.turnDiffsByTurnId.set(notification.params.turnId, notification.params.diff);
                 return null;
+            case "model/verification":
+                return null;
             case "item/mcpToolCall/progress":
                 return this.createMcpToolProgressEvent(notification.params);
             case "account/rateLimits/updated":
@@ -274,6 +278,8 @@ export class CodexEventHandler {
                 return await this.createConfigWarningEvent(notification.params);
             case "warning":
                 return this.createWarningEvent(notification.params);
+            case "guardianWarning":
+                return this.createGuardianWarningEvent(notification.params);
             case "thread/compacted":
                 return {
                     sessionUpdate: "agent_message_chunk",
@@ -343,6 +349,16 @@ export class CodexEventHandler {
             content: {
                 type: "text",
                 text: `Warning: ${event.message}\n\n`
+            }
+        };
+    }
+
+    private createGuardianWarningEvent(event: GuardianWarningNotification): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `Guardian warning: ${event.message}\n\n`
             }
         };
     }

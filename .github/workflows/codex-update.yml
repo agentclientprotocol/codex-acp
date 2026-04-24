@@ -23,7 +23,7 @@ jobs:
       - name: Check if update is required
         id: check
         run: |
-          if ! npm outdated "$CODEX_PACKAGE"; then
+          if npm outdated "$CODEX_PACKAGE"; then
             echo "Package is up to date"
             exit 0
           fi

@@ -395,6 +395,7 @@ describe('CodexEventHandler - command action events', () => {
                 item: {
                     type: "dynamicToolCall",
                     id: "dyn-call-id",
+                    namespace: null,
                     tool: "list_apps",
                     arguments: { includeDisabled: false },
                     status: "inProgress",

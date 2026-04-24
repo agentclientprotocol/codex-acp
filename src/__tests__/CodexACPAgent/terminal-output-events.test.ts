@@ -171,6 +171,7 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'dynamicToolCall',
                     id: 'dyn-tool-123',
+                    namespace: null,
                     tool: 'list_apps',
                     arguments: { includeDisabled: false },
                     status: 'completed',
