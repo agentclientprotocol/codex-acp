@@ -4,6 +4,13 @@ import {startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexAcpServer, type SessionState} from "../CodexAcpServer";
 import type {AgentSideConnection, RequestPermissionResponse} from "@agentclientprotocol/sdk";
 import type {ServerNotification} from "../app-server";
+import type {
+    Model,
+    Thread,
+    ThreadStartResponse,
+    Turn,
+    TurnCompletedNotification
+} from "../app-server/v2";
 import type {MessageConnection} from "vscode-jsonrpc/node";
 import path from "node:path";
 import fs from "node:fs";
@@ -315,6 +322,96 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
     };
 }
 
+export function createTestModel(overrides?: Partial<Model>): Model {
+    return {
+        id: "gpt-5",
+        model: "gpt-5",
+        upgrade: null,
+        upgradeInfo: null,
+        availabilityNux: null,
+        displayName: "GPT-5",
+        description: "test model",
+        hidden: false,
+        supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "balanced" }],
+        defaultReasoningEffort: "medium",
+        inputModalities: ["text"],
+        supportsPersonality: false,
+        additionalSpeedTiers: [],
+        isDefault: true,
+        ...overrides,
+    };
+}
+
+export function createTestTurn(overrides?: Partial<Turn>): Turn {
+    return {
+        id: "turn-id",
+        items: [],
+        status: "inProgress",
+        error: null,
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+        ...overrides,
+    };
+}
+
+export function createTestThread(overrides?: Partial<Thread>): Thread {
+    return {
+        id: "thread-id",
+        forkedFromId: null,
+        preview: "",
+        ephemeral: false,
+        modelProvider: "openai",
+        createdAt: 0,
+        updatedAt: 0,
+        status: { type: "idle" },
+        path: null,
+        cwd: "/workspace",
+        cliVersion: "0.0.0-test",
+        source: "appServer",
+        agentNickname: null,
+        agentRole: null,
+        gitInfo: null,
+        name: null,
+        turns: [],
+        ...overrides,
+    };
+}
+
+export function createTestThreadStartResponse(overrides?: Partial<ThreadStartResponse>): ThreadStartResponse {
+    return {
+        thread: createTestThread(),
+        model: "gpt-5",
+        modelProvider: "openai",
+        serviceTier: null,
+        cwd: "/workspace",
+        instructionSources: [],
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        sandbox: {
+            type: "workspaceWrite",
+            writableRoots: [],
+            readOnlyAccess: { type: "fullAccess" },
+            networkAccess: false,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false,
+        },
+        permissionProfile: null,
+        reasoningEffort: "medium",
+        ...overrides,
+    };
+}
+
+export function createTestTurnCompletedNotification(
+    overrides?: Partial<TurnCompletedNotification>
+): TurnCompletedNotification {
+    return {
+        threadId: "session-id",
+        turn: createTestTurn({ status: "completed" }),
+        ...overrides,
+    };
+}
+
 export async function setupPromptAndSendNotifications(
     fixture: CodexMockTestFixture,
     sessionId: string,
@@ -323,15 +420,17 @@ export async function setupPromptAndSendNotifications(
 ): Promise<void> {
     const codexAcpAgent = fixture.getCodexAcpAgent();
     const codexAppServerClient = fixture.getCodexAppServerClient();
-    const turn = { id: "turn-id", items: [], status: "inProgress" as const, error: null };
+    const turn = createTestTurn();
 
     codexAppServerClient.turnStart = vi.fn().mockResolvedValue({
         turn,
     });
-    codexAppServerClient.awaitTurnCompleted = vi.fn().mockResolvedValue({
-        threadId: sessionId,
-        turn: { ...turn, status: "completed" },
-    });
+    codexAppServerClient.awaitTurnCompleted = vi.fn().mockResolvedValue(
+        createTestTurnCompletedNotification({
+            threadId: sessionId,
+            turn: createTestTurn({ ...turn, status: "completed" }),
+        })
+    );
 
     vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
 
