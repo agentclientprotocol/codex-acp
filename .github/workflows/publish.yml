@@ -8,6 +8,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    environment: release # Optional: for enhanced security
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v6
@@ -24,6 +25,7 @@ jobs:
   publish-to-npm:
     needs: verify
     runs-on: ubuntu-latest
+    environment: release # Optional: for enhanced security
     permissions:
       contents: read
       id-token: write
