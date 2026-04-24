@@ -47,15 +47,12 @@ import type {
 } from "./app-server/v2";
 import { logger } from "./Logger";
 
-export interface ApprovalHandler {
+type SessionHandler = {
+    handleNotification(notification: ServerNotification): Promise<void>;
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
     handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse>;
-}
-
-export interface ElicitationHandler {
-    handleNotification(notification: ServerNotification): void;
     handleElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
-}
+};
 
 export type McpStartupFailure = {
     server: string;
@@ -92,9 +89,7 @@ const McpServerElicitationRequest = new RequestType<
  */
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
-    private approvalHandlers = new Map<string, ApprovalHandler>();
-    private readonly notificationHandlers = new Set<(event: ServerNotification) => Promise<void>>();
-    private elicitationHandlers = new Map<string, ElicitationHandler>();
+    private readonly sessionHandlers = new Map<string, SessionHandlerState>();
     private mcpServerStartupVersion = 0;
     private readonly mcpServerStartupStates = new Map<string, McpServerStartupSnapshot>();
     private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
@@ -112,14 +107,14 @@ export class CodexAppServerClient {
                 });
                 this.resolveMcpServerStartupResolvers();
             }
-            this.notifyServerNotificationHandlers(serverNotification);
+            this.enqueueSessionNotification(serverNotification);
             for (const callback of this.codexEventHandlers) {
                 callback({ eventType: "notification", ...serverNotification });
             }
         });
 
         this.connection.onRequest(CommandExecutionApprovalRequest, async (params) => {
-            const handler = this.approvalHandlers.get(params.threadId);
+            const handler = this.sessionHandlers.get(params.threadId)?.handler;
             if (!handler) {
                 return { decision: "cancel" };
             }
@@ -127,7 +122,7 @@ export class CodexAppServerClient {
         });
 
         this.connection.onRequest(FileChangeApprovalRequest, async (params) => {
-            const handler = this.approvalHandlers.get(params.threadId);
+            const handler = this.sessionHandlers.get(params.threadId)?.handler;
             if (!handler) {
                 return { decision: "cancel" };
             }
@@ -135,7 +130,7 @@ export class CodexAppServerClient {
         });
 
         this.connection.onRequest(McpServerElicitationRequest, async (params) => {
-            const handler = this.elicitationHandlers.get(params.threadId);
+            const handler = this.sessionHandlers.get(params.threadId)?.handler;
             if (!handler) {
                 return { action: "cancel", content: null, _meta: null };
             }
@@ -143,12 +138,20 @@ export class CodexAppServerClient {
         });
     }
 
-    onApprovalRequest(threadId: string, handler: ApprovalHandler): void {
-        this.approvalHandlers.set(threadId, handler);
-    }
-
-    onElicitationRequest(threadId: string, handler: ElicitationHandler): void {
-        this.elicitationHandlers.set(threadId, handler);
+    subscribeSession(threadId: string, handler: SessionHandler): Disposable {
+        const previousState = this.sessionHandlers.get(threadId);
+        const state: SessionHandlerState = {
+            handler,
+            pending: previousState?.pending ?? Promise.resolve(),
+        };
+        this.sessionHandlers.set(threadId, state);
+        return {
+            dispose: () => {
+                if (this.sessionHandlers.get(threadId) === state) {
+                    this.sessionHandlers.delete(threadId);
+                }
+            }
+        };
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
@@ -244,16 +247,8 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "skills/list", params });
     }
 
-    /**
-     * Registers a notification handler for server notifications.
-     */
-    onServerNotification(callback: (event: ServerNotification) => Promise<void>): Disposable {
-        this.notificationHandlers.add(callback);
-        return {
-            dispose: () => {
-                this.notificationHandlers.delete(callback);
-            }
-        };
+    async awaitSessionIdle(threadId: string): Promise<void> {
+        await (this.sessionHandlers.get(threadId)?.pending ?? Promise.resolve());
     }
 
     private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
@@ -261,12 +256,29 @@ export class CodexAppServerClient {
         this.codexEventHandlers.push(callback);
     }
 
-    private notifyServerNotificationHandlers(notification: ServerNotification): void {
-        for (const notificationHandler of this.notificationHandlers) {
-            void notificationHandler(notification).catch((error) => {
+    private enqueueSessionNotification(notification: ServerNotification): void {
+        const threadId = getNotificationThreadId(notification);
+        if (threadId !== null && this.sessionHandlers.has(threadId)) {
+            this.enqueueNotificationForSession(threadId, notification);
+            return;
+        }
+
+        for (const sessionId of this.sessionHandlers.keys()) {
+            this.enqueueNotificationForSession(sessionId, notification);
+        }
+    }
+
+    private enqueueNotificationForSession(threadId: string, notification: ServerNotification): void {
+        const state = this.sessionHandlers.get(threadId);
+        if (!state) {
+            return;
+        }
+
+        state.pending = state.pending
+            .then(() => state.handler.handleNotification(notification))
+            .catch((error) => {
                 logger.error("Error handling server notification", error);
             });
-        }
     }
 
     private resolveMcpServerStartupResolvers(): void {
@@ -338,6 +350,21 @@ export type CodexConnectionEvent =
     | ({ eventType: "notification" } & ServerNotification);
 
 type CodexRequest = DistributiveOmit<ClientRequest, "id">
+
+type SessionHandlerState = {
+    handler: SessionHandler;
+    pending: Promise<void>;
+};
+
+function getNotificationThreadId(notification: ServerNotification): string | null {
+    const params = notification.params;
+    if (!params || typeof params !== "object") {
+        return null;
+    }
+
+    const threadId = (params as Record<string, unknown>)["threadId"];
+    return typeof threadId === "string" ? threadId : null;
+}
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>

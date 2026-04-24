@@ -9,7 +9,6 @@ import * as acp from "@agentclientprotocol/sdk";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import type {ToolCallContent} from "@agentclientprotocol/sdk/dist/schema/types.gen";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
-import type {ApprovalHandler} from "./CodexAppServerClient";
 import type {
     AccountRateLimitsUpdatedNotification,
     AgentMessageDeltaNotification,
@@ -23,6 +22,8 @@ import type {
     FileChangeRequestApprovalResponse,
     ItemCompletedNotification,
     ItemStartedNotification,
+    McpServerElicitationRequestParams,
+    McpServerElicitationRequestResponse,
     ModelReroutedNotification,
     ThreadItem,
     ThreadTokenUsageUpdatedNotification,
@@ -55,12 +56,92 @@ const APPROVAL_OPTIONS: acp.PermissionOption[] = [
     { optionId: "reject_once", name: "Reject", kind: "reject_once" },
 ];
 
-export class CodexEventHandler implements ApprovalHandler {
+// Standard elicitation options (non-tool-call approval).
+const ELICITATION_OPTIONS: acp.PermissionOption[] = [
+    { optionId: "accept", name: "Accept", kind: "allow_once" },
+    { optionId: "decline", name: "Decline", kind: "reject_once" },
+];
+
+// Option IDs used for MCP tool call approval persist choices.
+const OPTION_ALLOW_ONCE = "allow_once";
+const OPTION_ALLOW_SESSION = "allow_session";
+const OPTION_ALLOW_ALWAYS = "allow_always";
+
+type PersistValue = "session" | "always";
+
+/**
+ * Parses the `persist` field from the elicitation request `_meta`.
+ * Codex advertises which persistence options the client should show.
+ * Returns a set of supported persist values.
+ */
+function parsePersistOptions(meta: unknown): Set<PersistValue> {
+    const result = new Set<PersistValue>();
+    if (!meta || typeof meta !== "object") {
+        return result;
+    }
+
+    const persist = (meta as Record<string, unknown>)["persist"];
+    if (persist === "session") {
+        result.add("session");
+    } else if (persist === "always") {
+        result.add("always");
+    } else if (Array.isArray(persist)) {
+        if (persist.includes("session")) {
+            result.add("session");
+        }
+        if (persist.includes("always")) {
+            result.add("always");
+        }
+    }
+    return result;
+}
+
+function isMcpToolCallApproval(meta: unknown): boolean {
+    return meta !== null
+        && typeof meta === "object"
+        && (meta as Record<string, unknown>)["codex_approval_kind"] === "mcp_tool_call";
+}
+
+/**
+ * Builds the ACP permission options for an MCP tool call approval elicitation.
+ * Always includes "Allow Once"; adds session/always persist options when advertised.
+ */
+function buildToolApprovalOptions(persistOptions: Set<PersistValue>): acp.PermissionOption[] {
+    const options: acp.PermissionOption[] = [
+        { optionId: OPTION_ALLOW_ONCE, name: "Allow", kind: "allow_once" },
+    ];
+    if (persistOptions.has("session")) {
+        options.push({ optionId: OPTION_ALLOW_SESSION, name: "Allow for This Session", kind: "allow_always" });
+    }
+    if (persistOptions.has("always")) {
+        options.push({ optionId: OPTION_ALLOW_ALWAYS, name: "Allow and Don't Ask Again", kind: "allow_always" });
+    }
+    options.push({ optionId: "decline", name: "Decline", kind: "reject_once" });
+    return options;
+}
+
+export class CodexEventHandler {
 
     private readonly connection: acp.AgentSideConnection;
     private readonly sessionState: SessionState;
     private readonly fileChangesByItemId = new Map<string, ThreadItem & { type: "fileChange" }>();
     private readonly turnDiffsByTurnId = new Map<string, string>();
+    // In Rust, the MCP elicitation handler receives ElicitationRequestEvent directly from the MCP
+    // protocol layer, where id is set to "mcp_tool_call_approval_<call_id>" — the call ID is extracted
+    // by stripping that prefix.
+    //
+    // In TypeScript, Codex speaks the app-server JSON-RPC protocol (v2), where
+    // McpServerElicitationRequestParams omits elicitationId for form mode, so the MCP-level ID never
+    // reaches the client.
+    //
+    // Workaround: before requesting approval, Codex emits an item/started notification with an
+    // mcpToolCall item carrying the call id and server name. We store (threadId, serverName) → callId
+    // here so the elicitation request can correlate back to the already-rendered tool call item.
+    //
+    // Multiple calls are safe because Codex requests approval synchronously — it blocks on one tool
+    // call's elicitation before starting the next, so there is at most one pending approval per
+    // (threadId, serverName).
+    private readonly pendingMcpApprovals = new Map<string, string>();
     private failure: RequestError | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
 
@@ -109,6 +190,29 @@ export class CodexEventHandler implements ApprovalHandler {
         }
     }
 
+    async handleElicitation(
+        params: McpServerElicitationRequestParams
+    ): Promise<McpServerElicitationRequestResponse> {
+        try {
+            const { request, correlatedCallId } = this.buildElicitationPermissionRequest(params);
+            const response = await this.connection.requestPermission(request);
+            if (correlatedCallId && response.outcome.outcome !== "cancelled" && response.outcome.optionId !== "decline") {
+                await this.connection.sessionUpdate({
+                    sessionId: this.sessionState.sessionId,
+                    update: {
+                        sessionUpdate: "tool_call_update",
+                        toolCallId: correlatedCallId,
+                        status: "in_progress",
+                    }
+                });
+            }
+            return this.convertElicitationResponse(response);
+        } catch (error) {
+            logger.error("Error handling MCP elicitation request", error);
+            return { action: "cancel", content: null, _meta: null };
+        }
+    }
+
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
         /*
         TODO split UpdateSessionEvent to improve completion
@@ -121,8 +225,10 @@ export class CodexEventHandler implements ApprovalHandler {
             case "item/agentMessage/delta":
                 return await this.createTextEvent(notification.params);
             case "item/started":
+                this.trackItemStarted(notification.params);
                 return await this.createItemEvent(notification.params);
             case "item/completed":
+                this.trackItemCompleted(notification.params);
                 return await this.completeItemEvent(notification.params);
             case "turn/plan/updated":
                 return await this.updatePlan(notification.params);
@@ -152,7 +258,9 @@ export class CodexEventHandler implements ApprovalHandler {
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
+                return null;
             case "serverRequest/resolved":
+                this.clearThreadApprovals(notification.params.threadId);
                 return null;
             case "turn/diff/updated":
                 this.turnDiffsByTurnId.set(notification.params.turnId, notification.params.diff);
@@ -412,6 +520,70 @@ export class CodexEventHandler implements ApprovalHandler {
         };
     }
 
+    private buildElicitationPermissionRequest(
+        params: McpServerElicitationRequestParams
+    ): { request: acp.RequestPermissionRequest; correlatedCallId: string | undefined } {
+        const messageContent = this.createTextContent(params.message);
+        const isToolApproval = isMcpToolCallApproval(params._meta);
+        const options = isToolApproval
+            ? buildToolApprovalOptions(parsePersistOptions(params._meta))
+            : ELICITATION_OPTIONS;
+
+        if (params.mode === "form") {
+            const correlatedCallId = isToolApproval
+                ? this.popPendingApproval(params.threadId, params.serverName)
+                : undefined;
+            if (correlatedCallId) {
+                // The tool call item is already visible in the IDE conversation history because
+                // item/started was emitted before the elicitation request. Sending content or
+                // rawInput here would duplicate that information in the approval widget.
+                return {
+                    request: {
+                        sessionId: this.sessionState.sessionId,
+                        toolCall: {
+                            toolCallId: correlatedCallId,
+                            kind: "execute",
+                            status: "pending",
+                        },
+                        _meta: { is_mcp_tool_approval: true },
+                        options,
+                    },
+                    correlatedCallId,
+                };
+            }
+            return {
+                request: {
+                    sessionId: this.sessionState.sessionId,
+                    toolCall: {
+                        toolCallId: `elicitation-${params.serverName}`,
+                        kind: isToolApproval ? "execute" : "other",
+                        status: "pending",
+                        content: messageContent ? [messageContent] : null,
+                        rawInput: { serverName: params.serverName, schema: params.requestedSchema },
+                    },
+                    ...(isToolApproval ? { _meta: { is_mcp_tool_approval: true } } : {}),
+                    options,
+                },
+                correlatedCallId: undefined,
+            };
+        }
+
+        return {
+            request: {
+                sessionId: this.sessionState.sessionId,
+                toolCall: {
+                    toolCallId: `elicitation-${params.elicitationId}`,
+                    kind: "fetch",
+                    status: "pending",
+                    content: messageContent ? [messageContent] : null,
+                    rawInput: { serverName: params.serverName, url: params.url },
+                },
+                options,
+            },
+            correlatedCallId: undefined,
+        };
+    }
+
     private convertCommandResponse(
         response: acp.RequestPermissionResponse
     ): CommandExecutionRequestApprovalResponse {
@@ -446,6 +618,26 @@ export class CodexEventHandler implements ApprovalHandler {
         return { decision: "cancel" };
     }
 
+    private convertElicitationResponse(
+        response: acp.RequestPermissionResponse
+    ): McpServerElicitationRequestResponse {
+        if (response.outcome.outcome === "cancelled") {
+            return { action: "cancel", content: null, _meta: null };
+        }
+
+        switch (response.outcome.optionId) {
+            case OPTION_ALLOW_SESSION:
+                return { action: "accept", content: null, _meta: { persist: "session" } };
+            case OPTION_ALLOW_ALWAYS:
+                return { action: "accept", content: null, _meta: { persist: "always" } };
+            case OPTION_ALLOW_ONCE:
+            case "accept":
+                return { action: "accept", content: null, _meta: null };
+            default:
+                return { action: "decline", content: null, _meta: null };
+        }
+    }
+
     private createMcpToolProgressEvent(event: { itemId: string, message: string }): UpdateSessionEvent {
         const logDelta = event.message.trim();
         return {
@@ -457,6 +649,40 @@ export class CodexEventHandler implements ApprovalHandler {
                 }
             }
         };
+    }
+
+    private trackItemStarted(event: ItemStartedNotification): void {
+        if (event.item.type === "mcpToolCall") {
+            this.pendingMcpApprovals.set(this.pendingApprovalKey(event.threadId, event.item.server), event.item.id);
+        }
+    }
+
+    private trackItemCompleted(event: ItemCompletedNotification): void {
+        if (event.item.type === "mcpToolCall") {
+            // This may run after the elicitation path already consumed the same entry.
+            // That double-pop is intentional: approvals pop on request correlation, while
+            // auto-approved or interrupted calls need completion-side cleanup.
+            this.popPendingApproval(event.threadId, event.item.server);
+        }
+    }
+
+    private popPendingApproval(threadId: string, serverName: string): string | undefined {
+        const key = this.pendingApprovalKey(threadId, serverName);
+        const callId = this.pendingMcpApprovals.get(key);
+        this.pendingMcpApprovals.delete(key);
+        return callId;
+    }
+
+    private clearThreadApprovals(threadId: string): void {
+        for (const key of this.pendingMcpApprovals.keys()) {
+            if (key.startsWith(`${threadId}:`)) {
+                this.pendingMcpApprovals.delete(key);
+            }
+        }
+    }
+
+    private pendingApprovalKey(threadId: string, serverName: string): string {
+        return `${threadId}:${serverName}`;
     }
 
     static createMcpStartupUpdates(event: McpStartupCompleteEvent): UpdateSessionEvent[] {

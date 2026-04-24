@@ -3,17 +3,13 @@ import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
 import type {
-    ApprovalHandler,
     CodexAppServerClient,
-    ElicitationHandler,
     McpStartupResult,
 } from "./CodexAppServerClient";
 import open from "open";
-import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
     ReasoningEffort,
-    ServerNotification
 } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
@@ -36,6 +32,7 @@ import type {
 } from "./app-server/v2";
 import packageJson from "../package.json";
 import type {AuthenticationLogoutResponse, AuthenticationStatusResponse} from "./AcpExtensions";
+import type {Disposable} from "vscode-jsonrpc";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -48,8 +45,6 @@ export class CodexAcpClient {
     private gatewayConfig: GatewayConfig | null;
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
-    private readonly sessionNotificationStates = new Map<string, SessionNotificationState>();
-
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
         this.codexClient = codexClient;
@@ -360,19 +355,6 @@ export class CodexAcpClient {
         return ModelId.create(selectedModel.id, reasoningEffort ?? selectedModel.defaultReasoningEffort);
     }
 
-    subscribeToSessionEvents(
-        sessionId: string,
-        eventHandler: SessionEventHandler,
-        elicitationHandler: ElicitationHandler
-    ): void {
-        this.replaceSessionNotificationHandler(sessionId, async (event) => {
-            elicitationHandler.handleNotification(event);
-            await eventHandler.handleNotification(event);
-        });
-        this.codexClient.onApprovalRequest(sessionId, eventHandler);
-        this.codexClient.onElicitationRequest(sessionId, elicitationHandler);
-    }
-
     async sendPrompt(
         request: acp.PromptRequest,
         agentMode: AgentMode,
@@ -401,8 +383,12 @@ export class CodexAcpClient {
         // Wait for turn completion
         // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
         const turnCompleted = await this.codexClient.awaitTurnCompleted();
-        await this.awaitPendingSessionNotifications(request.sessionId);
+        await this.codexClient.awaitSessionIdle(request.sessionId);
         return turnCompleted;
+    }
+
+    subscribeSession(sessionId: string, handler: Parameters<CodexAppServerClient["subscribeSession"]>[1]): void {
+        this.codexClient.subscribeSession(sessionId, handler);
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {
@@ -450,30 +436,6 @@ export class CodexAcpClient {
                 resolve(mapEvent(event));
             });
         });
-    }
-
-    private replaceSessionNotificationHandler(
-        sessionId: string,
-        eventHandler: (event: ServerNotification) => Promise<void>,
-    ): void {
-        this.sessionNotificationStates.get(sessionId)?.subscription.dispose();
-        const state: SessionNotificationState = {
-            pending: Promise.resolve(),
-            subscription: { dispose() {} },
-        };
-        state.subscription = this.codexClient.onServerNotification(async (event) => {
-            state.pending = state.pending
-                .then(() => eventHandler(event))
-                .catch((error) => {
-                    logger.error("Error handling server notification", error);
-                });
-            await state.pending;
-        });
-        this.sessionNotificationStates.set(sessionId, state);
-    }
-
-    private async awaitPendingSessionNotifications(sessionId: string): Promise<void> {
-        await (this.sessionNotificationStates.get(sessionId)?.pending ?? Promise.resolve());
     }
 
     async listMcpServers(params: ListMcpServerStatusParams = { cursor: null, limit: null }): Promise<ListMcpServerStatusResponse> {
@@ -614,15 +576,6 @@ export class CodexAcpClient {
 }
 
 export type JsonObject = { [key in string]?: JsonValue }
-
-type SessionEventHandler = ApprovalHandler & {
-    handleNotification(notification: ServerNotification): Promise<void>;
-}
-
-type SessionNotificationState = {
-    pending: Promise<void>;
-    subscription: Disposable;
-}
 
 export type SessionMetadata = {
     sessionId: string,
