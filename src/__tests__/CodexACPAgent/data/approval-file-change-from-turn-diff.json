@@ -21,7 +21,7 @@
                 "type": "update",
                 "move_path": null
               },
-              "diff": "--- test/project/config.json\n+++ test/project/config.json\n@@ -1 +1 @@\n-{\"feature\":false}\n+{\"feature\":true}"
+              "diff": "--- test/project/config.json\n+++ test/project/config.json\n@@ -1,1 +1,1 @@\n-{\"feature\":false}\n+{\"feature\":true}\n"
             }
           ]
         },
