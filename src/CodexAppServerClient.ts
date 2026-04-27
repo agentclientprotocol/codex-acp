@@ -224,9 +224,13 @@ export class CodexAppServerClient {
     }
 
     //TODO create type-safe helper
-    async awaitTurnCompleted(): Promise<TurnCompletedNotification> {
+    async awaitTurnCompleted(threadId: string): Promise<TurnCompletedNotification> {
         return await new Promise((resolve) => {
-            this.connection.onNotification("turn/completed", (event: TurnCompletedNotification) => {
+            const disposable = this.connection.onNotification("turn/completed", (event: TurnCompletedNotification) => {
+                if (event.threadId !== threadId) {
+                    return;
+                }
+                disposable.dispose();
                 resolve(event);
             });
         });
@@ -255,6 +259,14 @@ export class CodexAppServerClient {
 
     private notificationHandlers = new Map<string, (event: ServerNotification) => void>();
     private notify(notification: ServerNotification) {
+        const threadId = extractThreadId(notification);
+        if (threadId !== null) {
+            const handler = this.notificationHandlers.get(threadId);
+            if (handler) {
+                handler(notification);
+            }
+            return;
+        }
         for (const notificationHandler of this.notificationHandlers.values()) {
             notificationHandler(notification);
         }
@@ -351,4 +363,12 @@ function isMcpServerStatusUpdatedNotification(notification: ServerNotification):
     params: McpServerStatusUpdatedNotification;
 } {
     return notification.method === "mcpServer/startupStatus/updated";
+}
+
+function extractThreadId(notification: ServerNotification): string | null {
+    const params = notification.params as { threadId?: unknown } | undefined;
+    if (params && typeof params.threadId === "string") {
+        return params.threadId;
+    }
+    return null;
 }

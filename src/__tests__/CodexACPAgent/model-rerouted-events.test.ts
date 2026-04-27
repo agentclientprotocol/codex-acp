@@ -23,7 +23,7 @@ describe("CodexEventHandler - model rerouted events", () => {
         const modelReroutedNotification: ServerNotification = {
             method: "model/rerouted",
             params: {
-                threadId: "thread-1",
+                threadId: sessionId,
                 turnId: "turn-1",
                 fromModel: "gpt-5",
                 toModel: "gpt-5-mini",

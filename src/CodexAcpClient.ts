@@ -402,7 +402,7 @@ export class CodexAcpClient {
 
         // Wait for turn completion
         // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
-        return await this.codexClient.awaitTurnCompleted();
+        return await this.codexClient.awaitTurnCompleted(request.sessionId);
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {

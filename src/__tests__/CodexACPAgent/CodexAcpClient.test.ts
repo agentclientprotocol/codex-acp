@@ -389,9 +389,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         // Trigger notifications after both prompts - should produce only 3 events, not 6
         const serverNotifications: ServerNotification[] = [
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "He", }},
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "ll", }},
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "o!", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "He", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "ll", }},
+            { method: "item/agentMessage/delta", params: { threadId: "id", turnId: "string", itemId: "string", delta: "o!", }},
         ];
         for (const notification of serverNotifications) {
             mockFixture.sendServerNotification(notification);
@@ -433,15 +433,23 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             return sessionId === "session-1" ? sessionState1 : sessionState2;
         });
 
+        // awaitTurnCompleted is per-thread; resolve the matching thread.
+        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation((threadId: string) => Promise.resolve({
+            threadId,
+            turn: { id: "turn-id", items: [], status: "completed", error: null }
+        }));
+
         // Start prompts for two different sessions
         await codexAcpAgent.prompt({ sessionId: "session-1", prompt: [{type: "text", text: "Message to session 1"}] });
         await codexAcpAgent.prompt({ sessionId: "session-2", prompt: [{type: "text", text: "Message to session 2"}] });
 
         mockFixture.clearAcpConnectionDump();
 
-        // Trigger notifications - both session handlers should receive them
+        // Each notification carries the threadId of the session it belongs to,
+        // and must only be dispatched to that session.
         const serverNotifications: ServerNotification[] = [
-            { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "Hello", }},
+            { method: "item/agentMessage/delta", params: { threadId: "session-1", turnId: "string", itemId: "string", delta: "Hello-1", }},
+            { method: "item/agentMessage/delta", params: { threadId: "session-2", turnId: "string", itemId: "string", delta: "Hello-2", }},
         ];
         for (const notification of serverNotifications) {
             mockFixture.sendServerNotification(notification);
@@ -450,10 +458,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         // Wait for async handlers to complete
         await vi.waitFor(() => {
             const dump = mockFixture.getAcpConnectionDump([]);
-            expect(dump.length).toBeGreaterThan(0);
+            expect(dump.length).toBeGreaterThanOrEqual(2);
         });
 
-        // Should have 2 events - one for each session's handler
+        // Should have exactly 2 events - the session-1 delta only on session-1, and
+        // the session-2 delta only on session-2 (no cross-session pollution).
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/multiple-sessions.json");
     });
 
