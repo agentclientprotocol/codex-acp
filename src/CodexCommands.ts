@@ -236,6 +236,9 @@ export class CodexCommands {
         if (account.type === "chatgpt") {
             return `ChatGPT ${account.planType} (${account.email})`;
         }
+        if (account.type === "amazonBedrock") {
+            return "Amazon Bedrock";
+        }
         return "unknown";
     }
 
