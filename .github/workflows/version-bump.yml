@@ -1,0 +1,43 @@
+name: Version Bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Bump x.y.z (triggers release): patch=z, minor=y (resets z), major=x (resets y, z)'
+        type: choice
+        default: 'patch'
+        options:
+          - patch
+          - minor
+          - major
+
+permissions: {}
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub token
+        uses: actions/create-github-app-token@v2
+        id: generate-token
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Bumps the version, commits to main, and pushes a v* tag.
+      # The tag push triggers the Release workflow (publish.yml), which publishes to npm.
+      - name: Bump version
+        run: npm version ${{ inputs.bump }} -m "Release v%s"
+
+      - name: Push commit and tag
+        run: git push --follow-tags origin main
