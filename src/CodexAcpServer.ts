@@ -245,7 +245,7 @@ export class CodexAcpServer implements acp.Agent {
         return await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
     }
 
-    async unstable_closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
+    async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
         logger.log("Closing session...", {sessionId: params.sessionId});
         const sessionState = this.getSessionState(params.sessionId);
         this.closingSessions.add(params.sessionId);

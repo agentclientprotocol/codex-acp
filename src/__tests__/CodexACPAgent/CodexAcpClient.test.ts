@@ -1205,7 +1205,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
-    it('removes session bookkeeping after unstable_closeSession', async () => {
+    it('removes session bookkeeping after closeSession', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
         const codexAcpClient = mockFixture.getCodexAcpClient();
@@ -1223,7 +1223,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         await expect(
-            codexAcpAgent.unstable_closeSession({sessionId: sessionState.sessionId})
+            codexAcpAgent.closeSession({sessionId: sessionState.sessionId})
         ).resolves.toEqual({});
         expect(closeSpy).toHaveBeenCalledWith(sessionState.sessionId, sessionState.currentTurnId);
         expect(() => codexAcpAgent.getSessionState(sessionState.sessionId)).toThrow(
@@ -1248,7 +1248,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
 
         await expect(
-            codexAcpAgent.unstable_closeSession({sessionId: sessionState.sessionId})
+            codexAcpAgent.closeSession({sessionId: sessionState.sessionId})
         ).resolves.toEqual({});
 
         expect(closeSpy).toHaveBeenCalledWith(sessionState.sessionId, "turn-pending");
@@ -1284,7 +1284,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         await expect(
-            codexAcpAgent.unstable_closeSession({sessionId: sessionState.sessionId})
+            codexAcpAgent.closeSession({sessionId: sessionState.sessionId})
         ).resolves.toEqual({});
 
         resolveTryHandle(false);
