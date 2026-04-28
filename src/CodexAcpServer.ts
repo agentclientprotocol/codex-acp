@@ -217,7 +217,7 @@ export class CodexAcpServer implements acp.Agent {
         };
     }
 
-    async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
+    async resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
         logger.log("Resuming session...", {sessionId: params.sessionId});
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -232,7 +232,7 @@ export class CodexAcpServer implements acp.Agent {
         };
     }
 
-    async unstable_listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+    async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
         logger.log("Listing sessions...", {cwd: params.cwd, cursor: params.cursor});
         await this.checkAuthorization();
         return await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));

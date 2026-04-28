@@ -507,7 +507,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         fixture.clearCodexConnectionDump();
 
         await expect(
-            fixture.getCodexAcpAgent().unstable_resumeSession({cwd: "", sessionId: sessionId})
+            fixture.getCodexAcpAgent().resumeSession({cwd: "", sessionId: sessionId})
         ).rejects.toThrow("invalid thread id");
     });
 
