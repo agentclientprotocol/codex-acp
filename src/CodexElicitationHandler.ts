@@ -9,6 +9,7 @@ import type {
     McpServerElicitationRequestResponse,
 } from "./app-server/v2";
 import { logger } from "./Logger";
+import { ApprovalOptionId } from "./ApprovalOptionId";
 
 // Standard elicitation options (non-tool-call approval).
 const ELICITATION_OPTIONS: acp.PermissionOption[] = [
@@ -16,10 +17,8 @@ const ELICITATION_OPTIONS: acp.PermissionOption[] = [
     { optionId: "decline", name: "Decline", kind: "reject_once" },
 ];
 
-// Option IDs used for MCP tool call approval persist choices.
-const OPTION_ALLOW_ONCE = "allow_once";
+// Option ID unique to elicitation persist choices — not part of the shared ApprovalOptionId set.
 const OPTION_ALLOW_SESSION = "allow_session";
-const OPTION_ALLOW_ALWAYS = "allow_always";
 
 type PersistValue = "session" | "always";
 
@@ -57,13 +56,13 @@ function isMcpToolCallApproval(meta: unknown): boolean {
  */
 function buildToolApprovalOptions(persistOptions: Set<PersistValue>): acp.PermissionOption[] {
     const options: acp.PermissionOption[] = [
-        { optionId: OPTION_ALLOW_ONCE, name: "Allow", kind: "allow_once" },
+        { optionId: ApprovalOptionId.AllowOnce, name: "Allow", kind: "allow_once" },
     ];
     if (persistOptions.has("session")) {
         options.push({ optionId: OPTION_ALLOW_SESSION, name: "Allow for This Session", kind: "allow_always" });
     }
     if (persistOptions.has("always")) {
-        options.push({ optionId: OPTION_ALLOW_ALWAYS, name: "Allow and Don't Ask Again", kind: "allow_always" });
+        options.push({ optionId: ApprovalOptionId.AllowAlways, name: "Allow and Don't Ask Again", kind: "allow_always" });
     }
     options.push({ optionId: "decline", name: "Decline", kind: "reject_once" });
     return options;
@@ -215,10 +214,10 @@ export class CodexElicitationHandler implements ElicitationHandler {
         if (optionId === OPTION_ALLOW_SESSION) {
             return { action: "accept", content: null, _meta: { persist: "session" } };
         }
-        if (optionId === OPTION_ALLOW_ALWAYS) {
+        if (optionId === ApprovalOptionId.AllowAlways) {
             return { action: "accept", content: null, _meta: { persist: "always" } };
         }
-        if (optionId === OPTION_ALLOW_ONCE || optionId === "accept") {
+        if (optionId === ApprovalOptionId.AllowOnce || optionId === "accept") {
             return { action: "accept", content: null, _meta: null };
         }
         return { action: "decline", content: null, _meta: null };

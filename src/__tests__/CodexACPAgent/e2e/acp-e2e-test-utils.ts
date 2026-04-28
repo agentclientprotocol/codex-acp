@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import {Readable, Writable} from "node:stream";
 import {describe, expect, vi} from "vitest";
+import {AgentMode} from "../../../AgentMode";
+import {ApprovalOptionId} from "../../../ApprovalOptionId";
 import {removeDirectoryWithRetry, writeCodexHomeConfig} from "../../acp-test-utils";
 
 export const RUN_E2E_TESTS = process.env["RUN_E2E_TESTS"] === "true";
@@ -13,11 +15,38 @@ const DEFAULT_E2E_SUITE_TIMEOUT_MS = 60_000;
 export interface SpawnedSessionFixture {
     readonly response: acp.NewSessionResponse;
     expectPromptText(promptText: string, assertText: (text: string) => void, timeoutMs?: number): Promise<void>;
+    readPermissionRequests(toolCallKind: acp.ToolKind): acp.RequestPermissionRequest[];
+}
+
+export function expectEndTurn(response: acp.PromptResponse): void {
+    expect(response.stopReason).toBe("end_turn");
+}
+
+export type PermissionResponder = (
+    params: acp.RequestPermissionRequest,
+) => acp.RequestPermissionResponse;
+
+export function createPermissionResponder(
+    expectedToolCallKind: acp.ToolKind,
+    optionId: ApprovalOptionId,
+): PermissionResponder {
+    return (request) => createPermissionResponse(
+        request.toolCall.kind === expectedToolCallKind ? optionId : null
+    );
+}
+
+export function createPermissionResponse(optionId: ApprovalOptionId | null): acp.RequestPermissionResponse {
+    if (optionId === null) {
+        return {outcome: {outcome: "cancelled"}};
+    }
+    return {outcome: {outcome: "selected", optionId}};
 }
 
 export interface SpawnedAgentFixture {
     readonly connection: acp.ClientSideConnection;
+    readonly workspaceDir: string;
     createSession(): Promise<SpawnedSessionFixture>;
+    setPermissionResponder(responder: PermissionResponder): void;
     dispose(): Promise<void>;
 }
 
@@ -51,11 +80,23 @@ interface RuntimePaths {
 
 class RecordingClient implements acp.Client {
     private readonly textBySessionId = new Map<string, string>();
+    private readonly permissionRequestsBySessionId = new Map<string, acp.RequestPermissionRequest[]>();
+    private permissionResponder: PermissionResponder = () => ({
+        outcome: {outcome: "cancelled"},
+    });
 
-    async requestPermission(_params: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse> {
-        return {
-            outcome: {outcome: "cancelled"},
-        };
+    setPermissionResponder(responder: PermissionResponder): void {
+        this.permissionResponder = responder;
+    }
+
+    async requestPermission(params: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse> {
+        let requests = this.permissionRequestsBySessionId.get(params.sessionId);
+        if (!requests) {
+            requests = [];
+            this.permissionRequestsBySessionId.set(params.sessionId, requests);
+        }
+        requests.push(params);
+        return this.permissionResponder(params);
     }
 
     async sessionUpdate(params: acp.SessionNotification): Promise<void> {
@@ -69,6 +110,14 @@ class RecordingClient implements acp.Client {
 
     readText(sessionId: string): string {
         return this.textBySessionId.get(sessionId) ?? "";
+    }
+
+    readPermissionRequests(
+        sessionId: string,
+        toolCallKind: acp.ToolKind,
+    ): acp.RequestPermissionRequest[] {
+        const requests = this.permissionRequestsBySessionId.get(sessionId) ?? [];
+        return requests.filter((request) => request.toolCall.kind === toolCallKind);
     }
 }
 
@@ -102,6 +151,10 @@ export async function createAuthenticatedFixture(
             throw new Error(`Unexpected authentication status: ${JSON.stringify(authenticationStatus)}`);
         }
     }, runtimePaths, extraEnv);
+}
+
+export async function createReadOnlyFixture(): Promise<SpawnedAgentFixture> {
+    return await createAuthenticatedFixture(undefined, {INITIAL_AGENT_MODE: AgentMode.ReadOnly.id});
 }
 
 export interface GatewayFixtureOptions {
@@ -186,12 +239,19 @@ async function createSpawnedFixture(
             async expectPromptText(promptText: string, assertText: (text: string) => void, timeoutMs = 30_000): Promise<void> {
                 await expectPromptTextForSession(connection, client, newSessionResponse.sessionId, promptText, assertText, timeoutMs);
             },
+            readPermissionRequests(toolCallKind: acp.ToolKind): acp.RequestPermissionRequest[] {
+                return client.readPermissionRequests(newSessionResponse.sessionId, toolCallKind);
+            },
         };
     };
 
     return {
         connection,
+        workspaceDir: runtimePaths.workspaceDir,
         createSession,
+        setPermissionResponder(responder: PermissionResponder): void {
+            client.setPermissionResponder(responder);
+        },
         async dispose(): Promise<void> {
             if (!agentProcess.stdin.destroyed && !agentProcess.stdin.writableEnded) {
                 agentProcess.stdin.end();
@@ -281,9 +341,7 @@ async function expectPromptTextForSession(
         }],
     });
 
-    if (promptResponse.stopReason !== "end_turn") {
-        throw new Error(`Unexpected stop reason: ${promptResponse.stopReason}`);
-    }
+    expectEndTurn(promptResponse);
 
     await vi.waitFor(() => {
         const sessionText = client.readText(sessionId);
