@@ -1239,8 +1239,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const sessionState = createTestSessionState({
             sessionId: "session-close",
-            currentTurnId: null,
-            pendingTurnId: Promise.resolve("turn-pending"),
+            currentTurnId: Promise.resolve("turn-pending"),
         });
         const closeSpy = vi.spyOn(codexAcpClient, "closeSession").mockResolvedValue();
 

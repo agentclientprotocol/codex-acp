@@ -299,7 +299,6 @@ function anonymizeValue(value: any, path: string[], fieldsToAnonymize: Set<strin
  */
 export function createTestSessionState(overrides?: Partial<SessionState>): SessionState {
     return {
-        pendingTurnId: null,
         currentTurnId: null,
         lastTokenUsage: null,
         totalTokenUsage: null,

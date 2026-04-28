@@ -44,8 +44,8 @@ export interface SessionState {
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     supportedInputModalities: Array<InputModality>,
     agentMode: AgentMode,
-    pendingTurnId: Promise<string> | null;
-    currentTurnId: string | null;
+    // Promise covers the turn/start request window before the turn id response arrives.
+    currentTurnId: Promise<string> | string | null;
     lastTokenUsage: TokenCount | null;
     totalTokenUsage: TokenCount | null;
     modelContextWindow: number | null;
@@ -175,7 +175,6 @@ export class CodexAcpServer implements acp.Agent {
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
-            pendingTurnId: null,
             currentTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
@@ -407,7 +406,6 @@ export class CodexAcpServer implements acp.Agent {
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
-            pendingTurnId: null,
             currentTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
@@ -670,17 +668,19 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     private async resolveActiveTurnId(sessionState: SessionState): Promise<string | null> {
-        if (sessionState.currentTurnId) {
-            return sessionState.currentTurnId;
-        }
-        if (!sessionState.pendingTurnId) {
+        const currentTurnId = sessionState.currentTurnId;
+        if (!currentTurnId) {
             return null;
         }
 
+        if (typeof currentTurnId === "string") {
+            return currentTurnId;
+        }
+
         try {
-            return await sessionState.pendingTurnId;
+            return await currentTurnId;
         } catch (err) {
-            logger.error(`Failed to resolve pending turn for session ${sessionState.sessionId}`, err);
+            logger.error(`Failed to resolve current turn for session ${sessionState.sessionId}`, err);
             return null;
         }
     }
@@ -783,7 +783,6 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState = this.getSessionState(params.sessionId);
         const requireTrackedSession = this.sessions.has(params.sessionId);
         this.ensureSessionIsActive(params.sessionId, requireTrackedSession);
-        sessionState.pendingTurnId = null;
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
 
@@ -830,12 +829,11 @@ export class CodexAcpServer implements acp.Agent {
                 throw RequestError.invalidRequest("The current model does not support image input");
             }
             const agentMode = sessionState.agentMode;
-            const pendingTurnId = this.runWithProcessCheck(
+            const turnIdPromise = this.runWithProcessCheck(
                 () => this.codexAcpClient.startPrompt(params, agentMode, modelId, disableSummary, sessionState.cwd)
             );
-            sessionState.pendingTurnId = pendingTurnId;
-            const turnId = await pendingTurnId;
-            sessionState.pendingTurnId = null;
+            sessionState.currentTurnId = turnIdPromise;
+            const turnId = await turnIdPromise;
             sessionState.currentTurnId = turnId;
 
             const turnCompleted = await this.runWithProcessCheck(
@@ -879,7 +877,6 @@ export class CodexAcpServer implements acp.Agent {
             throw err;
         } finally {
             logger.log("Prompt completed", {sessionId: params.sessionId});
-            sessionState.pendingTurnId = null;
             sessionState.currentTurnId = null;
         }
     }
