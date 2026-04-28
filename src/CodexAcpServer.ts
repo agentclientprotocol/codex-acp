@@ -8,7 +8,7 @@ import {
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
-import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
+import {getCodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
 import type {McpStartupResult} from "./CodexAppServerClient";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -109,7 +109,7 @@ export class CodexAcpServer implements acp.Agent {
                     sse: false
                 }
             },
-            authMethods: CodexAuthMethods,
+            authMethods: getCodexAuthMethods(_params.clientCapabilities),
         };
     }
 

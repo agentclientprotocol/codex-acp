@@ -112,7 +112,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const gatewayFixture = createTestFixture();
         const codexAcpAgent = gatewayFixture.getCodexAcpAgent();
 
-        await codexAcpAgent.initialize({protocolVersion: 1});
+        await codexAcpAgent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: {
+                auth: {
+                    _meta: {
+                        gateway: true,
+                    }
+                }
+            }
+        });
         await gatewayFixture.getCodexAcpClient().logout();
 
         const authRequest: CodexAuthRequest = {
