@@ -22,6 +22,7 @@ export interface SpawnedAgentFixture {
     readonly connection: acp.ClientSideConnection;
     readonly workspaceDir: string;
     createSession(): Promise<acp.NewSessionResponse>;
+    restart(): Promise<SpawnedAgentFixture>;
     writeSkill(skill: TestSkill): void;
     setPermissionResponder(responder: PermissionResponder): void;
     expectPromptText(
@@ -38,16 +39,13 @@ export interface SpawnedAgentFixture {
     dispose(): Promise<void>;
 }
 
-export function createSpawnedAgentFixture(
-    extraEnv?: NodeJS.ProcessEnv,
-): SpawnedAgentFixture {
-    const paths = RuntimePaths.createTemporary();
-    writeCodexHomeConfig(paths.codexHome, {
-        model: DEFAULT_TEST_MODEL_ID.model,
-        model_reasoning_effort: DEFAULT_TEST_MODEL_ID.effort,
-        web_search: "disabled",
-    });
+type ConnectionInitializer = (connection: acp.ClientSideConnection) => Promise<void>;
 
+export async function createSpawnedAgentFixture(
+    initializeConnection: ConnectionInitializer,
+    extraEnv?: NodeJS.ProcessEnv,
+    paths = RuntimePaths.createTemporary(),
+): Promise<SpawnedAgentFixture> {
     const agentProcess = spawn("npm", ["run", "--silent", "start"], {
         cwd: process.cwd(),
         env: {
@@ -59,7 +57,15 @@ export function createSpawnedAgentFixture(
         stdio: ["pipe", "pipe", "pipe"],
     });
 
-    return new SpawnedAgentFixtureImpl(new RecordingClient(), agentProcess, paths);
+    const fixture = new SpawnedAgentFixtureImpl(
+        new RecordingClient(),
+        agentProcess,
+        paths,
+        initializeConnection,
+        extraEnv,
+    );
+    await initializeConnection(fixture.connection);
+    return fixture;
 }
 
 class RuntimePaths {
@@ -79,6 +85,11 @@ class RuntimePaths {
         for (const dir of [paths.codexHome, paths.workspaceDir, paths.appServerLogsDir]) {
             fs.mkdirSync(dir, {recursive: true});
         }
+        writeCodexHomeConfig(paths.codexHome, {
+            model: DEFAULT_TEST_MODEL_ID.model,
+            model_reasoning_effort: DEFAULT_TEST_MODEL_ID.effort,
+            web_search: "disabled",
+        });
         return paths;
     }
 }
@@ -128,11 +139,14 @@ class RecordingClient implements acp.Client {
 
 class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
     readonly connection: acp.ClientSideConnection;
+    private disposed = false;
 
     constructor(
         private readonly client: RecordingClient,
         private readonly agentProcess: ChildProcessWithoutNullStreams,
         private readonly paths: RuntimePaths,
+        private readonly initializeConnection: ConnectionInitializer,
+        private readonly extraEnv?: NodeJS.ProcessEnv,
     ) {
         const output = Readable.toWeb(agentProcess.stdout) as ReadableStream<Uint8Array>;
         this.connection = new acp.ClientSideConnection(
@@ -150,6 +164,11 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
             cwd: this.workspaceDir,
             mcpServers: [],
         });
+    }
+
+    async restart(): Promise<SpawnedAgentFixture> {
+        await this.stopProcess(false);
+        return await createSpawnedAgentFixture(this.initializeConnection, this.extraEnv, this.paths);
     }
 
     writeSkill(skill: TestSkill): void {
@@ -211,6 +230,15 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
     }
 
     async dispose(): Promise<void> {
+        if (this.disposed) {
+            return;
+        }
+        this.disposed = true;
+        await this.stopProcess(true);
+        removeDirectoryWithRetry(this.paths.rootDir);
+    }
+
+    private async stopProcess(printLogs: boolean): Promise<void> {
         if (!this.agentProcess.stdin.destroyed && !this.agentProcess.stdin.writableEnded) {
             this.agentProcess.stdin.end();
         }
@@ -221,12 +249,16 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
             await waitForProcessExit(this.agentProcess, 4_000);
         }
 
-        printLogDirectory(this.paths.appServerLogsDir);
-        removeDirectoryWithRetry(this.paths.rootDir);
+        if (printLogs) {
+            printLogDirectory(this.paths.appServerLogsDir);
+        }
     }
 }
 
 function printLogDirectory(logDirectory: string): void {
+    if (!fs.existsSync(logDirectory)) {
+        return;
+    }
     fs.readdirSync(logDirectory, {withFileTypes: true})
         .filter((entry) => entry.isFile())
         .forEach((entry) => {
