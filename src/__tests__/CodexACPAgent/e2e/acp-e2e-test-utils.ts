@@ -103,24 +103,22 @@ async function createSpawnedFixture(
     authenticate: Authenticator,
     extraEnv?: NodeJS.ProcessEnv,
 ): Promise<SpawnedAgentFixture> {
-    const fixture = createSpawnedAgentFixture(extraEnv);
-    const connection = fixture.connection;
+    return await createSpawnedAgentFixture(async (connection) => {
+        const initializeResponse = await connection.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: buildClientCapabilities(),
+            clientInfo: {
+                name: "vitest",
+                version: "1.0.0",
+            },
+        });
 
-    const initializeResponse = await connection.initialize({
-        protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: buildClientCapabilities(),
-        clientInfo: {
-            name: "vitest",
-            version: "1.0.0",
-        },
-    });
+        if (initializeResponse.protocolVersion !== acp.PROTOCOL_VERSION) {
+            throw new Error(`Unexpected protocol version: ${initializeResponse.protocolVersion}`);
+        }
 
-    if (initializeResponse.protocolVersion !== acp.PROTOCOL_VERSION) {
-        throw new Error(`Unexpected protocol version: ${initializeResponse.protocolVersion}`);
-    }
-
-    await authenticate(connection, initializeResponse.authMethods ?? []);
-    return fixture;
+        await authenticate(connection, initializeResponse.authMethods ?? []);
+    }, extraEnv);
 }
 
 export function requireLiveApiKey(): string {
