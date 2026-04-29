@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import {afterEach, beforeEach, expect, it} from "vitest";
+import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {ApprovalOptionId} from "../../../ApprovalOptionId";
 import {
+    createAuthenticatedFixture,
     createPermissionResponse,
     createPermissionResponder,
     createReadOnlyFixture,
@@ -67,5 +68,49 @@ describeE2E("E2E shell approval tests", () => {
         expect(fs.existsSync(path.join(fixture.workspaceDir, FIRST_FILE_NAME))).toBe(false);
         expect(fs.existsSync(path.join(fixture.workspaceDir, SECOND_FILE_NAME))).toBe(false);
         expect(fixture.readPermissionRequests(sessionId, "execute").length).toBe(2);
+    });
+});
+
+describeE2E("E2E shell cancellation tests", () => {
+    let fixture: SpawnedAgentFixture | null = null;
+
+    afterEach(async () => {
+        await fixture?.dispose();
+        fixture = null;
+    });
+
+    function isProcessRunning(pid: number): boolean {
+        try {
+            process.kill(pid, 0);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    it("cancels a running shell command", async () => {
+        fixture = await createAuthenticatedFixture();
+        const sessionId = (await fixture.createSession()).sessionId;
+        const pidFilePath = path.join(fixture.workspaceDir, "cancel-command.pid");
+        const command = `/bin/sh -c 'echo $$ > "${pidFilePath}"; exec sleep 100'`;
+
+        const promptResponse = fixture.connection.prompt({
+            sessionId,
+            prompt: [{type: "text", text: `Use your shell tool to run exactly \`${command}\`.`}],
+        });
+
+        const pid = await vi.waitFor(() => {
+            const content = fs.existsSync(pidFilePath) ? fs.readFileSync(pidFilePath, "utf8").trim() : "";
+            const parsed = Number.parseInt(content, 10);
+            expect(parsed).toBeGreaterThan(0);
+            return parsed;
+        }, {timeout: 10_000});
+        expect(isProcessRunning(pid)).toBe(true);
+        await fixture.connection.cancel({sessionId});
+
+        expect((await promptResponse).stopReason).toBe("cancelled");
+        await vi.waitFor(() => {
+            expect(isProcessRunning(pid)).toBe(false);
+        }, {timeout: 5_000});
     });
 });
