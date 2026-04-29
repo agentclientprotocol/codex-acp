@@ -27,6 +27,8 @@ import {toTokenCount} from "./TokenCount";
 import {
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
+    createFileChangeCompletionUpdate,
+    createFileChangePatchUpdate,
     createFileChangeUpdate,
     createMcpRawInput,
     createMcpRawOutput,
@@ -105,13 +107,14 @@ export class CodexEventHandler {
             case "turn/diff/updated":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
-            case "item/fileChange/patchUpdated":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
             case "serverRequest/resolved":
             case "model/verification":
                 return null;
+            case "item/fileChange/patchUpdated":
+                return await createFileChangePatchUpdate(notification.params);
             case "item/mcpToolCall/progress":
                 return this.createMcpToolProgressEvent(notification.params);
             case "account/rateLimits/updated":
@@ -245,6 +248,7 @@ export class CodexEventHandler {
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
+                return await createFileChangeCompletionUpdate(event.item);
             case "dynamicToolCall":
                 return {
                     sessionUpdate: "tool_call_update",

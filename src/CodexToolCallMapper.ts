@@ -1,5 +1,5 @@
-import type { ToolCallContent } from "@agentclientprotocol/sdk";
-import { applyPatch, parsePatch } from "diff";
+import type { ToolCallContent, ToolCallLocation } from "@agentclientprotocol/sdk";
+import { applyPatch, parsePatch, reversePatch } from "diff";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
@@ -12,6 +12,7 @@ import type {
     CommandAction,
     CommandExecutionStatus,
     DynamicToolCallStatus,
+    FileChangePatchUpdatedNotification,
     FileUpdateChange,
     McpToolCallError,
     McpToolCallResult,
@@ -23,6 +24,7 @@ import type { JsonValue } from "./app-server/serde_json/JsonValue";
 
 type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+type FileChangeFields = Pick<Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>, "content" | "locations" | "rawOutput">;
 
 function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
     switch (status) {
@@ -39,19 +41,35 @@ function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
 export async function createFileChangeUpdate(
     item: ThreadItem & { type: "fileChange" }
 ): Promise<UpdateSessionEvent> {
-    const patches: ToolCallContent[] = [];
-    for (const change of item.changes) {
-        const content = await createPatchContent(change);
-        if (content) patches.push(content);
-        // ignore unparseable diffs
-    }
     return {
         sessionUpdate: "tool_call",
         toolCallId: item.id,
         title: "Editing files",
         kind: "edit",
         status: toAcpStatus(item.status),
-        content: patches,
+        ...await createFileChangeFields(item.changes),
+    };
+}
+
+export async function createFileChangePatchUpdate(
+    event: FileChangePatchUpdatedNotification
+): Promise<UpdateSessionEvent> {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: event.itemId,
+        status: "in_progress",
+        ...await createFileChangeFields(event.changes),
+    };
+}
+
+export async function createFileChangeCompletionUpdate(
+    item: ThreadItem & { type: "fileChange" }
+): Promise<UpdateSessionEvent> {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        status: toAcpStatus(item.status),
+        ...await createFileChangeFields(item.changes),
     };
 }
 
@@ -287,24 +305,96 @@ async function createPatchContent(change: FileUpdateChange): Promise<ToolCallCon
         }
     }
 
-    const oldContent = change.kind.type === "add" ? "" : await readFile(change.path, { encoding: "utf8" }).catch(() => null);
-    if (oldContent === null) {
+    const currentContent = change.kind.type === "add" ? "" : await readFile(change.path, { encoding: "utf8" }).catch(() => null);
+    if (currentContent === null) {
         return null;
     }
 
-    const newContent = applyPatch(oldContent, change.diff);
-    if (newContent === false) {
+    const newContent = applyPatch(currentContent, change.diff);
+    if (newContent !== false) {
+        return {
+            type: "diff",
+            oldText: change.kind.type === "add" ? null : currentContent,
+            newText: newContent,
+            path: change.path,
+            _meta: {
+                kind: change.kind.type,
+            },
+        };
+    }
+
+    const oldContent = isUnifiedDiff(change.diff)
+        ? reverseApplyPatch(currentContent, change.diff)
+        : null;
+
+    if (oldContent !== null) {
+        return {
+            type: "diff",
+            oldText: oldContent,
+            newText: currentContent,
+            path: change.path,
+            _meta: {
+                kind: change.kind.type,
+            },
+        };
+    }
+
+    return null;
+}
+
+async function createFileChangeFields(changes: FileUpdateChange[]): Promise<FileChangeFields> {
+    const content: ToolCallContent[] = [];
+    for (const change of changes) {
+        const patch = await createPatchContent(change);
+        if (patch) content.push(patch);
+        // ignore unparseable diffs
+    }
+
+    const locations = createFileChangeLocations(changes);
+    const rawOutput = createFileChangeRawOutput(changes);
+
+    return {
+        ...(content.length > 0 ? { content } : {}),
+        ...(locations.length > 0 ? { locations } : {}),
+        ...(rawOutput ? { rawOutput } : {}),
+    };
+}
+
+function createFileChangeLocations(changes: FileUpdateChange[]): ToolCallLocation[] {
+    const paths = new Set<string>();
+    for (const change of changes) {
+        paths.add(change.path);
+        if (change.kind.type === "update" && change.kind.move_path) {
+            paths.add(change.kind.move_path);
+        }
+    }
+
+    return Array.from(paths).map((path) => ({ path }));
+}
+
+function createFileChangeRawOutput(changes: FileUpdateChange[]): { diff: string, changes: FileUpdateChange[] } | null {
+    if (changes.length === 0) {
         return null;
     }
+
     return {
-        type: "diff",
-        oldText: change.kind.type === "add" ? null : oldContent,
-        newText: newContent,
-        path: change.path,
-        _meta: {
-            kind: change.kind.type,
-        },
+        diff: changes.map((change) => change.diff).join("\n"),
+        changes,
     };
+}
+
+function reverseApplyPatch(content: string, unifiedDiff: string): string | null {
+    try {
+        const [patch] = parsePatch(unifiedDiff);
+        if (!patch) {
+            return null;
+        }
+
+        const oldContent = applyPatch(content, reversePatch(patch));
+        return oldContent === false ? null : oldContent;
+    } catch {
+        return null;
+    }
 }
 
 function isUnifiedDiff(content: string): boolean {
