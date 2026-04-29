@@ -9,7 +9,6 @@ import {
     describeE2E,
     expectEndTurn,
     type SpawnedAgentFixture,
-    type SpawnedSessionFixture,
 } from "./acp-e2e-test-utils";
 
 const FIRST_FILE_NAME = "approval-first.txt";
@@ -18,24 +17,24 @@ const COMMAND = `if [ -e ${FIRST_FILE_NAME} ]; then touch ${SECOND_FILE_NAME}; e
 
 describeE2E("E2E shell approval tests", () => {
     let fixture: SpawnedAgentFixture;
-    let session: SpawnedSessionFixture;
+    let sessionId: string;
 
     beforeEach(async () => {
         fixture = await createReadOnlyFixture();
-        session = await fixture.createSession();
+        sessionId = (await fixture.createSession()).sessionId;
     });
 
     afterEach(async () => {
         await fixture.dispose();
     });
 
-    async function promptShellCommandTwice() {
+    async function promptShellCommandTwice(): Promise<void> {
         for (const text of [
             `Use your shell tool to run exactly \`${COMMAND}\`.`,
             `Use your shell tool to run exactly the same command again: \`${COMMAND}\`.`,
         ]) {
             expectEndTurn(await fixture.connection.prompt({
-                sessionId: session.response.sessionId,
+                sessionId,
                 prompt: [{type: "text", text}],
             }));
         }
@@ -51,7 +50,7 @@ describeE2E("E2E shell approval tests", () => {
         await promptShellCommandTwice();
         expect(fs.existsSync(path.join(fixture.workspaceDir, FIRST_FILE_NAME))).toBe(true);
         expect(fs.existsSync(path.join(fixture.workspaceDir, SECOND_FILE_NAME))).toBe(false);
-        expect(session.readPermissionRequests("execute").length).toBe(2);
+        expect(fixture.readPermissionRequests(sessionId, "execute").length).toBe(2);
     });
 
     it("skips subsequent approvals when allow_always is selected", async () => {
@@ -59,7 +58,7 @@ describeE2E("E2E shell approval tests", () => {
         await promptShellCommandTwice();
         expect(fs.existsSync(path.join(fixture.workspaceDir, FIRST_FILE_NAME))).toBe(true);
         expect(fs.existsSync(path.join(fixture.workspaceDir, SECOND_FILE_NAME))).toBe(true);
-        expect(session.readPermissionRequests("execute").length).toBe(1);
+        expect(fixture.readPermissionRequests(sessionId, "execute").length).toBe(1);
     });
 
     it("prompts for every command when reject_once is selected", async () => {
@@ -67,6 +66,6 @@ describeE2E("E2E shell approval tests", () => {
         await promptShellCommandTwice();
         expect(fs.existsSync(path.join(fixture.workspaceDir, FIRST_FILE_NAME))).toBe(false);
         expect(fs.existsSync(path.join(fixture.workspaceDir, SECOND_FILE_NAME))).toBe(false);
-        expect(session.readPermissionRequests("execute").length).toBe(2);
+        expect(fixture.readPermissionRequests(sessionId, "execute").length).toBe(2);
     });
 });

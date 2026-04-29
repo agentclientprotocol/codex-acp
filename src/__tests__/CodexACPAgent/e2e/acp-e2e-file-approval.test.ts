@@ -7,7 +7,6 @@ import {
     createReadOnlyFixture,
     describeE2E,
     type SpawnedAgentFixture,
-    type SpawnedSessionFixture,
 } from "./acp-e2e-test-utils";
 
 const FILE_NAME = "approval-file.txt";
@@ -15,11 +14,11 @@ const FILE_CONTENT = "file approval e2e";
 
 describeE2E("E2E file approval tests", () => {
     let fixture: SpawnedAgentFixture;
-    let session: SpawnedSessionFixture;
+    let sessionId: string;
 
     beforeEach(async () => {
         fixture = await createReadOnlyFixture();
-        session = await fixture.createSession();
+        sessionId = (await fixture.createSession()).sessionId;
     });
 
     afterEach(async () => {
@@ -29,18 +28,18 @@ describeE2E("E2E file approval tests", () => {
     async function expectFileApproval(
         optionId: ApprovalOptionId,
         expectedStopReason: "end_turn" | "cancelled",
-    ) {
+    ): Promise<void> {
         fixture.setPermissionResponder(createPermissionResponder("edit", optionId));
         const response = await fixture.connection.prompt({
-            sessionId: session.response.sessionId,
+            sessionId,
             prompt: [{
                 type: "text",
                 text: `Create ${FILE_NAME} by editing files directly. Content must be exactly: ${FILE_CONTENT}. Do not use shell commands, and stop if the edit is rejected.`,
             }],
         });
         expect(response.stopReason).toBe(expectedStopReason);
-        expect(session.readPermissionRequests("edit").length).toBe(1);
-        expect(session.readPermissionRequests("execute").length).toBe(0);
+        expect(fixture.readPermissionRequests(sessionId, "edit").length).toBe(1);
+        expect(fixture.readPermissionRequests(sessionId, "execute").length).toBe(0);
     }
 
     it("applies approved file edits", async () => {
