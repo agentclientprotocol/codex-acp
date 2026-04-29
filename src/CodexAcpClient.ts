@@ -156,6 +156,11 @@ export class CodexAcpClient {
                     type: "chat-gpt",
                     email: account.email,
                 };
+            case "amazonBedrock":
+                return {
+                    type: "gateway",
+                    name: "amazonBedrock",
+                };
         }
     }
 

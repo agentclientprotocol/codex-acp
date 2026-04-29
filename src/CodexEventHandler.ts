@@ -34,6 +34,7 @@ import type {
 import {stripShellPrefix} from "./CommandUtils";
 import {logger} from "./Logger";
 import {toTokenCount} from "./TokenCount";
+import {ApprovalOptionId} from "./ApprovalOptionId";
 import {
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
@@ -52,9 +53,9 @@ import {
 } from "./CodexToolCallMapper";
 
 const APPROVAL_OPTIONS: acp.PermissionOption[] = [
-    { optionId: "allow_once", name: "Allow Once", kind: "allow_once" },
-    { optionId: "allow_always", name: "Allow for Session", kind: "allow_always" },
-    { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+    { optionId: ApprovalOptionId.AllowOnce, name: "Allow Once", kind: "allow_once" },
+    { optionId: ApprovalOptionId.AllowAlways, name: "Allow for Session", kind: "allow_always" },
+    { optionId: ApprovalOptionId.RejectOnce, name: "Reject", kind: "reject_once" },
 ];
 
 // Standard elicitation options (non-tool-call approval).
@@ -64,9 +65,9 @@ const ELICITATION_OPTIONS: acp.PermissionOption[] = [
 ];
 
 // Option IDs used for MCP tool call approval persist choices.
-const OPTION_ALLOW_ONCE = "allow_once";
+const OPTION_ALLOW_ONCE = ApprovalOptionId.AllowOnce;
 const OPTION_ALLOW_SESSION = "allow_session";
-const OPTION_ALLOW_ALWAYS = "allow_always";
+const OPTION_ALLOW_ALWAYS = ApprovalOptionId.AllowAlways;
 
 type PersistValue = "session" | "always";
 
@@ -608,10 +609,10 @@ export class CodexEventHandler {
         }
 
         const optionId = response.outcome.optionId;
-        if (optionId === "allow_once") {
+        if (optionId === ApprovalOptionId.AllowOnce) {
             return { decision: "accept" };
         }
-        if (optionId === "allow_always") {
+        if (optionId === ApprovalOptionId.AllowAlways) {
             return { decision: "acceptForSession" };
         }
         return { decision: "decline" };
@@ -625,10 +626,10 @@ export class CodexEventHandler {
         }
 
         const optionId = response.outcome.optionId;
-        if (optionId === "allow_once") {
+        if (optionId === ApprovalOptionId.AllowOnce) {
             return { decision: "accept" };
         }
-        if (optionId === "allow_always") {
+        if (optionId === ApprovalOptionId.AllowAlways) {
             return { decision: "acceptForSession" };
         }
         return { decision: "cancel" };

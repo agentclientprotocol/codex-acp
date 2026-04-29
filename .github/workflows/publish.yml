@@ -40,7 +40,7 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
-      - run: npm publish --access public --tag beta
+      - run: npm publish --access public
 
   create-release:
     needs: publish-to-npm

@@ -171,8 +171,19 @@ export function createTestFixture(): TestFixture {
 
 function createTestCodexHome(): string {
     const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-codex-home-"));
-    fs.writeFileSync(path.join(codexHome, "config.toml"), 'cli_auth_credentials_store = "file"\n', "utf8");
+    writeCodexHomeConfig(codexHome);
     return codexHome;
+}
+
+export function writeCodexHomeConfig(codexHome: string, extras: Record<string, string> = {}): void {
+    const entries: Record<string, string> = {
+        cli_auth_credentials_store: "file",
+        ...extras,
+    };
+    const body = Object.entries(entries)
+        .map(([key, value]) => `${key} = "${value}"`)
+        .join("\n");
+    fs.writeFileSync(path.join(codexHome, "config.toml"), body, "utf8");
 }
 
 export function removeDirectoryWithRetry(directory: string): void {

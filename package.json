@@ -3,7 +3,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "0.0.39",
+  "version": "0.0.40",
   "description": "",
   "main": "dist/index.js",
   "bin": {
@@ -61,8 +61,8 @@
     "vitest": "^4.0.10"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.16.1",
-    "@openai/codex": "^0.124.0",
+    "@agentclientprotocol/sdk": "^0.21.0",
+    "@openai/codex": "^0.125.0",
     "diff": "^8.0.3",
     "open": "^11.0.0",
     "vscode-jsonrpc": "^8.2.1"
