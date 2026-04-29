@@ -47,7 +47,7 @@ import type {
 } from "./app-server/v2";
 import { logger } from "./Logger";
 
-type SessionHandler = {
+export type SessionHandler = {
     handleNotification(notification: ServerNotification): Promise<void>;
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
     handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse>;

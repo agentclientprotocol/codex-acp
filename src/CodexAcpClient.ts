@@ -5,6 +5,7 @@ import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
 import type {
     CodexAppServerClient,
     McpStartupResult,
+    SessionHandler,
 } from "./CodexAppServerClient";
 import open from "open";
 import type {
@@ -387,7 +388,7 @@ export class CodexAcpClient {
         return turnCompleted;
     }
 
-    subscribeSession(sessionId: string, handler: Parameters<CodexAppServerClient["subscribeSession"]>[1]): void {
+    subscribeSession(sessionId: string, handler: SessionHandler): void {
         this.codexClient.subscribeSession(sessionId, handler);
     }
 
