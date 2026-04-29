@@ -7,7 +7,6 @@ import type {
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse
 } from "./app-server/v2";
-import type {ToolCallContent} from "@agentclientprotocol/sdk/dist/schema/types.gen";
 import {logger} from "./Logger";
 import {stripShellPrefix} from "./CodexEventHandler";
 
@@ -61,45 +60,28 @@ export class CodexApprovalHandler implements ApprovalHandler {
         sessionId: string,
         params: CommandExecutionRequestApprovalParams
     ): acp.RequestPermissionRequest {
-        const reasonContent = this.createContentFromReason(params.reason ?? null);
         return {
             sessionId,
             toolCall: {
                 toolCallId: params.itemId,
                 kind: "execute",
                 status: "pending",
-                content: reasonContent ? [reasonContent] : null,
-                rawInput: params.command ? { command: stripShellPrefix(params.command), cwd: params.cwd } : null,
+                ...(params.command ? { rawInput: { command: stripShellPrefix(params.command), cwd: params.cwd } } : {}),
             },
             options: APPROVAL_OPTIONS,
         };
-    }
-
-    private createContentFromReason(reason: string | null): ToolCallContent | null {
-        if (reason === null || reason === "") {
-            return null;
-        }
-        return {
-            type: "content",
-            content: {
-                type: "text",
-                text: reason
-            }
-        }
     }
 
     private buildFileChangePermissionRequest(
         sessionId: string,
         params: FileChangeRequestApprovalParams
     ): acp.RequestPermissionRequest {
-        const reasonContent = this.createContentFromReason(params.reason ?? null);
         return {
             sessionId,
             toolCall: {
                 toolCallId: params.itemId,
                 kind: "edit",
                 status: "pending",
-                content: reasonContent ? [reasonContent] : null,
             },
             options: APPROVAL_OPTIONS,
         };
