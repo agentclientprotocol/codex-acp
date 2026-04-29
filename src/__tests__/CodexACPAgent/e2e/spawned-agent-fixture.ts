@@ -21,7 +21,7 @@ export interface TestSkill {
 export interface SpawnedAgentFixture {
     readonly connection: acp.ClientSideConnection;
     readonly workspaceDir: string;
-    createSession(): Promise<acp.NewSessionResponse>;
+    createSession(mcpServers?: acp.McpServer[]): Promise<acp.NewSessionResponse>;
     restart(): Promise<SpawnedAgentFixture>;
     writeSkill(skill: TestSkill): void;
     setPermissionResponder(responder: PermissionResponder): void;
@@ -159,10 +159,10 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         return this.paths.workspaceDir;
     }
 
-    async createSession(): Promise<acp.NewSessionResponse> {
+    async createSession(mcpServers: acp.McpServer[] = []): Promise<acp.NewSessionResponse> {
         return await this.connection.newSession({
             cwd: this.workspaceDir,
-            mcpServers: [],
+            mcpServers,
         });
     }
 
@@ -263,11 +263,18 @@ function printLogDirectory(logDirectory: string): void {
         .filter((entry) => entry.isFile())
         .forEach((entry) => {
             const logFilePath = path.join(logDirectory, entry.name);
-            const content = fs.readFileSync(logFilePath, "utf8").trim();
+            const content = redactLogSecrets(fs.readFileSync(logFilePath, "utf8").trim());
             console.log(`[APP_SERVER_LOGS] Logs from ${logFilePath}:`);
             console.log(content.length > 0 ? content : "[APP_SERVER_LOGS] Log file is empty");
             console.log("------");
         });
+}
+
+function redactLogSecrets(content: string): string {
+    return content
+        .replace(/("apiKey"\s*:\s*")[^"]+(")/g, "$1[REDACTED]$2")
+        .replace(/("Authorization"\s*:\s*")Bearer [^"]+(")/gi, "$1Bearer [REDACTED]$2")
+        .replace(/(Incorrect API key provided: )[^.,\s]+/g, "$1[REDACTED]");
 }
 
 async function waitForProcessExit(proc: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {
