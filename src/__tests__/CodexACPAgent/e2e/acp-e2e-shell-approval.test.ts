@@ -53,8 +53,8 @@ describeE2E("E2E shell approval tests", () => {
         expect(fixture.readPermissionRequests(sessionId, "execute").length).toBe(2);
     });
 
-    it("skips subsequent approvals when allow_always is selected", async () => {
-        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowAlways));
+    it("skips subsequent approvals when allow_for_session is selected", async () => {
+        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowForSession));
         await promptShellCommandTwice();
         expect(fs.existsSync(path.join(fixture.workspaceDir, FIRST_FILE_NAME))).toBe(true);
         expect(fs.existsSync(path.join(fixture.workspaceDir, SECOND_FILE_NAME))).toBe(true);

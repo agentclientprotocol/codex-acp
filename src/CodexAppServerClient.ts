@@ -9,6 +9,8 @@ import type {
     AccountLoginCompletedNotification, AccountUpdatedNotification,
     ConfigReadParams,
     ConfigReadResponse,
+    ConfigBatchWriteParams,
+    ConfigWriteResponse,
     GetAccountParams,
     GetAccountResponse,
     ListMcpServerStatusParams,
@@ -193,6 +195,10 @@ export class CodexAppServerClient {
 
     async configRead(params: ConfigReadParams): Promise<ConfigReadResponse> {
         return await this.sendRequest({ method: "config/read", params: params });
+    }
+
+    async configBatchWrite(params: ConfigBatchWriteParams): Promise<ConfigWriteResponse> {
+        return await this.sendRequest({ method: "config/batchWrite", params });
     }
 
     getMcpServerStartupVersion(): number {

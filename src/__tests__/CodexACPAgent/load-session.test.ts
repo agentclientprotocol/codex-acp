@@ -238,7 +238,7 @@ describe("CodexACPAgent - loadSession", () => {
             mcpServers: [],
         });
 
-        expect(codexAcpAgent.getSessionState("session-1").sessionMcpServers).toEqual([]);
+        expect(Array.from(codexAcpAgent.getSessionState("session-1").sessionMcpServers.keys())).toEqual([]);
     });
 
     it("publishes MCP startup failure for explicitly requested servers during loadSession", async () => {
@@ -317,7 +317,7 @@ describe("CodexACPAgent - loadSession", () => {
         });
 
         await vi.waitFor(() => {
-            expect(codexAcpAgent.getSessionState("session-1").sessionMcpServers).toEqual(["broken-mcp"]);
+            expect(Array.from(codexAcpAgent.getSessionState("session-1").sessionMcpServers.keys())).toEqual(["broken-mcp"]);
         });
 
         fixture.sendServerNotification({

@@ -4,7 +4,7 @@
     {
       "sessionId": "test-session-id",
       "toolCall": {
-        "toolCallId": "item-with-command",
+        "toolCallId": "item-no-prefix-rule",
         "kind": "execute",
         "status": "pending",
         "content": [
@@ -12,25 +12,17 @@
             "type": "content",
             "content": {
               "type": "text",
-              "text": "Installing dependencies"
+              "text": "Run exact command only"
             }
           }
         ],
-        "rawInput": {
-          "command": "npm install",
-          "cwd": "/home/user/project"
-        }
+        "rawInput": null
       },
       "options": [
         {
           "optionId": "allow_once",
           "name": "Yes, proceed",
           "kind": "allow_once"
-        },
-        {
-          "optionId": "allow_for_session",
-          "name": "Yes, and don't ask again for this exact command",
-          "kind": "allow_always"
         },
         {
           "optionId": "reject_once",

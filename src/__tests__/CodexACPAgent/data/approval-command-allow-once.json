@@ -21,17 +21,17 @@
       "options": [
         {
           "optionId": "allow_once",
-          "name": "Allow Once",
+          "name": "Yes, proceed",
           "kind": "allow_once"
         },
         {
-          "optionId": "allow_always",
-          "name": "Allow for Session",
+          "optionId": "allow_for_session",
+          "name": "Yes, and don't ask again for this exact command",
           "kind": "allow_always"
         },
         {
           "optionId": "reject_once",
-          "name": "Reject",
+          "name": "No, and tell Codex what to do differently",
           "kind": "reject_once"
         }
       ]

@@ -165,9 +165,7 @@ export class CodexCommands {
                     const resourceCount = (server.resources ?? []).length;
                     return `- ${server.name}: ${toolCount} tools, ${resourceCount} resources, auth=${server.authStatus}`;
                 });
-                const sessionServers = sessionState.sessionMcpServers
-                    ? sessionState.sessionMcpServers.map(serverName => `- ${serverName}`)
-                    : [];
+                const sessionServers = Array.from(sessionState.sessionMcpServers.keys()).map(serverName => `- ${serverName}`);
                 const lines = [...configuredServers, ...sessionServers];
                 const text = lines.length > 0
                     ? ["Configured MCP servers:", ...lines].join("\n")

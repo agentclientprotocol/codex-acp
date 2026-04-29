@@ -51,7 +51,7 @@ export interface SessionState {
     rateLimits: RateLimitsMap | null;
     account: Account | null;
     cwd: string;
-    sessionMcpServers?: Array<string>;
+    sessionMcpServers: Map<string, acp.McpServer>;
 }
 
 interface PendingMcpStartupSession {
@@ -161,7 +161,6 @@ export class CodexAcpServer implements acp.Agent {
 
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models} = sessionMetadata;
-        const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, "sessionId" in request);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -176,7 +175,7 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: accountResponse.account,
             cwd: request.cwd,
-            sessionMcpServers: sessionMcpServers,
+            sessionMcpServers: this.createSessionMcpServers(requestedMcpServers, "sessionId" in request),
         }
         this.sessions.set(sessionId, sessionState);
 
@@ -372,7 +371,6 @@ export class CodexAcpServer implements acp.Agent {
 
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         const {sessionId, currentModelId, models, thread} = sessionMetadata;
-        const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -387,7 +385,7 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: accountResponse.account,
             cwd: request.cwd,
-            sessionMcpServers: sessionMcpServers,
+            sessionMcpServers: this.createSessionMcpServers(requestedMcpServers, true),
         };
         this.sessions.set(sessionId, sessionState);
 
@@ -641,24 +639,23 @@ export class CodexAcpServer implements acp.Agent {
         return sessionState;
     }
 
-    private resolveSessionMcpServers(
+    private createSessionMcpServers(
         mcpServers: Array<acp.McpServer>,
         recoverFromStartup: boolean,
-    ): Array<string> {
+    ): Map<string, acp.McpServer> {
         // Explicit MCP servers from the request are the primary source of truth for the session.
-        const requestedServerNames = getRequestedMcpServerNames(mcpServers);
-        if (requestedServerNames.length > 0) {
-            return requestedServerNames;
+        if (mcpServers.length > 0) {
+            return new Map(mcpServers.map(server => [server.name, server]));
         }
         // Fresh sessions without MCP config should not inherit any session MCP state.
         if (!recoverFromStartup) {
-            return [];
+            return new Map();
         }
         // Without a thread-scoped startup completion event, loadSession/resumeSession can no longer
         // recover omitted session MCP server names. Treat the session set as unknown unless ACP
         // explicitly provided mcpServers in the request.
         logger.log("Skipping MCP server recovery for load/resume without explicit mcpServers");
-        return [];
+        return new Map();
     }
 
     private publishMcpStartupStatusAsync(sessionId: string): void {
@@ -719,7 +716,7 @@ export class CodexAcpServer implements acp.Agent {
         try {
             const eventHandler = new CodexEventHandler(this.connection, sessionState);
             const approvalHandler = new CodexApprovalHandler(this.connection, sessionState);
-            const elicitationHandler = new CodexElicitationHandler(this.connection, sessionState);
+            const elicitationHandler = new CodexElicitationHandler(this.connection, sessionState, this.codexAcpClient);
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 (event) => {
                     elicitationHandler.handleNotification(event);
@@ -867,8 +864,4 @@ export class CodexAcpServer implements acp.Agent {
             logger.error(`Cancel - turnInterrupt failed`, err);
         }
     }
-}
-
-function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
-    return Array.from(new Set(mcpServers.map(server => server.name)));
 }

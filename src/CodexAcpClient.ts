@@ -23,6 +23,7 @@ import {logger} from "./Logger";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
+    ConfigEdit,
     GetAccountResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
@@ -307,6 +308,24 @@ export class CodexAcpClient {
             ...mergedConfig,
             "mcp_servers": Object.fromEntries(mcpServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp)]))
         }
+    }
+
+    // Makes an ACP-provided MCP server durable so Codex core can append
+    // mcp_servers.<server>.tools.<tool>.approval_mode afterward:
+    // https://github.com/openai/codex/blob/main/codex-rs/app-server/src/config_api.rs
+    async persistMcpServer(mcpServer: McpServer): Promise<void> {
+        const edits: ConfigEdit[] = [{
+            keyPath: `mcp_servers.${mcpServer.name}`,
+            value: this.createMcpSeverConfig(mcpServer),
+            mergeStrategy: "upsert",
+        }];
+
+        await this.codexClient.configBatchWrite({
+            edits,
+            filePath: null,
+            expectedVersion: null,
+            reloadUserConfig: true,
+        });
     }
 
     private getModelProvider(): string | null {
