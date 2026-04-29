@@ -488,14 +488,17 @@ function joinPatchLines(lines: string[]): string {
     return lines.join("\n");
 }
 
-function normalizeDiffPath(fileName: string | undefined): string | undefined {
-    if (!fileName || fileName === "/dev/null") {
+function normalizeDiffPath(fileName: string | undefined): string | null {
+    if (!fileName) {
+        return null;
+    }
+    if (fileName === "/dev/null") {
         return fileName;
     }
     return fileName.replace(/^[ab]\//, "");
 }
 
-function toPatchChangeKind(oldFileName: string | undefined, newFileName: string | undefined): FileUpdateChange["kind"] {
+function toPatchChangeKind(oldFileName: string | null, newFileName: string | null): FileUpdateChange["kind"] {
     if (oldFileName === "/dev/null") {
         return { type: "add" };
     }
