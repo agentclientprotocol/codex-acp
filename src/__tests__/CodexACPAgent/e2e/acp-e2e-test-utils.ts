@@ -77,6 +77,24 @@ export async function createGatewayFixture(
     });
 }
 
+function buildClientCapabilities(): acp.ClientCapabilities {
+    return {
+        fs: {
+            readTextFile: true,
+            writeTextFile: true,
+        },
+        terminal: true,
+        auth: {
+            _meta: {
+                gateway: true,
+            },
+        },
+        _meta: {
+            "terminal-auth": true,
+        },
+    };
+}
+
 type Authenticator = (connection: acp.ClientSideConnection, authMethods: acp.AuthMethod[]) => Promise<void>;
 
 async function createSpawnedFixture(
@@ -88,7 +106,7 @@ async function createSpawnedFixture(
 
     const initializeResponse = await connection.initialize({
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: {},
+        clientCapabilities: buildClientCapabilities(),
         clientInfo: {
             name: "vitest",
             version: "1.0.0",
