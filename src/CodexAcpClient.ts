@@ -3,17 +3,14 @@ import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
 import type {
-    ApprovalHandler,
     CodexAppServerClient,
-    ElicitationHandler,
     McpStartupResult,
+    SessionHandler,
 } from "./CodexAppServerClient";
 import open from "open";
-import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
     ReasoningEffort,
-    ServerNotification
 } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
@@ -36,6 +33,7 @@ import type {
 } from "./app-server/v2";
 import packageJson from "../package.json";
 import type {AuthenticationLogoutResponse, AuthenticationStatusResponse} from "./AcpExtensions";
+import type {Disposable} from "vscode-jsonrpc";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -48,7 +46,6 @@ export class CodexAcpClient {
     private gatewayConfig: GatewayConfig | null;
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
-
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
         this.codexClient = codexClient;
@@ -364,17 +361,6 @@ export class CodexAcpClient {
         return ModelId.create(selectedModel.id, reasoningEffort ?? selectedModel.defaultReasoningEffort);
     }
 
-    async subscribeToSessionEvents(
-        sessionId: string,
-        eventHandler: (result: ServerNotification) => void,
-        approvalHandler: ApprovalHandler,
-        elicitationHandler: ElicitationHandler
-    ) {
-        this.codexClient.onServerNotification(sessionId, eventHandler);
-        this.codexClient.onApprovalRequest(sessionId, approvalHandler);
-        this.codexClient.onElicitationRequest(sessionId, elicitationHandler);
-    }
-
     async sendPrompt(
         request: acp.PromptRequest,
         agentMode: AgentMode,
@@ -402,7 +388,13 @@ export class CodexAcpClient {
 
         // Wait for turn completion
         // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
-        return await this.codexClient.awaitTurnCompleted();
+        const turnCompleted = await this.codexClient.awaitTurnCompleted();
+        await this.codexClient.awaitSessionIdle(request.sessionId);
+        return turnCompleted;
+    }
+
+    subscribeSession(sessionId: string, handler: SessionHandler): void {
+        this.codexClient.subscribeSession(sessionId, handler);
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {

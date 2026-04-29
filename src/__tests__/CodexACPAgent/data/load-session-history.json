@@ -130,7 +130,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-file-1",
-        "title": "Editing files",
+        "title": "/test/project/Added.txt",
         "kind": "edit",
         "status": "completed",
         "content": [
@@ -143,7 +143,23 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/Added.txt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/Added.txt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "--- /dev/null\n+++ /test/project/Added.txt\n@@ -0,0 +1,2 @@\n+Hello\n+World\n"
+            }
+          ]
+        }
       }
     }
   ]

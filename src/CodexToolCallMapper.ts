@@ -1,5 +1,5 @@
 import type { ToolCallContent } from "@agentclientprotocol/sdk";
-import { applyPatch, parsePatch } from "diff";
+import { applyPatch, FILE_HEADERS_ONLY, formatPatch, parsePatch, reversePatch } from "diff";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
@@ -39,19 +39,101 @@ function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
 export async function createFileChangeUpdate(
     item: ThreadItem & { type: "fileChange" }
 ): Promise<UpdateSessionEvent> {
-    const patches: ToolCallContent[] = [];
-    for (const change of item.changes) {
-        const content = await createPatchContent(change);
-        if (content) patches.push(content);
-        // ignore unparseable diffs
-    }
+    const patches = await createFileChangeContents(item.changes);
+    const details = createFileChangeDetails(item.changes);
     return {
         sessionUpdate: "tool_call",
         toolCallId: item.id,
-        title: "Editing files",
+        title: details.title,
         kind: "edit",
         status: toAcpStatus(item.status),
         content: patches,
+        locations: details.locations,
+        rawInput: details.rawInput,
+    };
+}
+
+export function createFileChangeCompletionUpdate(
+    item: ThreadItem & { type: "fileChange" }
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        status: toAcpStatus(item.status),
+    };
+}
+
+export async function createFileChangeContents(changes: Array<FileUpdateChange>): Promise<ToolCallContent[]> {
+    const patches: ToolCallContent[] = [];
+    for (const change of changes) {
+        patches.push(await createPatchContent(change));
+    }
+    return patches;
+}
+
+export function createFileChangeLocations(changes: Array<FileUpdateChange>): Array<{ path: string }> {
+    return Array.from(new Set(changes.map(change => change.path))).map(path => ({ path }));
+}
+
+export function createRawFileChangeInput(changes: Array<FileUpdateChange>): {
+    changes: Array<{
+        path: string;
+        kind: FileUpdateChange["kind"];
+        diff: string;
+    }>;
+} {
+    return {
+        changes: changes.map(change => ({
+            path: change.path,
+            kind: change.kind,
+            diff: change.diff,
+        })),
+    };
+}
+
+export function parseUnifiedDiffChanges(unifiedDiff: string): Array<FileUpdateChange> {
+    try {
+        return parsePatch(unifiedDiff)
+            .map(patch => {
+                const oldFileName = normalizeDiffPath(patch.oldFileName);
+                const newFileName = normalizeDiffPath(patch.newFileName);
+                const path = newFileName === "/dev/null" ? oldFileName : newFileName;
+                if (!path) {
+                    return null;
+                }
+                const normalizedPatch = {
+                    ...patch,
+                    oldFileName: oldFileName ?? "/dev/null",
+                    newFileName: newFileName ?? "/dev/null",
+                };
+                return {
+                    path,
+                    kind: toPatchChangeKind(oldFileName, newFileName),
+                    diff: formatPatchForOutput(normalizedPatch),
+                } satisfies FileUpdateChange;
+            })
+            .filter((change): change is FileUpdateChange => change !== null);
+    } catch {
+        return [];
+    }
+}
+
+function createFileChangeDetails(changes: Array<FileUpdateChange>): {
+    title: string;
+    locations: Array<{ path: string }>;
+    rawInput: {
+        changes: Array<{
+            path: string;
+            kind: FileUpdateChange["kind"];
+            diff: string;
+        }>;
+    };
+} {
+    const uniquePaths = createFileChangeLocations(changes);
+    return {
+        title: uniquePaths.length > 0 ? uniquePaths.map(location => location.path).join(", ") : "File change",
+        locations: uniquePaths,
+        rawInput: createRawFileChangeInput(changes),
     };
 }
 
@@ -256,50 +338,53 @@ function createSearchTitle(query: string | null, path: string | null): string {
     return "Search";
 }
 
-async function createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
+async function createPatchContent(change: FileUpdateChange): Promise<ToolCallContent> {
     if (change.kind.type === "add" && !isUnifiedDiff(change.diff)) {
-        // For new files, diff may contain raw file content instead of a patch.
-        return {
-            type: "diff",
-            oldText: null,
-            newText: change.diff,
-            path: change.path,
-            _meta: {
-                kind: "add",
-            },
-        };
+        return createDiffContent(change, null, change.diff);
     }
 
+    const parsedPatch = parseSinglePatch(change.diff);
     if (change.kind.type === "delete") {
-        // If the patch deletes a file, the old content may be only available from the diff.
-        const oldContent = await readFile(change.path, { encoding: "utf8"} ).catch(() =>
-            isUnifiedDiff(change.diff) ? patchToDeletedContent(change.diff) : change.diff
-        );
-
-        return {
-            type: "diff",
-            oldText: oldContent,
-            newText: "",
-            path: change.path,
-            _meta: {
-                kind: "delete",
+        const oldContent = await readFile(change.path, { encoding: "utf8"}).catch(() => {
+            if (parsedPatch) {
+                const restoredContent = restoreDeletedContent(parsedPatch, change.diff);
+                if (restoredContent !== null) {
+                    return restoredContent;
+                }
             }
+            return isUnifiedDiff(change.diff) ? null : change.diff;
+        });
+
+        if (oldContent !== null) {
+            return createDiffContent(change, oldContent, "");
         }
+        return createUnifiedDiffFallbackContent(change, parsedPatch);
     }
 
     const oldContent = change.kind.type === "add" ? "" : await readFile(change.path, { encoding: "utf8" }).catch(() => null);
     if (oldContent === null) {
-        return null;
+        return createUnifiedDiffFallbackContent(change, parsedPatch);
     }
 
     const newContent = applyPatch(oldContent, change.diff);
-    if (newContent === false) {
-        return null;
+    if (newContent !== false) {
+        return createDiffContent(change, change.kind.type === "add" ? null : oldContent, newContent);
     }
+    if (parsedPatch) {
+        const previousContent = applyPatch(oldContent, reversePatch(parsedPatch));
+        if (previousContent !== false) {
+            return createDiffContent(change, previousContent, oldContent);
+        }
+    }
+
+    return createUnifiedDiffFallbackContent(change, parsedPatch);
+}
+
+function createDiffContent(change: FileUpdateChange, oldText: string | null, newText: string): ToolCallContent {
     return {
         type: "diff",
-        oldText: change.kind.type === "add" ? null : oldContent,
-        newText: newContent,
+        oldText,
+        newText,
         path: change.path,
         _meta: {
             kind: change.kind.type,
@@ -307,43 +392,121 @@ async function createPatchContent(change: FileUpdateChange): Promise<ToolCallCon
     };
 }
 
+function createUnifiedDiffFallbackContent(
+    change: FileUpdateChange,
+    patch: ReturnType<typeof parsePatch>[number] | null,
+): ToolCallContent {
+    if (patch) {
+        return createDiffContentFromParsedPatch(change, patch);
+    }
+    return createDiffContent(change, change.kind.type === "add" ? null : "", change.kind.type === "delete" ? "" : change.diff);
+}
+
 function isUnifiedDiff(content: string): boolean {
     return content.startsWith("--- ") || content.includes("\n--- ");
 }
 
-/**
- * Recreates the content of a deleted file from the unified diff.
- * @param unifiedDiff The unified diff of the file deletion patch
- */
-function patchToDeletedContent(unifiedDiff: string): string | null {
+function parseSinglePatch(unifiedDiff: string): ReturnType<typeof parsePatch>[number] | null {
+    if (!isUnifiedDiff(unifiedDiff)) {
+        return null;
+    }
+
     try {
         const [patch] = parsePatch(unifiedDiff);
-        if (!patch || patch.hunks.length === 0) {
-            return null;
-        }
-
-        const oldLines: string[] = [];
-        let hasNoTrailingNewlineMarker = false;
-
-        for (const hunk of patch.hunks) {
-            for (const line of hunk.lines) {
-                if (line === "\\ No newline at end of file") {
-                    hasNoTrailingNewlineMarker = true;
-                    continue;
-                }
-                if (line.startsWith("-") || line.startsWith(" ")) {
-                    oldLines.push(line.slice(1));
-                }
-            }
-        }
-
-        if (oldLines.length === 0) {
-            return "";
-        }
-
-        const oldText = oldLines.join("\n");
-        return hasNoTrailingNewlineMarker || !unifiedDiff.endsWith("\n") ? oldText : `${oldText}\n`;
+        return patch ?? null;
     } catch {
         return null;
     }
+}
+
+function restoreDeletedContent(
+    patch: ReturnType<typeof parsePatch>[number],
+    originalDiff: string,
+): string | null {
+    const restoredContent = applyPatch("", reversePatch(patch));
+    if (restoredContent === false) {
+        return null;
+    }
+
+    const omitTrailingNewline = originalDiff.includes("\\ No newline at end of file") || !originalDiff.endsWith("\n");
+    if (omitTrailingNewline && restoredContent.endsWith("\n")) {
+        return restoredContent.slice(0, -1);
+    }
+    return restoredContent;
+}
+
+function formatPatchForOutput(patch: ReturnType<typeof parsePatch>[number]): string {
+    return formatPatch({
+        ...patch,
+        oldHeader: undefined,
+        newHeader: undefined,
+    }, FILE_HEADERS_ONLY);
+}
+
+function createDiffContentFromParsedPatch(
+    change: FileUpdateChange,
+    patch: ReturnType<typeof parsePatch>[number],
+): ToolCallContent {
+    const oldLines: string[] = [];
+    const newLines: string[] = [];
+
+    for (const hunk of patch.hunks) {
+        for (const line of hunk.lines) {
+            if (line === "\\ No newline at end of file") {
+                continue;
+            }
+
+            if (line.startsWith(" ")) {
+                const text = line.slice(1);
+                oldLines.push(text);
+                newLines.push(text);
+                continue;
+            }
+            if (line.startsWith("-")) {
+                oldLines.push(line.slice(1));
+                continue;
+            }
+            if (line.startsWith("+")) {
+                newLines.push(line.slice(1));
+            }
+        }
+    }
+
+    const oldText = change.kind.type === "add"
+        ? null
+        : joinPatchLines(oldLines);
+    const newText = change.kind.type === "delete"
+        ? ""
+        : joinPatchLines(newLines);
+    return createDiffContent(change, oldText, newText);
+}
+
+function joinPatchLines(lines: string[]): string {
+    if (lines.length === 0) {
+        return "";
+    }
+    return lines.join("\n");
+}
+
+function normalizeDiffPath(fileName: string | undefined): string | null {
+    if (!fileName) {
+        return null;
+    }
+    if (fileName === "/dev/null") {
+        return fileName;
+    }
+    return fileName.replace(/^[ab]\//, "");
+}
+
+function toPatchChangeKind(oldFileName: string | null, newFileName: string | null): FileUpdateChange["kind"] {
+    if (oldFileName === "/dev/null") {
+        return { type: "add" };
+    }
+    if (newFileName === "/dev/null") {
+        return { type: "delete" };
+    }
+    return {
+        type: "update",
+        move_path: oldFileName && newFileName && oldFileName !== newFileName ? oldFileName : null,
+    };
 }

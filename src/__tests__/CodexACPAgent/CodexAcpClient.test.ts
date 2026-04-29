@@ -335,16 +335,17 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "ll", }},
             { method: "item/agentMessage/delta", params: { threadId: "string", turnId: "string", itemId: "string", delta: "o!", }},
         ];
-        function onServerNotification(_sessionId: string, callback: (event: ServerNotification) => void){
+        function subscribeSession(_sessionId: string, handler: { handleNotification(event: ServerNotification): Promise<void> }){
             for (const notification of serverNotifications) {
-                callback(notification);
+                void handler.handleNotification(notification);
             }
+            return { dispose() {} };
         }
-        return onServerNotification;
+        return subscribeSession;
     }
 
     it('should map events from dump', async () => {
-        fixture.getCodexAppServerClient().onServerNotification = loadNotifications();
+        fixture.getCodexAppServerClient().subscribeSession = loadNotifications();
 
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
@@ -893,6 +894,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     rateLimitReachedType: null,
                 }
             }
+        });
+
+        await vi.waitFor(() => {
+            expect(sessionState.rateLimits?.size).toBe(2);
         });
 
         expect(sessionState.rateLimits).not.toBeNull();

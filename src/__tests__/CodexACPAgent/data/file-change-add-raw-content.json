@@ -6,7 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-change-raw",
-        "title": "Editing files",
+        "title": "/test/project/RawFile.kt",
         "kind": "edit",
         "status": "completed",
         "content": [
@@ -19,7 +19,23 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/RawFile.kt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/RawFile.kt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "fun main() {\n    println(\"Hello, World!\")\n}\n"
+            }
+          ]
+        }
       }
     }
   ]

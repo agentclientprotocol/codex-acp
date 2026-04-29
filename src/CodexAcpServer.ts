@@ -6,8 +6,6 @@ import {
     type SessionModeState
 } from "@agentclientprotocol/sdk";
 import {CodexEventHandler} from "./CodexEventHandler";
-import {CodexApprovalHandler} from "./CodexApprovalHandler";
-import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {getCodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
 import type {McpStartupResult} from "./CodexAppServerClient";
@@ -717,16 +715,8 @@ export class CodexAcpServer implements acp.Agent {
         sessionState.lastTokenUsage = null;
 
         try {
-            const eventHandler = new CodexEventHandler(this.connection, sessionState);
-            const approvalHandler = new CodexApprovalHandler(this.connection, sessionState);
-            const elicitationHandler = new CodexElicitationHandler(this.connection, sessionState);
-            await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
-                (event) => {
-                    elicitationHandler.handleNotification(event);
-                    return eventHandler.handleNotification(event);
-                },
-                approvalHandler,
-                elicitationHandler);
+            const sessionHandler = new CodexEventHandler(this.connection, sessionState);
+            this.codexAcpClient.subscribeSession(params.sessionId, sessionHandler);
 
             if (await this.availableCommands.tryHandle(params.prompt, sessionState)) {
                 logger.log("Prompt handled by a command");
@@ -775,7 +765,7 @@ export class CodexAcpServer implements acp.Agent {
                 };
             }
 
-            const error = eventHandler.getFailure()
+            const error = sessionHandler.getFailure()
             if (error) {
                 // noinspection ExceptionCaughtLocallyJS
                 throw error;

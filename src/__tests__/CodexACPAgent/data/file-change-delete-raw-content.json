@@ -6,7 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-delete-raw",
-        "title": "Editing files",
+        "title": "/test/project/RawDeleteFile.kt",
         "kind": "edit",
         "status": "completed",
         "content": [
@@ -19,7 +19,23 @@
               "kind": "delete"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/RawDeleteFile.kt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/RawDeleteFile.kt",
+              "kind": {
+                "type": "delete"
+              },
+              "diff": "fun main() {\n    println(\"Hello, World!\")\n}\n"
+            }
+          ]
+        }
       }
     }
   ]
