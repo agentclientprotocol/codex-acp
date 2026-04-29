@@ -33,6 +33,8 @@ describe('Elicitation Events', () => {
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
+        // @ts-expect-error seeding private session store for prompt test
+        codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
 
         const promptPromise = codexAcpAgent.prompt({
             sessionId,

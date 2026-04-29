@@ -83,10 +83,8 @@ export class CodexEventHandler {
             case "error":
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
-                this.sessionState.currentTurnId = notification.params.turn.id;
                 return null;
             case "turn/completed":
-                this.sessionState.currentTurnId = null;
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);

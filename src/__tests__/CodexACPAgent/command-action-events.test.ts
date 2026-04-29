@@ -23,7 +23,7 @@ describe('CodexEventHandler - command action events', () => {
         const listFilesNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -58,7 +58,7 @@ describe('CodexEventHandler - command action events', () => {
         const listFilesNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -93,7 +93,7 @@ describe('CodexEventHandler - command action events', () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -129,7 +129,7 @@ describe('CodexEventHandler - command action events', () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -165,7 +165,7 @@ describe('CodexEventHandler - command action events', () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -201,7 +201,7 @@ describe('CodexEventHandler - command action events', () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'commandExecution',
@@ -237,7 +237,7 @@ describe('CodexEventHandler - command action events', () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: "mcpToolCall",
@@ -265,7 +265,7 @@ describe('CodexEventHandler - command action events', () => {
             {
                 method: 'item/started',
                 params: {
-                    threadId: 'thread-1',
+                    threadId: sessionId,
                     turnId: 'turn-1',
                     item: {
                         type: "mcpToolCall",
@@ -283,7 +283,7 @@ describe('CodexEventHandler - command action events', () => {
             {
                 method: 'item/mcpToolCall/progress',
                 params: {
-                    threadId: 'thread-1',
+                    threadId: sessionId,
                     turnId: 'turn-1',
                     itemId: 'call-id',
                     message: "File /Users/aleksandr.slapoguzov/Projects/ultimate/.ai/local.md doesn't exist or can't be opened",
@@ -292,7 +292,7 @@ describe('CodexEventHandler - command action events', () => {
             {
                 method: 'item/completed',
                 params: {
-                    threadId: 'thread-1',
+                    threadId: sessionId,
                     turnId: 'turn-1',
                     item: {
                         type: "mcpToolCall",
@@ -324,7 +324,7 @@ describe('CodexEventHandler - command action events', () => {
             {
                 method: 'item/started',
                 params: {
-                    threadId: 'thread-1',
+                    threadId: sessionId,
                     turnId: 'turn-1',
                     item: {
                         type: "mcpToolCall",
@@ -342,7 +342,7 @@ describe('CodexEventHandler - command action events', () => {
             {
                 method: 'item/mcpToolCall/progress',
                 params: {
-                    threadId: 'thread-1',
+                    threadId: sessionId,
                     turnId: 'turn-1',
                     itemId: 'call-id',
                     message: repeatedMessage,
@@ -351,7 +351,7 @@ describe('CodexEventHandler - command action events', () => {
             {
                 method: 'item/mcpToolCall/progress',
                 params: {
-                    threadId: 'thread-1',
+                    threadId: sessionId,
                     turnId: 'turn-1',
                     itemId: 'call-id',
                     message: repeatedMessage,
@@ -360,7 +360,7 @@ describe('CodexEventHandler - command action events', () => {
             {
                 method: 'item/completed',
                 params: {
-                    threadId: 'thread-1',
+                    threadId: sessionId,
                     turnId: 'turn-1',
                     item: {
                         type: "mcpToolCall",
@@ -390,7 +390,7 @@ describe('CodexEventHandler - command action events', () => {
         const dynamicToolNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: "dynamicToolCall",

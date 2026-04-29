@@ -5,6 +5,7 @@ import type {
     InitializeResponse,
     ServerNotification
 } from "./app-server";
+import {logger} from "./Logger";
 import type {
     AccountLoginCompletedNotification, AccountUpdatedNotification,
     ConfigReadParams,
@@ -85,6 +86,8 @@ const McpServerElicitationRequest = new RequestType<
     void
 >('mcpServer/elicitation/request');
 
+const MAX_COMPLETED_TURNS_PER_THREAD = 20;
+
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
  * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
@@ -97,7 +100,7 @@ export class CodexAppServerClient {
     private readonly mcpServerStartupStates = new Map<string, McpServerStartupSnapshot>();
     private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
     private readonly turnCompletedResolvers = new Map<string, Array<TurnCompletedResolver>>();
-    private readonly lastTurnCompletedByThread = new Map<string, TurnCompletedNotification>();
+    private readonly completedTurnsByThread = new Map<string, Map<string, TurnCompletedNotification>>();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -113,7 +116,7 @@ export class CodexAppServerClient {
                 this.resolveMcpServerStartupResolvers();
             }
             if (isTurnCompletedNotification(serverNotification)) {
-                this.lastTurnCompletedByThread.set(serverNotification.params.threadId, serverNotification.params);
+                this.rememberCompletedTurn(serverNotification.params);
                 this.resolveTurnCompleted(serverNotification.params);
             }
             this.notify(serverNotification);
@@ -244,21 +247,20 @@ export class CodexAppServerClient {
     }
 
     async awaitTurnCompleted(threadId: string, turnId: string): Promise<TurnCompletedNotification> {
-        const completedTurn = this.lastTurnCompletedByThread.get(threadId);
-        if (completedTurn && completedTurn.turn.id === turnId) {
+        const completedTurn = this.getCompletedTurn(threadId, turnId);
+        if (completedTurn) {
             return completedTurn;
         }
 
-        return await new Promise((resolve) => {
+        return await new Promise((resolve, reject) => {
             const resolvers = this.turnCompletedResolvers.get(threadId) ?? [];
-            resolvers.push({turnId, resolve});
+            resolvers.push({turnId, resolve, reject});
             this.turnCompletedResolvers.set(threadId, resolvers);
         });
     }
 
     hasTurnCompleted(threadId: string, turnId: string): boolean {
-        const completedTurn = this.lastTurnCompletedByThread.get(threadId);
-        return completedTurn?.turn.id === turnId;
+        return this.getCompletedTurn(threadId, turnId) !== null;
     }
 
     async listModels(params: ModelListParams = {cursor: null, limit: null}): Promise<ModelListResponse> {
@@ -282,8 +284,12 @@ export class CodexAppServerClient {
     }
 
     clearThreadState(threadId: string): void {
+        const resolvers = this.turnCompletedResolvers.get(threadId) ?? [];
+        for (const resolver of resolvers) {
+            resolver.reject(new Error(`Stopped waiting for turn completion after thread ${threadId} was cleared`));
+        }
         this.turnCompletedResolvers.delete(threadId);
-        this.lastTurnCompletedByThread.delete(threadId);
+        this.completedTurnsByThread.delete(threadId);
     }
 
     private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
@@ -295,7 +301,15 @@ export class CodexAppServerClient {
     private notify(notification: ServerNotification) {
         const threadId = this.getThreadId(notification);
         if (threadId) {
-            this.notificationHandlers.get(threadId)?.(notification);
+            const notificationHandler = this.notificationHandlers.get(threadId);
+            if (notificationHandler) {
+                notificationHandler(notification);
+            } else {
+                logger.log("Dropping scoped notification for unregistered thread", {
+                    method: notification.method,
+                    threadId,
+                });
+            }
             return;
         }
 
@@ -305,8 +319,35 @@ export class CodexAppServerClient {
     }
 
     private getThreadId(notification: ServerNotification): string | null {
-        const params = notification.params as { threadId?: unknown };
-        return typeof params.threadId === "string" ? params.threadId : null;
+        switch (notification.method) {
+            case "thread/started":
+                return notification.params.thread.id;
+            default: {
+                const params = notification.params;
+                if (params === null || typeof params !== "object") {
+                    return null;
+                }
+                const threadId = (params as { threadId?: unknown }).threadId;
+                return typeof threadId === "string" ? threadId : null;
+            }
+        }
+    }
+
+    private getCompletedTurn(threadId: string, turnId: string): TurnCompletedNotification | null {
+        return this.completedTurnsByThread.get(threadId)?.get(turnId) ?? null;
+    }
+
+    private rememberCompletedTurn(event: TurnCompletedNotification): void {
+        const threadTurns = this.completedTurnsByThread.get(event.threadId) ?? new Map<string, TurnCompletedNotification>();
+        threadTurns.set(event.turn.id, event);
+        while (threadTurns.size > MAX_COMPLETED_TURNS_PER_THREAD) {
+            const oldestTurnId = threadTurns.keys().next().value;
+            if (oldestTurnId === undefined) {
+                break;
+            }
+            threadTurns.delete(oldestTurnId);
+        }
+        this.completedTurnsByThread.set(event.threadId, threadTurns);
     }
 
     private resolveMcpServerStartupResolvers(): void {
@@ -420,6 +461,7 @@ type McpServerStartupResolver = {
 type TurnCompletedResolver = {
     turnId: string;
     resolve: (event: TurnCompletedNotification) => void;
+    reject: (error: Error) => void;
 };
 
 

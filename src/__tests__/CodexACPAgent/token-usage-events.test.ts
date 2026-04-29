@@ -49,7 +49,10 @@ describe('Token Usage Events', () => {
                 };
             });
 
-            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({ sessionId }));
+            const sessionState = createTestSessionState({ sessionId });
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
+            // @ts-expect-error seeding private session store for prompt test
+            codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
 
             return codexAcpAgent;
         }
@@ -179,7 +182,10 @@ describe('Token Usage Events', () => {
                 };
             });
 
-            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({ sessionId }));
+            const sessionState = createTestSessionState({ sessionId });
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
+            // @ts-expect-error seeding private session store for prompt test
+            codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
 
             return async () => {
                 await codexAcpAgent.prompt({

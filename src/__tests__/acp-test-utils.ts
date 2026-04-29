@@ -334,6 +334,8 @@ export async function setupPromptAndSendNotifications(
     });
 
     vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+    // @ts-expect-error seeding private session store for focused event-handler tests
+    codexAcpAgent.sessions.set(sessionId, sessionState);
 
     await codexAcpAgent.prompt({
         sessionId,
@@ -343,21 +345,7 @@ export async function setupPromptAndSendNotifications(
     fixture.clearAcpConnectionDump();
 
     for (const notification of notifications) {
-        const routedNotification = (() => {
-            const params = notification.params;
-            if ("threadId" in params && typeof params.threadId !== "string") {
-                return notification;
-            }
-            return {
-                ...notification,
-                params: {
-                    ...notification.params,
-                    threadId: sessionId,
-                },
-            } as ServerNotification;
-        })();
-
-        fixture.sendServerNotification(routedNotification);
+        fixture.sendServerNotification(notification);
     }
 
     await vi.waitFor(() => {

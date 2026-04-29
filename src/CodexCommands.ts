@@ -52,6 +52,9 @@ export class CodexCommands {
     async tryHandle(prompt: acp.ContentBlock[], sessionState: SessionState): Promise<boolean> {
         const command = this.parseCommand(prompt);
         if (command) {
+            if (!this.isSessionActive(sessionState.sessionId)) {
+                return true;
+            }
             return this.handleCommand(command, sessionState);
         }
         return false;
@@ -129,6 +132,9 @@ export class CodexCommands {
 
     async handleCommand(command: ParsedCommand, sessionState: SessionState): Promise<boolean> {
         const sessionId = sessionState.sessionId;
+        if (!this.isSessionActive(sessionId)) {
+            return true;
+        }
 
         switch (command.name) {
             case "status": {
@@ -140,7 +146,13 @@ export class CodexCommands {
                 return true;
             }
             case "logout": {
+                if (!this.isSessionActive(sessionId)) {
+                    return true;
+                }
                 await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+                if (!this.isSessionActive(sessionId)) {
+                    return true;
+                }
                 await this.updateSession(sessionId, {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text: "Logged out from Codex account." }
@@ -149,6 +161,9 @@ export class CodexCommands {
             }
             case "skills": {
                 const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills());
+                if (!this.isSessionActive(sessionId)) {
+                    return true;
+                }
                 const skills = (response?.data ?? []).flatMap(entry => entry.skills);
                 const lines = skills.map(skill => {
                     const description = skill.shortDescription ?? skill.description ?? "";
@@ -165,6 +180,9 @@ export class CodexCommands {
             }
             case "mcp": {
                 const servers = await this.runWithProcessCheck(() => this.codexAcpClient.listMcpServers());
+                if (!this.isSessionActive(sessionId)) {
+                    return true;
+                }
                 const configuredServers = servers.data.map(server => {
                     const toolCount = Object.keys(server.tools ?? {}).length;
                     const resourceCount = (server.resources ?? []).length;
@@ -205,11 +223,15 @@ export class CodexCommands {
     }
 
     private async updateSession(sessionId: string, update: UpdateSessionEvent): Promise<void> {
-        if (this.isSessionClosing(sessionId) || !this.hasTrackedSession(sessionId)) {
+        if (!this.isSessionActive(sessionId)) {
             return;
         }
         const session = new ACPSessionConnection(this.connection, sessionId);
         await session.update(update);
+    }
+
+    private isSessionActive(sessionId: string): boolean {
+        return !this.isSessionClosing(sessionId) && this.hasTrackedSession(sessionId);
     }
 
     private buildStatusMessage(sessionState: SessionState): string {
