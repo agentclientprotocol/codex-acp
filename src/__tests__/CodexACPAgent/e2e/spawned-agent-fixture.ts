@@ -5,8 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import {Readable, Writable} from "node:stream";
 import {expect, vi} from "vitest";
+import {ModelId} from "../../../ModelId";
 import {removeDirectoryWithRetry, writeCodexHomeConfig} from "../../acp-test-utils";
 import type {PermissionResponder} from "./permission-responders";
+
+export const DEFAULT_TEST_MODEL_ID = ModelId.create("gpt-5.2", "none");
+export const OTHER_TEST_MODEL_ID = ModelId.create("gpt-5.3-codex", "low");
 
 export interface TestSkill {
     readonly name: string;
@@ -39,8 +43,8 @@ export function createSpawnedAgentFixture(
 ): SpawnedAgentFixture {
     const paths = RuntimePaths.createTemporary();
     writeCodexHomeConfig(paths.codexHome, {
-        model: "gpt-5.2",
-        model_reasoning_effort: "none",
+        model: DEFAULT_TEST_MODEL_ID.model,
+        model_reasoning_effort: DEFAULT_TEST_MODEL_ID.effort,
         web_search: "disabled",
     });
 

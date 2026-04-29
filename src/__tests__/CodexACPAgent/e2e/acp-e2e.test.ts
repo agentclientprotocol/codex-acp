@@ -3,7 +3,9 @@ import {AgentMode} from "../../../AgentMode";
 import {
     createAuthenticatedFixture,
     createGatewayFixture,
+    DEFAULT_TEST_MODEL_ID,
     describeE2E,
+    OTHER_TEST_MODEL_ID,
     requireLiveApiKey,
     type SpawnedAgentFixture,
 } from "./acp-e2e-test-utils";
@@ -44,20 +46,13 @@ describeE2E("E2E tests", () => {
             throw new Error("Agent did not return initial model state.");
         }
         expect(models.availableModels.length).toBeGreaterThan(0);
-
-        const selectedModelId =
-            models.availableModels.find((model) => model.modelId !== models.currentModelId)?.modelId
-            ?? models.currentModelId
-            ?? models.availableModels[0]?.modelId;
-        if (!selectedModelId) {
-            throw new Error("No available models returned by ACP server.");
-        }
+        expect(models.currentModelId).toBe(DEFAULT_TEST_MODEL_ID.toString());
 
         await fixture.connection.unstable_setSessionModel({
             sessionId: session.sessionId,
-            modelId: selectedModelId,
+            modelId: OTHER_TEST_MODEL_ID.toString(),
         });
-        await fixture.expectStatus(session.sessionId, {Model: selectedModelId});
+        await fixture.expectStatus(session.sessionId, {Model: OTHER_TEST_MODEL_ID});
     });
 
     it("changes session mode via setSessionMode and reflects it in /status", async () => {

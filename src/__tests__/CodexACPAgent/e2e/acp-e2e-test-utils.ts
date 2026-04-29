@@ -9,8 +9,10 @@ export {
     type PermissionResponder,
 } from "./permission-responders";
 export {
+    DEFAULT_TEST_MODEL_ID,
     type SpawnedAgentFixture,
     type TestSkill,
+    OTHER_TEST_MODEL_ID,
 } from "./spawned-agent-fixture";
 
 export const RUN_E2E_TESTS = process.env["RUN_E2E_TESTS"] === "true";
