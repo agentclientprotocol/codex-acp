@@ -44,7 +44,8 @@ export interface SessionState {
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     supportedInputModalities: Array<InputModality>,
     agentMode: AgentMode,
-    currentTurnId: string | null;
+    // Promise covers the turn/start request window before the turn id response arrives.
+    currentTurnId: Promise<string> | string | null;
     lastTokenUsage: TokenCount | null;
     totalTokenUsage: TokenCount | null;
     modelContextWindow: number | null;
@@ -68,6 +69,8 @@ export class CodexAcpServer implements acp.Agent {
 
     private readonly sessions: Map<string, SessionState>;
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
+    private readonly closingSessions: Set<string>;
+    private readonly closeSessionPromises: Map<string, Promise<void>>;
 
     constructor(
         connection: acp.AgentSideConnection,
@@ -77,6 +80,8 @@ export class CodexAcpServer implements acp.Agent {
     ) {
         this.sessions = new Map();
         this.pendingMcpStartupSessions = new Map();
+        this.closingSessions = new Set();
+        this.closeSessionPromises = new Map();
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
@@ -84,7 +89,9 @@ export class CodexAcpServer implements acp.Agent {
         this.availableCommands = new CodexCommands(
             connection,
             codexAcpClient,
-            (operation) => this.runWithProcessCheck(operation)
+            (operation) => this.runWithProcessCheck(operation),
+            (sessionId) => this.sessions.has(sessionId),
+            (sessionId) => this.closingSessions.has(sessionId),
         );
     }
 
@@ -101,6 +108,7 @@ export class CodexAcpServer implements acp.Agent {
                     image: true
                 },
                 sessionCapabilities: {
+                    close: {},
                     resume: { },
                     list: { }
                 },
@@ -238,6 +246,42 @@ export class CodexAcpServer implements acp.Agent {
         return await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
     }
 
+    async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
+        logger.log("Closing session...", {sessionId: params.sessionId});
+        const existingClose = this.closeSessionPromises.get(params.sessionId);
+        if (existingClose) {
+            await existingClose;
+            logger.log("Session close already completed", {sessionId: params.sessionId});
+            return {};
+        }
+
+        const closePromise = this.closeSessionInternal(params.sessionId);
+        this.closeSessionPromises.set(params.sessionId, closePromise);
+        try {
+            await closePromise;
+        } finally {
+            this.closeSessionPromises.delete(params.sessionId);
+        }
+
+        logger.log("Session closed", {sessionId: params.sessionId});
+        return {};
+    }
+
+    private async closeSessionInternal(sessionId: string): Promise<void> {
+        logger.log("Closing session internals...", {sessionId});
+        const sessionState = this.getSessionState(sessionId);
+        this.closingSessions.add(sessionId);
+
+        try {
+            const activeTurnId = await this.resolveActiveTurnId(sessionState);
+            await this.runWithProcessCheck(() =>
+                this.codexAcpClient.closeSession(sessionId, activeTurnId)
+            );
+        } finally {
+            this.forgetSession(sessionId);
+        }
+    }
+
     async newSession(
         params: acp.NewSessionRequest,
     ): Promise<acp.NewSessionResponse> {
@@ -279,6 +323,9 @@ export class CodexAcpServer implements acp.Agent {
         });
         const sessionState = this.sessions.get(_params.sessionId);
         if (!sessionState) throw new Error(`Session ${_params.sessionId} not found`);
+        if (this.closingSessions.has(_params.sessionId)) {
+            throw RequestError.invalidRequest("Session is closing");
+        }
 
         const newMode = AgentMode.find(_params.modeId);
         if (!newMode) {
@@ -295,6 +342,9 @@ export class CodexAcpServer implements acp.Agent {
         });
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
+        if (this.closingSessions.has(params.sessionId)) {
+            throw RequestError.invalidRequest("Session is closing");
+        }
 
         const requestedModelId= ModelId.fromString(params.modelId);
         const requestedModelName = requestedModelId.model;
@@ -641,6 +691,34 @@ export class CodexAcpServer implements acp.Agent {
         return sessionState;
     }
 
+    private async resolveActiveTurnId(sessionState: SessionState): Promise<string | null> {
+        const currentTurnId = sessionState.currentTurnId;
+        if (!currentTurnId) {
+            return null;
+        }
+
+        if (typeof currentTurnId === "string") {
+            return currentTurnId;
+        }
+
+        try {
+            return await currentTurnId;
+        } catch (err) {
+            logger.error(`Failed to resolve current turn for session ${sessionState.sessionId}`, err);
+            return null;
+        }
+    }
+
+    private isSessionClosedOrClosing(sessionId: string): boolean {
+        return this.closingSessions.has(sessionId) || !this.sessions.has(sessionId);
+    }
+
+    private forgetSession(sessionId: string): void {
+        this.sessions.delete(sessionId);
+        this.pendingMcpStartupSessions.delete(sessionId);
+        this.closingSessions.delete(sessionId);
+    }
+
     private resolveSessionMcpServers(
         mcpServers: Array<acp.McpServer>,
         recoverFromStartup: boolean,
@@ -671,14 +749,26 @@ export class CodexAcpServer implements acp.Agent {
             return;
         }
 
+        const requestedServers = pendingStartup.requestedServers;
+        const afterVersion = pendingStartup.afterVersion;
+
         try {
             const mcpStartup = await this.runWithProcessCheck(() =>
                 this.codexAcpClient.awaitMcpServerStartup(
-                    Array.from(pendingStartup.requestedServers),
-                    pendingStartup.afterVersion,
+                    Array.from(requestedServers),
+                    afterVersion,
                 )
             );
-            await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.requestedServers);
+            const sessionState = this.sessions.get(sessionId);
+            const currentPendingStartup = this.pendingMcpStartupSessions.get(sessionId);
+            if (sessionState && currentPendingStartup) {
+                sessionState.sessionMcpServers = mcpStartup.ready.filter(serverName =>
+                    currentPendingStartup.requestedServers.has(serverName)
+                );
+                await this.publishMcpStartupStatus(sessionId, mcpStartup, currentPendingStartup.requestedServers);
+            } else {
+                logger.log("Skipping MCP startup status for closed session", {sessionId});
+            }
         } catch (err) {
             logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
         } finally {
@@ -713,6 +803,9 @@ export class CodexAcpServer implements acp.Agent {
             prompt: params.prompt,
         });
         const sessionState = this.getSessionState(params.sessionId);
+        if (this.isSessionClosedOrClosing(params.sessionId)) {
+            return this.buildCancelledPromptResponse(sessionState);
+        }
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
 
@@ -722,19 +815,32 @@ export class CodexAcpServer implements acp.Agent {
             const elicitationHandler = new CodexElicitationHandler(this.connection, sessionState);
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 (event) => {
+                    if (this.closingSessions.has(params.sessionId)) {
+                        return;
+                    }
                     elicitationHandler.handleNotification(event);
                     return eventHandler.handleNotification(event);
                 },
                 approvalHandler,
                 elicitationHandler);
+            if (this.isSessionClosedOrClosing(params.sessionId)) {
+                return this.buildCancelledPromptResponse(sessionState);
+            }
 
             if (await this.availableCommands.tryHandle(params.prompt, sessionState)) {
                 logger.log("Prompt handled by a command");
+                if (this.isSessionClosedOrClosing(params.sessionId)) {
+                    return this.buildCancelledPromptResponse(sessionState);
+                }
                 return {
                     stopReason: "end_turn",
                     usage: this.buildPromptUsage(sessionState.lastTokenUsage),
                     _meta: this.buildQuotaMeta(sessionState),
                 };
+            }
+
+            if (this.isSessionClosedOrClosing(params.sessionId)) {
+                return this.buildCancelledPromptResponse(sessionState);
             }
 
             const modelId = ModelId.fromString(sessionState.currentModelId);
@@ -753,26 +859,44 @@ export class CodexAcpServer implements acp.Agent {
                 throw RequestError.invalidRequest("The current model does not support image input");
             }
             const agentMode = sessionState.agentMode;
+            const turnIdPromise = this.runWithProcessCheck(
+                () => this.codexAcpClient.startPrompt(params, agentMode, modelId, disableSummary, sessionState.cwd)
+            );
+            turnIdPromise.catch(() => {
+                // The prompt path awaits this promise, but close also reads currentTurnId.
+                // Attach a handler immediately so future readers cannot create an unhandled rejection.
+            });
+            sessionState.currentTurnId = turnIdPromise;
+            let turnId: string;
+            try {
+                turnId = await turnIdPromise;
+            } catch (err) {
+                if (this.isSessionClosedOrClosing(params.sessionId)) {
+                    return this.buildCancelledPromptResponse(sessionState);
+                }
+                throw err;
+            }
+            sessionState.currentTurnId = turnId;
+
             const turnCompleted = await this.runWithProcessCheck(
-                () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, disableSummary, sessionState.cwd));
+                () => this.codexAcpClient.awaitTurnCompleted(params.sessionId, turnId)
+            );
 
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
-                await this.connection.sessionUpdate({
-                    sessionId: params.sessionId,
-                    update: {
-                        sessionUpdate: "agent_message_chunk",
-                        content: {
-                            type: "text",
-                            text: "*Conversation interrupted*"
+                if (!this.closingSessions.has(params.sessionId)) {
+                    await this.connection.sessionUpdate({
+                        sessionId: params.sessionId,
+                        update: {
+                            sessionUpdate: "agent_message_chunk",
+                            content: {
+                                type: "text",
+                                text: "*Conversation interrupted*"
+                            }
                         }
-                    }
-                });
-                return {
-                    stopReason: "cancelled",
-                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                    _meta: this.buildQuotaMeta(sessionState),
-                };
+                    });
+                }
+                return this.buildCancelledPromptResponse(sessionState);
             }
 
             const error = eventHandler.getFailure()
@@ -787,6 +911,9 @@ export class CodexAcpServer implements acp.Agent {
                 _meta: this.buildQuotaMeta(sessionState),
             };
         } catch (err) {
+            if (this.isSessionClosedOrClosing(params.sessionId)) {
+                return this.buildCancelledPromptResponse(sessionState);
+            }
             logger.error(`Prompt for session ${params.sessionId} failed`, err);
             throw err;
         } finally {
@@ -821,6 +948,14 @@ export class CodexAcpServer implements acp.Agent {
         return toPromptUsage(lastTokenUsage);
     }
 
+    private buildCancelledPromptResponse(sessionState: SessionState): acp.PromptResponse {
+        return {
+            stopReason: "cancelled",
+            usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+            _meta: this.buildQuotaMeta(sessionState),
+        };
+    }
+
     private async runWithProcessCheck<T>(operation: () => Promise<T>): Promise<T> {
         try {
             return await operation();
@@ -844,24 +979,25 @@ export class CodexAcpServer implements acp.Agent {
             return;
         }
 
-        if (!sessionState.currentTurnId) {
+        const currentTurnId = await this.resolveActiveTurnId(sessionState);
+        if (!currentTurnId) {
             logger.log("Cancel request rejected: no current turn", {sessionId: params.sessionId});
             return;
         }
 
         logger.log("Cancel session requested", {
             sessionId: params.sessionId,
-            currentTurnId: sessionState.currentTurnId
+            currentTurnId,
         });
         try {
             // After turnInterrupt(), Codex will send turn/completed event, which will naturally complete awaitTurnCompleted()
             await this.codexAcpClient.turnInterrupt({
                 threadId: params.sessionId,
-                turnId: sessionState.currentTurnId
+                turnId: currentTurnId
             });
             logger.log("Cancel - turnInterrupt succeeded", {
                 sessionId: params.sessionId,
-                currentTurnId: sessionState.currentTurnId
+                currentTurnId,
             });
         } catch (err) {
             logger.error(`Cancel - turnInterrupt failed`, err);

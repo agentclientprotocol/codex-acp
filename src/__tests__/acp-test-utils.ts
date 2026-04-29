@@ -334,6 +334,8 @@ export async function setupPromptAndSendNotifications(
     });
 
     vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+    // @ts-expect-error seeding private session store for focused event-handler tests
+    codexAcpAgent.sessions.set(sessionId, sessionState);
 
     await codexAcpAgent.prompt({
         sessionId,

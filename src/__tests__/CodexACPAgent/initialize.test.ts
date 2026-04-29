@@ -37,6 +37,7 @@ describe('CodexACPAgent - initialize', () => {
                     image: true
                 },
                 sessionCapabilities: {
+                    close: {},
                     resume: {},
                     list: {},
                 },

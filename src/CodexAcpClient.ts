@@ -31,11 +31,14 @@ import type {
     SkillsListResponse,
     Thread,
     ThreadSourceKind,
+    ThreadUnsubscribeResponse,
     TurnCompletedNotification,
     UserInput,
 } from "./app-server/v2";
 import packageJson from "../package.json";
 import type {AuthenticationLogoutResponse, AuthenticationStatusResponse} from "./AcpExtensions";
+
+const CLOSE_TURN_COMPLETION_TIMEOUT_MS = 10_000;
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -375,18 +378,55 @@ export class CodexAcpClient {
         this.codexClient.onElicitationRequest(sessionId, elicitationHandler);
     }
 
-    async sendPrompt(
+    unsubscribeFromSessionEvents(sessionId: string): void {
+        this.codexClient.removeServerNotification(sessionId);
+        this.codexClient.removeApprovalRequest(sessionId);
+        this.codexClient.removeElicitationRequest(sessionId);
+    }
+
+    async closeSession(sessionId: string, currentTurnId: string | null): Promise<void> {
+        try {
+            if (currentTurnId && !this.codexClient.hasTurnCompleted(sessionId, currentTurnId)) {
+                try {
+                    await this.codexClient.turnInterrupt({
+                        threadId: sessionId,
+                        turnId: currentTurnId,
+                    });
+                    await this.waitForTurnCompletionDuringClose(sessionId, currentTurnId);
+                } catch (err) {
+                    logger.error(`Failed to interrupt active turn while closing session ${sessionId}`, err);
+                }
+            }
+
+            try {
+                const response = await this.codexClient.threadUnsubscribe({threadId: sessionId}) as ThreadUnsubscribeResponse | undefined;
+                if (response?.status && response.status !== "unsubscribed") {
+                    logger.log("Thread unsubscribe completed without an active subscription", {
+                        sessionId,
+                        status: response.status,
+                    });
+                }
+            } catch (err) {
+                logger.error(`Failed to unsubscribe thread while closing session ${sessionId}`, err);
+            }
+        } finally {
+            this.unsubscribeFromSessionEvents(sessionId);
+            this.codexClient.clearThreadState(sessionId);
+        }
+    }
+
+    async startPrompt(
         request: acp.PromptRequest,
         agentMode: AgentMode,
         modelId: ModelId,
         disableSummary: boolean,
         cwd: string,
-    ): Promise<TurnCompletedNotification> {
+    ): Promise<string> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
 
         await this.refreshSkills(cwd, request._meta);
-        await this.codexClient.turnStart({
+        const response = await this.codexClient.turnStart({
             outputSchema: null,
             threadId: request.sessionId,
             input: input,
@@ -400,9 +440,34 @@ export class CodexAcpClient {
             model: modelId.model,
         });
 
-        // Wait for turn completion
+        return response.turn.id;
+    }
+
+    async awaitTurnCompleted(sessionId: string, turnId: string): Promise<TurnCompletedNotification> {
         // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
-        return await this.codexClient.awaitTurnCompleted();
+        return await this.codexClient.awaitTurnCompleted(sessionId, turnId);
+    }
+
+    private async waitForTurnCompletionDuringClose(sessionId: string, turnId: string): Promise<void> {
+        let timeout: ReturnType<typeof setTimeout> | null = null;
+        try {
+            await Promise.race([
+                this.codexClient.awaitTurnCompleted(sessionId, turnId),
+                new Promise<never>((_, reject) => {
+                    timeout = setTimeout(() => {
+                        reject(new Error(`Timed out waiting for turn ${turnId} to complete during close`));
+                    }, CLOSE_TURN_COMPLETION_TIMEOUT_MS);
+                }),
+            ]);
+        } finally {
+            if (timeout) {
+                clearTimeout(timeout);
+            }
+        }
+    }
+
+    hasTurnCompleted(sessionId: string, turnId: string): boolean {
+        return this.codexClient.hasTurnCompleted(sessionId, turnId);
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {
