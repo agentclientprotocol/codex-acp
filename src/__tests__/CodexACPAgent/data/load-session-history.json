@@ -143,7 +143,24 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/Added.txt"
+          }
+        ],
+        "rawOutput": {
+          "diff": "--- /dev/null\n+++ /test/project/Added.txt\n@@ -0,0 +1,2 @@\n+Hello\n+World\n",
+          "changes": [
+            {
+              "path": "/test/project/Added.txt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "--- /dev/null\n+++ /test/project/Added.txt\n@@ -0,0 +1,2 @@\n+Hello\n+World\n"
+            }
+          ]
+        }
       }
     }
   ]

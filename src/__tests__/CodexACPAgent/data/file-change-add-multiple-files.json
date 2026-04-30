@@ -28,7 +28,34 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/FileA.kt"
+          },
+          {
+            "path": "/test/project/FileB.kt"
+          }
+        ],
+        "rawOutput": {
+          "diff": "--- /dev/null\n+++ /test/project/FileA.kt\n@@ -0,0 +1 @@\n+class FileA\n--- /dev/null\n+++ /test/project/FileB.kt\n@@ -0,0 +1 @@\n+class FileB",
+          "changes": [
+            {
+              "path": "/test/project/FileA.kt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "--- /dev/null\n+++ /test/project/FileA.kt\n@@ -0,0 +1 @@\n+class FileA"
+            },
+            {
+              "path": "/test/project/FileB.kt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "--- /dev/null\n+++ /test/project/FileB.kt\n@@ -0,0 +1 @@\n+class FileB"
+            }
+          ]
+        }
       }
     }
   ]

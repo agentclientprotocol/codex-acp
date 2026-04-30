@@ -7,15 +7,6 @@
         "toolCallId": "item-with-command",
         "kind": "execute",
         "status": "pending",
-        "content": [
-          {
-            "type": "content",
-            "content": {
-              "type": "text",
-              "text": "Installing dependencies"
-            }
-          }
-        ],
         "rawInput": {
           "command": "npm install",
           "cwd": "/home/user/project"

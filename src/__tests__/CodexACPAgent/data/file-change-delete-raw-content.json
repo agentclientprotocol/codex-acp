@@ -19,7 +19,24 @@
               "kind": "delete"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/RawDeleteFile.kt"
+          }
+        ],
+        "rawOutput": {
+          "diff": "fun main() {\n    println(\"Hello, World!\")\n}\n",
+          "changes": [
+            {
+              "path": "/test/project/RawDeleteFile.kt",
+              "kind": {
+                "type": "delete"
+              },
+              "diff": "fun main() {\n    println(\"Hello, World!\")\n}\n"
+            }
+          ]
+        }
       }
     }
   ]

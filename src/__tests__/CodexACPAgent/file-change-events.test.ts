@@ -271,4 +271,104 @@ describe('CodexEventHandler - file change events', () => {
             'data/file-change-delete-raw-content.json'
         );
     });
+
+    it('should handle file change patch updates', async () => {
+        mockFileContent('/test/project/Existing.kt', 'class Existing {\n    fun value() = 1\n}\n');
+
+        const change = {
+            path: '/test/project/Existing.kt',
+            kind: { type: 'update' as const, move_path: null },
+            diff: `--- /test/project/Existing.kt
++++ /test/project/Existing.kt
+@@ -1,3 +1,3 @@
+ class Existing {
+-    fun value() = 1
++    fun value() = 2
+ }`,
+        };
+
+        const startedNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-change-patch-update',
+                    changes: [],
+                    status: 'inProgress',
+                },
+            },
+        };
+
+        const patchUpdatedNotification: ServerNotification = {
+            method: 'item/fileChange/patchUpdated',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'file-change-patch-update',
+                changes: [change],
+            },
+        };
+
+        const completedNotification: ServerNotification = {
+            method: 'item/completed',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-change-patch-update',
+                    changes: [change],
+                    status: 'completed',
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            startedNotification,
+            patchUpdatedNotification,
+            completedNotification,
+        ]);
+
+        await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
+            'data/file-change-patch-updated.json'
+        );
+    });
+
+    it('should handle completed file changes after the file is already updated', async () => {
+        mockFileContent('/test/project/Existing.kt', 'class Existing {\n    fun value() = 2\n}\n');
+
+        const completedNotification: ServerNotification = {
+            method: 'item/completed',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-change-completed-after-apply',
+                    changes: [
+                        {
+                            path: '/test/project/Existing.kt',
+                            kind: { type: 'update', move_path: null },
+                            diff: `--- /test/project/Existing.kt
++++ /test/project/Existing.kt
+@@ -1,3 +1,3 @@
+ class Existing {
+-    fun value() = 1
++    fun value() = 2
+ }`,
+                        },
+                    ],
+                    status: 'completed',
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [completedNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
+            'data/file-change-completed-after-apply.json'
+        );
+    });
 });
