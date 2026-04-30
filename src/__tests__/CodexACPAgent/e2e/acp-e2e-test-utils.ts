@@ -26,8 +26,9 @@ export function expectEndTurn(response: acp.PromptResponse): void {
     expect(response.stopReason).toBe("end_turn");
 }
 
-export async function createAuthenticatedFixture(extraEnv?: NodeJS.ProcessEnv): Promise<SpawnedAgentFixture> {
+export async function createAuthenticatedFixture(initialMode?: AgentMode): Promise<SpawnedAgentFixture> {
     const apiKey = requireLiveApiKey();
+    const extraEnv = initialMode ? {INITIAL_AGENT_MODE: initialMode.id} : undefined;
     return await createSpawnedFixture(async (connection, authMethods) => {
         if (!authMethods.some((method) => method.id === "api-key")) {
             throw new Error("API key authentication is not available.");
@@ -47,10 +48,6 @@ export async function createAuthenticatedFixture(extraEnv?: NodeJS.ProcessEnv): 
             throw new Error(`Unexpected authentication status: ${JSON.stringify(authenticationStatus)}`);
         }
     }, extraEnv);
-}
-
-export async function createReadOnlyFixture(): Promise<SpawnedAgentFixture> {
-    return await createAuthenticatedFixture({INITIAL_AGENT_MODE: AgentMode.ReadOnly.id});
 }
 
 export async function createGatewayFixture(

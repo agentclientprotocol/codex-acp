@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
+import {AgentMode} from "../../../AgentMode";
 import {ApprovalOptionId} from "../../../ApprovalOptionId";
 import {
     createAuthenticatedFixture,
     createPermissionResponse,
     createPermissionResponder,
-    createReadOnlyFixture,
     describeE2E,
     expectEndTurn,
     type SpawnedAgentFixture,
@@ -21,7 +21,7 @@ describeE2E("E2E shell approval tests", () => {
     let sessionId: string;
 
     beforeEach(async () => {
-        fixture = await createReadOnlyFixture();
+        fixture = await createAuthenticatedFixture(AgentMode.ReadOnly);
         sessionId = (await fixture.createSession()).sessionId;
     });
 
