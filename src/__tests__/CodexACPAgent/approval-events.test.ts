@@ -50,7 +50,7 @@ describe('Approval Events', () => {
     describe('Command execution approval', () => {
         const commandApprovalCases = [
             { optionId: 'allow_once', expectedDecision: 'accept', description: 'allow once' },
-            { optionId: 'allow_always', expectedDecision: 'acceptForSession', description: 'allow for session' },
+            { optionId: 'allow_for_session', expectedDecision: 'acceptForSession', description: 'allow for session' },
             { optionId: 'reject_once', expectedDecision: 'decline', description: 'reject' },
         ] as const;
 
@@ -94,6 +94,172 @@ describe('Approval Events', () => {
                 itemId: 'item-cancelled',
                 reason: null,
                 proposedExecpolicyAmendment: null,
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                params
+            );
+
+            expect(response).toEqual({ decision: 'cancel' });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should map available execpolicy amendment approval to Codex decision', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            const execpolicyAmendment = ['env', 'GRADLE_USER_HOME=/workspace/.gradle-home', './gradlew', 'build'];
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_command_prefix_rule' }
+            });
+
+            const params: CommandExecutionRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-prefix-rule',
+                reason: 'Build the project',
+                proposedExecpolicyAmendment: ['ignored-fallback'],
+                availableDecisions: [
+                    'accept',
+                    { acceptWithExecpolicyAmendment: { execpolicy_amendment: execpolicyAmendment } },
+                    'decline',
+                ],
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                params
+            );
+
+            expect(response).toEqual({
+                decision: {
+                    acceptWithExecpolicyAmendment: {
+                        execpolicy_amendment: execpolicyAmendment,
+                    },
+                },
+            });
+            await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot(
+                'data/approval-command-prefix-rule.json'
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should add fallback execpolicy amendment option when availableDecisions is absent', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            const execpolicyAmendment = ['npm', 'run'];
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_command_prefix_rule' }
+            });
+
+            const params: CommandExecutionRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-prefix-rule-fallback',
+                reason: 'Run npm script',
+                proposedExecpolicyAmendment: execpolicyAmendment,
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                params
+            );
+
+            expect(response).toEqual({
+                decision: {
+                    acceptWithExecpolicyAmendment: {
+                        execpolicy_amendment: execpolicyAmendment,
+                    },
+                },
+            });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should respect availableDecisions when prefix-rule approval is omitted', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+
+            const params: CommandExecutionRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-no-prefix-rule',
+                reason: 'Run exact command only',
+                proposedExecpolicyAmendment: ['npm', 'run'],
+                availableDecisions: ['accept', 'decline'],
+            };
+
+            await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                params
+            );
+
+            await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot(
+                'data/approval-command-available-decisions-without-prefix.json'
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should map network policy amendment approval to Codex decision', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            const networkPolicyAmendment = { host: 'registry.npmjs.org', action: 'allow' } as const;
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'apply_network_policy_amendment' }
+            });
+
+            const params: CommandExecutionRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-network-policy',
+                reason: 'Allow network access',
+                proposedExecpolicyAmendment: null,
+                availableDecisions: [
+                    'accept',
+                    { applyNetworkPolicyAmendment: { network_policy_amendment: networkPolicyAmendment } },
+                    'cancel',
+                ],
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                params
+            );
+
+            expect(response).toEqual({
+                decision: {
+                    applyNetworkPolicyAmendment: {
+                        network_policy_amendment: networkPolicyAmendment,
+                    },
+                },
+            });
+            await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot(
+                'data/approval-command-network-policy.json'
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should map explicit cancel option to cancel when advertised', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'cancel' }
+            });
+
+            const params: CommandExecutionRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-explicit-cancel',
+                reason: 'Test command',
+                proposedExecpolicyAmendment: null,
+                availableDecisions: ['accept', 'cancel'],
             };
 
             const response = await fixture.sendServerRequest(
@@ -221,7 +387,7 @@ describe('Approval Events', () => {
     describe('File change approval', () => {
         const fileChangeApprovalCases = [
             { optionId: 'allow_once', expectedDecision: 'accept', description: 'allow once' },
-            { optionId: 'allow_always', expectedDecision: 'acceptForSession', description: 'allow for session' },
+            { optionId: 'allow_for_session', expectedDecision: 'acceptForSession', description: 'allow for session' },
             { optionId: 'reject_once', expectedDecision: 'cancel', description: 'reject' },
         ] as const;
 

@@ -4,7 +4,7 @@
     {
       "sessionId": "test-session-id",
       "toolCall": {
-        "toolCallId": "item-with-command",
+        "toolCallId": "item-network-policy",
         "kind": "execute",
         "status": "pending",
         "content": [
@@ -12,14 +12,11 @@
             "type": "content",
             "content": {
               "type": "text",
-              "text": "Installing dependencies"
+              "text": "Allow network access"
             }
           }
         ],
-        "rawInput": {
-          "command": "npm install",
-          "cwd": "/home/user/project"
-        }
+        "rawInput": null
       },
       "options": [
         {
@@ -28,12 +25,12 @@
           "kind": "allow_once"
         },
         {
-          "optionId": "allow_for_session",
-          "name": "Yes, and don't ask again for this exact command",
+          "optionId": "apply_network_policy_amendment",
+          "name": "Yes, and don't ask again for network access to `registry.npmjs.org`",
           "kind": "allow_always"
         },
         {
-          "optionId": "reject_once",
+          "optionId": "cancel",
           "name": "No, and tell Codex what to do differently",
           "kind": "reject_once"
         }

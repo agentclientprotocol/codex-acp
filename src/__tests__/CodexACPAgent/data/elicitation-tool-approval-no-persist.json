@@ -29,12 +29,14 @@
         {
           "optionId": "allow_once",
           "name": "Allow",
-          "kind": "allow_once"
+          "kind": "allow_once",
+          "_meta": "_meta"
         },
         {
           "optionId": "decline",
-          "name": "Decline",
-          "kind": "reject_once"
+          "name": "Cancel",
+          "kind": "reject_once",
+          "_meta": "_meta"
         }
       ]
     }

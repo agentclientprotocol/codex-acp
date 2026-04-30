@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import type { SessionState } from "./CodexAcpServer";
 import type { ElicitationHandler } from "./CodexAppServerClient";
+import type { CodexAcpClient } from "./CodexAcpClient";
 import type { ServerNotification } from "./app-server";
 import type {
     ItemCompletedNotification,
@@ -21,6 +22,20 @@ const ELICITATION_OPTIONS: acp.PermissionOption[] = [
 const OPTION_ALLOW_SESSION = "allow_session";
 
 type PersistValue = "session" | "always";
+
+function buildToolApprovalOption(
+    optionId: string,
+    name: string,
+    kind: acp.PermissionOption["kind"],
+    description: string
+): acp.PermissionOption {
+    return {
+        optionId,
+        name,
+        kind,
+        _meta: { description },
+    };
+}
 
 /**
  * Parses the `persist` field from the elicitation request `_meta`.
@@ -52,25 +67,48 @@ function isMcpToolCallApproval(meta: unknown): boolean {
 
 /**
  * Builds the ACP permission options for an MCP tool call approval elicitation.
- * Always includes "Allow Once"; adds session/always persist options when advertised.
+ * Always includes "Allow"; adds session/persistent approval options when advertised.
  */
 function buildToolApprovalOptions(persistOptions: Set<PersistValue>): acp.PermissionOption[] {
     const options: acp.PermissionOption[] = [
-        { optionId: ApprovalOptionId.AllowOnce, name: "Allow", kind: "allow_once" },
+        buildToolApprovalOption(
+            ApprovalOptionId.AllowOnce,
+            "Allow",
+            "allow_once",
+            "Run the tool and continue."
+        ),
     ];
+    // Codex advertises MCP tool approval persistence choices in request _meta.persist.
+    // Only surface scopes the server explicitly offered.
     if (persistOptions.has("session")) {
-        options.push({ optionId: OPTION_ALLOW_SESSION, name: "Allow for This Session", kind: "allow_always" });
+        options.push(buildToolApprovalOption(
+            OPTION_ALLOW_SESSION,
+            "Allow for this session",
+            "allow_always",
+            "Run the tool and remember this choice for this session."
+        ));
     }
     if (persistOptions.has("always")) {
-        options.push({ optionId: ApprovalOptionId.AllowAlways, name: "Allow and Don't Ask Again", kind: "allow_always" });
+        options.push(buildToolApprovalOption(
+            ApprovalOptionId.AllowPersist,
+            "Always allow",
+            "allow_always",
+            "Run the tool and remember this choice for future tool calls."
+        ));
     }
-    options.push({ optionId: "decline", name: "Decline", kind: "reject_once" });
+    options.push(buildToolApprovalOption(
+        "decline",
+        "Cancel",
+        "reject_once",
+        "Cancel this tool call."
+    ));
     return options;
 }
 
 export class CodexElicitationHandler implements ElicitationHandler {
     private readonly connection: acp.AgentSideConnection;
     private readonly sessionState: SessionState;
+    private readonly codexAcpClient: CodexAcpClient;
     // In Rust, the MCP elicitation handler receives ElicitationRequestEvent directly from the MCP
     // protocol layer, where id is set to "mcp_tool_call_approval_<call_id>" — the call ID is extracted
     // by stripping that prefix.
@@ -88,9 +126,14 @@ export class CodexElicitationHandler implements ElicitationHandler {
     // (threadId, serverName).
     private readonly pendingMcpApprovals = new Map<string, string>();
 
-    constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
+    constructor(
+        connection: acp.AgentSideConnection,
+        sessionState: SessionState,
+        codexAcpClient: CodexAcpClient
+    ) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.codexAcpClient = codexAcpClient;
     }
 
     handleNotification(notification: ServerNotification): void {
@@ -124,7 +167,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     });
                 }
             }
-            return this.convertResponse(response);
+            return await this.convertResponse(response, params);
         } catch (error) {
             logger.error("Error handling MCP elicitation request", error);
             return { action: "cancel", content: null, _meta: null };
@@ -203,24 +246,48 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
     }
 
-    private convertResponse(
-        response: acp.RequestPermissionResponse
-    ): McpServerElicitationRequestResponse {
+    private async convertResponse(
+        response: acp.RequestPermissionResponse,
+        params: McpServerElicitationRequestParams
+    ): Promise<McpServerElicitationRequestResponse> {
         if (response.outcome.outcome === "cancelled") {
             return { action: "cancel", content: null, _meta: null };
         }
 
         const optionId = response.outcome.optionId;
         if (optionId === OPTION_ALLOW_SESSION) {
+            // This _meta is part of Codex's MCP tool approval response contract.
+            // It tells app-server to remember this approval for the current session.
             return { action: "accept", content: null, _meta: { persist: "session" } };
         }
-        if (optionId === ApprovalOptionId.AllowAlways) {
+        if (optionId === ApprovalOptionId.AllowPersist) {
+            if (isMcpToolCallApproval(params._meta)) {
+                // Codex persists tool approval under an existing config.toml server:
+                // https://github.com/openai/codex/blob/main/codex-rs/core/src/mcp_tool_call.rs
+                // ACP servers are session-only, so write this server before returning persist:"always".
+                await this.persistMcpServerForToolApproval(params.serverName);
+            }
+            // This _meta is part of Codex's MCP tool approval response contract.
+            // It tells app-server to persist this MCP tool approval across sessions.
             return { action: "accept", content: null, _meta: { persist: "always" } };
         }
         if (optionId === ApprovalOptionId.AllowOnce || optionId === "accept") {
             return { action: "accept", content: null, _meta: null };
         }
         return { action: "decline", content: null, _meta: null };
+    }
+
+    private async persistMcpServerForToolApproval(serverName: string): Promise<void> {
+        const mcpServer = this.sessionState.sessionMcpServers.get(serverName);
+        if (mcpServer === undefined) {
+            return;
+        }
+
+        try {
+            await this.codexAcpClient.persistMcpServer(mcpServer);
+        } catch (error) {
+            logger.error("Failed to persist ACP MCP server before MCP tool approval", error);
+        }
     }
 
     private handleItemStarted(event: ItemStartedNotification): void {

@@ -4,7 +4,7 @@
     {
       "sessionId": "test-session-id",
       "toolCall": {
-        "toolCallId": "item-with-command",
+        "toolCallId": "item-prefix-rule",
         "kind": "execute",
         "status": "pending",
         "content": [
@@ -12,14 +12,11 @@
             "type": "content",
             "content": {
               "type": "text",
-              "text": "Installing dependencies"
+              "text": "Build the project"
             }
           }
         ],
-        "rawInput": {
-          "command": "npm install",
-          "cwd": "/home/user/project"
-        }
+        "rawInput": null
       },
       "options": [
         {
@@ -28,8 +25,8 @@
           "kind": "allow_once"
         },
         {
-          "optionId": "allow_for_session",
-          "name": "Yes, and don't ask again for this exact command",
+          "optionId": "allow_command_prefix_rule",
+          "name": "Yes, and don't ask again for commands that start with `env GRADLE_USER_HOME=/workspace/.gradle-home ./gradlew build`",
           "kind": "allow_always"
         },
         {

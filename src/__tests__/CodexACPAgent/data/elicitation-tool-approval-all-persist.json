@@ -29,22 +29,26 @@
         {
           "optionId": "allow_once",
           "name": "Allow",
-          "kind": "allow_once"
+          "kind": "allow_once",
+          "_meta": "_meta"
         },
         {
           "optionId": "allow_session",
-          "name": "Allow for This Session",
-          "kind": "allow_always"
+          "name": "Allow for this session",
+          "kind": "allow_always",
+          "_meta": "_meta"
         },
         {
-          "optionId": "allow_always",
-          "name": "Allow and Don't Ask Again",
-          "kind": "allow_always"
+          "optionId": "allow_persist",
+          "name": "Always allow",
+          "kind": "allow_always",
+          "_meta": "_meta"
         },
         {
           "optionId": "decline",
-          "name": "Decline",
-          "kind": "reject_once"
+          "name": "Cancel",
+          "kind": "reject_once",
+          "_meta": "_meta"
         }
       ]
     }

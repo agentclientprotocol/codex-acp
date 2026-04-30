@@ -24,7 +24,7 @@
           "kind": "allow_once"
         },
         {
-          "optionId": "allow_always",
+          "optionId": "allow_for_session",
           "name": "Allow for Session",
           "kind": "allow_always"
         },
