@@ -7,7 +7,7 @@
         "sessionUpdate": "agent_message_chunk",
         "content": {
           "type": "text",
-          "text": "Hello"
+          "text": "Hello-1"
         }
       }
     }
@@ -22,7 +22,7 @@
         "sessionUpdate": "agent_message_chunk",
         "content": {
           "type": "text",
-          "text": "Hello"
+          "text": "Hello-2"
         }
       }
     }
