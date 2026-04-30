@@ -26,6 +26,26 @@ export function expectEndTurn(response: acp.PromptResponse): void {
     expect(response.stopReason).toBe("end_turn");
 }
 
+export function expectCancelled(response: acp.PromptResponse): void {
+    expect(response.stopReason).toBe("cancelled");
+}
+
+export function generateFileNameForTest(): string {
+    return `test-file-${crypto.randomUUID()}.txt`;
+}
+
+export function expectPermissionRequests(fixture: SpawnedAgentFixture, sessionId: string, requests: {
+    edit: number,
+    execute: number,
+}): void {
+    expect(fixture.readPermissionRequests(sessionId, "edit").length).toBe(requests.edit);
+    expect(fixture.readPermissionRequests(sessionId, "execute").length).toBe(requests.execute);
+}
+
+export function expectNoPermissionRequests(fixture: SpawnedAgentFixture, sessionId: string): void {
+    expectPermissionRequests(fixture, sessionId, { edit: 0, execute: 0 });
+}
+
 export async function createAuthenticatedFixture(initialMode?: AgentMode): Promise<SpawnedAgentFixture> {
     const apiKey = requireLiveApiKey();
     const extraEnv = initialMode ? {INITIAL_AGENT_MODE: initialMode.id} : undefined;
