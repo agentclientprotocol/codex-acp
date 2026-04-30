@@ -25,7 +25,7 @@ describe("Model filtering", () => {
                 supportedReasoningEfforts: efforts,
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
-                additionalSpeedTiers: [],
+                additionalSpeedTiers: ["fast"],
                 isDefault: false,
                 inputModalities: []
             },
@@ -94,5 +94,89 @@ describe("Model filtering", () => {
         await expect(JSON.stringify(availableModels, null, 2)).toMatchFileSnapshot(
             "data/model-filtering.json"
         );
+    });
+
+    it("rejects fast model selections when the model does not support fast", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+
+        const models: Model[] = [
+            {
+                id: "gpt-5.2",
+                model: "gpt-5.2",
+                upgrade: null,
+                upgradeInfo: null,
+                availabilityNux: null,
+                displayName: "GPT-5.2",
+                description: "No fast tier.",
+                hidden: false,
+                supportedReasoningEfforts: [{reasoningEffort: "medium", description: "Default effort."}],
+                defaultReasoningEffort: "medium",
+                supportsPersonality: false,
+                additionalSpeedTiers: [],
+                isDefault: true,
+                inputModalities: ["text"]
+            },
+        ];
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "session-id",
+            currentModelId: "gpt-5.2[medium]",
+            models,
+        });
+        vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue(models);
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+
+        await codexAcpAgent.newSession({ cwd: "", mcpServers: [] });
+
+        await expect(codexAcpAgent.unstable_setSessionModel({
+            sessionId: "session-id",
+            modelId: "gpt-5.2[medium]@fast",
+        })).rejects.toThrow("Unsupported service tier fast for model gpt-5.2");
+    });
+
+    it("stores fast model selections when the model supports fast", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+
+        const models: Model[] = [
+            {
+                id: "gpt-5.2",
+                model: "gpt-5.2",
+                upgrade: null,
+                upgradeInfo: null,
+                availabilityNux: null,
+                displayName: "GPT-5.2",
+                description: "Fast tier.",
+                hidden: false,
+                supportedReasoningEfforts: [{reasoningEffort: "medium", description: "Default effort."}],
+                defaultReasoningEffort: "medium",
+                supportsPersonality: false,
+                additionalSpeedTiers: ["fast"],
+                isDefault: true,
+                inputModalities: ["text"]
+            },
+        ];
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "session-id",
+            currentModelId: "gpt-5.2[medium]",
+            models,
+        });
+        vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue(models);
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+
+        await codexAcpAgent.newSession({ cwd: "", mcpServers: [] });
+        await codexAcpAgent.unstable_setSessionModel({
+            sessionId: "session-id",
+            modelId: "gpt-5.2[medium]@fast",
+        });
+
+        expect(codexAcpAgent.getSessionState("session-id").currentModelId)
+            .toBe("gpt-5.2[medium]@fast");
     });
 });

@@ -412,6 +412,7 @@ export class CodexAcpClient {
             cwd: null,
             effort: effort,
             model: modelId.model,
+            serviceTier: modelId.serviceTier,
         });
     }
 

@@ -310,13 +310,16 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
-        const requestedModelId= ModelId.fromString(params.modelId);
+        const requestedModelId = ModelId.fromString(params.modelId);
         const requestedModelName = requestedModelId.model;
         const requestedEffort = requestedModelId.effort;
 
         const models = await this.codexAcpClient.fetchAvailableModels();
         const model = models.find(m => m.id === requestedModelName);
         if (!model) throw new Error(`Unknown model ${params.modelId}`);
+        if (requestedModelId.serviceTier === "fast" && !model.additionalSpeedTiers.includes("fast")) {
+            throw new Error(`Unsupported service tier fast for model ${requestedModelName}`);
+        }
 
         const requestedEffortValue = requestedEffort as ReasoningEffort | undefined;
         let reasoningEffort: ReasoningEffort;
@@ -334,7 +337,7 @@ export class CodexAcpServer implements acp.Agent {
             reasoningEffort = model.defaultReasoningEffort;
         }
 
-        sessionState.currentModelId = ModelId.fromComponents(model, reasoningEffort).toString();
+        sessionState.currentModelId = ModelId.fromComponents(model, reasoningEffort, requestedModelId.serviceTier).toString();
         sessionState.supportedReasoningEfforts = model.supportedReasoningEfforts;
         sessionState.supportedInputModalities = model.inputModalities;
 
@@ -353,11 +356,24 @@ export class CodexAcpServer implements acp.Agent {
     private createModelState(availableModels: Model[], selectedModelId: string): SessionModelState {
         const allowedModels = availableModels
             .flatMap((model) =>
-                model.supportedReasoningEfforts.map((effort) => ({
-                    modelId: ModelId.fromComponents(model, effort.reasoningEffort).toString(),
-                    name: `${model.displayName} (${effort.reasoningEffort})`,
-                    description: `${model.description} ${effort.description}`,
-                }))
+                model.supportedReasoningEfforts.flatMap((effort) => {
+                    const standardModel = {
+                        modelId: ModelId.fromComponents(model, effort.reasoningEffort).toString(),
+                        name: `${model.displayName} (${effort.reasoningEffort})`,
+                        description: `${model.description} ${effort.description}`,
+                    };
+                    if (!model.additionalSpeedTiers.includes("fast")) {
+                        return [standardModel];
+                    }
+                    return [
+                        standardModel,
+                        {
+                            modelId: ModelId.fromComponents(model, effort.reasoningEffort, "fast").toString(),
+                            name: `${model.displayName} (${effort.reasoningEffort}, fast)`,
+                            description: `${model.description} ${effort.description} Fast service tier.`,
+                        },
+                    ];
+                })
             );
         return {
             availableModels: allowedModels,
@@ -812,8 +828,7 @@ export class CodexAcpServer implements acp.Agent {
     private buildQuotaMeta(sessionState: SessionState): { quota: QuotaMeta } {
         const lastTokenUsage = sessionState.lastTokenUsage;
 
-        // Remove the "[reasoning-level]" suffix from currentModelId if present
-        const modelName = sessionState.currentModelId.replace(/\[.*?]$/, '');
+        const modelName = ModelId.fromString(sessionState.currentModelId).model;
 
         // FIXME: currently all tokens are reported for the current model
         const modelUsage = (lastTokenUsage != null)

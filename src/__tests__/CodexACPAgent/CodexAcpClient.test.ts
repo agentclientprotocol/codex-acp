@@ -914,6 +914,34 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: null }));
     });
 
+    it ('should send null service tier for normal model selections', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({
+            currentModelId: "model-id[effort]",
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            model: "model-id",
+            effort: "effort",
+            serviceTier: null,
+        }));
+    });
+
+    it ('should send fast service tier for fast model selections', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({
+            currentModelId: "model-id[effort]@fast",
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            model: "model-id",
+            effort: "effort",
+            serviceTier: "fast",
+        }));
+    });
+
     it ('should disable reasoning.summary when model lacks reasoning', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({
             account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
