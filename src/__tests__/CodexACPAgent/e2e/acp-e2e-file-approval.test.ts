@@ -1,57 +1,108 @@
 import fs from "node:fs";
 import path from "node:path";
-import {afterEach, beforeEach, expect, it} from "vitest";
+import {afterEach, beforeEach, expect, it, onTestFinished} from "vitest";
 import {AgentMode} from "../../../AgentMode";
 import {ApprovalOptionId} from "../../../ApprovalOptionId";
 import {
     createAuthenticatedFixture,
     createPermissionResponder,
     describeE2E,
+    expectNoPermissionRequests,
+    expectPermissionRequests,
+    generateFileNameForTest,
     type SpawnedAgentFixture,
 } from "./acp-e2e-test-utils";
 
-const FILE_NAME = "approval-file.txt";
 const FILE_CONTENT = "file approval e2e";
 
 describeE2E("E2E file approval tests", () => {
     let fixture: SpawnedAgentFixture;
-    let sessionId: string;
 
     beforeEach(async () => {
         fixture = await createAuthenticatedFixture(AgentMode.ReadOnly);
-        sessionId = (await fixture.createSession()).sessionId;
     });
 
     afterEach(async () => {
         await fixture.dispose();
     });
 
-    async function expectFileApproval(
-        optionId: ApprovalOptionId,
-        expectedStopReason: "end_turn" | "cancelled",
-    ): Promise<void> {
-        fixture.setPermissionResponder(createPermissionResponder("edit", optionId));
-        const response = await fixture.connection.prompt({
-            sessionId,
-            prompt: [{
-                type: "text",
-                text: `Create ${FILE_NAME} by editing files directly. Content must be exactly: ${FILE_CONTENT}. Do not use shell commands, and stop if the edit is rejected.`,
-            }],
-        });
-        expect(response.stopReason).toBe(expectedStopReason);
-        expect(fixture.readPermissionRequests(sessionId, "edit").length).toBe(1);
-        expect(fixture.readPermissionRequests(sessionId, "execute").length).toBe(0);
-    }
-
     it("applies approved file edits", async () => {
-        await expectFileApproval(ApprovalOptionId.AllowOnce, "end_turn");
-        const filePath = path.join(fixture.workspaceDir, FILE_NAME);
-        expect(fs.existsSync(filePath)).toBe(true);
-        expect(fs.readFileSync(filePath, "utf8").trim()).toBe(FILE_CONTENT);
+        fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.AllowOnce));
+        const sessionId = await editFileDirectly(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()), true);
+        expectPermissionRequests(fixture, sessionId, {edit: 1, execute: 0});
     });
 
     it("does not apply rejected file edits", async () => {
-        await expectFileApproval(ApprovalOptionId.RejectOnce, "cancelled");
-        expect(fs.existsSync(path.join(fixture.workspaceDir, FILE_NAME))).toBe(false);
+        fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.RejectOnce));
+        const sessionId = await editFileDirectly(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()), false);
+        expectPermissionRequests(fixture, sessionId, {edit: 1, execute: 0});
     });
 });
+
+describeE2E("E2E Agent mode file permission tests", () => {
+    let fixture: SpawnedAgentFixture;
+
+    beforeEach(async () => {
+        fixture = await createAuthenticatedFixture(AgentMode.Agent);
+    });
+
+    afterEach(async () => {
+        await fixture.dispose();
+    });
+
+    it("edits a workspace file without prompting for permission", async () => {
+        const sessionId = await editFileDirectly(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()), true);
+        expectNoPermissionRequests(fixture, sessionId);
+    });
+
+    it("can't edit file outside workspace", async () => {
+        const dir = createDirOutsideWorkspace(fixture);
+        await editFileDirectly(fixture, path.join(dir, generateFileNameForTest()), false);
+    });
+});
+
+describeE2E("E2E Agent with full access file permission tests", () => {
+    let fixture: SpawnedAgentFixture;
+
+    beforeEach(async () => {
+        fixture = await createAuthenticatedFixture(AgentMode.AgentFullAccess);
+    });
+
+    afterEach(async () => {
+        await fixture.dispose();
+    });
+
+    it("edits a file outside workspace without prompting for permission", async () => {
+        const dir = createDirOutsideWorkspace(fixture);
+        const sessionId = await editFileDirectly(fixture, path.join(dir, generateFileNameForTest()), true);
+        expectNoPermissionRequests(fixture, sessionId);
+    });
+});
+
+async function editFileDirectly(
+    fixture: SpawnedAgentFixture,
+    filePath: string,
+    expectSuccess: boolean,
+): Promise<string> {
+    const sessionId = (await fixture.createSession()).sessionId;
+    await fixture.connection.prompt({
+        sessionId,
+        prompt: [{
+            type: "text",
+            text: `Create ${filePath} by editing files directly. Content must be exactly: ${FILE_CONTENT}. Do not use shell commands.`,
+        }],
+    });
+    if (expectSuccess) {
+        expect(fs.readFileSync(filePath, "utf8").trim()).toBe(FILE_CONTENT);
+    } else {
+        expect(fs.existsSync(filePath)).toBe(false);
+    }
+    return sessionId;
+}
+
+function createDirOutsideWorkspace(fixture: SpawnedAgentFixture): string {
+    const outsideWorkspaceDir = path.join(path.dirname(fixture.workspaceDir), "outside-workspace");
+    onTestFinished(() => fs.rmSync(outsideWorkspaceDir, {recursive: true, force: true}));
+    fs.mkdirSync(outsideWorkspaceDir);
+    return outsideWorkspaceDir;
+}

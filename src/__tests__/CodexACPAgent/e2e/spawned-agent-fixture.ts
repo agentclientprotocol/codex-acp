@@ -1,7 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {Readable, Writable} from "node:stream";
 import {expect, vi} from "vitest";
@@ -80,9 +79,9 @@ class RuntimePaths {
     }
 
     static createTemporary(): RuntimePaths {
-        const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-integration-"));
+        const rootDir = path.join(process.cwd(), "tmp", crypto.randomUUID());
         const paths = new RuntimePaths(rootDir);
-        for (const dir of [paths.codexHome, paths.workspaceDir, paths.appServerLogsDir]) {
+        for (const dir of [paths.rootDir, paths.codexHome, paths.workspaceDir, paths.appServerLogsDir]) {
             fs.mkdirSync(dir, {recursive: true});
         }
         writeCodexHomeConfig(paths.codexHome, {
