@@ -90,6 +90,8 @@ describeE2E("E2E shell cancellation tests", () => {
 
     it("cancels a running shell command", async () => {
         fixture = await createAuthenticatedFixture();
+        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowOnce));
+
         const sessionId = (await fixture.createSession()).sessionId;
         const pidFilePath = path.join(fixture.workspaceDir, "cancel-command.pid");
         const command = `/bin/sh -c 'echo $$ > "${pidFilePath}"; exec sleep 100'`;
