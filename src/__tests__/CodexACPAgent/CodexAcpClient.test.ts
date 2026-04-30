@@ -103,7 +103,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const authenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
         expect(authenticatedResponse).toEqual({type: "api-key"});
 
-        await keyFixture.getCodexAcpAgent().extMethod("authentication/logout", {});
+        await keyFixture.getCodexAcpAgent().unstable_logout({});
         const logoutResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
         expect(logoutResponse).toEqual({type: "unauthenticated"});
     });
@@ -145,6 +145,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
         expect(newSessionResponse.sessionId).toBeDefined()
     })
+
+    it('supports legacy authentication/logout ext method', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        const logoutSpy = vi.spyOn(codexAcpAgent, "unstable_logout").mockResolvedValue();
+
+        await expect(codexAcpAgent.extMethod("authentication/logout", {})).resolves.toEqual({});
+        expect(logoutSpy).toHaveBeenCalledWith({});
+    });
 
     it('prefetches session additional skill roots before thread start', async () => {
         const mockFixture = createCodexMockTestFixture();
@@ -565,7 +575,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const sessionState: SessionState = createTestSessionState();
 
-        const logoutSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "logout").mockResolvedValue({});
+        const logoutSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "logout").mockResolvedValue();
 
         // @ts-expect-error - exercising private helper
         const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "logout", input: null }, sessionState);
