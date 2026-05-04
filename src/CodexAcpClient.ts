@@ -209,12 +209,9 @@ export class CodexAcpClient {
             config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
             developerInstructions: null,
-            history: null,
             model: null,
             modelProvider: this.getModelProvider(),
-            path: null,
             personality: null,
-            persistExtendedHistory: false,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -234,12 +231,9 @@ export class CodexAcpClient {
             config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
             developerInstructions: null,
-            history: null,
             model: null,
             modelProvider: this.getModelProvider(),
-            path: null,
             personality: null,
-            persistExtendedHistory: false,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -266,8 +260,6 @@ export class CodexAcpClient {
             developerInstructions: null,
             personality: null,
             ephemeral: null,
-            experimentalRawEvents: false,
-            persistExtendedHistory: false
         });
 
         const codexModels = await this.fetchAvailableModels();
@@ -393,7 +385,6 @@ export class CodexAcpClient {
             sandboxPolicy: agentMode.sandboxPolicy,
             summary: disableSummary ? "none" : null,
             personality: null,
-            collaborationMode: null,
             cwd: null,
             effort: effort,
             model: modelId.model,

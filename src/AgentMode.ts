@@ -25,7 +25,6 @@ export class AgentMode {
         "on-request",
         {
             "type": "readOnly",
-            "access": {"type": "fullAccess"},
             "networkAccess": false
         },
         "read-only"
@@ -38,7 +37,6 @@ export class AgentMode {
         {
             type: "workspaceWrite",
             writableRoots: [],
-            readOnlyAccess: {"type": "fullAccess"},
             networkAccess: false,
             excludeTmpdirEnvVar: false,
             excludeSlashTmp: false
