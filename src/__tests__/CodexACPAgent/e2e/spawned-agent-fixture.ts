@@ -22,7 +22,7 @@ export interface SpawnedAgentFixture {
     readonly workspaceDir: string;
     createSession(mcpServers?: acp.McpServer[]): Promise<acp.NewSessionResponse>;
     restart(): Promise<SpawnedAgentFixture>;
-    writeSkill(skill: TestSkill): void;
+    writeSkill(skill: TestSkill, rootDir?: string): void;
     setPermissionResponder(responder: PermissionResponder): void;
     expectPromptText(
         sessionId: string,
@@ -170,8 +170,9 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         return await createSpawnedAgentFixture(this.initializeConnection, this.extraEnv, this.paths);
     }
 
-    writeSkill(skill: TestSkill): void {
-        const skillDirectory = path.join(this.paths.codexHome, "skills", skill.name);
+    writeSkill(skill: TestSkill, rootDir?: string): void {
+        const skillsRoot = rootDir ?? path.join(this.paths.codexHome, "skills");
+        const skillDirectory = path.join(skillsRoot, skill.name);
         fs.mkdirSync(skillDirectory, {recursive: true});
         fs.writeFileSync(
             path.join(skillDirectory, "SKILL.md"),

@@ -1,3 +1,4 @@
+import path from "node:path";
 import {afterEach, expect, it} from "vitest";
 import {AgentMode} from "../../../AgentMode";
 import {
@@ -90,7 +91,7 @@ describeE2E("E2E tests", () => {
         });
     });
 
-    it("lists a user skill from the wrapped CODEX_HOME", async () => {
+    it("lists a user skill from the CODEX_HOME", async () => {
         fixture = await createAuthenticatedFixture();
         fixture.writeSkill({
             name: "integration-skill",
@@ -101,6 +102,30 @@ describeE2E("E2E tests", () => {
         await fixture.expectPromptText(session.sessionId, "/skills", (text) => {
             expect(text).toContain("Available skills:");
             expect(text).toContain("- integration-skill: Integration skill");
+        });
+    });
+
+    // Currently, `additionalRoots` are not propagated when listing skills
+    it.skip("lists skills from additional session roots", async () => {
+        fixture = await createAuthenticatedFixture();
+        const additionalSkillsRoot = path.join(fixture.workspaceDir, "custom-skills");
+        fixture.writeSkill({
+            name: "session-root-skill",
+            description: "Session root skill",
+            body: "This skill exists only in an additional root passed at session creation.",
+        }, additionalSkillsRoot);
+
+        const session = await fixture.connection.newSession({
+            cwd: fixture.workspaceDir,
+            mcpServers: [],
+            _meta: {
+                additionalRoots: [additionalSkillsRoot],
+            },
+        });
+
+        await fixture.expectPromptText(session.sessionId, "/skills", (text) => {
+            expect(text).toContain("Available skills:");
+            expect(text).toContain("- session-root-skill: Session root skill");
         });
     });
 });
