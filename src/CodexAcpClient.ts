@@ -377,7 +377,7 @@ export class CodexAcpClient {
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
 
         await this.refreshSkills(cwd, request._meta);
-        await this.codexClient.turnStart({
+        return await this.codexClient.runTurn({
             outputSchema: null,
             threadId: request.sessionId,
             input: input,
@@ -389,10 +389,6 @@ export class CodexAcpClient {
             effort: effort,
             model: modelId.model,
         });
-
-        // Wait for turn completion
-        // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
-        return await this.codexClient.awaitTurnCompleted(request.sessionId);
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {

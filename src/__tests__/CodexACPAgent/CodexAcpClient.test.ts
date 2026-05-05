@@ -7,7 +7,7 @@ import {createTestFixture, createCodexMockTestFixture, createTestSessionState, t
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
-import type {ListMcpServerStatusResponse, Model, SkillsListResponse} from "../../app-server/v2";
+import type {ListMcpServerStatusResponse, Model, SkillsListResponse, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 
@@ -353,6 +353,32 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         return onServerNotification;
     }
 
+    function createTurn(id: string, status: "inProgress" | "completed") {
+        return {
+            id,
+            items: [],
+            status,
+            error: null,
+            startedAt: null,
+            completedAt: null,
+            durationMs: null,
+        };
+    }
+
+    function createTurnCompletedNotification(threadId: string, turnId: string): ServerNotification {
+        return {
+            method: "turn/completed",
+            params: {
+                threadId,
+                turn: createTurn(turnId, "completed"),
+            },
+        };
+    }
+
+    async function flushAsyncWork(): Promise<void> {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
     it('should map events from dump', async () => {
         fixture.getCodexAppServerClient().onServerNotification = loadNotifications();
 
@@ -432,10 +458,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockResolvedValue({
-            threadId: "id",
-            turn: { id: "turn-id", items: [], status: "completed", error: null }
-        });
 
         const sessionState1: SessionState = createTestSessionState({
             sessionId: "session-1",
@@ -452,10 +474,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             return sessionId === "session-1" ? sessionState1 : sessionState2;
         });
 
-        // awaitTurnCompleted is per-thread; resolve the matching thread.
-        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation((threadId: string) => Promise.resolve({
+        // awaitTurnCompleted is per-turn; resolve the matching thread and turn.
+        mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation((threadId: string, turnId: string) => Promise.resolve({
             threadId,
-            turn: { id: "turn-id", items: [], status: "completed", error: null }
+            turn: createTurn(turnId, "completed")
         }));
 
         // Start prompts for two different sessions
@@ -485,11 +507,92 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/multiple-sessions.json");
     });
 
+    it('should complete concurrent prompts by matching thread and turn id', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        const turnIds = new Map([
+            ["session-1", "turn-1"],
+            ["session-2", "turn-2"],
+        ]);
+        const turnStart = vi.fn().mockImplementation((params: TurnStartParams) => Promise.resolve({
+            turn: createTurn(turnIds.get(params.threadId) ?? "unknown-turn", "inProgress"),
+        }));
+        mockFixture.getCodexAppServerClient().turnStart = turnStart;
+
+        const sessionState1: SessionState = createTestSessionState({
+            sessionId: "session-1",
+            currentModelId: "model-id[effort]",
+            agentMode: AgentMode.DEFAULT_AGENT_MODE
+        });
+        const sessionState2: SessionState = createTestSessionState({
+            sessionId: "session-2",
+            currentModelId: "model-id[effort]",
+            agentMode: AgentMode.DEFAULT_AGENT_MODE
+        });
+        vi.spyOn(codexAcpAgent, "getSessionState").mockImplementation((sessionId: string) => {
+            return sessionId === "session-1" ? sessionState1 : sessionState2;
+        });
+
+        const prompt1 = codexAcpAgent.prompt({ sessionId: "session-1", prompt: [{type: "text", text: "Message to session 1"}] });
+        const prompt2 = codexAcpAgent.prompt({ sessionId: "session-2", prompt: [{type: "text", text: "Message to session 2"}] });
+
+        await vi.waitFor(() => {
+            expect(turnStart).toHaveBeenCalledTimes(2);
+        });
+
+        let prompt1Settled = false;
+        void prompt1.then(() => {
+            prompt1Settled = true;
+        }, () => {
+            prompt1Settled = true;
+        });
+
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-1", "old-turn"));
+        await flushAsyncWork();
+        expect(prompt1Settled).toBe(false);
+
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-2", "turn-2"));
+        await expect(prompt2).resolves.toMatchObject({stopReason: "end_turn"});
+        expect(prompt1Settled).toBe(false);
+
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-1", "turn-1"));
+        await expect(prompt1).resolves.toMatchObject({stopReason: "end_turn"});
+    });
+
+    it('should handle a turn completion that arrives before awaitTurnCompleted is called', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockImplementation((params: TurnStartParams) => {
+            mockFixture.sendServerNotification(createTurnCompletedNotification(params.threadId, "fast-turn"));
+            return Promise.resolve({
+                turn: createTurn("fast-turn", "inProgress"),
+            });
+        });
+
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(createTestSessionState({
+            sessionId: "fast-session",
+            currentModelId: "model-id[effort]",
+            agentMode: AgentMode.DEFAULT_AGENT_MODE
+        }));
+
+        await expect(codexAcpAgent.prompt({
+            sessionId: "fast-session",
+            prompt: [{type: "text", text: "Fast completion"}],
+        })).resolves.toMatchObject({stopReason: "end_turn"});
+    });
+
     it('should send attachments as prompt items', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
 
+        const realTurnStart = codexAppServerClient.turnStart.bind(codexAppServerClient);
+        vi.spyOn(codexAppServerClient, "turnStart").mockImplementation(async (params) => {
+            await realTurnStart(params);
+            return {turn: createTurn("turn-id", "inProgress")};
+        });
         vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
             threadId: "session-id",
             turn: {
