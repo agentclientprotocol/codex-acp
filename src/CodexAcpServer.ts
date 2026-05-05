@@ -8,7 +8,7 @@ import {
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
-import {CodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
+import {getCodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
 import type {McpStartupResult} from "./CodexAppServerClient";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -96,6 +96,9 @@ export class CodexAcpServer implements acp.Agent {
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
             agentCapabilities: {
+                auth: {
+                    logout: {},
+                },
                 loadSession: true,
                 promptCapabilities: {
                     image: true
@@ -109,7 +112,7 @@ export class CodexAcpServer implements acp.Agent {
                     sse: false
                 }
             },
-            authMethods: CodexAuthMethods,
+            authMethods: getCodexAuthMethods(_params.clientCapabilities),
         };
     }
 
@@ -121,8 +124,10 @@ export class CodexAcpServer implements acp.Agent {
         switch (methodRequest.method) {
             case "authentication/status":
                 return await this.runWithProcessCheck(() => this.codexAcpClient.getAuthenticationStatus());
-            case "authentication/logout":
-                return await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+            case "authentication/logout": {
+                await this.unstable_logout({});
+                return {};
+            }
         }
     }
 
@@ -217,7 +222,7 @@ export class CodexAcpServer implements acp.Agent {
         };
     }
 
-    async unstable_resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
+    async resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
         logger.log("Resuming session...", {sessionId: params.sessionId});
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -232,7 +237,7 @@ export class CodexAcpServer implements acp.Agent {
         };
     }
 
-    async unstable_listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+    async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
         logger.log("Listing sessions...", {cwd: params.cwd, cursor: params.cursor});
         await this.checkAuthorization();
         return await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
@@ -268,6 +273,12 @@ export class CodexAcpServer implements acp.Agent {
         }
         logger.log("Authenticate request completed");
         return { };
+    }
+
+    async unstable_logout(_params: acp.LogoutRequest): Promise<void> {
+        logger.log("Logout request received");
+        await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+        logger.log("Logout request completed");
     }
 
     async setSessionMode(

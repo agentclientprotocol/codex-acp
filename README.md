@@ -5,4 +5,3 @@
 ## Documentation
 
 - **[Development Guide](readme-dev.md)** - Setup, configuration, and building binaries
-- **[Release Instructions](release.md)** - How to create a new release

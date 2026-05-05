@@ -35,7 +35,7 @@ import type {
     UserInput,
 } from "./app-server/v2";
 import packageJson from "../package.json";
-import type {AuthenticationLogoutResponse, AuthenticationStatusResponse} from "./AcpExtensions";
+import type {AuthenticationStatusResponse} from "./AcpExtensions";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -176,11 +176,10 @@ export class CodexAcpClient {
         return settingsModelProvider.config.model_provider;
     }
 
-    async logout(): Promise<AuthenticationLogoutResponse> {
+    async logout(): Promise<void> {
         const accountUpdatedPromise = this.awaitNextAccountUpdated();
         await this.codexClient.accountLogout();
         await accountUpdatedPromise;
-        return {};
     }
 
     async authRequired(): Promise<Boolean> {
@@ -210,12 +209,9 @@ export class CodexAcpClient {
             config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
             developerInstructions: null,
-            history: null,
             model: null,
             modelProvider: this.getModelProvider(),
-            path: null,
             personality: null,
-            persistExtendedHistory: false,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -235,12 +231,9 @@ export class CodexAcpClient {
             config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
             developerInstructions: null,
-            history: null,
             model: null,
             modelProvider: this.getModelProvider(),
-            path: null,
             personality: null,
-            persistExtendedHistory: false,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -267,8 +260,6 @@ export class CodexAcpClient {
             developerInstructions: null,
             personality: null,
             ephemeral: null,
-            experimentalRawEvents: false,
-            persistExtendedHistory: false
         });
 
         const codexModels = await this.fetchAvailableModels();
@@ -394,7 +385,6 @@ export class CodexAcpClient {
             sandboxPolicy: agentMode.sandboxPolicy,
             summary: disableSummary ? "none" : null,
             personality: null,
-            collaborationMode: null,
             cwd: null,
             effort: effort,
             model: modelId.model,
