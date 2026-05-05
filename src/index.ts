@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import {createRequire} from "node:module";
 import * as acp from "@agentclientprotocol/sdk";
 import {startCodexConnection} from "./CodexJsonRpcConnection";
 import {CodexAcpServer} from "./CodexAcpServer";
@@ -30,7 +29,7 @@ if (process.argv[2] === "login") {
 }
 
 function startAcpServer() {
-    const codexPath = process.env["CODEX_PATH"] ?? createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js");
+    const codexPath = process.env["CODEX_PATH"];
     const configString = process.env["CODEX_CONFIG"];
     const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
     const modelProvider = process.env["MODEL_PROVIDER"];

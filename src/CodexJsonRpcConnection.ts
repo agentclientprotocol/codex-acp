@@ -2,6 +2,7 @@ import * as rpc from "vscode-jsonrpc/node";
 import type {MessageConnection} from "vscode-jsonrpc/node";
 import type {ChildProcessWithoutNullStreams} from "node:child_process";
 import {spawn} from "node:child_process";
+import {createRequire} from "node:module";
 
 import {createJSONRPCReader, createJSONRPCWriter} from "./StdUtils";
 import {logger} from "./Logger";
@@ -11,11 +12,18 @@ export interface CodexConnection {
     readonly process: ChildProcessWithoutNullStreams;
 }
 
-export function startCodexConnection(codexPath: string, env?: NodeJS.ProcessEnv): CodexConnection {
+export function startCodexConnection(codexPath?: string, env?: NodeJS.ProcessEnv): CodexConnection {
     const spawnEnv = env ?? process.env;
-    const codex: ChildProcessWithoutNullStreams = process.platform === 'win32'
-        ? spawn(`"${codexPath}" app-server`, { shell: true, env: spawnEnv })
-        : spawn(codexPath, ['app-server'], { env: spawnEnv });
+
+    let codex: ChildProcessWithoutNullStreams
+    if (codexPath) {
+        codex = process.platform === 'win32'
+            ? spawn(`"${codexPath}" app-server`, { shell: true, env: spawnEnv })
+            : spawn(codexPath, ['app-server'], { env: spawnEnv });
+    } else {
+        const bundledCodexPath = createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js");
+        codex = spawn(process.execPath, [bundledCodexPath, 'app-server'], {env: spawnEnv});
+    }
 
     attachLogs(codex);
 
