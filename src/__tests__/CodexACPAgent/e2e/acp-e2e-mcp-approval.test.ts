@@ -1,4 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
+import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it} from "vitest";
 import {ApprovalOptionId} from "../../../ApprovalOptionId";
@@ -14,12 +15,15 @@ import {
 const MCP_SERVER_NAME = "integration-mcp";
 const MCP_ECHO_MESSAGE = "mcp approval e2e";
 
-function createMcpServer(): acp.McpServerStdio {
+function createMcpServer(invocationMarkerPath: string): acp.McpServerStdio {
     return {
         name: MCP_SERVER_NAME,
         command: process.execPath,
-        args: [path.join(process.cwd(), "node_modules/mcp-hello-world/build/stdio.js")],
-        env: [],
+        args: [path.join(process.cwd(), "src/__tests__/CodexACPAgent/e2e/fixtures/invocation-aware-mcp-server.mjs")],
+        env: [{
+            name: "MCP_TOOL_INVOCATION_MARKER_PATH",
+            value: invocationMarkerPath,
+        }],
     };
 }
 
@@ -33,18 +37,16 @@ function createMcpPermissionResponder(optionId: ApprovalOptionId): PermissionRes
 
 describeE2E("E2E MCP approval tests", () => {
     let fixture: SpawnedAgentFixture;
-    let sessionId: string;
 
     beforeEach(async () => {
         fixture = await createAuthenticatedFixture();
-        sessionId = (await fixture.createSession([createMcpServer()])).sessionId;
     });
 
     afterEach(async () => {
         await fixture.dispose();
     });
 
-    function expectMcpToolPermissionRequest(): void {
+    function expectMcpToolPermissionRequest(sessionId: string): void {
         const requests = fixture.readPermissionRequests(sessionId, "execute");
         expect(requests.length).toBe(1);
         expect(isMcpPermissionRequest(requests[0]!)).toBe(true);
@@ -52,17 +54,22 @@ describeE2E("E2E MCP approval tests", () => {
 
     it("executes an approved MCP tool call", async () => {
         fixture.setPermissionResponder(createMcpPermissionResponder(ApprovalOptionId.AllowOnce));
+        const invocationMarkerPath = path.join(fixture.workspaceDir, `mcp-tool-invocation-${crypto.randomUUID()}.txt`);
+        const sessionId = (await fixture.createSession([createMcpServer(invocationMarkerPath)])).sessionId;
 
         await fixture.expectPromptText(
             sessionId,
             `Use the ${MCP_SERVER_NAME} MCP echo tool with message "${MCP_ECHO_MESSAGE}". Reply with exactly the tool result and no extra text.`,
             (text) => expect(text).toContain(`You said: ${MCP_ECHO_MESSAGE}`),
         );
-        expectMcpToolPermissionRequest();
+        expect(fs.readFileSync(invocationMarkerPath, "utf8")).toBe(MCP_ECHO_MESSAGE);
+        expectMcpToolPermissionRequest(sessionId);
     });
 
     it("ends turn when MCP tool call is rejected", async () => {
         fixture.setPermissionResponder(createMcpPermissionResponder(ApprovalOptionId.RejectOnce));
+        const invocationMarkerPath = path.join(fixture.workspaceDir, `mcp-tool-invocation-${crypto.randomUUID()}.txt`);
+        const sessionId = (await fixture.createSession([createMcpServer(invocationMarkerPath)])).sessionId;
 
         expectEndTurn(await fixture.connection.prompt({
             sessionId,
@@ -71,6 +78,7 @@ describeE2E("E2E MCP approval tests", () => {
                 text: `Use the ${MCP_SERVER_NAME} MCP echo tool with message "${MCP_ECHO_MESSAGE}". Stop if the tool call is rejected.`,
             }],
         }));
-        expectMcpToolPermissionRequest();
+        expect(fs.existsSync(invocationMarkerPath)).toBe(false);
+        expectMcpToolPermissionRequest(sessionId);
     });
 });
