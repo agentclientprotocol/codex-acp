@@ -9,7 +9,6 @@ import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
 import type {ListMcpServerStatusResponse, Model, SkillsListResponse, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
-import {ModelId} from "../../ModelId";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -448,7 +447,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         const sessionState: SessionState = createTestSessionState({
             sessionId: "id",
-            currentModelId: "model-id[effort]",
+            currentModelId: "model-id",
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
@@ -473,7 +472,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const sessionState: SessionState = createTestSessionState({
             sessionId: "id",
-            currentModelId: "model-id[effort]",
+            currentModelId: "model-id",
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
@@ -515,12 +514,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const sessionState1: SessionState = createTestSessionState({
             sessionId: "session-1",
-            currentModelId: "model-id[effort]",
+            currentModelId: "model-id",
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         const sessionState2: SessionState = createTestSessionState({
             sessionId: "session-2",
-            currentModelId: "model-id[effort]",
+            currentModelId: "model-id",
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
 
@@ -853,13 +852,21 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     ];
 
     it('should fallback to the default model when modelId is null', () => {
-        const result = fixture.getCodexAcpClient().createModelId(mockModels, null, 'low');
-        expect(result).toEqual(ModelId.create('5.1', 'low'));
+        const result = fixture.getCodexAcpClient().createModelSelection(mockModels, null, 'low', null);
+        expect(result).toEqual({
+            currentModelId: "5.1",
+            currentReasoningEffort: "low",
+            currentServiceTier: null,
+        });
     });
 
     it('should fallback to the model-specific effort when reasoningEffort is null', () => {
-        const result = fixture.getCodexAcpClient().createModelId(mockModels, '5.2-codex', null);
-        expect(result).toEqual(ModelId.create('5.2-codex', 'medium'));
+        const result = fixture.getCodexAcpClient().createModelSelection(mockModels, '5.2-codex', null, null);
+        expect(result).toEqual({
+            currentModelId: "5.2-codex",
+            currentReasoningEffort: "medium",
+            currentServiceTier: null,
+        });
     });
 
     /**
@@ -916,28 +923,32 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
     it ('should send null service tier for normal model selections', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({
-            currentModelId: "model-id[effort]",
+            currentModelId: "model-id",
+            currentReasoningEffort: "high",
+            currentServiceTier: null,
         });
 
         await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
 
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
             model: "model-id",
-            effort: "effort",
+            effort: "high",
             serviceTier: null,
         }));
     });
 
     it ('should send fast service tier for fast model selections', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({
-            currentModelId: "model-id[effort]@fast",
+            currentModelId: "model-id",
+            currentReasoningEffort: "high",
+            currentServiceTier: "fast",
         });
 
         await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
 
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
             model: "model-id",
-            effort: "effort",
+            effort: "high",
             serviceTier: "fast",
         }));
     });

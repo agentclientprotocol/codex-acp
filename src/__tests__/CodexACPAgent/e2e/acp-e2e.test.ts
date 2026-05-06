@@ -51,6 +51,7 @@ describeE2E("E2E tests", () => {
         await fixture.connection.unstable_setSessionModel({
             sessionId: session.sessionId,
             modelId: OTHER_TEST_MODEL_ID.toString(),
+            _meta: { reasoningEffort: OTHER_TEST_MODEL_ID.effort },
         });
         await fixture.expectStatus(session.sessionId, {Model: OTHER_TEST_MODEL_ID});
     });
