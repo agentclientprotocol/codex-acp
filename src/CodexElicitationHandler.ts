@@ -9,16 +9,13 @@ import type {
     McpServerElicitationRequestResponse,
 } from "./app-server/v2";
 import { logger } from "./Logger";
-import { ApprovalOptionId } from "./ApprovalOptionId";
+import { McpApprovalOptionId } from "./McpApprovalOptionId";
 
 // Standard elicitation options (non-tool-call approval).
 const ELICITATION_OPTIONS: acp.PermissionOption[] = [
     { optionId: "accept", name: "Accept", kind: "allow_once" },
     { optionId: "decline", name: "Decline", kind: "reject_once" },
 ];
-
-// Option ID unique to elicitation persist choices — not part of the shared ApprovalOptionId set.
-const OPTION_ALLOW_SESSION = "allow_session";
 
 type PersistValue = "session" | "always";
 
@@ -56,15 +53,15 @@ function isMcpToolCallApproval(meta: unknown): boolean {
  */
 function buildToolApprovalOptions(persistOptions: Set<PersistValue>): acp.PermissionOption[] {
     const options: acp.PermissionOption[] = [
-        { optionId: ApprovalOptionId.AllowOnce, name: "Allow", kind: "allow_once" },
+        { optionId: McpApprovalOptionId.AllowOnce, name: "Allow", kind: "allow_once" },
     ];
     if (persistOptions.has("session")) {
-        options.push({ optionId: OPTION_ALLOW_SESSION, name: "Allow for This Session", kind: "allow_always" });
+        options.push({ optionId: McpApprovalOptionId.AllowSession, name: "Allow for This Session", kind: "allow_always" });
     }
     if (persistOptions.has("always")) {
-        options.push({ optionId: ApprovalOptionId.AllowAlways, name: "Allow and Don't Ask Again", kind: "allow_always" });
+        options.push({ optionId: McpApprovalOptionId.AllowAlways, name: "Allow and Don't Ask Again", kind: "allow_always" });
     }
-    options.push({ optionId: "decline", name: "Decline", kind: "reject_once" });
+    options.push({ optionId: McpApprovalOptionId.Decline, name: "Decline", kind: "reject_once" });
     return options;
 }
 
@@ -117,7 +114,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
             const response = await this.connection.requestPermission(request);
             if (correlatedCallId !== undefined && response.outcome.outcome !== "cancelled") {
                 const optionId = response.outcome.optionId;
-                if (optionId !== "decline") {
+                if (optionId !== McpApprovalOptionId.Decline) {
                     await this.connection.sessionUpdate({
                         sessionId: this.sessionState.sessionId,
                         update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
@@ -211,13 +208,13 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
 
         const optionId = response.outcome.optionId;
-        if (optionId === OPTION_ALLOW_SESSION) {
+        if (optionId === McpApprovalOptionId.AllowSession) {
             return { action: "accept", content: null, _meta: { persist: "session" } };
         }
-        if (optionId === ApprovalOptionId.AllowAlways) {
+        if (optionId === McpApprovalOptionId.AllowAlways) {
             return { action: "accept", content: null, _meta: { persist: "always" } };
         }
-        if (optionId === ApprovalOptionId.AllowOnce || optionId === "accept") {
+        if (optionId === McpApprovalOptionId.AllowOnce || optionId === "accept") {
             return { action: "accept", content: null, _meta: null };
         }
         return { action: "decline", content: null, _meta: null };

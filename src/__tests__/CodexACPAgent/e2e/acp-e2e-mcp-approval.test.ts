@@ -2,10 +2,9 @@ import type * as acp from "@agentclientprotocol/sdk";
 import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it} from "vitest";
-import {ApprovalOptionId} from "../../../ApprovalOptionId";
+import {McpApprovalOptionId, type McpApprovalOptionId as McpApprovalOptionIdValue} from "../../../McpApprovalOptionId";
 import {
     createAuthenticatedFixture,
-    createPermissionResponse,
     describeE2E,
     expectEndTurn,
     type PermissionResponder,
@@ -31,8 +30,15 @@ function isMcpPermissionRequest(request: acp.RequestPermissionRequest): boolean 
     return request.toolCall.kind === "execute" && request._meta?.["is_mcp_tool_approval"] === true;
 }
 
-function createMcpPermissionResponder(optionId: ApprovalOptionId): PermissionResponder {
-    return (request) => createPermissionResponse(isMcpPermissionRequest(request) ? optionId : null);
+function createMcpPermissionResponse(optionId: McpApprovalOptionIdValue | null): acp.RequestPermissionResponse {
+    if (optionId === null) {
+        return {outcome: {outcome: "cancelled"}};
+    }
+    return {outcome: {outcome: "selected", optionId}};
+}
+
+function createMcpPermissionResponder(optionId: McpApprovalOptionIdValue): PermissionResponder {
+    return (request) => createMcpPermissionResponse(isMcpPermissionRequest(request) ? optionId : null);
 }
 
 describeE2E("E2E MCP approval tests", () => {
@@ -53,7 +59,7 @@ describeE2E("E2E MCP approval tests", () => {
     }
 
     it("executes an approved MCP tool call", async () => {
-        fixture.setPermissionResponder(createMcpPermissionResponder(ApprovalOptionId.AllowOnce));
+        fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.AllowOnce));
         const invocationMarkerPath = path.join(fixture.workspaceDir, `mcp-tool-invocation-${crypto.randomUUID()}.txt`);
         const sessionId = (await fixture.createSession([createMcpServer(invocationMarkerPath)])).sessionId;
 
@@ -67,7 +73,7 @@ describeE2E("E2E MCP approval tests", () => {
     });
 
     it("ends turn when MCP tool call is rejected", async () => {
-        fixture.setPermissionResponder(createMcpPermissionResponder(ApprovalOptionId.RejectOnce));
+        fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.Decline));
         const invocationMarkerPath = path.join(fixture.workspaceDir, `mcp-tool-invocation-${crypto.randomUUID()}.txt`);
         const sessionId = (await fixture.createSession([createMcpServer(invocationMarkerPath)])).sessionId;
 
