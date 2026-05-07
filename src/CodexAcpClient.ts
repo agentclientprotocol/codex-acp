@@ -300,7 +300,7 @@ export class CodexAcpClient {
         }
     }
 
-    private getModelProvider(): string | null {
+    getModelProvider(): string | null {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
     }
 

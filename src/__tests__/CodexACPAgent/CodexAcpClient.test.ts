@@ -146,6 +146,60 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(newSessionResponse.sessionId).toBeDefined()
     })
 
+    it('should show account in /status for api key auth and hide it for gateway auth', async () => {
+        const authFixture = createTestFixture();
+        const codexAcpAgent = authFixture.getCodexAcpAgent();
+
+        await codexAcpAgent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: {
+                auth: {
+                    _meta: {
+                        gateway: true,
+                    }
+                }
+            }
+        });
+        await authFixture.getCodexAcpClient().logout();
+
+        await codexAcpAgent.authenticate({
+            methodId: "api-key",
+            _meta: { "api-key": { apiKey: "TOKEN" } }
+        });
+        const apiKeySession = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        authFixture.clearAcpConnectionDump();
+
+        await codexAcpAgent.prompt({
+            sessionId: apiKeySession.sessionId,
+            prompt: [{ type: "text", text: "/status" }]
+        });
+
+        const apiKeyStatusDump = authFixture.getAcpConnectionDump([]);
+        expect(apiKeyStatusDump).toContain("**Account:** API key configured");
+
+        await codexAcpAgent.authenticate({
+            methodId: "gateway",
+            _meta: {
+                "gateway": {
+                    baseUrl: "https://www.example.com",
+                    headers: {
+                        "Custom-Auth-Header": "TOKEN"
+                    }
+                }
+            }
+        });
+        const gatewaySession = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        authFixture.clearAcpConnectionDump();
+
+        await codexAcpAgent.prompt({
+            sessionId: gatewaySession.sessionId,
+            prompt: [{ type: "text", text: "/status" }]
+        });
+
+        const gatewayStatusDump = authFixture.getAcpConnectionDump([]);
+        expect(gatewayStatusDump).toContain("**Account:** not logged in");
+    });
+
     it('supports legacy authentication/logout ext method', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();

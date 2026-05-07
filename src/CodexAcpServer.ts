@@ -1,14 +1,9 @@
 import * as acp from "@agentclientprotocol/sdk";
-import {
-    RequestError,
-    type SessionId,
-    type SessionModelState,
-    type SessionModeState
-} from "@agentclientprotocol/sdk";
+import {RequestError, type SessionId, type SessionModelState, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
-import {getCodexAuthMethods, type CodexAuthRequest} from "./CodexAuthMethod";
+import {type CodexAuthRequest, getCodexAuthMethods} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
 import type {McpStartupResult} from "./CodexAppServerClient";
 import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -17,10 +12,10 @@ import type {
     Account,
     CollabAgentToolCallStatus,
     Model,
+    ReasoningEffortOption,
     Thread,
     ThreadItem,
-    UserInput,
-    ReasoningEffortOption
+    UserInput
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
@@ -164,7 +159,7 @@ export class CodexAcpServer implements acp.Agent {
             sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(request));
         }
 
-        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        const account = await this.getActiveAccount();
         const {sessionId, currentModelId, models} = sessionMetadata;
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, "sessionId" in request);
         const currentModel = this.findCurrentModel(models, currentModelId);
@@ -179,7 +174,7 @@ export class CodexAcpServer implements acp.Agent {
             totalTokenUsage: null,
             modelContextWindow: null,
             rateLimits: null,
-            account: accountResponse.account,
+            account: account,
             cwd: request.cwd,
             sessionMcpServers: sessionMcpServers,
         }
@@ -198,6 +193,14 @@ export class CodexAcpServer implements acp.Agent {
         const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
 
         return [sessionId, sessionModelState, sessionModeState];
+    }
+
+    private async getActiveAccount(){
+        if (this.codexAcpClient.getModelProvider()) {
+            return null
+        }
+        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        return accountResponse.account;
     }
 
     async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
@@ -381,7 +384,7 @@ export class CodexAcpServer implements acp.Agent {
             this.codexAcpClient.loadSession(request)
         );
 
-        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        const account = await this.getActiveAccount();
         const {sessionId, currentModelId, models, thread} = sessionMetadata;
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
         const currentModel = this.findCurrentModel(models, currentModelId);
@@ -396,7 +399,7 @@ export class CodexAcpServer implements acp.Agent {
             totalTokenUsage: null,
             modelContextWindow: null,
             rateLimits: null,
-            account: accountResponse.account,
+            account: account,
             cwd: request.cwd,
             sessionMcpServers: sessionMcpServers,
         };
