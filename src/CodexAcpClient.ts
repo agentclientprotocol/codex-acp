@@ -210,7 +210,7 @@ export class CodexAcpClient {
             cwd: request.cwd,
             developerInstructions: null,
             model: null,
-            modelProvider: this.getModelProvider(),
+            modelProvider: this.getResumeModelProvider(),
             personality: null,
             threadId: request.sessionId,
         });
@@ -232,7 +232,7 @@ export class CodexAcpClient {
             cwd: request.cwd,
             developerInstructions: null,
             model: null,
-            modelProvider: this.getModelProvider(),
+            modelProvider: this.getResumeModelProvider(),
             personality: null,
             threadId: request.sessionId,
         });
@@ -302,6 +302,12 @@ export class CodexAcpClient {
 
     private getModelProvider(): string | null {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
+    }
+
+    private getResumeModelProvider(): string {
+        // Passing `null` forces codex to use the persisted provider for resumed session instead of default one
+        // Explicit fallback to "openai" fixes error `Model provider not found` at least for ChatGPT authentication
+        return this.getModelProvider() ?? "openai";
     }
 
     private async refreshSkills(cwd: string, meta?: Record<string, unknown> | null): Promise<void> {
