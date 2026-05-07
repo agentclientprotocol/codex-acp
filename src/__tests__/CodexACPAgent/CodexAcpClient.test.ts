@@ -869,6 +869,51 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    it('should fallback to the model-specific effort when reasoningEffort is unsupported', () => {
+        const result = fixture.getCodexAcpClient().createModelSelection(mockModels, '5.2-codex', 'low', null);
+        expect(result).toEqual({
+            currentModelId: "5.2-codex",
+            currentReasoningEffort: "medium",
+            currentServiceTier: null,
+        });
+    });
+
+    it('should drop stale service tier when falling back to the default model', () => {
+        const [codexModel, defaultModel] = mockModels as [Model, Model];
+        const models = [
+            {
+                ...codexModel,
+                additionalSpeedTiers: ["fast"],
+            },
+            defaultModel,
+        ];
+
+        const result = fixture.getCodexAcpClient().createModelSelection(models, 'unavailable-model', 'high', 'fast');
+        expect(result).toEqual({
+            currentModelId: "5.1",
+            currentReasoningEffort: "low",
+            currentServiceTier: null,
+        });
+    });
+
+    it('should retain service tier when selected model supports it', () => {
+        const [codexModel, defaultModel] = mockModels as [Model, Model];
+        const models = [
+            {
+                ...codexModel,
+                additionalSpeedTiers: ["fast"],
+            },
+            defaultModel,
+        ];
+
+        const result = fixture.getCodexAcpClient().createModelSelection(models, '5.2-codex', 'high', 'fast');
+        expect(result).toEqual({
+            currentModelId: "5.2-codex",
+            currentReasoningEffort: "high",
+            currentServiceTier: "fast",
+        });
+    });
+
     /**
      * Sets up a mock fixture with turnStart/awaitTurnCompleted spied on,
      * and a given session state. Returns the fixture and turnStart spy.
