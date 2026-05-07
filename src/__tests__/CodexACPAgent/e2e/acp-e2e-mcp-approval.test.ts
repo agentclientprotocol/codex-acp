@@ -10,6 +10,7 @@ import {
     type PermissionResponder,
     type SpawnedAgentFixture,
 } from "./acp-e2e-test-utils";
+import os from "node:os";
 
 const MCP_SERVER_NAME = "integration-mcp";
 const MCP_ECHO_MESSAGE = "mcp approval e2e";
@@ -37,11 +38,32 @@ function createMcpPermissionResponse(optionId: McpApprovalOptionIdValue | null):
     return {outcome: {outcome: "selected", optionId}};
 }
 
-function createMcpPermissionResponder(optionId: McpApprovalOptionIdValue): PermissionResponder {
-    return (request) => createMcpPermissionResponse(isMcpPermissionRequest(request) ? optionId : null);
+function createMcpPermissionResponder(...optionIds: McpApprovalOptionIdValue[]): PermissionResponder {
+    const queue = [...optionIds];
+    return (request) => createMcpPermissionResponse(
+        isMcpPermissionRequest(request)
+            ? queue.shift() ?? McpApprovalOptionId.Decline
+            : null,
+    );
 }
 
-describeE2E("E2E MCP approval tests", () => {
+async function expectEchoToolReply(fixture: SpawnedAgentFixture, sessionId: string, message: string): Promise<void> {
+    await fixture.expectPromptText(
+        sessionId,
+        `Use the ${MCP_SERVER_NAME} MCP echo tool with message "${message}". Reply with exactly the tool result and no extra text.`,
+        (text) => expect(text).toContain(`You said: ${message}`),
+    );
+}
+
+function expectMcpPermissionRequestCount(fixture: SpawnedAgentFixture, sessionId: string, count: number): void {
+    const requests = fixture.readPermissionRequests(sessionId, "execute");
+    expect(requests.length).toBe(count);
+    for (const request of requests) {
+        expect(isMcpPermissionRequest(request)).toBe(true);
+    }
+}
+
+describeE2E("E2E MCP approval tests (configured in session)", () => {
     let fixture: SpawnedAgentFixture;
 
     beforeEach(async () => {
@@ -52,30 +74,24 @@ describeE2E("E2E MCP approval tests", () => {
         await fixture.dispose();
     });
 
-    function expectMcpToolPermissionRequest(sessionId: string): void {
-        const requests = fixture.readPermissionRequests(sessionId, "execute");
-        expect(requests.length).toBe(1);
-        expect(isMcpPermissionRequest(requests[0]!)).toBe(true);
+    async function createMcpSession(): Promise<{ sessionId: string; invocationMarkerPath: string }> {
+        const invocationMarkerPath = path.join(fixture.workspaceDir, `mcp-tool-invocation-${crypto.randomUUID()}.txt`);
+        const sessionId = (await fixture.createSession([createMcpServer(invocationMarkerPath)])).sessionId;
+        return {sessionId, invocationMarkerPath};
     }
 
     it("executes an approved MCP tool call", async () => {
         fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.AllowOnce));
-        const invocationMarkerPath = path.join(fixture.workspaceDir, `mcp-tool-invocation-${crypto.randomUUID()}.txt`);
-        const sessionId = (await fixture.createSession([createMcpServer(invocationMarkerPath)])).sessionId;
+        const {sessionId, invocationMarkerPath} = await createMcpSession();
 
-        await fixture.expectPromptText(
-            sessionId,
-            `Use the ${MCP_SERVER_NAME} MCP echo tool with message "${MCP_ECHO_MESSAGE}". Reply with exactly the tool result and no extra text.`,
-            (text) => expect(text).toContain(`You said: ${MCP_ECHO_MESSAGE}`),
-        );
+        await expectEchoToolReply(fixture, sessionId, MCP_ECHO_MESSAGE);
         expect(fs.readFileSync(invocationMarkerPath, "utf8")).toBe(MCP_ECHO_MESSAGE);
-        expectMcpToolPermissionRequest(sessionId);
+        expectMcpPermissionRequestCount(fixture, sessionId, 1);
     });
 
     it("ends turn when MCP tool call is rejected", async () => {
         fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.Decline));
-        const invocationMarkerPath = path.join(fixture.workspaceDir, `mcp-tool-invocation-${crypto.randomUUID()}.txt`);
-        const sessionId = (await fixture.createSession([createMcpServer(invocationMarkerPath)])).sessionId;
+        const {sessionId, invocationMarkerPath} = await createMcpSession();
 
         expectEndTurn(await fixture.connection.prompt({
             sessionId,
@@ -85,6 +101,91 @@ describeE2E("E2E MCP approval tests", () => {
             }],
         }));
         expect(fs.existsSync(invocationMarkerPath)).toBe(false);
-        expectMcpToolPermissionRequest(sessionId);
+        expectMcpPermissionRequestCount(fixture, sessionId, 1);
+    });
+
+    it("skips subsequent approvals in the same session when allow_session is selected", async () => {
+        fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.AllowSession));
+        const {sessionId, invocationMarkerPath} = await createMcpSession();
+
+        await expectEchoToolReply(fixture, sessionId, "session approval first");
+        await expectEchoToolReply(fixture, sessionId, "session approval second");
+
+        expect(fs.readFileSync(invocationMarkerPath, "utf8")).toBe("session approval second");
+        expectMcpPermissionRequestCount(fixture, sessionId, 1);
+    });
+
+    it("requests subsequent approvals after session restart when allow_session is selected", async () => {
+        fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.AllowSession, McpApprovalOptionId.AllowOnce));
+        const {sessionId, invocationMarkerPath} = await createMcpSession();
+
+        await expectEchoToolReply(fixture, sessionId, MCP_ECHO_MESSAGE);
+        expectMcpPermissionRequestCount(fixture, sessionId, 1);
+
+        fixture = await fixture.restart();
+        await fixture.connection.loadSession({
+            sessionId,
+            cwd: fixture.workspaceDir,
+            mcpServers: [createMcpServer(invocationMarkerPath)],
+        });
+
+        await expectEchoToolReply(fixture, sessionId, MCP_ECHO_MESSAGE);
+        expectMcpPermissionRequestCount(fixture, sessionId, 2);
+    });
+});
+
+describeE2E("E2E MCP approval tests (configured in toml)", () => {
+    let invocationMarkerPath: string;
+    let fixture: SpawnedAgentFixture;
+
+    beforeEach(async () => {
+        fixture = await createAuthenticatedFixture();
+        invocationMarkerPath = path.join(os.tmpdir(), `mcp-tool-invocation-${crypto.randomUUID()}.txt`)
+    });
+
+    afterEach(async () => {
+        await fixture.dispose();
+        fs.rmSync(invocationMarkerPath, { force: true });
+    });
+
+
+    beforeEach(async () => {
+        await fixture.dispose();
+        fixture = await createAuthenticatedFixture(undefined, [createMcpServer(invocationMarkerPath)]);
+    });
+
+    it("skips subsequent approvals in the same session when allow_always is selected", async () => {
+        fixture.setPermissionResponder(
+            createMcpPermissionResponder(McpApprovalOptionId.AllowAlways),
+        );
+        const sessionId = (await fixture.createSession()).sessionId;
+
+        await expectEchoToolReply(fixture, sessionId, "always approval first");
+        await expectEchoToolReply(fixture, sessionId, "always approval second");
+
+        expect(fs.readFileSync(invocationMarkerPath, "utf8")).toBe("always approval second");
+        expectMcpPermissionRequestCount(fixture, sessionId, 1);
+    });
+
+    it.skip("skips subsequent approvals after session restart when allow_always is selected", async () => {
+        fixture.setPermissionResponder(
+            createMcpPermissionResponder(McpApprovalOptionId.AllowAlways),
+        );
+        const firstSessionId = (await fixture.createSession()).sessionId;
+
+        await expectEchoToolReply(fixture, firstSessionId, "always approval first");
+
+        fixture = await fixture.restart();
+        fixture.setPermissionResponder((request) => {
+            if (isMcpPermissionRequest(request)) {
+                throw new Error("unexpected MCP approval after allow_always restart");
+            }
+            return createMcpPermissionResponse(null);
+        });
+        const newSessionId = (await fixture.createSession()).sessionId;
+        await expectEchoToolReply(fixture, newSessionId, "always approval second");
+
+        expect(fs.readFileSync(invocationMarkerPath, "utf8")).toBe("always approval second");
+        expect(fixture.readPermissionRequests(newSessionId, "execute").length).toBe(0);
     });
 });
