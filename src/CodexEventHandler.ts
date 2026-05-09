@@ -255,6 +255,8 @@ export class CodexEventHandler {
                 return await createMcpToolCallUpdate(event.item);
             case "dynamicToolCall":
                 return await createDynamicToolCallUpdate(event.item);
+            case "enteredReviewMode":
+                return this.createReviewModeEvent(event.item, true);
             case "collabAgentToolCall":
             case "userMessage":
             case "hookPrompt":
@@ -263,7 +265,6 @@ export class CodexEventHandler {
             case "webSearch":
             case "imageView":
             case "imageGeneration":
-            case "enteredReviewMode":
             case "exitedReviewMode":
             case "contextCompaction":
             case "plan":
@@ -308,11 +309,29 @@ export class CodexEventHandler {
             case "imageView":
             case "imageGeneration":
             case "enteredReviewMode":
+                return null;
             case "exitedReviewMode":
+                return this.createReviewModeEvent(event.item, false);
             case "contextCompaction":
             case "plan":
                 return null;
         }
+    }
+
+    private createReviewModeEvent(
+        item: ThreadItem & { type: "enteredReviewMode" | "exitedReviewMode" },
+        entered: boolean
+    ): UpdateSessionEvent {
+        const text = entered
+            ? "Code review started: current changes"
+            : `${item.review}\n\nCode review finished`;
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `${text}\n\n`,
+            },
+        };
     }
 
     private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {

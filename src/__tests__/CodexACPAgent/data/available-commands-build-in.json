@@ -12,6 +12,11 @@
             "input": null
           },
           {
+            "name": "review",
+            "description": "Review uncommitted changes.",
+            "input": null
+          },
+          {
             "name": "skills",
             "description": "List available skills.",
             "input": null

@@ -28,6 +28,7 @@ import type {
     GetAccountResponse,
     ListMcpServerStatusResponse,
     Model,
+    ReviewTarget,
     SkillsListParams,
     SkillsListResponse,
     Thread,
@@ -472,6 +473,14 @@ export class CodexAcpClient {
 
     markTurnStale(params: { threadId: string, turnId: string }): void {
         this.codexClient.markTurnStale(params.threadId, params.turnId);
+    }
+
+    async runReview(threadId: string, target: ReviewTarget): Promise<TurnCompletedNotification> {
+        return await this.codexClient.runReview({
+            threadId,
+            target,
+            delivery: "inline",
+        });
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {

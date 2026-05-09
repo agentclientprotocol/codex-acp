@@ -13,7 +13,7 @@ import {
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
-import type {Model, TurnStartParams} from "../../app-server/v2";
+import type {Model, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 
@@ -910,6 +910,122 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: prompt });
         const transportDump = fixture.getAcpConnectionDump([]);
         expect(transportDump).contain(`**Session:** \`${newSessionResponse.sessionId}\``);
+    });
+
+    it('handles review command', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const sessionState: SessionState = createTestSessionState({sessionId: "session-id"});
+        const turnCompleted: TurnCompletedNotification = {
+            threadId: "session-id",
+            turn: {
+                id: "review-turn",
+                items: [],
+                itemsView: "full",
+                status: "completed",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null
+            }
+        };
+        const reviewSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "runReview").mockResolvedValue(turnCompleted);
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+        const response = await codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "/review"}]
+        });
+
+        expect(response.stopReason).toBe("end_turn");
+        expect(reviewSpy).toHaveBeenCalledWith("session-id", {type: "uncommittedChanges"});
+    });
+
+    it('rejects review command arguments', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const sessionState: SessionState = createTestSessionState({sessionId: "session-id"});
+        const reviewSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "runReview");
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+        const response = await codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "/review check race conditions"}]
+        });
+
+        expect(response.stopReason).toBe("end_turn");
+        expect(reviewSpy).not.toHaveBeenCalled();
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-review-arguments.json");
+    });
+
+    it('returns cancelled when review command is interrupted', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const sessionState: SessionState = createTestSessionState({sessionId: "session-id"});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "runReview").mockResolvedValue({
+            threadId: "session-id",
+            turn: {
+                id: "review-turn",
+                items: [],
+                itemsView: "full",
+                status: "interrupted",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null
+            }
+        });
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+        // @ts-expect-error - exercising interruption behavior for a registered session
+        codexAcpAgent.sessions.set("session-id", sessionState);
+
+        const response = await codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "/review"}]
+        });
+
+        expect(response.stopReason).toBe("cancelled");
+        expect(mockFixture.getAcpConnectionDump([])).toContain("*Conversation interrupted*");
+    });
+
+    it('propagates review command event handler failures', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const sessionState: SessionState = createTestSessionState({sessionId: "session-id"});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "runReview").mockImplementation(async () => {
+            mockFixture.sendServerNotification({
+                method: "error",
+                params: {
+                    threadId: "session-id",
+                    turnId: "review-turn",
+                    willRetry: false,
+                    error: {
+                        message: "auth failed",
+                        codexErrorInfo: "unauthorized",
+                        additionalDetails: null
+                    }
+                }
+            });
+            return {
+                threadId: "session-id",
+                turn: {
+                    id: "review-turn",
+                    items: [],
+                    itemsView: "full",
+                    status: "completed",
+                    error: null,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null
+                }
+            };
+        });
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+        await expect(codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "/review"}]
+        })).rejects.toBeTruthy();
     });
 
     const mockModels: Model[] = [

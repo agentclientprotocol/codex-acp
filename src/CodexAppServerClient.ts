@@ -21,6 +21,8 @@ import type {
     McpServerStatusUpdatedNotification,
     ModelListParams,
     ModelListResponse,
+    ReviewStartParams,
+    ReviewStartResponse,
     SkillsExtraRootsSetParams,
     SkillsListParams,
     SkillsListResponse,
@@ -189,6 +191,10 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "turn/start", params: params });
     }
 
+    async reviewStart(params: ReviewStartParams): Promise<ReviewStartResponse> {
+        return await this.sendRequest({ method: "review/start", params: params });
+    }
+
     async runTurn(params: TurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
@@ -206,6 +212,31 @@ export class CodexAppServerClient {
             // Wait for turn completion
             // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
             return await this.awaitTurnCompleted(params.threadId, turnStarted.turn.id);
+        } finally {
+            releaseCapture();
+        }
+    }
+
+    async runReview(params: ReviewStartParams): Promise<TurnCompletedNotification> {
+        if (params.delivery === "detached") {
+            throw new Error("runReview only supports inline review delivery");
+        }
+        const capturedCompletions: Array<TurnCompletedNotification> = [];
+        const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
+            capturedCompletions.push(event);
+        });
+
+        try {
+            const reviewStarted = await this.reviewStart(params);
+            const earlyCompletion = capturedCompletions.find(event =>
+                event.threadId === reviewStarted.reviewThreadId
+                && event.turn.id === reviewStarted.turn.id
+            );
+            releaseCapture();
+            if (earlyCompletion) {
+                return earlyCompletion;
+            }
+            return await this.awaitTurnCompleted(reviewStarted.reviewThreadId, reviewStarted.turn.id);
         } finally {
             releaseCapture();
         }

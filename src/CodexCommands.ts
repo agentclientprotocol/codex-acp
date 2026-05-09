@@ -2,11 +2,15 @@ import type * as acp from "@agentclientprotocol/sdk";
 import type {AgentSideConnection, AvailableCommand} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection} from "./ACPSessionConnection";
 import type {CodexAcpClient} from "./CodexAcpClient";
-import type {RateLimitSnapshot, SkillsListEntry} from "./app-server/v2";
+import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, TurnCompletedNotification} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
 import {logger} from "./Logger";
+
+type CommandHandlingResult =
+    | { handled: false }
+    | { handled: true; turnCompleted?: TurnCompletedNotification };
 
 export class CodexCommands {
     private readonly connection: AgentSideConnection;
@@ -74,6 +78,11 @@ export class CodexCommands {
                 input: null
             },
             {
+                name: "review",
+                description: "Review uncommitted changes.",
+                input: null
+            },
+            {
                 name: "skills",
                 description: "List available skills.",
                 input: null
@@ -91,7 +100,7 @@ export class CodexCommands {
         ];
     }
 
-    private getCommandName(prompt: acp.ContentBlock[]): string | null {
+    private parseCommand(prompt: acp.ContentBlock[]): ParsedCommand | null {
         const firstBlock = prompt[0];
         if (!firstBlock || firstBlock.type != "text") return null;
 
@@ -101,17 +110,25 @@ export class CodexCommands {
         const commandText = text.slice(1).trim();
         if (commandText.length === 0) return null;
 
-        const [name] = commandText.split(/\s+/);
-        return name?.toLowerCase() ?? null;
+        const separatorIndex = commandText.search(/\s/);
+        if (separatorIndex === -1) {
+            return {name: commandText.toLowerCase(), input: null};
+        }
+        const name = commandText.slice(0, separatorIndex).toLowerCase();
+        const input = commandText.slice(separatorIndex).trim();
+        return {name, input: input.length > 0 ? input : null};
     }
 
-    async tryHandleCommand(prompt: acp.ContentBlock[], sessionState: SessionState): Promise<boolean> {
-        const commandName = this.getCommandName(prompt);
-        if (commandName === null) return false;
-        if (commandName.startsWith("$")) return false;
+    async tryHandleCommand(
+        prompt: acp.ContentBlock[],
+        sessionState: SessionState
+    ): Promise<CommandHandlingResult> {
+        const command = this.parseCommand(prompt);
+        if (command === null) return {handled: false};
+        if (command.name.startsWith("$")) return {handled: false};
 
         const sessionId = sessionState.sessionId;
-        switch (commandName) {
+        switch (command.name) {
             case "status": {
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 const message = this.buildStatusMessage(sessionState);
@@ -119,7 +136,7 @@ export class CodexCommands {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text: message }
                 });
-                return true;
+                return {handled: true};
             }
             case "logout": {
                 await this.runWithProcessCheck(() => this.codexAcpClient.logout());
@@ -128,7 +145,7 @@ export class CodexCommands {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text: "Logged out from Codex account." }
                 });
-                return true;
+                return {handled: true};
             }
             case "skills": {
                 const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills());
@@ -145,7 +162,7 @@ export class CodexCommands {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text }
                 });
-                return true;
+                return {handled: true};
             }
             case "mcp": {
                 const servers = await this.runWithProcessCheck(() => this.codexAcpClient.listMcpServers());
@@ -166,12 +183,31 @@ export class CodexCommands {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text }
                 });
-                return true;
+                return {handled: true};
+            }
+            case "review": {
+                if (command.input !== null) {
+                    await this.sendCommandMessage(sessionId, "/review does not accept arguments yet.");
+                    return {handled: true};
+                }
+                const target: ReviewTarget = {type: "uncommittedChanges"};
+                const turnCompleted = await this.runWithProcessCheck(() =>
+                    this.codexAcpClient.runReview(sessionId, target)
+                );
+                return {handled: true, turnCompleted};
             }
             default:
-                await this.sendUnknownCommandMessage(commandName, sessionId);
-                return true;
+                await this.sendUnknownCommandMessage(command.name, sessionId);
+                return {handled: true};
         }
+    }
+
+    private async sendCommandMessage(sessionId: string, text: string): Promise<void> {
+        const session = new ACPSessionConnection(this.connection, sessionId);
+        await session.update({
+            sessionUpdate: "agent_message_chunk",
+            content: {type: "text", text}
+        });
     }
 
     private async sendUnknownCommandMessage(name: string, sessionId: string): Promise<void> {
@@ -343,4 +379,7 @@ export class CodexCommands {
     }
 }
 
-type ParsedCommand = { name: string; };
+type ParsedCommand = {
+    name: string;
+    input: string | null;
+};
