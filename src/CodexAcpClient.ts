@@ -206,7 +206,7 @@ export class CodexAcpClient {
             approvalPolicy: null,
             sandbox: null,
             baseInstructions: null,
-            config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
             developerInstructions: null,
             model: null,
@@ -228,7 +228,7 @@ export class CodexAcpClient {
             approvalPolicy: null,
             sandbox: null,
             baseInstructions: null,
-            config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
             developerInstructions: null,
             model: null,
@@ -250,7 +250,7 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, request._meta);
 
         const response = await this.codexClient.threadStart({
-            config: this.createSessionConfig(request.cwd, request.mcpServers),
+            config: await this.createSessionConfig(request.cwd, request.mcpServers),
             modelProvider: this.getModelProvider(),
             model: null,
             cwd: request.cwd,
@@ -282,7 +282,7 @@ export class CodexAcpClient {
         return this.codexClient.getMcpServerStartupVersion();
     }
 
-    private createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): JsonObject {
+    private async createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): Promise<JsonObject> {
         const mergedConfig = {
             ...mergeGatewayConfig(this.config, this.gatewayConfig),
             projects: {
@@ -294,10 +294,28 @@ export class CodexAcpClient {
         if (mcpServers.length === 0) {
             return mergedConfig;
         }
+
+        // Deduplicates new servers against existing config to prevent Codex from deep-merging
+        // incompatible field types (e.g., mixing url and stdio schemas).
+        const existingNames = await this.getConfigMcpServerNames(projectPath);
+        const uniqueServers = mcpServers.filter(mcp => !existingNames.has(mcp.name));
+        if (uniqueServers.length === 0) {
+            return mergedConfig;
+        }
+
         return {
             ...mergedConfig,
-            "mcp_servers": Object.fromEntries(mcpServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp)]))
+            "mcp_servers": Object.fromEntries(uniqueServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp)])),
+        };
+    }
+
+    private async getConfigMcpServerNames(projectPath: string): Promise<Set<string>> {
+        const response = await this.codexClient.configRead({ includeLayers: true, cwd: projectPath });
+        const mcpServers = response?.config?.["mcp_servers"];
+        if (!mcpServers || typeof mcpServers !== "object" || Array.isArray(mcpServers)) {
+            return new Set();
         }
+        return new Set(Object.keys(mcpServers));
     }
 
     getModelProvider(): string | null {
