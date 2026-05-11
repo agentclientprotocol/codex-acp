@@ -8,23 +8,6 @@ import type {McpServerStdio} from "@agentclientprotocol/sdk";
 import {startCodexConnection} from "../../CodexJsonRpcConnection";
 import {createBaseTestFixture, removeDirectoryWithRetry, type TestFixture} from "../acp-test-utils";
 
-/**
- * Reproduces the bug in CodexAcpClient.createSessionConfig where it does not
- * resolve conflicts between MCP servers defined in the global codex config.toml
- * and MCP servers supplied through the ACP protocol.
- *
- * Setup:
- *   1. Write a url-based MCP server "shared-mcp" into the codex home config.toml
- *      (acts as the user's globally configured MCP).
- *   2. Open a new ACP session passing a command-type MCP with the same name
- *      "shared-mcp" via mcpServers.
- *
- * Expectation:
- *   /mcp must still list "shared-mcp" as a single, well-formed entry. Currently
- *   the override built by createSessionConfig replaces mcp_servers wholesale,
- *   so the url-based config and the command-type override clash on the codex
- *   side and produce a broken merged entry.
- */
 describe('MCP config merge across global config and ACP request', { timeout: 40_000 }, () => {
 
     let codexHome: string;
