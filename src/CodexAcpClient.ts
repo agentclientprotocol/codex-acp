@@ -42,6 +42,16 @@ const FILE_URI_PREFIX = "file://";
 // From the Codex Rust implementation, `codex-rs/core-skills/src/loader.rs` defines `SKILLS_FILENAME = "SKILL.md"` and only parses files whose discovered filename exactly matches that value. The app-server README and bundled skill-creator sample also document `SKILL.md` as the required file for a skill. There is
 // some UI/mention handling that recognizes paths ending in `SKILL.md`, but the actual loader discovery path is hardcoded around this filename.
 const SKILL_FILE_NAME = "SKILL.md";
+const HARDCODED_TURN_ENVIRONMENTS = [
+    {
+        environmentId: "local",
+        cwd: "/Users/Nikolai.Sviridov/work/acp-dev/codex-acp",
+    },
+    {
+        environmentId: "skills1",
+        cwd: "/Users/Nikolai.Sviridov/work/tmp",
+    },
+];
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -69,7 +79,9 @@ export class CodexAcpClient {
 
     async initialize(request: acp.InitializeRequest): Promise<void> {
         await this.codexClient.initialize({
-            capabilities: null,
+            capabilities: {
+                experimentalApi: true,
+            },
             clientInfo: {
                 name: request.clientInfo?.name ?? this.defaultClientInfo.name,
                 version: request.clientInfo?.version ?? this.defaultClientInfo.version,
@@ -218,6 +230,7 @@ export class CodexAcpClient {
             model: null,
             modelProvider: this.getResumeModelProvider(),
             personality: null,
+            persistExtendedHistory: false,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -240,6 +253,7 @@ export class CodexAcpClient {
             model: null,
             modelProvider: this.getResumeModelProvider(),
             personality: null,
+            persistExtendedHistory: false,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -266,6 +280,8 @@ export class CodexAcpClient {
             developerInstructions: null,
             personality: null,
             ephemeral: null,
+            experimentalRawEvents: false,
+            persistExtendedHistory: false,
         });
 
         const codexModels = await this.fetchAvailableModels();
@@ -388,6 +404,7 @@ export class CodexAcpClient {
             outputSchema: null,
             threadId: request.sessionId,
             input: input,
+            environments: HARDCODED_TURN_ENVIRONMENTS,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: agentMode.sandboxPolicy,
             summary: disableSummary ? "none" : null,
