@@ -29,7 +29,7 @@ describe('Elicitation Events', () => {
 
         const sessionState: SessionState = createTestSessionState({
             sessionId,
-            currentModelId: 'model-id',
+            currentModelId: 'model-id[effort]',
             agentMode: AgentMode.DEFAULT_AGENT_MODE
         });
         vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);

@@ -82,9 +82,7 @@ describe("Model filtering", () => {
         vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId: "session-id",
-            currentModelId: "gpt-5.2",
-            currentReasoningEffort: "medium",
-            currentServiceTier: null,
+            currentModelId: "gpt-5.2[medium]",
             models,
         });
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
@@ -93,10 +91,6 @@ describe("Model filtering", () => {
         const sessionModels = newSessionResponse.models;
         const availableModels = sessionModels?.availableModels;
 
-        expect(sessionModels?._meta).toEqual({
-            currentReasoningEffort: "medium",
-            currentServiceTier: null,
-        });
         await expect(JSON.stringify(availableModels, null, 2)).toMatchFileSnapshot(
             "data/model-filtering.json"
         );
@@ -129,9 +123,7 @@ describe("Model filtering", () => {
         vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId: "session-id",
-            currentModelId: "gpt-5.2",
-            currentReasoningEffort: "medium",
-            currentServiceTier: null,
+            currentModelId: "gpt-5.2[medium]",
             models,
         });
         vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue(models);
@@ -141,8 +133,7 @@ describe("Model filtering", () => {
 
         await expect(codexAcpAgent.unstable_setSessionModel({
             sessionId: "session-id",
-            modelId: "gpt-5.2",
-            _meta: { serviceTier: "fast" },
+            modelId: "gpt-5.2[medium]@fast",
         })).rejects.toThrow("Unsupported service tier fast for model gpt-5.2");
     });
 
@@ -173,9 +164,7 @@ describe("Model filtering", () => {
         vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId: "session-id",
-            currentModelId: "gpt-5.2",
-            currentReasoningEffort: "medium",
-            currentServiceTier: null,
+            currentModelId: "gpt-5.2[medium]",
             models,
         });
         vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue(models);
@@ -184,97 +173,10 @@ describe("Model filtering", () => {
         await codexAcpAgent.newSession({ cwd: "", mcpServers: [] });
         await codexAcpAgent.unstable_setSessionModel({
             sessionId: "session-id",
-            modelId: "gpt-5.2",
-            _meta: { serviceTier: "fast" },
+            modelId: "gpt-5.2[medium]@fast",
         });
 
         expect(codexAcpAgent.getSessionState("session-id").currentModelId)
-            .toBe("gpt-5.2");
-        expect(codexAcpAgent.getSessionState("session-id").currentReasoningEffort)
-            .toBe("medium");
-        expect(codexAcpAgent.getSessionState("session-id").currentServiceTier)
-            .toBe("fast");
-    });
-
-    it("uses the model default effort when _meta.reasoningEffort is omitted", async () => {
-        const {codexAcpAgent} = await setupModelSelectionTest([createSelectableModel()]);
-
-        await codexAcpAgent.unstable_setSessionModel({
-            sessionId: "session-id",
-            modelId: "gpt-5.2",
-        });
-
-        expect(codexAcpAgent.getSessionState("session-id").currentReasoningEffort).toBe("medium");
-        expect(codexAcpAgent.getSessionState("session-id").currentServiceTier).toBeNull();
-    });
-
-    it("stores requested reasoning effort from _meta", async () => {
-        const {codexAcpAgent} = await setupModelSelectionTest([createSelectableModel()]);
-
-        await codexAcpAgent.unstable_setSessionModel({
-            sessionId: "session-id",
-            modelId: "gpt-5.2",
-            _meta: { reasoningEffort: "low" },
-        });
-
-        expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("gpt-5.2");
-        expect(codexAcpAgent.getSessionState("session-id").currentReasoningEffort).toBe("low");
-    });
-
-    it("rejects unsupported reasoning effort selections", async () => {
-        const {codexAcpAgent} = await setupModelSelectionTest([createSelectableModel()]);
-
-        await expect(codexAcpAgent.unstable_setSessionModel({
-            sessionId: "session-id",
-            modelId: "gpt-5.2",
-            _meta: { reasoningEffort: "xhigh" },
-        })).rejects.toThrow("Unsupported reasoning effort xhigh for model gpt-5.2");
+            .toBe("gpt-5.2[medium]@fast");
     });
 });
-
-function createSelectableModel(overrides: Partial<Model> = {}): Model {
-    return {
-        id: "gpt-5.2",
-        model: "gpt-5.2",
-        upgrade: null,
-        upgradeInfo: null,
-        availabilityNux: null,
-        displayName: "GPT-5.2",
-        description: "Selectable model.",
-        hidden: false,
-        supportedReasoningEfforts: [
-            {reasoningEffort: "low", description: "Fast effort."},
-            {reasoningEffort: "medium", description: "Default effort."},
-        ],
-        defaultReasoningEffort: "medium",
-        supportsPersonality: false,
-        additionalSpeedTiers: ["fast"],
-        isDefault: true,
-        inputModalities: ["text"],
-        ...overrides,
-    };
-}
-
-async function setupModelSelectionTest(models: Model[]) {
-    const initialModel = models[0];
-    if (!initialModel) {
-        throw new Error("setupModelSelectionTest requires at least one model");
-    }
-    const fixture = createCodexMockTestFixture();
-    const codexAcpAgent = fixture.getCodexAcpAgent();
-    const codexAcpClient = fixture.getCodexAcpClient();
-
-    vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
-    vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
-        sessionId: "session-id",
-        currentModelId: initialModel.id,
-        currentReasoningEffort: initialModel.defaultReasoningEffort,
-        currentServiceTier: null,
-        models,
-    });
-    vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue(models);
-    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
-
-    await codexAcpAgent.newSession({ cwd: "", mcpServers: [] });
-    return {fixture, codexAcpAgent, codexAcpClient};
-}

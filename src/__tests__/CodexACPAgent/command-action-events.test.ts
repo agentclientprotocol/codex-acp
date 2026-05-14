@@ -15,7 +15,7 @@ describe('CodexEventHandler - command action events', () => {
 
     const sessionState: SessionState = createTestSessionState({
         sessionId,
-        currentModelId: 'model-id',
+        currentModelId: 'model-id[effort]',
         agentMode: AgentMode.DEFAULT_AGENT_MODE
     });
 

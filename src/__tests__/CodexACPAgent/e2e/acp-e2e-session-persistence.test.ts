@@ -22,11 +22,7 @@ describeE2E("E2E session persistence tests", () => {
         beforeRestartFixture = await createAuthenticatedFixture();
         const sessionId = (await beforeRestartFixture.createSession()).sessionId;
 
-        await beforeRestartFixture.connection.unstable_setSessionModel({
-            sessionId,
-            modelId: OTHER_TEST_MODEL_ID.toString(),
-            _meta: { reasoningEffort: OTHER_TEST_MODEL_ID.effort },
-        });
+        await beforeRestartFixture.connection.unstable_setSessionModel({sessionId, modelId: OTHER_TEST_MODEL_ID.toString()});
         const memorizedToken = "token-for-tests-123";
         await beforeRestartFixture.expectPromptText(
             sessionId,

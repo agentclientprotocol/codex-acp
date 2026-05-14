@@ -4,26 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import {Readable, Writable} from "node:stream";
 import {expect, vi} from "vitest";
-import type {ReasoningEffort} from "../../../app-server";
+import {ModelId} from "../../../ModelId";
 import {removeDirectoryWithRetry, writeCodexHomeConfig} from "../../acp-test-utils";
 import type {PermissionResponder} from "./permission-responders";
 
-export interface TestModelSelection {
-    readonly model: string;
-    readonly effort: ReasoningEffort;
-    toString(): string;
-}
-
-export const DEFAULT_TEST_MODEL_ID: TestModelSelection = {
-    model: "gpt-5.2",
-    effort: "none",
-    toString: () => "gpt-5.2",
-};
-export const OTHER_TEST_MODEL_ID: TestModelSelection = {
-    model: "gpt-5.3-codex",
-    effort: "low",
-    toString: () => "gpt-5.3-codex",
-};
+export const DEFAULT_TEST_MODEL_ID = ModelId.create("gpt-5.2", "none");
+export const OTHER_TEST_MODEL_ID = ModelId.create("gpt-5.3-codex", "low");
 
 export interface TestSkill {
     readonly name: string;

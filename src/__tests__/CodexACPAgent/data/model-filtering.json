@@ -1,68 +1,37 @@
 [
   {
-    "modelId": "gpt-5.2",
-    "name": "GPT-5.2",
-    "description": "Allowed by id.",
-    "_meta": {
-      "supportedReasoningEfforts": [
-        {
-          "reasoningEffort": "medium",
-          "description": "Default effort."
-        },
-        {
-          "reasoningEffort": "low",
-          "description": "Fast effort."
-        }
-      ],
-      "defaultReasoningEffort": "medium",
-      "serviceTiers": [
-        "fast"
-      ]
-    }
+    "modelId": "gpt-5.2[medium]",
+    "name": "GPT-5.2 (medium)",
+    "description": "Allowed by id. Default effort."
   },
   {
-    "modelId": "other-id",
-    "name": "gpt-5.2",
-    "description": "Allowed",
-    "_meta": {
-      "supportedReasoningEfforts": [
-        {
-          "reasoningEffort": "medium",
-          "description": "Default effort."
-        }
-      ],
-      "defaultReasoningEffort": "medium",
-      "serviceTiers": []
-    }
+    "modelId": "gpt-5.2[medium]@fast",
+    "name": "GPT-5.2 (medium, fast)",
+    "description": "Allowed by id. Default effort. Fast service tier."
   },
   {
-    "modelId": "gpt-5.1-codex-mini",
-    "name": "Other",
-    "description": "Allowed by id.",
-    "_meta": {
-      "supportedReasoningEfforts": [
-        {
-          "reasoningEffort": "medium",
-          "description": "Default effort."
-        }
-      ],
-      "defaultReasoningEffort": "medium",
-      "serviceTiers": []
-    }
+    "modelId": "gpt-5.2[low]",
+    "name": "GPT-5.2 (low)",
+    "description": "Allowed by id. Fast effort."
   },
   {
-    "modelId": "gpt-4o",
-    "name": "gpt-4o",
-    "description": "Allowed.",
-    "_meta": {
-      "supportedReasoningEfforts": [
-        {
-          "reasoningEffort": "medium",
-          "description": "Default effort."
-        }
-      ],
-      "defaultReasoningEffort": "medium",
-      "serviceTiers": []
-    }
+    "modelId": "gpt-5.2[low]@fast",
+    "name": "GPT-5.2 (low, fast)",
+    "description": "Allowed by id. Fast effort. Fast service tier."
+  },
+  {
+    "modelId": "other-id[medium]",
+    "name": "gpt-5.2 (medium)",
+    "description": "Allowed Default effort."
+  },
+  {
+    "modelId": "gpt-5.1-codex-mini[medium]",
+    "name": "Other (medium)",
+    "description": "Allowed by id. Default effort."
+  },
+  {
+    "modelId": "gpt-4o[medium]",
+    "name": "gpt-4o (medium)",
+    "description": "Allowed. Default effort."
   }
 ]

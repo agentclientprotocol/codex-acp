@@ -13,10 +13,10 @@ import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
     ReasoningEffort,
-    ServerNotification,
-    ServiceTier,
+    ServerNotification
 } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
+import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
@@ -215,10 +215,10 @@ export class CodexAcpClient {
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
-        const modelSelection = this.createModelSelection(codexModels, response.model, response.reasoningEffort, response.serviceTier);
+        const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
             sessionId: request.sessionId,
-            ...modelSelection,
+            currentModelId: currentModelId,
             models: codexModels,
         }
     }
@@ -237,10 +237,10 @@ export class CodexAcpClient {
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
-        const modelSelection = this.createModelSelection(codexModels, response.model, response.reasoningEffort, response.serviceTier);
+        const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
             sessionId: request.sessionId,
-            ...modelSelection,
+            currentModelId: currentModelId,
             models: codexModels,
             thread: response.thread,
         };
@@ -266,10 +266,10 @@ export class CodexAcpClient {
         if (codexModels.length === 0) {
             throw new Error("Codex did not return any models");
         }
-        const modelSelection = this.createModelSelection(codexModels, response.model, response.reasoningEffort, response.serviceTier);
+        const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
             sessionId: response.thread.id,
-            ...modelSelection,
+            currentModelId: currentModelId,
             models: codexModels,
         };
     }
@@ -364,15 +364,10 @@ export class CodexAcpClient {
     }
 
     /**
-     * Resolves a model selection using the provided ID and reasoning effort.
-     * Falls back to model defaults if parameters are missing.
+     * Resolves a ModelId using the provided ID and reasoning effort.
+     * Falls back to model defaults if parameters are missing or unsupported.
      */
-    createModelSelection(
-        availableModels: Model[],
-        modelId: string | null,
-        reasoningEffort: ReasoningEffort | null,
-        serviceTier: ServiceTier | null,
-    ): ModelSelection {
+    createModelId(availableModels: Model[], modelId: string | null, reasoningEffort: ReasoningEffort | null): ModelId {
         const selectedModel =
             availableModels.find(m => m.id === modelId) ??
             availableModels.find(m => m.isDefault);
@@ -381,11 +376,7 @@ export class CodexAcpClient {
             throw new Error(`Model selection failed: No model found for ID "${modelId}" and no default model is defined.`);
         }
 
-        return {
-            currentModelId: selectedModel.id,
-            currentReasoningEffort: reasoningEffort ?? selectedModel.defaultReasoningEffort,
-            currentServiceTier: serviceTier ?? null,
-        };
+        return ModelId.create(selectedModel.id, reasoningEffort ?? selectedModel.defaultReasoningEffort);
     }
 
     async subscribeToSessionEvents(
@@ -402,11 +393,12 @@ export class CodexAcpClient {
     async sendPrompt(
         request: acp.PromptRequest,
         agentMode: AgentMode,
-        modelSelection: ModelSelection,
+        modelId: ModelId,
         disableSummary: boolean,
         cwd: string,
     ): Promise<TurnCompletedNotification> {
         const input = buildPromptItems(request.prompt);
+        const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
 
         await this.refreshSkills(cwd, request._meta);
         return await this.codexClient.runTurn({
@@ -418,9 +410,9 @@ export class CodexAcpClient {
             summary: disableSummary ? "none" : null,
             personality: null,
             cwd: null,
-            effort: modelSelection.currentReasoningEffort,
-            model: modelSelection.currentModelId,
-            serviceTier: modelSelection.currentServiceTier,
+            effort: effort,
+            model: modelId.model,
+            serviceTier: modelId.serviceTier,
         });
     }
 
@@ -613,16 +605,12 @@ export type JsonObject = { [key in string]?: JsonValue }
 export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
-    currentReasoningEffort: ReasoningEffort,
-    currentServiceTier: ServiceTier | null,
     models: Model[],
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
     thread: Thread,
 }
-
-export type ModelSelection = Pick<SessionMetadata, "currentModelId" | "currentReasoningEffort" | "currentServiceTier">;
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
     return prompt.map((block): UserInput | null => {
