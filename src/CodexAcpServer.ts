@@ -742,7 +742,7 @@ export class CodexAcpServer implements acp.Agent {
                 approvalHandler,
                 elicitationHandler);
 
-            if (await this.availableCommands.tryHandle(params.prompt, sessionState)) {
+            if (await this.availableCommands.tryHandleCommand(params.prompt, sessionState)) {
                 logger.log("Prompt handled by a command");
                 return {
                     stopReason: "end_turn",

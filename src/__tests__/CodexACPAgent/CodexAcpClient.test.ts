@@ -1,13 +1,18 @@
 // noinspection ES6RedundantAwait
 
-import {describe, expect, it, vi, beforeEach} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import type {CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk";
-import {createTestFixture, createCodexMockTestFixture, createTestSessionState, type TestFixture} from "../acp-test-utils";
+import {
+    createCodexMockTestFixture,
+    createTestFixture,
+    createTestSessionState,
+    type TestFixture
+} from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
-import type {ListMcpServerStatusResponse, Model, SkillsListResponse, TurnStartParams} from "../../app-server/v2";
+import type {Model, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 
@@ -736,28 +741,25 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('handles logout command', async () => {
-        const mockFixture = createCodexMockTestFixture();
-        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
 
-        const sessionState: SessionState = createTestSessionState();
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
 
-        const logoutSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "logout").mockResolvedValue();
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
 
-        // @ts-expect-error - exercising private helper
-        const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "logout", input: null }, sessionState);
-
-        expect(handled).toBe(true);
-        expect(logoutSpy).toHaveBeenCalledTimes(1);
-        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-logout.json");
+        fixture.clearAcpConnectionDump();
+        const prompt: acp.ContentBlock[] = [{ type: "text", text: "/logout " }];
+        await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: prompt });
+        await expect(fixture.getAcpConnectionDump(["sessionId"])).toMatchFileSnapshot("data/command-logout.json");
     });
 
     it('handles skills command', async () => {
-        const mockFixture = createCodexMockTestFixture();
-        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
 
-        const sessionState: SessionState = createTestSessionState();
-
-        const skillsResponse: SkillsListResponse = {
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        vi.spyOn(fixture.getCodexAcpClient(), "listSkills").mockResolvedValue({
             data: [{
                 cwd: "/workspace",
                 skills: [
@@ -766,29 +768,28 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 ],
                 errors: []
             }]
-        };
-        const skillsSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue(skillsResponse);
+        });
 
-        // @ts-expect-error - exercising private helper
-        const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "skills", input: null }, sessionState);
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
 
-        expect(handled).toBe(true);
-        expect(skillsSpy).toHaveBeenCalledTimes(1);
-        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-skills.json");
+        fixture.clearAcpConnectionDump();
+        const prompt: acp.ContentBlock[] = [{ type: "text", text: "/skills " }];
+        await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: prompt });
+
+        await expect(fixture.getAcpConnectionDump(["sessionId"])).toMatchFileSnapshot("data/command-skills.json");
     });
 
     it('handles mcp command', async () => {
-        const mockFixture = createCodexMockTestFixture();
-        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
 
-        const sessionState: SessionState = createTestSessionState();
-
-        const mcpResponse: ListMcpServerStatusResponse = {
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        vi.spyOn(fixture.getCodexAcpClient(), "listMcpServers").mockResolvedValue({
             data: [
                 {
                     name: "fs",
-                    tools: { listFiles: { name: "listFiles", inputSchema: { type: "object" } } },
-                    resources: [{ name: "workspace", uri: "file:///workspace" }],
+                    tools: {listFiles: {name: "listFiles", inputSchema: {type: "object"}}},
+                    resources: [{name: "workspace", uri: "file:///workspace"}],
                     resourceTemplates: [],
                     authStatus: "bearerToken"
                 },
@@ -801,15 +802,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 }
             ],
             nextCursor: null
-        };
-        const mcpSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "listMcpServers").mockResolvedValue(mcpResponse);
+        });
 
-        // @ts-expect-error - exercising private helper
-        const handled = await codexAcpAgent.availableCommands.handleCommand({ name: "mcp", input: null }, sessionState);
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
 
-        expect(handled).toBe(true);
-        expect(mcpSpy).toHaveBeenCalledTimes(1);
-        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-mcp.json");
+        fixture.clearAcpConnectionDump();
+        const prompt: acp.ContentBlock[] = [{ type: "text", text: "/mcp " }];
+        await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: prompt });
+        await expect(fixture.getAcpConnectionDump(["sessionId"])).toMatchFileSnapshot("data/command-mcp.json");
     });
 
     const mockModels: Model[] = [
