@@ -92,19 +92,17 @@ export class CodexCommands {
     }
 
     private getCommandName(prompt: acp.ContentBlock[]): string | null {
-        if (prompt.length !== 1) return null;
-        const [single] = prompt;
-        if (!single) return null;
+        const firstBlock = prompt[0];
+        if (!firstBlock || firstBlock.type != "text") return null;
 
-        if (single.type !== "text") return null;
-        const trimmed = single.text.trim();
-        if (!trimmed.startsWith("/")) return null;
+        const text = firstBlock.text.trim();
+        if (!text.startsWith("/")) return null;
 
-        const commandText = trimmed.slice(1).trim();
+        const commandText = text.slice(1).trim();
         if (commandText.length === 0) return null;
 
         const [name] = commandText.split(/\s+/);
-        return name!!.toLowerCase();
+        return name?.toLowerCase() ?? null;
     }
 
     async tryHandleCommand(prompt: acp.ContentBlock[], sessionState: SessionState): Promise<boolean> {

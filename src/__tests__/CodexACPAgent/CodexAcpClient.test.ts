@@ -812,6 +812,29 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(fixture.getAcpConnectionDump(["sessionId"])).toMatchFileSnapshot("data/command-mcp.json");
     });
 
+    it('handles builtin slash command locally when prompt has attachments', async () => {
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        const prompt: acp.ContentBlock[] = [
+            { type: "text", text: "/status " },
+            {
+                type: "resource_link",
+                name: "editor.xml",
+                uri: "file:///editor.xml",
+                description: "File that is opened in the IDE and is currently viewed by the user",
+            },
+        ];
+
+        fixture.clearAcpConnectionDump();
+        await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: prompt });
+        const transportDump = fixture.getAcpConnectionDump([]);
+        expect(transportDump).contain(`**Session:** \`${newSessionResponse.sessionId}\``);
+    });
+
     const mockModels: Model[] = [
         {
             id: '5.2-codex',
