@@ -433,7 +433,6 @@ export class CodexAcpClient {
             cwd: null,
             effort: modelSelection.currentReasoningEffort,
             model: modelSelection.currentModelId,
-            // In app-server, explicit null clears the tier; omitting serviceTier would keep the thread's existing tier.
             serviceTier: modelSelection.currentServiceTier,
         });
     }
