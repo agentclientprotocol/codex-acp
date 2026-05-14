@@ -13,6 +13,7 @@ import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
     ReasoningEffort,
+    ServiceTier,
     ServerNotification
 } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
@@ -220,6 +221,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            currentServiceTier: response.serviceTier ?? null,
         }
     }
 
@@ -242,6 +244,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            currentServiceTier: response.serviceTier ?? null,
             thread: response.thread,
         };
     }
@@ -271,6 +274,7 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
+            currentServiceTier: response.serviceTier ?? null,
         };
     }
 
@@ -394,6 +398,7 @@ export class CodexAcpClient {
         request: acp.PromptRequest,
         agentMode: AgentMode,
         modelId: ModelId,
+        serviceTier: ServiceTier | null,
         disableSummary: boolean,
         cwd: string,
     ): Promise<TurnCompletedNotification> {
@@ -412,6 +417,7 @@ export class CodexAcpClient {
             cwd: null,
             effort: effort,
             model: modelId.model,
+            serviceTier: serviceTier,
         });
     }
 
@@ -605,6 +611,7 @@ export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
     models: Model[],
+    currentServiceTier?: ServiceTier | null,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {

@@ -322,6 +322,8 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         supportedReasoningEfforts: [],
         supportedInputModalities: ["text", "image"],
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
+        fastModeEnabled: false,
+        currentModelSupportsFast: false,
         ...overrides,
     };
 }

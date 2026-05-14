@@ -32,6 +32,14 @@ import {
     createFileChangeUpdate,
     createMcpToolCallUpdate,
 } from "./CodexToolCallMapper";
+import {
+    createFastModeConfigOption,
+    FAST_MODE_CONFIG_ID,
+    FAST_MODE_OFF,
+    FAST_MODE_ON,
+    modelSupportsFast,
+    resolveFastServiceTier,
+} from "./FastModeConfig";
 
 export interface SessionState {
     sessionId: string,
@@ -46,6 +54,8 @@ export interface SessionState {
     rateLimits: RateLimitsMap | null;
     account: Account | null;
     cwd: string;
+    fastModeEnabled: boolean;
+    currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
 }
 
@@ -163,6 +173,7 @@ export class CodexAcpServer implements acp.Agent {
         const {sessionId, currentModelId, models} = sessionMetadata;
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, "sessionId" in request);
         const currentModel = this.findCurrentModel(models, currentModelId);
+        const currentModelSupportsFast = modelSupportsFast(currentModel);
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
@@ -176,6 +187,8 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: account,
             cwd: request.cwd,
+            fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
+            currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
         }
         this.sessions.set(sessionId, sessionState);
@@ -221,7 +234,8 @@ export class CodexAcpServer implements acp.Agent {
         });
         return {
             models: modelState,
-            modes: modeState
+            modes: modeState,
+            configOptions: this.createSessionConfigOptions(this.getSessionState(sessionId)),
         };
     }
 
@@ -236,7 +250,8 @@ export class CodexAcpServer implements acp.Agent {
         });
         return {
             models: modelState,
-            modes: modeState
+            modes: modeState,
+            configOptions: this.createSessionConfigOptions(this.getSessionState(sessionId)),
         };
     }
 
@@ -261,7 +276,8 @@ export class CodexAcpServer implements acp.Agent {
         return {
             sessionId: sessionId,
             models: modelState,
-            modes: modeState
+            modes: modeState,
+            configOptions: this.createSessionConfigOptions(this.getSessionState(sessionId)),
         };
     }
 
@@ -302,6 +318,28 @@ export class CodexAcpServer implements acp.Agent {
         return {};
     }
 
+    async setSessionConfigOption(params: acp.SetSessionConfigOptionRequest): Promise<acp.SetSessionConfigOptionResponse> {
+        logger.log("Set session config option requested", {
+            sessionId: params.sessionId,
+            configId: params.configId,
+        });
+        const sessionState = this.sessions.get(params.sessionId);
+        if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
+
+        if (params.configId !== FAST_MODE_CONFIG_ID || ("type" in params && params.type === "boolean")) {
+            throw RequestError.invalidParams();
+        }
+
+        if (params.value !== FAST_MODE_ON && params.value !== FAST_MODE_OFF) {
+            throw RequestError.invalidParams();
+        }
+
+        sessionState.fastModeEnabled = params.value === FAST_MODE_ON;
+        return {
+            configOptions: this.createSessionConfigOptions(sessionState),
+        };
+    }
+
     async unstable_setSessionModel(params: acp.SetSessionModelRequest): Promise<acp.SetSessionModelResponse | void> {
         logger.log("Set session model requested", {
             sessionId: params.sessionId,
@@ -337,8 +375,15 @@ export class CodexAcpServer implements acp.Agent {
         sessionState.currentModelId = ModelId.fromComponents(model, reasoningEffort).toString();
         sessionState.supportedReasoningEfforts = model.supportedReasoningEfforts;
         sessionState.supportedInputModalities = model.inputModalities;
+        sessionState.currentModelSupportsFast = modelSupportsFast(model);
 
         return {};
+    }
+
+    private createSessionConfigOptions(sessionState: SessionState): Array<acp.SessionConfigOption> {
+        return [
+            createFastModeConfigOption(sessionState.fastModeEnabled),
+        ];
     }
 
     private publishAvailableCommandsAsync(sessionId: string) {
@@ -388,6 +433,7 @@ export class CodexAcpServer implements acp.Agent {
         const {sessionId, currentModelId, models, thread} = sessionMetadata;
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
         const currentModel = this.findCurrentModel(models, currentModelId);
+        const currentModelSupportsFast = modelSupportsFast(currentModel);
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
@@ -401,6 +447,8 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: account,
             cwd: request.cwd,
+            fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
+            currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
         };
         this.sessions.set(sessionId, sessionState);
@@ -767,8 +815,12 @@ export class CodexAcpServer implements acp.Agent {
                 throw RequestError.invalidRequest("The current model does not support image input");
             }
             const agentMode = sessionState.agentMode;
+            const serviceTier = resolveFastServiceTier(
+                sessionState.fastModeEnabled,
+                sessionState.currentModelSupportsFast,
+            );
             const turnCompleted = await this.runWithProcessCheck(
-                () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, disableSummary, sessionState.cwd));
+                () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, serviceTier, disableSummary, sessionState.cwd));
 
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
