@@ -373,31 +373,18 @@ export class CodexAcpClient {
         reasoningEffort: ReasoningEffort | null,
         serviceTier: ServiceTier | null,
     ): ModelSelection {
-        const requestedModel = availableModels.find(m => m.id === modelId);
-        const selectedModel = requestedModel ?? availableModels.find(m => m.isDefault);
+        const selectedModel =
+            availableModels.find(m => m.id === modelId) ??
+            availableModels.find(m => m.isDefault);
 
         if (!selectedModel) {
             throw new Error(`Model selection failed: No model found for ID "${modelId}" and no default model is defined.`);
         }
 
-        const supportedReasoningEfforts = selectedModel.supportedReasoningEfforts ?? [];
-        const additionalSpeedTiers = selectedModel.additionalSpeedTiers ?? [];
-        const selectedReasoningEffort = reasoningEffort !== null && supportedReasoningEfforts.some(
-            option => option.reasoningEffort === reasoningEffort
-        )
-            ? reasoningEffort
-            : selectedModel.defaultReasoningEffort;
-        const didSelectRequestedModel = requestedModel !== undefined;
-        const supportsServiceTier = serviceTier !== null && additionalSpeedTiers.includes(serviceTier);
-        const selectedServiceTier =
-            didSelectRequestedModel && supportsServiceTier
-                ? serviceTier
-                : null;
-
         return {
             currentModelId: selectedModel.id,
-            currentReasoningEffort: selectedReasoningEffort,
-            currentServiceTier: selectedServiceTier,
+            currentReasoningEffort: reasoningEffort ?? selectedModel.defaultReasoningEffort,
+            currentServiceTier: serviceTier ?? null,
         };
     }
 
