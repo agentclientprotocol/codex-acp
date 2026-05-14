@@ -1,6 +1,10 @@
 import {describe, expect, it, vi} from "vitest";
-import type {Model, ReasoningEffortOption} from "../../app-server/v2";
-import {createCodexMockTestFixture, createTestSessionState} from "../acp-test-utils";
+import {
+    createCodexMockTestFixture,
+    createTestModel,
+    mockPromptTurn,
+    setupPromptTestSession,
+} from "../acp-test-utils";
 import {
     createFastModeConfigOption,
     FAST_MODE_CONFIG_ID,
@@ -9,32 +13,14 @@ import {
 } from "../../FastModeConfig";
 
 describe("Fast mode session config", () => {
-    const defaultEffort: ReasoningEffortOption = {reasoningEffort: "medium", description: "Balanced"};
-
-    function createModel(id: string, additionalSpeedTiers: string[] = []): Model {
-        return {
-            id,
-            model: id,
-            upgrade: null,
-            upgradeInfo: null,
-            availabilityNux: null,
-            displayName: id,
-            description: `${id} model`,
-            hidden: false,
-            supportedReasoningEfforts: [defaultEffort],
-            defaultReasoningEffort: "medium",
-            inputModalities: ["text", "image"],
-            supportsPersonality: false,
-            additionalSpeedTiers,
-            isDefault: true,
-        };
-    }
-
     async function createSession(currentServiceTier: "fast" | "flex" | null = null) {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
-        const fastModel = createModel("fast-model", ["fast"]);
+        const fastModel = createTestModel({
+            id: "fast-model",
+            additionalSpeedTiers: ["fast"],
+        });
 
         vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
@@ -50,43 +36,13 @@ describe("Fast mode session config", () => {
     }
 
     function setupPromptSession(fastModeEnabled: boolean, currentModelSupportsFast: boolean) {
-        const fixture = createCodexMockTestFixture();
-        const codexAcpAgent = fixture.getCodexAcpAgent();
-        const codexAppServerClient = fixture.getCodexAppServerClient();
-        const sessionState = createTestSessionState({
+        const {mockFixture, turnStartSpy} = setupPromptTestSession({
             sessionId: "session-id",
             currentModelId: "fast-model[medium]",
             fastModeEnabled,
             currentModelSupportsFast,
-            supportedReasoningEfforts: [defaultEffort],
         });
-
-        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
-        const turnStartSpy = vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({
-            turn: {
-                id: "turn-id",
-                items: [],
-                status: "inProgress",
-                error: null,
-                startedAt: null,
-                completedAt: null,
-                durationMs: null,
-            }
-        });
-        vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
-            threadId: "session-id",
-            turn: {
-                id: "turn-id",
-                items: [],
-                status: "completed",
-                error: null,
-                startedAt: null,
-                completedAt: null,
-                durationMs: null,
-            }
-        });
-
-        return {codexAcpAgent, turnStartSpy};
+        return {codexAcpAgent: mockFixture.getCodexAcpAgent(), turnStartSpy};
     }
 
     it("returns the Fast mode config option defaulted to Off for new sessions", async () => {
@@ -170,31 +126,9 @@ describe("Fast mode session config", () => {
 
     it("keeps Fast mode selected across model switches but stops applying it for non-fast models", async () => {
         const {codexAcpAgent, codexAcpClient, fixture} = await createSession("fast");
-        const slowModel = createModel("slow-model");
+        const slowModel = createTestModel({id: "slow-model"});
         vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue([slowModel]);
-        const turnStartSpy = vi.spyOn(fixture.getCodexAppServerClient(), "turnStart").mockResolvedValue({
-            turn: {
-                id: "turn-id",
-                items: [],
-                status: "inProgress",
-                error: null,
-                startedAt: null,
-                completedAt: null,
-                durationMs: null,
-            }
-        });
-        vi.spyOn(fixture.getCodexAppServerClient(), "awaitTurnCompleted").mockResolvedValue({
-            threadId: "session-id",
-            turn: {
-                id: "turn-id",
-                items: [],
-                status: "completed",
-                error: null,
-                startedAt: null,
-                completedAt: null,
-                durationMs: null,
-            }
-        });
+        const turnStartSpy = mockPromptTurn(fixture, "session-id");
 
         await codexAcpAgent.unstable_setSessionModel({
             sessionId: "session-id",
