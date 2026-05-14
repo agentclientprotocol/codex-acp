@@ -6,7 +6,7 @@ export const FAST_MODE_CONFIG_ID = "fast-mode";
 export const FAST_MODE_ON = "on";
 export const FAST_MODE_OFF = "off";
 
-const FAST_MODE_DESCRIPTION = "Use the fast service tier when it is available for the selected model. This can be more expensive.";
+const FAST_MODE_DESCRIPTION = "1.5x speed, increased usage";
 
 export function modelSupportsFast(model: Model | undefined): boolean {
     return model?.additionalSpeedTiers?.includes("fast") ?? false;
@@ -28,7 +28,7 @@ export function createFastModeConfigOption(fastModeEnabled: boolean): SessionCon
             {
                 value: FAST_MODE_OFF,
                 name: "Off",
-                description: "Use the standard service tier.",
+                description: "Default speed, normal usage",
             },
             {
                 value: FAST_MODE_ON,
