@@ -5,19 +5,9 @@
     "description": "Allowed by id. Default effort."
   },
   {
-    "modelId": "gpt-5.2[medium]@fast",
-    "name": "GPT-5.2 (medium, fast)",
-    "description": "Allowed by id. Default effort. Fast service tier."
-  },
-  {
     "modelId": "gpt-5.2[low]",
     "name": "GPT-5.2 (low)",
     "description": "Allowed by id. Fast effort."
-  },
-  {
-    "modelId": "gpt-5.2[low]@fast",
-    "name": "GPT-5.2 (low, fast)",
-    "description": "Allowed by id. Fast effort. Fast service tier."
   },
   {
     "modelId": "other-id[medium]",

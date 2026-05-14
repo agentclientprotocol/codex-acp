@@ -56,8 +56,7 @@
     "personality": null,
     "cwd": "cwd",
     "effort": "effort",
-    "model": "model",
-    "serviceTier": null
+    "model": "model"
   }
 }
 {
