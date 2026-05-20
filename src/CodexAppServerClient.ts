@@ -6,7 +6,6 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
-    AccountLoginCompletedNotification, AccountUpdatedNotification,
     ConfigReadParams,
     ConfigReadResponse,
     GetAccountParams,
@@ -257,11 +256,11 @@ export class CodexAppServerClient {
         });
     }
 
-    async listModels(params: ModelListParams = {cursor: null, limit: null}): Promise<ModelListResponse> {
+    async listModels(params: ModelListParams): Promise<ModelListResponse> {
         return await this.sendRequest({ method: "model/list", params });
     }
 
-    async listSkills(params: SkillsListParams = {}): Promise<SkillsListResponse> {
+    async listSkills(params: SkillsListParams): Promise<SkillsListResponse> {
         return await this.sendRequest({ method: "skills/list", params });
     }
 

@@ -25,7 +25,6 @@ import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
     GetAccountResponse,
-    ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
     Model,
     SkillsListParams,
@@ -204,15 +203,9 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, request._meta);
 
         const response = await this.codexClient.threadResume({
-            approvalPolicy: null,
-            sandbox: null,
-            baseInstructions: null,
             config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
-            developerInstructions: null,
-            model: null,
             modelProvider: this.getResumeModelProvider(),
-            personality: null,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -227,15 +220,9 @@ export class CodexAcpClient {
 
     async loadSession(request: acp.LoadSessionRequest): Promise<SessionMetadataWithThread> {
         const response = await this.codexClient.threadResume({
-            approvalPolicy: null,
-            sandbox: null,
-            baseInstructions: null,
             config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
-            developerInstructions: null,
-            model: null,
             modelProvider: this.getResumeModelProvider(),
-            personality: null,
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -255,14 +242,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadStart({
             config: await this.createSessionConfig(request.cwd, request.mcpServers),
             modelProvider: this.getModelProvider(),
-            model: null,
             cwd: request.cwd,
-            approvalPolicy: null,
-            sandbox: null,
-            baseInstructions: null,
-            developerInstructions: null,
-            personality: null,
-            ephemeral: null,
         });
 
         const codexModels = await this.fetchAvailableModels();
@@ -407,14 +387,11 @@ export class CodexAcpClient {
 
         await this.refreshSkills(cwd, request._meta);
         return await this.codexClient.runTurn({
-            outputSchema: null,
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: agentMode.sandboxPolicy,
             summary: disableSummary ? "none" : null,
-            personality: null,
-            cwd: null,
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,
@@ -468,8 +445,8 @@ export class CodexAcpClient {
         });
     }
 
-    async listMcpServers(params: ListMcpServerStatusParams = { cursor: null, limit: null }): Promise<ListMcpServerStatusResponse> {
-        return this.codexClient.listMcpServerStatus(params);
+    async listMcpServers(): Promise<ListMcpServerStatusResponse> {
+        return this.codexClient.listMcpServerStatus({});
     }
 
     async listSessions(request: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
@@ -499,11 +476,8 @@ export class CodexAcpClient {
         const modelProviders = preferredProvider ? [preferredProvider] : [];
         const listResponse = await this.codexClient.threadList({
             cursor: request.cursor ?? null,
-            limit: null,
-            sortKey: null,
             modelProviders: modelProviders,
             sourceKinds: sourceKinds,
-            archived: null,
         });
 
         if (listResponse.data.length === 0) {
@@ -561,30 +535,9 @@ export class CodexAcpClient {
 
     private async runSessionListDiagnostics(): Promise<Record<string, unknown>> {
         const [allProviders, archivedAllProviders, customGateway] = await Promise.all([
-            this.codexClient.threadList({
-                cursor: null,
-                limit: null,
-                sortKey: null,
-                modelProviders: [],
-                sourceKinds: null,
-                archived: null,
-            }),
-            this.codexClient.threadList({
-                cursor: null,
-                limit: null,
-                sortKey: null,
-                modelProviders: [],
-                sourceKinds: null,
-                archived: true,
-            }),
-            this.codexClient.threadList({
-                cursor: null,
-                limit: null,
-                sortKey: null,
-                modelProviders: ["custom-gateway"],
-                sourceKinds: null,
-                archived: null,
-            }),
+            this.codexClient.threadList({}),
+            this.codexClient.threadList({archived: true}),
+            this.codexClient.threadList({modelProviders: ["custom-gateway"]}),
         ]);
 
         return {
