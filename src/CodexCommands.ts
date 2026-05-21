@@ -41,14 +41,6 @@ export class CodexCommands {
         }
     }
 
-    async tryHandle(prompt: acp.ContentBlock[], sessionState: SessionState): Promise<boolean> {
-        const command = this.parseCommand(prompt);
-        if (command) {
-            return this.handleCommand(command, sessionState);
-        }
-        return false;
-    }
-
     private buildAvailableCommands(skillsEntries: SkillsListEntry[]): AvailableCommand[] {
         const commands = new Map<string, AvailableCommand>();
 
@@ -99,30 +91,26 @@ export class CodexCommands {
         ];
     }
 
-    private parseCommand(prompt: acp.ContentBlock[]): ParsedCommand | null {
-        if (prompt.length !== 1) return null;
-        const [single] = prompt;
-        if (!single) return null;
+    private getCommandName(prompt: acp.ContentBlock[]): string | null {
+        const firstBlock = prompt[0];
+        if (!firstBlock || firstBlock.type != "text") return null;
 
-        if (single.type !== "text") return null;
-        const trimmed = single.text.trim();
-        if (!trimmed.startsWith("/")) return null;
+        const text = firstBlock.text.trim();
+        if (!text.startsWith("/")) return null;
 
-        const commandText = trimmed.slice(1).trim();
+        const commandText = text.slice(1).trim();
         if (commandText.length === 0) return null;
 
-        const [name, ...rest] = commandText.split(/\s+/);
-        const input = rest.join(" ").trim();
-        return {
-            name: name!!.toLowerCase(),
-            input: input.length > 0 ? input : null
-        };
+        const [name] = commandText.split(/\s+/);
+        return name?.toLowerCase() ?? null;
     }
 
-    async handleCommand(command: ParsedCommand, sessionState: SessionState): Promise<boolean> {
-        const sessionId = sessionState.sessionId;
+    async tryHandleCommand(prompt: acp.ContentBlock[], sessionState: SessionState): Promise<boolean> {
+        const commandName = this.getCommandName(prompt)
+        if (commandName === null) return false;
 
-        switch (command.name) {
+        const sessionId = sessionState.sessionId;
+        switch (commandName) {
             case "status": {
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 const message = this.buildStatusMessage(sessionState);
@@ -180,7 +168,7 @@ export class CodexCommands {
                 return true;
             }
             default:
-                await this.sendUnknownCommandMessage(command.name, sessionId);
+                await this.sendUnknownCommandMessage(commandName, sessionId);
                 return true;
         }
     }
@@ -354,4 +342,4 @@ export class CodexCommands {
     }
 }
 
-type ParsedCommand = { name: string; input: string | null };
+type ParsedCommand = { name: string; };

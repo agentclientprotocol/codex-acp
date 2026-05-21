@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import {createRequire} from "node:module";
 import * as acp from "@agentclientprotocol/sdk";
 import {startCodexConnection} from "./CodexJsonRpcConnection";
 import {CodexAcpServer} from "./CodexAcpServer";
@@ -28,8 +27,7 @@ if (process.argv[2] === "login") {
         });
 } else if (process.argv[2] === "cli") {
     const args = process.argv.slice(3);
-    const codexPath = getCodexPath();
-    runCodexCli(codexPath, args)
+    runCodexCli(process.env["CODEX_PATH"], args)
         .then((exitCode) => process.exit(exitCode))
         .catch((error) => {
             console.error("Codex CLI error:", error.message);
@@ -40,7 +38,7 @@ if (process.argv[2] === "login") {
 }
 
 function startAcpServer() {
-    const codexPath = getCodexPath();
+    const codexPath = process.env["CODEX_PATH"];
     const configString = process.env["CODEX_CONFIG"];
     const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
     const modelProvider = process.env["MODEL_PROVIDER"];
@@ -79,8 +77,4 @@ function startAcpServer() {
     }
 
     new acp.AgentSideConnection(createAgent, acpJsonStream);
-}
-
-function getCodexPath(): string {
-    return process.env["CODEX_PATH"] ?? createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js");
 }

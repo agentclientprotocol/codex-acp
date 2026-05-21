@@ -2,7 +2,7 @@
   "method": "sessionUpdate",
   "args": [
     {
-      "sessionId": "session-id",
+      "sessionId": "sessionId",
       "update": {
         "sessionUpdate": "agent_message_chunk",
         "content": {

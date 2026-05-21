@@ -10,6 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import {AgentMode} from "../AgentMode";
 import {expect, vi} from "vitest";
+import type {Model, ReasoningEffortOption} from "../app-server/v2";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -171,8 +172,19 @@ export function createTestFixture(): TestFixture {
 
 function createTestCodexHome(): string {
     const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-codex-home-"));
-    fs.writeFileSync(path.join(codexHome, "config.toml"), 'cli_auth_credentials_store = "file"\n', "utf8");
+    writeCodexHomeConfig(codexHome);
     return codexHome;
+}
+
+export function writeCodexHomeConfig(codexHome: string, extras: Record<string, string> = {}): void {
+    const entries: Record<string, string> = {
+        cli_auth_credentials_store: "file",
+        ...extras,
+    };
+    const body = Object.entries(entries)
+        .map(([key, value]) => `${key} = "${value}"`)
+        .join("\n");
+    fs.writeFileSync(path.join(codexHome, "config.toml"), body, "utf8");
 }
 
 export function removeDirectoryWithRetry(directory: string): void {
@@ -311,8 +323,71 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         supportedReasoningEfforts: [],
         supportedInputModalities: ["text", "image"],
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
+        fastModeEnabled: false,
+        currentModelSupportsFast: false,
         ...overrides,
     };
+}
+
+export function createTestModel(overrides?: Partial<Model>): Model {
+    const id = overrides?.id ?? "model-id";
+    const defaultEffort: ReasoningEffortOption = {reasoningEffort: "medium", description: "Balanced"};
+    return {
+        id,
+        model: id,
+        upgrade: null,
+        upgradeInfo: null,
+        availabilityNux: null,
+        displayName: id,
+        description: `${id} model`,
+        hidden: false,
+        supportedReasoningEfforts: [defaultEffort],
+        defaultReasoningEffort: "medium",
+        inputModalities: ["text", "image"],
+        supportsPersonality: false,
+        additionalSpeedTiers: [],
+        isDefault: true,
+        ...overrides,
+    };
+}
+
+export function setupPromptTestSession(sessionOverrides?: Partial<SessionState>) {
+    const mockFixture = createCodexMockTestFixture();
+    const sessionState = createTestSessionState(sessionOverrides);
+
+    vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
+    const turnStartSpy = mockPromptTurn(mockFixture, sessionState.sessionId);
+
+    return {mockFixture, sessionState, turnStartSpy};
+}
+
+export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string) {
+    const codexAppServerClient = fixture.getCodexAppServerClient();
+    const turnStartSpy = vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({
+        turn: {
+            id: "turn-id",
+            items: [],
+            status: "inProgress",
+            error: null,
+            startedAt: null,
+            completedAt: null,
+            durationMs: null,
+        }
+    });
+    vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
+        threadId: sessionId,
+        turn: {
+            id: "turn-id",
+            items: [],
+            status: "completed",
+            error: null,
+            startedAt: null,
+            completedAt: null,
+            durationMs: null,
+        }
+    });
+
+    return turnStartSpy;
 }
 
 export async function setupPromptAndSendNotifications(

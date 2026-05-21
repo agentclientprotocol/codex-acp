@@ -44,7 +44,7 @@ describe('CodexEventHandler - file change events', () => {
         const newFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
@@ -79,7 +79,7 @@ describe('CodexEventHandler - file change events', () => {
         const multiFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
@@ -119,7 +119,7 @@ describe('CodexEventHandler - file change events', () => {
         const newFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
@@ -147,7 +147,7 @@ describe('CodexEventHandler - file change events', () => {
         const deleteFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
@@ -183,7 +183,7 @@ describe('CodexEventHandler - file change events', () => {
         const deletedFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
@@ -213,7 +213,7 @@ describe('CodexEventHandler - file change events', () => {
         const deleteFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
@@ -248,7 +248,7 @@ describe('CodexEventHandler - file change events', () => {
         const deletedFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
-                threadId: 'thread-1',
+                threadId: sessionId,
                 turnId: 'turn-1',
                 item: {
                     type: 'fileChange',
