@@ -44,6 +44,7 @@ describe('CodexACPAgent - initialize', () => {
                     list: {},
                 },
                 mcpCapabilities: {
+                    acp: false,
                     http: true,
                     sse: false,
                 },

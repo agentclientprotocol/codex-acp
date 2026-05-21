@@ -332,12 +332,16 @@ export class CodexAcpClient {
      */
     private createMcpSeverConfig(mcpServer: McpServer): JsonObject {
         if ("type" in mcpServer) {
-            if (mcpServer.type == "sse") {
-                throw RequestError.invalidRequest("Codex doesn't support MCP SSE transport protocol")
-            }
-            return {
-                "url": mcpServer.url,
-                "http_headers": Object.fromEntries(mcpServer.headers.map(h => [h.name, h.value])),
+            switch (mcpServer.type) {
+                case "acp":
+                    throw RequestError.invalidRequest("Codex doesn't support MCP ACP transport protocol")
+                case "sse":
+                    throw RequestError.invalidRequest("Codex doesn't support MCP SSE transport protocol")
+                case "http":
+                    return {
+                        "url": mcpServer.url,
+                        "http_headers": Object.fromEntries(mcpServer.headers.map(h => [h.name, h.value])),
+                    }
             }
         }
         return {
