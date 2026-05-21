@@ -1,5 +1,5 @@
 
-import type {AuthenticateRequest, AuthMethod} from "@agentclientprotocol/sdk";
+import type {AuthenticateRequest, AuthMethod, ClientCapabilities} from "@agentclientprotocol/sdk";
 
 const ApiKeyAuthMethod: AuthMethod = {
     id: "api-key",
@@ -54,7 +54,14 @@ export interface GatewayAuthRequest extends AuthenticateRequest {
     };
 }
 
-export const CodexAuthMethods: AuthMethod[] = [ApiKeyAuthMethod, ChatGptAuthMethod, GatewayAuthMethod];
+export function getCodexAuthMethods(clientCapabilities?: ClientCapabilities | null): AuthMethod[] {
+    const authMethods: AuthMethod[] = [ApiKeyAuthMethod, ChatGptAuthMethod];
+    const supportsGatewayAuth = clientCapabilities?.auth?._meta?.["gateway"] === true;
+    if (supportsGatewayAuth) {
+        authMethods.push(GatewayAuthMethod);
+    }
+    return authMethods;
+}
 
 export type CodexAuthRequest = ApiKeyAuthRequest | ChatGPTAuthRequest | GatewayAuthRequest;
 

@@ -23,12 +23,15 @@ jobs:
       - name: Check if update is required
         id: check
         run: |
-          if npm outdated "$CODEX_PACKAGE"; then
-            echo "Package is up to date"
+          RAW=$(jq -r --arg pkg "$CODEX_PACKAGE" '.dependencies[$pkg]' package.json)
+          CURRENT="${RAW#[\^~]}"
+          LATEST=$(npm view "$CODEX_PACKAGE" version)
+
+          if [ "$CURRENT" = "$LATEST" ]; then
+            echo "Package is up to date ($CURRENT)"
             exit 0
           fi
 
-          LATEST=$(npm view "$CODEX_PACKAGE" version)
           BRANCH="codex-update/$LATEST"
 
           if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" >/dev/null 2>&1; then

@@ -65,7 +65,7 @@ describe("CodexACPAgent - list sessions", () => {
             cwd: "/repo/project",
             cursor: null,
         };
-        const response = await codexAcpAgent.unstable_listSessions(params);
+        const response = await codexAcpAgent.listSessions(params);
 
         expect(codexAppServerClient.threadList).toHaveBeenCalledWith(expect.objectContaining({
             sourceKinds: [

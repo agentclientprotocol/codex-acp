@@ -94,25 +94,6 @@ export class CodexEventHandler {
                 return this.createUsageUpdate(notification.params);
             case "item/commandExecution/outputDelta":
                 return this.createCommandOutputDeltaEvent(notification.params);
-            case "command/exec/outputDelta":
-            case "item/autoApprovalReview/started":
-            case "item/autoApprovalReview/completed":
-            case "hook/started":
-            case "hook/completed":
-                return null;
-            case "item/reasoning/summaryTextDelta": //TODO streaming reasoning?
-            case "item/reasoning/summaryPartAdded":
-            //skipped events
-            case "item/reasoning/textDelta": //for raw output
-            case "turn/diff/updated":
-            case "item/commandExecution/terminalInteraction":
-            case "item/fileChange/outputDelta":
-            case "account/updated":
-            case "fs/changed":
-            case "mcpServer/startupStatus/updated":
-            case "serverRequest/resolved":
-            case "model/verification":
-                return null;
             case "item/fileChange/patchUpdated":
                 return await createFileChangePatchUpdate(notification.params);
             case "item/mcpToolCall/progress":
@@ -134,6 +115,29 @@ export class CodexEventHandler {
                         text: "*Context compacted to fit the model's context window.*\n\n"
                     }
                 };
+            case "model/rerouted":
+                return this.createModelReroutedEvent(notification.params);
+            case "fuzzyFileSearch/sessionUpdated":
+                return this.handleFuzzyFileSearchSessionUpdated(notification.params);
+            case "fuzzyFileSearch/sessionCompleted":
+                return this.handleFuzzyFileSearchSessionCompleted(notification.params);
+            // ignored events
+            case "command/exec/outputDelta":
+            case "item/autoApprovalReview/started":
+            case "item/autoApprovalReview/completed":
+            case "hook/started":
+            case "hook/completed":
+            case "item/reasoning/summaryTextDelta":
+            case "item/reasoning/summaryPartAdded":
+            case "item/reasoning/textDelta":
+            case "turn/diff/updated":
+            case "item/commandExecution/terminalInteraction":
+            case "item/fileChange/outputDelta":
+            case "account/updated":
+            case "fs/changed":
+            case "mcpServer/startupStatus/updated":
+            case "serverRequest/resolved":
+            case "model/verification":
             case "windows/worldWritableWarning":
             case "thread/status/changed":
             case "thread/archived":
@@ -157,14 +161,11 @@ export class CodexEventHandler {
             case "thread/started":
             case "thread/name/updated":
             case "item/plan/delta":
+            case "thread/goal/updated":
+            case "thread/goal/cleared":
+            case "remoteControl/status/changed":
             case "app/list/updated":
                 return null;
-            case "model/rerouted":
-                return this.createModelReroutedEvent(notification.params);
-            case "fuzzyFileSearch/sessionUpdated":
-                return this.handleFuzzyFileSearchSessionUpdated(notification.params);
-            case "fuzzyFileSearch/sessionCompleted":
-                return this.handleFuzzyFileSearchSessionCompleted(notification.params);
         }
     }
 

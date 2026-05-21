@@ -13,6 +13,7 @@ import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
     ReasoningEffort,
+    ServiceTier,
     ServerNotification
 } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
@@ -24,7 +25,6 @@ import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
     GetAccountResponse,
-    ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
     Model,
     SkillsListParams,
@@ -35,7 +35,7 @@ import type {
     UserInput,
 } from "./app-server/v2";
 import packageJson from "../package.json";
-import type {AuthenticationLogoutResponse, AuthenticationStatusResponse} from "./AcpExtensions";
+import type {AuthenticationStatusResponse} from "./AcpExtensions";
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -176,11 +176,10 @@ export class CodexAcpClient {
         return settingsModelProvider.config.model_provider;
     }
 
-    async logout(): Promise<AuthenticationLogoutResponse> {
+    async logout(): Promise<void> {
         const accountUpdatedPromise = this.awaitNextAccountUpdated();
         await this.codexClient.accountLogout();
         await accountUpdatedPromise;
-        return {};
     }
 
     async authRequired(): Promise<Boolean> {
@@ -204,18 +203,9 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, request._meta);
 
         const response = await this.codexClient.threadResume({
-            approvalPolicy: null,
-            sandbox: null,
-            baseInstructions: null,
-            config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
-            developerInstructions: null,
-            history: null,
-            model: null,
-            modelProvider: this.getModelProvider(),
-            path: null,
-            personality: null,
-            persistExtendedHistory: false,
+            modelProvider: this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -224,23 +214,15 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            currentServiceTier: response.serviceTier ?? null,
         }
     }
 
     async loadSession(request: acp.LoadSessionRequest): Promise<SessionMetadataWithThread> {
         const response = await this.codexClient.threadResume({
-            approvalPolicy: null,
-            sandbox: null,
-            baseInstructions: null,
-            config: this.createSessionConfig(request.cwd, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
-            developerInstructions: null,
-            history: null,
-            model: null,
-            modelProvider: this.getModelProvider(),
-            path: null,
-            personality: null,
-            persistExtendedHistory: false,
+            modelProvider: this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -249,6 +231,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            currentServiceTier: response.serviceTier ?? null,
             thread: response.thread,
         };
     }
@@ -257,18 +240,9 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, request._meta);
 
         const response = await this.codexClient.threadStart({
-            config: this.createSessionConfig(request.cwd, request.mcpServers),
+            config: await this.createSessionConfig(request.cwd, request.mcpServers),
             modelProvider: this.getModelProvider(),
-            model: null,
             cwd: request.cwd,
-            approvalPolicy: null,
-            sandbox: null,
-            baseInstructions: null,
-            developerInstructions: null,
-            personality: null,
-            ephemeral: null,
-            experimentalRawEvents: false,
-            persistExtendedHistory: false
         });
 
         const codexModels = await this.fetchAvailableModels();
@@ -280,6 +254,7 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
+            currentServiceTier: response.serviceTier ?? null,
         };
     }
 
@@ -291,7 +266,7 @@ export class CodexAcpClient {
         return this.codexClient.getMcpServerStartupVersion();
     }
 
-    private createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): JsonObject {
+    private async createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): Promise<JsonObject> {
         const mergedConfig = {
             ...mergeGatewayConfig(this.config, this.gatewayConfig),
             projects: {
@@ -303,14 +278,38 @@ export class CodexAcpClient {
         if (mcpServers.length === 0) {
             return mergedConfig;
         }
+
+        // Deduplicates new servers against existing config to prevent Codex from deep-merging
+        // incompatible field types (e.g., mixing url and stdio schemas).
+        const existingNames = await this.getConfigMcpServerNames(projectPath);
+        const uniqueServers = mcpServers.filter(mcp => !existingNames.has(mcp.name));
+        if (uniqueServers.length === 0) {
+            return mergedConfig;
+        }
+
         return {
             ...mergedConfig,
-            "mcp_servers": Object.fromEntries(mcpServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp)]))
-        }
+            "mcp_servers": Object.fromEntries(uniqueServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp)])),
+        };
     }
 
-    private getModelProvider(): string | null {
+    private async getConfigMcpServerNames(projectPath: string): Promise<Set<string>> {
+        const response = await this.codexClient.configRead({ includeLayers: true, cwd: projectPath });
+        const mcpServers = response?.config?.["mcp_servers"];
+        if (!mcpServers || typeof mcpServers !== "object" || Array.isArray(mcpServers)) {
+            return new Set();
+        }
+        return new Set(Object.keys(mcpServers));
+    }
+
+    getModelProvider(): string | null {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
+    }
+
+    private getResumeModelProvider(): string {
+        // Passing `null` forces codex to use the persisted provider for resumed session instead of default one
+        // Explicit fallback to "openai" fixes error `Model provider not found` at least for ChatGPT authentication
+        return this.getModelProvider() ?? "openai";
     }
 
     private async refreshSkills(cwd: string, meta?: Record<string, unknown> | null): Promise<void> {
@@ -379,6 +378,7 @@ export class CodexAcpClient {
         request: acp.PromptRequest,
         agentMode: AgentMode,
         modelId: ModelId,
+        serviceTier: ServiceTier | null,
         disableSummary: boolean,
         cwd: string,
     ): Promise<TurnCompletedNotification> {
@@ -386,23 +386,16 @@ export class CodexAcpClient {
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
 
         await this.refreshSkills(cwd, request._meta);
-        await this.codexClient.turnStart({
-            outputSchema: null,
+        return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: agentMode.sandboxPolicy,
             summary: disableSummary ? "none" : null,
-            personality: null,
-            collaborationMode: null,
-            cwd: null,
             effort: effort,
             model: modelId.model,
+            serviceTier: serviceTier,
         });
-
-        // Wait for turn completion
-        // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
-        return await this.codexClient.awaitTurnCompleted();
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {
@@ -452,8 +445,8 @@ export class CodexAcpClient {
         });
     }
 
-    async listMcpServers(params: ListMcpServerStatusParams = { cursor: null, limit: null }): Promise<ListMcpServerStatusResponse> {
-        return this.codexClient.listMcpServerStatus(params);
+    async listMcpServers(): Promise<ListMcpServerStatusResponse> {
+        return this.codexClient.listMcpServerStatus({});
     }
 
     async listSessions(request: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
@@ -483,11 +476,8 @@ export class CodexAcpClient {
         const modelProviders = preferredProvider ? [preferredProvider] : [];
         const listResponse = await this.codexClient.threadList({
             cursor: request.cursor ?? null,
-            limit: null,
-            sortKey: null,
             modelProviders: modelProviders,
             sourceKinds: sourceKinds,
-            archived: null,
         });
 
         if (listResponse.data.length === 0) {
@@ -545,30 +535,9 @@ export class CodexAcpClient {
 
     private async runSessionListDiagnostics(): Promise<Record<string, unknown>> {
         const [allProviders, archivedAllProviders, customGateway] = await Promise.all([
-            this.codexClient.threadList({
-                cursor: null,
-                limit: null,
-                sortKey: null,
-                modelProviders: [],
-                sourceKinds: null,
-                archived: null,
-            }),
-            this.codexClient.threadList({
-                cursor: null,
-                limit: null,
-                sortKey: null,
-                modelProviders: [],
-                sourceKinds: null,
-                archived: true,
-            }),
-            this.codexClient.threadList({
-                cursor: null,
-                limit: null,
-                sortKey: null,
-                modelProviders: ["custom-gateway"],
-                sourceKinds: null,
-                archived: null,
-            }),
+            this.codexClient.threadList({}),
+            this.codexClient.threadList({archived: true}),
+            this.codexClient.threadList({modelProviders: ["custom-gateway"]}),
         ]);
 
         return {
@@ -595,6 +564,7 @@ export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
     models: Model[],
+    currentServiceTier?: ServiceTier | null,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {

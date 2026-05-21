@@ -9,11 +9,12 @@ import type {
 } from "./app-server/v2";
 import {logger} from "./Logger";
 import {stripShellPrefix} from "./CodexEventHandler";
+import {ApprovalOptionId} from "./ApprovalOptionId";
 
 const APPROVAL_OPTIONS: acp.PermissionOption[] = [
-    { optionId: "allow_once", name: "Allow Once", kind: "allow_once" },
-    { optionId: "allow_always", name: "Allow for Session", kind: "allow_always" },
-    { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+    { optionId: ApprovalOptionId.AllowOnce, name: "Allow Once", kind: "allow_once" },
+    { optionId: ApprovalOptionId.AllowAlways, name: "Allow for Session", kind: "allow_always" },
+    { optionId: ApprovalOptionId.RejectOnce, name: "Reject", kind: "reject_once" },
 ];
 
 export class CodexApprovalHandler implements ApprovalHandler {
@@ -95,9 +96,9 @@ export class CodexApprovalHandler implements ApprovalHandler {
         }
 
         const optionId = response.outcome.optionId;
-        if (optionId === "allow_once") {
+        if (optionId === ApprovalOptionId.AllowOnce) {
             return { decision: "accept" };
-        } else if (optionId === "allow_always") {
+        } else if (optionId === ApprovalOptionId.AllowAlways) {
             return { decision: "acceptForSession" };
         } else {
             return { decision: "decline" };
@@ -112,9 +113,9 @@ export class CodexApprovalHandler implements ApprovalHandler {
         }
 
         const optionId = response.outcome.optionId;
-        if (optionId === "allow_once") {
+        if (optionId === ApprovalOptionId.AllowOnce) {
             return { decision: "accept" };
-        } else if (optionId === "allow_always") {
+        } else if (optionId === ApprovalOptionId.AllowAlways) {
             return { decision: "acceptForSession" };
         } else {
             return { decision: "cancel" };

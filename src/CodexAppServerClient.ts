@@ -6,7 +6,6 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
-    AccountLoginCompletedNotification, AccountUpdatedNotification,
     ConfigReadParams,
     ConfigReadResponse,
     GetAccountParams,
@@ -94,6 +93,8 @@ export class CodexAppServerClient {
     private mcpServerStartupVersion = 0;
     private readonly mcpServerStartupStates = new Map<string, McpServerStartupSnapshot>();
     private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
+    private readonly pendingTurnCompletionResolvers = new Map<string, Map<string, (event: TurnCompletedNotification) => void>>();
+    private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -107,6 +108,9 @@ export class CodexAppServerClient {
                     version: this.mcpServerStartupVersion,
                 });
                 this.resolveMcpServerStartupResolvers();
+            }
+            if (isTurnCompletedNotification(serverNotification)) {
+                this.recordTurnCompleted(serverNotification.params);
             }
             this.notify(serverNotification);
             for (const callback of this.codexEventHandlers) {
@@ -153,6 +157,27 @@ export class CodexAppServerClient {
 
     async turnStart(params: TurnStartParams): Promise<TurnStartResponse> {
         return await this.sendRequest({ method: "turn/start", params: params });
+    }
+
+    async runTurn(params: TurnStartParams): Promise<TurnCompletedNotification> {
+        const capturedCompletions: Array<TurnCompletedNotification> = [];
+        const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
+            capturedCompletions.push(event);
+        });
+
+        try {
+            const turnStarted = await this.turnStart(params);
+            const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnStarted.turn.id);
+            releaseCapture();
+            if (earlyCompletion) {
+                return earlyCompletion;
+            }
+            // Wait for turn completion
+            // If turnInterrupt() was called, Codex will send turn/completed event with status "interrupted"
+            return await this.awaitTurnCompleted(params.threadId, turnStarted.turn.id);
+        } finally {
+            releaseCapture();
+        }
     }
 
     async turnInterrupt(params: TurnInterruptParams): Promise<TurnInterruptResponse> {
@@ -224,19 +249,18 @@ export class CodexAppServerClient {
     }
 
     //TODO create type-safe helper
-    async awaitTurnCompleted(): Promise<TurnCompletedNotification> {
+    async awaitTurnCompleted(threadId: string, turnId: string): Promise<TurnCompletedNotification> {
         return await new Promise((resolve) => {
-            this.connection.onNotification("turn/completed", (event: TurnCompletedNotification) => {
-                resolve(event);
-            });
+            const threadResolvers = this.getOrCreatePendingTurnCompletionResolvers(threadId);
+            threadResolvers.set(turnId, resolve);
         });
     }
 
-    async listModels(params: ModelListParams = {cursor: null, limit: null}): Promise<ModelListResponse> {
+    async listModels(params: ModelListParams): Promise<ModelListResponse> {
         return await this.sendRequest({ method: "model/list", params });
     }
 
-    async listSkills(params: SkillsListParams = {}): Promise<SkillsListResponse> {
+    async listSkills(params: SkillsListParams): Promise<SkillsListResponse> {
         return await this.sendRequest({ method: "skills/list", params });
     }
 
@@ -255,9 +279,65 @@ export class CodexAppServerClient {
 
     private notificationHandlers = new Map<string, (event: ServerNotification) => void>();
     private notify(notification: ServerNotification) {
+        const threadId = extractThreadId(notification);
+        if (threadId !== null) {
+            const handler = this.notificationHandlers.get(threadId);
+            if (handler) {
+                handler(notification);
+            }
+            return;
+        }
         for (const notificationHandler of this.notificationHandlers.values()) {
             notificationHandler(notification);
         }
+    }
+
+    private recordTurnCompleted(event: TurnCompletedNotification): void {
+        const threadResolvers = this.pendingTurnCompletionResolvers.get(event.threadId);
+        const resolve = threadResolvers?.get(event.turn.id);
+        if (resolve) {
+            threadResolvers!.delete(event.turn.id);
+            if (threadResolvers!.size === 0) {
+                this.pendingTurnCompletionResolvers.delete(event.threadId);
+            }
+            resolve(event);
+            return;
+        }
+
+        const captures = this.turnCompletionCaptures.get(event.threadId);
+        if (!captures) {
+            return;
+        }
+        for (const capture of captures) {
+            capture(event);
+        }
+    }
+
+    private getOrCreatePendingTurnCompletionResolvers(threadId: string): Map<string, (event: TurnCompletedNotification) => void> {
+        const existing = this.pendingTurnCompletionResolvers.get(threadId);
+        if (existing) {
+            return existing;
+        }
+        const created = new Map<string, (event: TurnCompletedNotification) => void>();
+        this.pendingTurnCompletionResolvers.set(threadId, created);
+        return created;
+    }
+
+    private captureTurnCompletions(threadId: string, capture: (event: TurnCompletedNotification) => void): () => void {
+        const captures = this.turnCompletionCaptures.get(threadId) ?? new Set<(event: TurnCompletedNotification) => void>();
+        captures.add(capture);
+        this.turnCompletionCaptures.set(threadId, captures);
+        let released = false;
+        return () => {
+            if (released) {
+                return;
+            }
+            released = true;
+            captures.delete(capture);
+            if (captures.size === 0) {
+                this.turnCompletionCaptures.delete(threadId);
+            }
+        };
     }
 
     private resolveMcpServerStartupResolvers(): void {
@@ -351,4 +431,19 @@ function isMcpServerStatusUpdatedNotification(notification: ServerNotification):
     params: McpServerStatusUpdatedNotification;
 } {
     return notification.method === "mcpServer/startupStatus/updated";
+}
+
+function isTurnCompletedNotification(notification: ServerNotification): notification is {
+    method: "turn/completed";
+    params: TurnCompletedNotification;
+} {
+    return notification.method === "turn/completed";
+}
+
+function extractThreadId(notification: ServerNotification): string | null {
+    const params = notification.params as { threadId?: unknown } | undefined;
+    if (params && typeof params.threadId === "string") {
+        return params.threadId;
+    }
+    return null;
 }
