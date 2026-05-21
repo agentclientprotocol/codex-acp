@@ -1,5 +1,7 @@
 import type {AskForApproval, SandboxMode, SandboxPolicy} from "./app-server/v2";
-import type {SessionMode, SessionModeState} from "@agentclientprotocol/sdk";
+import type {SessionConfigOption, SessionMode, SessionModeState} from "@agentclientprotocol/sdk";
+
+export const MODE_CONFIG_ID = "mode";
 
 export class AgentMode {
     readonly id: string;
@@ -66,6 +68,22 @@ export class AgentMode {
         return {
             availableModes: AgentMode.all().map(mode => mode.toSessionMode()),
             currentModeId: this.id
+        };
+    }
+
+    toConfigOption(): SessionConfigOption {
+        return {
+            id: MODE_CONFIG_ID,
+            name: "Mode",
+            description: "Approval and sandboxing preset for the session",
+            category: "mode",
+            type: "select",
+            currentValue: this.id,
+            options: AgentMode.all().map(mode => ({
+                value: mode.id,
+                name: mode.name,
+                description: mode.description,
+            })),
         };
     }
 

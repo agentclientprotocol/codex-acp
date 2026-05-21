@@ -48,13 +48,13 @@ describe("Fast mode session config", () => {
     it("returns the Fast mode config option defaulted to Off for new sessions", async () => {
         const {response} = await createSession();
 
-        expect(response.configOptions).toEqual([createFastModeConfigOption(false)]);
+        expect(response.configOptions).toContainEqual(createFastModeConfigOption(false));
     });
 
     it("initializes Fast mode as On when the app-server session tier is fast", async () => {
         const {response, codexAcpAgent} = await createSession("fast");
 
-        expect(response.configOptions).toEqual([createFastModeConfigOption(true)]);
+        expect(response.configOptions).toContainEqual(createFastModeConfigOption(true));
         expect(codexAcpAgent.getSessionState("session-id").fastModeEnabled).toBe(true);
     });
 
@@ -66,7 +66,7 @@ describe("Fast mode session config", () => {
             configId: FAST_MODE_CONFIG_ID,
             value: FAST_MODE_ON,
         });
-        expect(onResponse.configOptions).toEqual([createFastModeConfigOption(true)]);
+        expect(onResponse.configOptions).toContainEqual(createFastModeConfigOption(true));
         expect(codexAcpAgent.getSessionState("session-id").fastModeEnabled).toBe(true);
 
         const offResponse = await codexAcpAgent.setSessionConfigOption({
@@ -74,7 +74,7 @@ describe("Fast mode session config", () => {
             configId: FAST_MODE_CONFIG_ID,
             value: FAST_MODE_OFF,
         });
-        expect(offResponse.configOptions).toEqual([createFastModeConfigOption(false)]);
+        expect(offResponse.configOptions).toContainEqual(createFastModeConfigOption(false));
         expect(codexAcpAgent.getSessionState("session-id").fastModeEnabled).toBe(false);
     });
 

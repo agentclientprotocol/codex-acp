@@ -19,7 +19,14 @@ import type {
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
-import {AgentMode} from "./AgentMode";
+import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
+import {
+    createModelConfigOption,
+    createReasoningEffortConfigOption,
+    findSupportedEffort,
+    MODEL_CONFIG_ID,
+    REASONING_EFFORT_CONFIG_ID,
+} from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
 import {toPromptUsage} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
@@ -44,6 +51,7 @@ import {
 export interface SessionState {
     sessionId: string,
     currentModelId: string,
+    availableModels: Array<Model>,
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     supportedInputModalities: Array<InputModality>,
     agentMode: AgentMode,
@@ -177,6 +185,7 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
+            availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
@@ -310,11 +319,7 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState = this.sessions.get(_params.sessionId);
         if (!sessionState) throw new Error(`Session ${_params.sessionId} not found`);
 
-        const newMode = AgentMode.find(_params.modeId);
-        if (!newMode) {
-            throw RequestError.invalidParams();
-        }
-        sessionState.agentMode = newMode;
+        this.applyModeChange(sessionState, _params.modeId);
         return {};
     }
 
@@ -326,18 +331,73 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
-        if (params.configId !== FAST_MODE_CONFIG_ID || ("type" in params && params.type === "boolean")) {
+        if (typeof params.value !== "string") {
             throw RequestError.invalidParams();
         }
+        const value = params.value;
 
-        if (params.value !== FAST_MODE_ON && params.value !== FAST_MODE_OFF) {
-            throw RequestError.invalidParams();
+        switch (params.configId) {
+            case FAST_MODE_CONFIG_ID:
+                this.applyFastModeChange(sessionState, value);
+                break;
+            case MODE_CONFIG_ID:
+                this.applyModeChange(sessionState, value);
+                break;
+            case MODEL_CONFIG_ID:
+                this.applyModelChange(sessionState, value);
+                break;
+            case REASONING_EFFORT_CONFIG_ID:
+                this.applyReasoningEffortChange(sessionState, value);
+                break;
+            default:
+                throw RequestError.invalidParams();
         }
 
-        sessionState.fastModeEnabled = params.value === FAST_MODE_ON;
         return {
             configOptions: this.createSessionConfigOptions(sessionState),
         };
+    }
+
+    private applyFastModeChange(sessionState: SessionState, value: string): void {
+        if (value !== FAST_MODE_ON && value !== FAST_MODE_OFF) {
+            throw RequestError.invalidParams();
+        }
+        sessionState.fastModeEnabled = value === FAST_MODE_ON;
+    }
+
+    private applyModeChange(sessionState: SessionState, value: string): void {
+        const newMode = AgentMode.find(value);
+        if (!newMode) {
+            throw RequestError.invalidParams();
+        }
+        sessionState.agentMode = newMode;
+    }
+
+    private applyModelChange(sessionState: SessionState, value: string): void {
+        const model = sessionState.availableModels.find(m => m.id === value);
+        if (!model) {
+            throw RequestError.invalidParams();
+        }
+        const currentEffort = ModelId.fromString(sessionState.currentModelId).effort;
+        const effort = findSupportedEffort(model.supportedReasoningEfforts, currentEffort)
+            ?? model.defaultReasoningEffort;
+        this.applyModelAndEffort(sessionState, model, effort);
+    }
+
+    private applyReasoningEffortChange(sessionState: SessionState, value: string): void {
+        const effort = findSupportedEffort(sessionState.supportedReasoningEfforts, value);
+        if (!effort) {
+            throw RequestError.invalidParams();
+        }
+        const {model} = ModelId.fromString(sessionState.currentModelId);
+        sessionState.currentModelId = ModelId.create(model, effort).toString();
+    }
+
+    private applyModelAndEffort(sessionState: SessionState, model: Model, effort: ReasoningEffort): void {
+        sessionState.currentModelId = ModelId.fromComponents(model, effort).toString();
+        sessionState.supportedReasoningEfforts = model.supportedReasoningEfforts;
+        sessionState.supportedInputModalities = model.inputModalities;
+        sessionState.currentModelSupportsFast = modelSupportsFast(model);
     }
 
     async unstable_setSessionModel(params: acp.SetSessionModelRequest): Promise<acp.SetSessionModelResponse | void> {
@@ -348,40 +408,35 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
-        const requestedModelId= ModelId.fromString(params.modelId);
-        const requestedModelName = requestedModelId.model;
-        const requestedEffort = requestedModelId.effort;
+        const {model: requestedModelName, effort: requestedEffort} = ModelId.fromString(params.modelId);
 
         const models = await this.codexAcpClient.fetchAvailableModels();
         const model = models.find(m => m.id === requestedModelName);
         if (!model) throw new Error(`Unknown model ${params.modelId}`);
 
-        const requestedEffortValue = requestedEffort as ReasoningEffort | undefined;
         let reasoningEffort: ReasoningEffort;
-        if (requestedEffortValue) {
-            const matchedEffort = model.supportedReasoningEfforts.find(
-                (option) => option.reasoningEffort === requestedEffortValue
-            )?.reasoningEffort;
-
+        if (requestedEffort) {
+            const matchedEffort = findSupportedEffort(model.supportedReasoningEfforts, requestedEffort);
             if (!matchedEffort) {
-                throw new Error(`Unsupported reasoning effort ${requestedEffortValue} for model ${requestedModelName}`);
+                throw new Error(`Unsupported reasoning effort ${requestedEffort} for model ${requestedModelName}`);
             }
-
             reasoningEffort = matchedEffort;
         } else {
             reasoningEffort = model.defaultReasoningEffort;
         }
 
-        sessionState.currentModelId = ModelId.fromComponents(model, reasoningEffort).toString();
-        sessionState.supportedReasoningEfforts = model.supportedReasoningEfforts;
-        sessionState.supportedInputModalities = model.inputModalities;
-        sessionState.currentModelSupportsFast = modelSupportsFast(model);
+        sessionState.availableModels = models;
+        this.applyModelAndEffort(sessionState, model, reasoningEffort);
 
         return {};
     }
 
     private createSessionConfigOptions(sessionState: SessionState): Array<acp.SessionConfigOption> {
+        const currentModelId = ModelId.fromString(sessionState.currentModelId);
         return [
+            sessionState.agentMode.toConfigOption(),
+            createModelConfigOption(sessionState.availableModels, currentModelId.model),
+            createReasoningEffortConfigOption(sessionState.supportedReasoningEfforts, currentModelId.effort),
             createFastModeConfigOption(sessionState.fastModeEnabled),
         ];
     }
@@ -437,6 +492,7 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
+            availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
