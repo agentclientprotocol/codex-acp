@@ -40,6 +40,7 @@ import {
     modelSupportsFast,
     resolveFastServiceTier,
 } from "./FastModeConfig";
+import packageJson from "../package.json";
 
 export interface SessionState {
     sessionId: string,
@@ -100,6 +101,11 @@ export class CodexAcpServer implements acp.Agent {
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
+            agentInfo: {
+                name: packageJson.name,
+                title: "Codex",
+                version: packageJson.version,
+            },
             agentCapabilities: {
                 auth: {
                     logout: {},

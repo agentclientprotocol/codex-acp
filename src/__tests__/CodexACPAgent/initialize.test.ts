@@ -5,6 +5,7 @@ import { createMockConnections } from './test-utils';
 import {getCodexAuthMethods} from "../../CodexAuthMethod";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
+import packageJson from "../../../package.json";
 
 describe('CodexACPAgent - initialize', () => {
     let agent: CodexAcpServer;
@@ -31,6 +32,11 @@ describe('CodexACPAgent - initialize', () => {
         const result = await agent.initialize(params);
         expect(result).toEqual({
             protocolVersion: acp.PROTOCOL_VERSION,
+            agentInfo: {
+                name: packageJson.name,
+                title: "Codex",
+                version: packageJson.version,
+            },
             agentCapabilities: {
                 auth: {
                     logout: {},
