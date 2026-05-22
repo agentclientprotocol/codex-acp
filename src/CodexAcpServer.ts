@@ -112,6 +112,7 @@ export class CodexAcpServer implements acp.Agent {
                 },
                 loadSession: true,
                 promptCapabilities: {
+                    embeddedContext: true,
                     image: true
                 },
                 sessionCapabilities: {

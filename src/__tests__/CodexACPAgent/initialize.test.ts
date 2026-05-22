@@ -43,6 +43,7 @@ describe('CodexACPAgent - initialize', () => {
                 },
                 loadSession: true,
                 promptCapabilities: {
+                    embeddedContext: true,
                     image: true
                 },
                 sessionCapabilities: {
