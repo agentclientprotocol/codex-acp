@@ -106,8 +106,9 @@ export class CodexCommands {
     }
 
     async tryHandleCommand(prompt: acp.ContentBlock[], sessionState: SessionState): Promise<boolean> {
-        const commandName = this.getCommandName(prompt)
+        const commandName = this.getCommandName(prompt);
         if (commandName === null) return false;
+        if (commandName.startsWith("$")) return false;
 
         const sessionId = sessionState.sessionId;
         switch (commandName) {

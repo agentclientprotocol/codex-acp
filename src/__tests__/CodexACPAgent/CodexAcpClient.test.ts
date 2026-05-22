@@ -740,6 +740,24 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-status.json");
     });
 
+    it('passes skill slash commands through to Codex', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture();
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/$imagegen create a hero image" }],
+        });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            input: [{
+                type: "text",
+                text: "/$imagegen create a hero image",
+                text_elements: []
+            }]
+        }));
+        expect(mockFixture.getAcpConnectionDump([])).toBe("");
+    });
+
     it('handles logout command', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
