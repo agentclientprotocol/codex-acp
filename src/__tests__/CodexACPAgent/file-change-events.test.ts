@@ -46,6 +46,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 1234567890,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-1',
@@ -81,6 +82,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 1234567890,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-2',
@@ -121,6 +123,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 1234567890,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-raw',
@@ -149,6 +152,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 1234567890,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-3',
@@ -185,6 +189,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 1234567890,
                 item: {
                     type: 'fileChange',
                     id: 'file-delete-raw',
@@ -215,6 +220,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 1234567890,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-3',
@@ -250,6 +256,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 1234567890,
                 item: {
                     type: 'fileChange',
                     id: 'file-delete-raw',

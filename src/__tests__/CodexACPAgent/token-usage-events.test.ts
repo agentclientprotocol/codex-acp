@@ -34,7 +34,7 @@ describe('Token Usage Events', () => {
             const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
             mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
-                turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+                turn: { id: "turn-id", items: [], itemsView: "full", status: "inProgress", error: null }
             });
 
             // awaitTurnCompleted sends notifications before resolving
@@ -45,7 +45,7 @@ describe('Token Usage Events', () => {
                 }
                 return {
                     threadId: sessionId,
-                    turn: { id: "turn-id", items: [], status: turnStatus, error: null }
+                    turn: { id: "turn-id", items: [], itemsView: "full", status: turnStatus, error: null }
                 };
             });
 
@@ -166,7 +166,7 @@ describe('Token Usage Events', () => {
             const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
             mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
-                turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+                turn: { id: "turn-id", items: [], itemsView: "full", status: "inProgress", error: null }
             });
 
             mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation(async () => {
@@ -175,7 +175,7 @@ describe('Token Usage Events', () => {
                 }
                 return {
                     threadId: sessionId,
-                    turn: { id: "turn-id", items: [], status: turnStatus, error: null }
+                    turn: { id: "turn-id", items: [], itemsView: "full", status: turnStatus, error: null }
                 };
             });
 

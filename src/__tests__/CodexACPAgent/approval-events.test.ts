@@ -16,13 +16,13 @@ describe('Approval Events', () => {
     function setupSessionWithPendingPrompt() {
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
-        let resolveTurnCompleted: (value: { threadId: string; turn: { id: string; items: never[]; status: string; error: null } }) => void;
-        const turnCompletedPromise = new Promise<{ threadId: string; turn: { id: string; items: never[]; status: string; error: null } }>((resolve) => {
+        let resolveTurnCompleted: (value: { threadId: string; turn: { id: string; items: never[]; itemsView: "full"; status: string; error: null } }) => void;
+        const turnCompletedPromise = new Promise<{ threadId: string; turn: { id: string; items: never[]; itemsView: "full"; status: string; error: null } }>((resolve) => {
             resolveTurnCompleted = resolve;
         });
 
         fixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
-            turn: { id: "turn-id", items: [], status: "inProgress", error: null }
+            turn: { id: "turn-id", items: [], itemsView: "full", status: "inProgress", error: null }
         });
         fixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockReturnValue(turnCompletedPromise);
 
@@ -42,7 +42,7 @@ describe('Approval Events', () => {
             promptPromise,
             completeTurn: () => resolveTurnCompleted!({
                 threadId: sessionId,
-                turn: { id: "turn-id", items: [], status: "completed", error: null }
+                turn: { id: "turn-id", items: [], itemsView: "full", status: "completed", error: null }
             })
         };
     }
@@ -66,6 +66,7 @@ describe('Approval Events', () => {
                     threadId: sessionId,
                     turnId: 'turn-1',
                     itemId: `item-${optionId}`,
+                    startedAtMs: 1234567890,
                     reason: 'Test command',
                     proposedExecpolicyAmendment: null,
                 };
@@ -92,6 +93,7 @@ describe('Approval Events', () => {
                 threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'item-cancelled',
+                    startedAtMs: 1234567890,
                 reason: null,
                 proposedExecpolicyAmendment: null,
             };
@@ -112,6 +114,7 @@ describe('Approval Events', () => {
                 threadId: 'non-existent-session',
                 turnId: 'turn-1',
                 itemId: 'item-no-handler',
+                    startedAtMs: 1234567890,
                 reason: null,
                 proposedExecpolicyAmendment: null,
             };
@@ -134,6 +137,7 @@ describe('Approval Events', () => {
                 threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'item-snapshot',
+                    startedAtMs: 1234567890,
                 reason: 'Running npm install',
                 proposedExecpolicyAmendment: null,
             };
@@ -161,6 +165,7 @@ describe('Approval Events', () => {
                 threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'item-with-command',
+                    startedAtMs: 1234567890,
                 reason: 'Installing dependencies',
                 command: 'npm install',
                 cwd: '/home/user/project',
@@ -198,6 +203,7 @@ describe('Approval Events', () => {
                 threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'item-shell-prefix',
+                    startedAtMs: 1234567890,
                 reason: 'Installing dependencies',
                 command,
                 cwd: '/home/user/project',
@@ -237,6 +243,7 @@ describe('Approval Events', () => {
                     threadId: sessionId,
                     turnId: 'turn-1',
                     itemId: `file-change-${optionId}`,
+                    startedAtMs: 1234567890,
                     reason: 'Test file change',
                     grantRoot: null,
                 };
@@ -263,6 +270,7 @@ describe('Approval Events', () => {
                 threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'file-change-cancelled',
+                    startedAtMs: 1234567890,
                 reason: null,
                 grantRoot: null,
             };
@@ -283,6 +291,7 @@ describe('Approval Events', () => {
                 threadId: 'non-existent-session',
                 turnId: 'turn-1',
                 itemId: 'file-change-no-handler',
+                    startedAtMs: 1234567890,
                 reason: null,
                 grantRoot: null,
             };
@@ -305,6 +314,7 @@ describe('Approval Events', () => {
                 threadId: sessionId,
                 turnId: 'turn-1',
                 itemId: 'file-change-snapshot',
+                    startedAtMs: 1234567890,
                 reason: 'Modifying config file',
                 grantRoot: null,
             };

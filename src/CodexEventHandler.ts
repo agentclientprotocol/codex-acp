@@ -119,6 +119,8 @@ export class CodexEventHandler {
                 return this.handleFuzzyFileSearchSessionCompleted(notification.params);
             // ignored events
             case "command/exec/outputDelta":
+            case "process/outputDelta":
+            case "process/exited":
             case "item/autoApprovalReview/started":
             case "item/autoApprovalReview/completed":
             case "hook/started":
@@ -137,6 +139,7 @@ export class CodexEventHandler {
             case "model/verification":
             case "windows/worldWritableWarning":
             case "thread/status/changed":
+            case "thread/settings/updated":
             case "thread/archived":
             case "thread/unarchived":
             case "thread/closed":

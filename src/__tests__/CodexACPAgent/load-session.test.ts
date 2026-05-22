@@ -33,6 +33,8 @@ describe("CodexACPAgent - loadSession", () => {
             inputModalities: ["text", "image"],
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: true,
         };
 
@@ -43,6 +45,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         const thread: Thread = {
             id: "session-1",
+            sessionId: "session-1",
             forkedFromId: null,
             preview: "Hi",
             ephemeral: false,
@@ -54,6 +57,7 @@ describe("CodexACPAgent - loadSession", () => {
             cwd: "/test/project",
             cliVersion: "0.0.0",
             source: "cli",
+            threadSource: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
@@ -61,6 +65,7 @@ describe("CodexACPAgent - loadSession", () => {
             turns: [
                 {
                     id: "turn-1",
+                    itemsView: "full",
                     status: "completed",
                     error: null,
                     startedAt: null,
@@ -123,6 +128,7 @@ describe("CodexACPAgent - loadSession", () => {
                             id: "item-mcp-1",
                             server: "github",
                             tool: "search",
+                            pluginId: null,
                             status: "completed",
                             arguments: {},
                             result: null,
@@ -196,6 +202,8 @@ describe("CodexACPAgent - loadSession", () => {
             inputModalities: ["text"],
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: true,
         };
 
@@ -268,6 +276,8 @@ describe("CodexACPAgent - loadSession", () => {
             inputModalities: ["text"],
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: true,
         };
 

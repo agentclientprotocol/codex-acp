@@ -14,6 +14,7 @@ describe("CodexACPAgent - list sessions", () => {
 
         const threadA: Thread = {
             id: "sess-1",
+            sessionId: "sess-1",
             forkedFromId: null,
             preview: "First session",
             ephemeral: false,
@@ -25,6 +26,7 @@ describe("CodexACPAgent - list sessions", () => {
             cwd: "/repo/project",
             cliVersion: "0.0.0",
             source: "cli",
+            threadSource: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
@@ -33,6 +35,7 @@ describe("CodexACPAgent - list sessions", () => {
         };
         const threadB: Thread = {
             id: "sess-2",
+            sessionId: "sess-2",
             forkedFromId: null,
             preview: "Other session",
             ephemeral: false,
@@ -44,6 +47,7 @@ describe("CodexACPAgent - list sessions", () => {
             cwd: "/repo/other",
             cliVersion: "0.0.0",
             source: "cli",
+            threadSource: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
