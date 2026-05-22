@@ -202,7 +202,7 @@ function createCommandActionEvent(
             toolCallId: id,
             status: acpStatus,
             kind: "read",
-            title: "Read file",
+            title: `Read file '${commandAction.path}'`,
             locations: [{ path: commandAction.path }],
         };
     } else if (commandAction.type === "search") {

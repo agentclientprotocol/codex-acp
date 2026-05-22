@@ -89,6 +89,42 @@ describe('CodexEventHandler - command action events', () => {
         );
     });
 
+    it('should include the path in read file command titles', async () => {
+        const readFileNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-read-file',
+                    command: 'sed -n "1,80p" /test/project/src/index.ts',
+                    cwd: '/test/project',
+                    processId: null,
+                    source: 'agent',
+                    status: 'inProgress',
+                    commandActions: [
+                        {
+                            type: 'read',
+                            command: 'sed -n "1,80p" /test/project/src/index.ts',
+                            name: 'sed',
+                            path: '/test/project/src/index.ts',
+                        },
+                    ],
+                    aggregatedOutput: null,
+                    exitCode: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [readFileNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/command-read-file-with-path.json'
+        );
+    });
+
     it('should handle search command with query and path', async () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',

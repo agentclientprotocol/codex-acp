@@ -1,0 +1,20 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "command-read-file",
+        "status": "in_progress",
+        "kind": "read",
+        "title": "Read file '/test/project/src/index.ts'",
+        "locations": [
+          {
+            "path": "/test/project/src/index.ts"
+          }
+        ]
+      }
+    }
+  ]
+}
