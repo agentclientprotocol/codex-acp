@@ -85,4 +85,47 @@ describe("CodexACPAgent - list sessions", () => {
             "data/list-sessions.json"
         );
     });
+
+    it("should prefer the explicit thread name as the session title", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+
+        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+
+        const thread: Thread = {
+            id: "sess-1",
+            forkedFromId: null,
+            preview: "Preview text",
+            ephemeral: false,
+            modelProvider: "openai",
+            createdAt: 100,
+            updatedAt: 200,
+            status: { type: "idle" },
+            path: null,
+            cwd: "/repo/project",
+            cliVersion: "0.0.0",
+            source: "cli",
+            agentNickname: null,
+            agentRole: null,
+            gitInfo: null,
+            name: "Saved title",
+            turns: [],
+        };
+
+        codexAppServerClient.threadList = vi.fn().mockResolvedValue({
+            data: [thread],
+            nextCursor: null,
+        });
+
+        const response = await codexAcpAgent.listSessions({
+            cwd: null,
+            cursor: null,
+        });
+
+        await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
+            "data/list-sessions-thread-name.json"
+        );
+    });
 });

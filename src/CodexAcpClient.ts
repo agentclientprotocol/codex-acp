@@ -492,7 +492,7 @@ export class CodexAcpClient {
         let sessions = listResponse.data.map((thread) => ({
             sessionId: thread.id,
             cwd: thread.cwd,
-            title: thread.preview || null,
+            title: (thread.name ?? thread.preview) || null,
             updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
         }));
         if (requestedCwd) {
@@ -501,7 +501,7 @@ export class CodexAcpClient {
                 .map((thread) => ({
                     sessionId: thread.id,
                     cwd: thread.cwd,
-                    title: thread.preview || null,
+                    title: (thread.name ?? thread.preview) || null,
                     updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
                 }));
             if (filtered.length > 0 || path.isAbsolute(requestedCwd)) {

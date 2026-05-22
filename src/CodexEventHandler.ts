@@ -90,6 +90,27 @@ export class CodexEventHandler {
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
+            case "thread/name/updated":
+                return {
+                    sessionUpdate: "session_info_update",
+                    title: notification.params.threadName ?? null,
+                };
+            case "thread/status/changed":
+                return this.createCodexSessionInfoUpdate({
+                    threadStatus: notification.params.status,
+                });
+            case "thread/archived":
+                return this.createCodexSessionInfoUpdate({
+                    archived: true,
+                });
+            case "thread/unarchived":
+                return this.createCodexSessionInfoUpdate({
+                    archived: false,
+                });
+            case "thread/closed":
+                return this.createCodexSessionInfoUpdate({
+                    closed: true,
+                });
             case "item/commandExecution/outputDelta":
                 return this.createCommandOutputDeltaEvent(notification.params);
             case "item/mcpToolCall/progress":
@@ -136,10 +157,6 @@ export class CodexEventHandler {
             case "serverRequest/resolved":
             case "model/verification":
             case "windows/worldWritableWarning":
-            case "thread/status/changed":
-            case "thread/archived":
-            case "thread/unarchived":
-            case "thread/closed":
             case "thread/realtime/started":
             case "thread/realtime/itemAdded":
             case "thread/realtime/transcript/delta":
@@ -156,7 +173,6 @@ export class CodexEventHandler {
             case "externalAgentConfig/import/completed":
             case "rawResponseItem/completed":
             case "thread/started":
-            case "thread/name/updated":
             case "item/plan/delta":
             case "thread/goal/updated":
             case "thread/goal/cleared":
@@ -164,6 +180,15 @@ export class CodexEventHandler {
             case "app/list/updated":
                 return null;
         }
+    }
+
+    private createCodexSessionInfoUpdate(codexMetadata: Record<string, unknown>): UpdateSessionEvent {
+        return {
+            sessionUpdate: "session_info_update",
+            _meta: {
+                codex: codexMetadata,
+            },
+        };
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {

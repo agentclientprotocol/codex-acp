@@ -1,0 +1,69 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "codex": {
+            "threadStatus": {
+              "type": "active",
+              "activeFlags": [
+                "waitingOnApproval"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "codex": {
+            "archived": true
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "codex": {
+            "archived": false
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "codex": {
+            "closed": true
+          }
+        }
+      }
+    }
+  ]
+}
