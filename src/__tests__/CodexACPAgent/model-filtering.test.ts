@@ -77,6 +77,38 @@ describe("Model filtering", () => {
                 isDefault: false,
                 inputModalities: []
             },
+            {
+                id: "gpt-5.3-codex",
+                model: "gpt-5.3-codex",
+                upgrade: null,
+                upgradeInfo: null,
+                availabilityNux: null,
+                displayName: "gpt-5.3-codex",
+                description: "Codex suffix lowercased.",
+                hidden: false,
+                supportedReasoningEfforts: [defaultEffort],
+                defaultReasoningEffort: "medium",
+                supportsPersonality: false,
+                additionalSpeedTiers: [],
+                isDefault: false,
+                inputModalities: []
+            },
+            {
+                id: "gpt-5.4-mini",
+                model: "gpt-5.4-mini",
+                upgrade: null,
+                upgradeInfo: null,
+                availabilityNux: null,
+                displayName: "gpt-5.4-mini",
+                description: "Mini suffix lowercased.",
+                hidden: false,
+                supportedReasoningEfforts: [defaultEffort],
+                defaultReasoningEffort: "medium",
+                supportsPersonality: false,
+                additionalSpeedTiers: [],
+                isDefault: false,
+                inputModalities: []
+            },
         ];
 
         vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);

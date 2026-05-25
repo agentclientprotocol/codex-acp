@@ -66,6 +66,12 @@ interface PendingMcpStartupSession {
 }
 
 export class CodexAcpServer implements acp.Agent {
+    private static readonly MODEL_NAME_TOKEN_OVERRIDES: Record<string, string> = {
+        gpt: "GPT",
+        mini: "Mini",
+        codex: "Codex",
+    };
+
     private readonly codexAcpClient: CodexAcpClient;
     private readonly connection: acp.AgentSideConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
@@ -403,12 +409,19 @@ export class CodexAcpServer implements acp.Agent {
         return models.find(m => m.id === modelId.model);
     }
 
+    private normalizeModelDisplayName(displayName: string): string {
+        return displayName
+            .split("-")
+            .map((token) => CodexAcpServer.MODEL_NAME_TOKEN_OVERRIDES[token.toLowerCase()] ?? token)
+            .join("-");
+    }
+
     private createModelState(availableModels: Model[], selectedModelId: string): SessionModelState {
         const allowedModels = availableModels
             .flatMap((model) =>
                 model.supportedReasoningEfforts.map((effort) => ({
                     modelId: ModelId.fromComponents(model, effort.reasoningEffort).toString(),
-                    name: `${model.displayName} (${effort.reasoningEffort})`,
+                    name: `${this.normalizeModelDisplayName(model.displayName)} (${effort.reasoningEffort})`,
                     description: `${model.description} ${effort.description}`,
                 }))
             );
