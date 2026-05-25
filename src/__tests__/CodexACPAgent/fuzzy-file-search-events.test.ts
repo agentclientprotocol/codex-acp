@@ -4,6 +4,23 @@ import type { ServerNotification } from "../../app-server";
 import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from "../acp-test-utils";
 import { AgentMode } from "../../AgentMode";
 
+function normalizePathSeparators<T>(value: T): T {
+    if (typeof value === "string") {
+        return value.replace(/\\/g, "/") as unknown as T;
+    }
+    if (Array.isArray(value)) {
+        return value.map(normalizePathSeparators) as unknown as T;
+    }
+    if (value && typeof value === "object") {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+            out[k] = normalizePathSeparators(v);
+        }
+        return out as unknown as T;
+    }
+    return value;
+}
+
 describe("CodexEventHandler - fuzzy file search events", () => {
     let mockFixture: CodexMockTestFixture;
     const sessionId = "test-session-id";
@@ -55,8 +72,10 @@ describe("CodexEventHandler - fuzzy file search events", () => {
 
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [updated1, updated2, completed]);
 
-        expect(events).toHaveLength(3);
-        expect(events[0]).toEqual({
+        const normalizedEvents = normalizePathSeparators(events);
+
+        expect(normalizedEvents).toHaveLength(3);
+        expect(normalizedEvents[0]).toEqual({
             method: "sessionUpdate",
             args: [
                 {
@@ -78,7 +97,7 @@ describe("CodexEventHandler - fuzzy file search events", () => {
                 },
             ],
         });
-        expect(events[1]).toEqual({
+        expect(normalizedEvents[1]).toEqual({
             method: "sessionUpdate",
             args: [
                 {
@@ -93,7 +112,7 @@ describe("CodexEventHandler - fuzzy file search events", () => {
                 },
             ],
         });
-        expect(events[2]).toEqual({
+        expect(normalizedEvents[2]).toEqual({
             method: "sessionUpdate",
             args: [
                 {
