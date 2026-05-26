@@ -44,6 +44,7 @@ export async function createSpawnedAgentFixture(
     initializeConnection: ConnectionInitializer,
     extraEnv?: NodeJS.ProcessEnv,
     paths = RuntimePaths.createTemporary(),
+    client: RecordingClient = new RecordingClient(),
 ): Promise<SpawnedAgentFixture> {
     const agentProcess = spawn("npm", ["run", "--silent", "start"], {
         cwd: process.cwd(),
@@ -57,7 +58,7 @@ export async function createSpawnedAgentFixture(
     });
 
     const fixture = new SpawnedAgentFixtureImpl(
-        new RecordingClient(),
+        client,
         agentProcess,
         paths,
         initializeConnection,
@@ -167,7 +168,7 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
 
     async restart(): Promise<SpawnedAgentFixture> {
         await this.stopProcess(false);
-        return await createSpawnedAgentFixture(this.initializeConnection, this.extraEnv, this.paths);
+        return await createSpawnedAgentFixture(this.initializeConnection, this.extraEnv, this.paths, this.client);
     }
 
     writeSkill(skill: TestSkill, rootDir?: string): void {
