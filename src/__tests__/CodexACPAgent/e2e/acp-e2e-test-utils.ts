@@ -1,7 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {describe, expect} from "vitest";
 import {AgentMode} from "../../../AgentMode";
-import {createSpawnedAgentFixture, type SpawnedAgentFixture} from "./spawned-agent-fixture";
+import {createSpawnedAgentFixture, type SpawnedAgentFixture,} from "./spawned-agent-fixture";
 
 export {
     createPermissionResponder,
@@ -46,7 +46,7 @@ export function expectNoPermissionRequests(fixture: SpawnedAgentFixture, session
     expectPermissionRequests(fixture, sessionId, { edit: 0, execute: 0 });
 }
 
-export async function createAuthenticatedFixture(initialMode?: AgentMode): Promise<SpawnedAgentFixture> {
+export async function createAuthenticatedFixture(initialMode?: AgentMode, mcpServers?: acp.McpServerStdio[]): Promise<SpawnedAgentFixture> {
     const apiKey = requireLiveApiKey();
     const extraEnv = initialMode ? {INITIAL_AGENT_MODE: initialMode.id} : undefined;
     return await createSpawnedFixture(async (connection, authMethods) => {
@@ -67,7 +67,7 @@ export async function createAuthenticatedFixture(initialMode?: AgentMode): Promi
         if (authenticationStatus["type"] !== "api-key") {
             throw new Error(`Unexpected authentication status: ${JSON.stringify(authenticationStatus)}`);
         }
-    }, extraEnv);
+    }, extraEnv, mcpServers);
 }
 
 export async function createGatewayFixture(
@@ -119,6 +119,7 @@ type Authenticator = (connection: acp.ClientSideConnection, authMethods: acp.Aut
 async function createSpawnedFixture(
     authenticate: Authenticator,
     extraEnv?: NodeJS.ProcessEnv,
+    mcpServers?: acp.McpServerStdio[],
 ): Promise<SpawnedAgentFixture> {
     return await createSpawnedAgentFixture(async (connection) => {
         const initializeResponse = await connection.initialize({
@@ -135,7 +136,7 @@ async function createSpawnedFixture(
         }
 
         await authenticate(connection, initializeResponse.authMethods ?? []);
-    }, extraEnv);
+    }, extraEnv, mcpServers);
 }
 
 export function requireLiveApiKey(): string {

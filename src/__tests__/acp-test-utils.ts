@@ -1,8 +1,8 @@
+import type {AgentSideConnection, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
 import {CodexAcpClient} from '../CodexAcpClient';
-import {type CodexConnectionEvent, CodexAppServerClient} from '../CodexAppServerClient';
+import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';
 import {startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexAcpServer, type SessionState} from "../CodexAcpServer";
-import type {AgentSideConnection, RequestPermissionResponse} from "@agentclientprotocol/sdk";
 import type {ServerNotification} from "../app-server";
 import type {MessageConnection} from "vscode-jsonrpc/node";
 import path from "node:path";
@@ -176,15 +176,35 @@ function createTestCodexHome(): string {
     return codexHome;
 }
 
-export function writeCodexHomeConfig(codexHome: string, extras: Record<string, string> = {}): void {
+export function writeCodexHomeConfig(
+    codexHome: string,
+    extras: Record<string, string> = {},
+    mcpServers: McpServerStdio[] = [],
+): void {
     const entries: Record<string, string> = {
         cli_auth_credentials_store: "file",
         ...extras,
     };
-    const body = Object.entries(entries)
+    let body = Object.entries(entries)
         .map(([key, value]) => `${key} = "${value}"`)
         .join("\n");
+    for (const server of mcpServers) {
+        body += `\n\n[mcp_servers."${escapeTOML(server.name)}"]`;
+        body += `\ncommand = "${escapeTOML(server.command)}"`;
+        const argsToml = server.args.map(a => `"${escapeTOML(a)}"`).join(", ");
+        body += `\nargs = [${argsToml}]`;
+        if (server.env && server.env.length > 0) {
+            const envPairs = server.env
+                .map(e => `${e.name} = "${escapeTOML(e.value)}"`)
+                .join(", ");
+            body += `\nenv = {${envPairs}}`;
+        }
+    }
     fs.writeFileSync(path.join(codexHome, "config.toml"), body, "utf8");
+}
+
+function escapeTOML(value: string): string {
+    return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 export function removeDirectoryWithRetry(directory: string): void {

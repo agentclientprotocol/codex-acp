@@ -43,26 +43,37 @@ type ConnectionInitializer = (connection: acp.ClientSideConnection) => Promise<v
 export async function createSpawnedAgentFixture(
     initializeConnection: ConnectionInitializer,
     extraEnv?: NodeJS.ProcessEnv,
-    paths = RuntimePaths.createTemporary(),
-    client: RecordingClient = new RecordingClient(),
+    mcpServers?: acp.McpServerStdio[],
+    paths?: RuntimePaths,
+    client?: RecordingClient,
 ): Promise<SpawnedAgentFixture> {
+    const resolvedPaths = paths ?? RuntimePaths.createTemporary();
+    const configuredMcpServers = mcpServers ?? [];
+    writeCodexHomeConfig(resolvedPaths.codexHome, {
+        model: DEFAULT_TEST_MODEL_ID.model,
+        model_reasoning_effort: DEFAULT_TEST_MODEL_ID.effort,
+        web_search: "disabled",
+    }, configuredMcpServers);
+
+    const resolvedClient = client ?? new RecordingClient();
     const agentProcess = spawn("npm", ["run", "--silent", "start"], {
         cwd: process.cwd(),
         env: {
             ...process.env,
-            CODEX_HOME: paths.codexHome,
-            APP_SERVER_LOGS: paths.appServerLogsDir,
+            CODEX_HOME: resolvedPaths.codexHome,
+            APP_SERVER_LOGS: resolvedPaths.appServerLogsDir,
             ...extraEnv,
         },
         stdio: ["pipe", "pipe", "pipe"],
     });
 
     const fixture = new SpawnedAgentFixtureImpl(
-        client,
+        resolvedClient,
         agentProcess,
-        paths,
+        resolvedPaths,
         initializeConnection,
-        extraEnv,
+        extraEnv ?? {},
+        configuredMcpServers,
     );
     await initializeConnection(fixture.connection);
     return fixture;
@@ -85,11 +96,6 @@ class RuntimePaths {
         for (const dir of [paths.rootDir, paths.codexHome, paths.workspaceDir, paths.appServerLogsDir]) {
             fs.mkdirSync(dir, {recursive: true});
         }
-        writeCodexHomeConfig(paths.codexHome, {
-            model: DEFAULT_TEST_MODEL_ID.model,
-            model_reasoning_effort: DEFAULT_TEST_MODEL_ID.effort,
-            web_search: "disabled",
-        });
         return paths;
     }
 }
@@ -146,7 +152,8 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         private readonly agentProcess: ChildProcessWithoutNullStreams,
         private readonly paths: RuntimePaths,
         private readonly initializeConnection: ConnectionInitializer,
-        private readonly extraEnv?: NodeJS.ProcessEnv,
+        private readonly extraEnv: NodeJS.ProcessEnv,
+        private readonly mcpServers: acp.McpServerStdio[],
     ) {
         const output = Readable.toWeb(agentProcess.stdout) as ReadableStream<Uint8Array>;
         this.connection = new acp.ClientSideConnection(
@@ -168,7 +175,7 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
 
     async restart(): Promise<SpawnedAgentFixture> {
         await this.stopProcess(false);
-        return await createSpawnedAgentFixture(this.initializeConnection, this.extraEnv, this.paths, this.client);
+        return await createSpawnedAgentFixture(this.initializeConnection, this.extraEnv, this.mcpServers, this.paths, this.client);
     }
 
     writeSkill(skill: TestSkill, rootDir?: string): void {
