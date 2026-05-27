@@ -76,7 +76,7 @@ describeE2E("E2E MCP approval tests (configured in session)", () => {
 
     async function createMcpSession(): Promise<{ sessionId: string; invocationMarkerPath: string }> {
         const invocationMarkerPath = path.join(fixture.workspaceDir, `mcp-tool-invocation-${crypto.randomUUID()}.txt`);
-        const sessionId = (await fixture.createSession([createMcpServer(invocationMarkerPath)])).sessionId;
+        const sessionId = (await fixture.createSession({mcpServers: [createMcpServer(invocationMarkerPath)]})).sessionId;
         return {sessionId, invocationMarkerPath};
     }
 
