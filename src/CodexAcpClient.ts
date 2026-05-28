@@ -205,7 +205,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: this.getResumeModelProvider(),
+            modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -222,7 +222,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: this.getResumeModelProvider(),
+            modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         const codexModels = await this.fetchAvailableModels();
@@ -306,10 +306,10 @@ export class CodexAcpClient {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
     }
 
-    private getResumeModelProvider(): string {
+    private async getResumeModelProvider(): Promise<string> {
         // Passing `null` forces codex to use the persisted provider for resumed session instead of default one
         // Explicit fallback to "openai" fixes error `Model provider not found` at least for ChatGPT authentication
-        return this.getModelProvider() ?? "openai";
+        return await this.getCurrentModelProvider() ?? "openai";
     }
 
     private async refreshSkills(cwd: string, meta?: Record<string, unknown> | null): Promise<void> {
