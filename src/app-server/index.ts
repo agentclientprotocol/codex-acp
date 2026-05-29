@@ -25,6 +25,7 @@ export type { AskForApproval } from "./AskForApproval";
 export type { AudioContent } from "./AudioContent";
 export type { AuthMode } from "./AuthMode";
 export type { AuthStatusChangeNotification } from "./AuthStatusChangeNotification";
+export type { AutoCompactTokenLimitScope } from "./AutoCompactTokenLimitScope";
 export type { BackgroundEventEvent } from "./BackgroundEventEvent";
 export type { BlobResourceContents } from "./BlobResourceContents";
 export type { ByteRange } from "./ByteRange";
