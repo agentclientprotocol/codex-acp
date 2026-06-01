@@ -296,7 +296,8 @@ async function createUpdateFileContent(change: FileUpdateChange): Promise<ToolCa
     const oldContent = await readFile(change.path, { encoding: "utf8" }).catch(() => null);
     if (oldContent === null) return null;
 
-    const newContent = applyPatch(oldContent, change.diff);
+    const unifiedDiff = recoverCorruptedDiff(change.diff);
+    const newContent = applyPatch(oldContent, unifiedDiff);
     if (!newContent) return null;
 
     return {
@@ -325,6 +326,14 @@ async function createDeleteFileContent(change: FileUpdateChange): Promise<ToolCa
             kind: "delete",
         }
     }
+}
+
+/**
+ * Fix unified diff content corrupted by codex agent.
+ * Removes synthetic "Moved to" from the end.
+ */
+function recoverCorruptedDiff(diff: string): string {
+    return diff.replace(/\nMoved to: .*$/, "");
 }
 
 function isUnifiedDiff(content: string): boolean {

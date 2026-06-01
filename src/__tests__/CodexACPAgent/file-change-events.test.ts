@@ -298,4 +298,40 @@ describe('CodexEventHandler - file change events', () => {
             content: [],
         });
     });
+
+    it('should parse update diffs with move metadata appended', async () => {
+        mockFileContent('/test/project/OriginalFile.kt', 'old code line\n');
+
+        const fileChange: ThreadItem = {
+            type: 'fileChange',
+            id: 'file-change-move-metadata',
+            changes: [
+                {
+                    path: '/test/project/OriginalFile.kt',
+                    kind: {
+                        type: 'update',
+                        move_path: '/test/project/NewFile.kt',
+                    },
+                    diff:
+`@@ -1 +1 @@
+-old code line
++new code line
+
+
+Moved to: /test/project/NewFile.kt`,
+                },
+            ],
+            status: 'inProgress',
+        };
+
+        const updateEvent = await createFileChangeUpdate(fileChange);
+        expect(updateEvent).toMatchObject({
+            content: [
+                {
+                    oldText: 'old code line\n',
+                    newText: 'new code line\n',
+                },
+            ],
+        });
+    });
 });
