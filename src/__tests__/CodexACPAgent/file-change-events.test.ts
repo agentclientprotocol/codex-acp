@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
+import { createFileChangeUpdate } from '../../CodexToolCallMapper';
+import type { ThreadItem } from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
 import {AgentMode} from "../../AgentMode";
 
@@ -270,5 +272,30 @@ describe('CodexEventHandler - file change events', () => {
         await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
             'data/file-change-delete-raw-content.json'
         );
+    });
+
+    it('should ignore broken unified diffs in file changes', async () => {
+        const fileChange: ThreadItem = {
+            type: 'fileChange',
+            id: 'file-change-broken-diff',
+            changes: [
+                {
+                    path: '/test/project/BrokenFile.kt',
+                    kind: { type: 'add' },
+                    diff:
+`--- /dev/null
++++ /test/project/BrokenFile.kt
+@@ broken @@
++class BrokenFile
+`,
+                },
+            ],
+            status: 'completed',
+        };
+
+        const updateEvent = await createFileChangeUpdate(fileChange);
+        expect(updateEvent).toMatchObject({
+            content: [],
+        });
     });
 });

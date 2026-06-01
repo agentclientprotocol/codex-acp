@@ -20,6 +20,7 @@ import type {
     ThreadItem,
 } from "./app-server/v2";
 import type { JsonValue } from "./app-server/serde_json/JsonValue";
+import {logger} from "./Logger";
 
 type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -257,13 +258,18 @@ function createSearchTitle(query: string | null, path: string | null): string {
 }
 
 async function createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
-    switch (change.kind.type) {
-        case "add":
-            return await createAddFileContent(change);
-        case "delete":
-            return await createDeleteFileContent(change);
-        case "update":
-            return await createUpdateFileContent(change);
+    try {
+        switch (change.kind.type) {
+            case "add":
+                return await createAddFileContent(change);
+            case "delete":
+                return await createDeleteFileContent(change);
+            case "update":
+                return await createUpdateFileContent(change);
+        }
+    } catch (error) {
+        logger.log(`Error processing file update change: ${error}`);
+        return null;
     }
 }
 
