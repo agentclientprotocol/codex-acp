@@ -257,54 +257,68 @@ function createSearchTitle(query: string | null, path: string | null): string {
 }
 
 async function createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
-    if (change.kind.type === "add" && !isUnifiedDiff(change.diff)) {
-        // For new files, diff may contain raw file content instead of a patch.
-        return {
-            type: "diff",
-            oldText: null,
-            newText: change.diff,
-            path: change.path,
-            _meta: {
-                kind: "add",
-            },
-        };
+    switch (change.kind.type) {
+        case "add":
+            return await createAddFileContent(change);
+        case "delete":
+            return await createDeleteFileContent(change);
+        case "update":
+            return await createUpdateFileContent(change);
     }
+}
 
-    if (change.kind.type === "delete") {
-        // If the patch deletes a file, the old content may be only available from the diff.
-        const oldContent = await readFile(change.path, { encoding: "utf8"} ).catch(() =>
-            isUnifiedDiff(change.diff) ? patchToDeletedContent(change.diff) : change.diff
-        );
-
-        return {
-            type: "diff",
-            oldText: oldContent,
-            newText: "",
-            path: change.path,
-            _meta: {
-                kind: "delete",
-            }
-        }
-    }
-
-    const oldContent = change.kind.type === "add" ? "" : await readFile(change.path, { encoding: "utf8" }).catch(() => null);
-    if (oldContent === null) {
-        return null;
-    }
-
-    const newContent = applyPatch(oldContent, change.diff);
-    if (newContent === false) {
-        return null;
+async function createAddFileContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
+    let newText;
+    if (isUnifiedDiff(change.diff)) {
+        newText = applyPatch("", change.diff)
+        if (!newText) return null;
+    } else {
+        newText = change.diff;
     }
     return {
         type: "diff",
-        oldText: change.kind.type === "add" ? null : oldContent,
+        oldText: null,
+        newText: newText,
+        path: change.path,
+        _meta: {
+            kind: "add",
+        },
+    };
+}
+
+async function createUpdateFileContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
+    const oldContent = await readFile(change.path, { encoding: "utf8" }).catch(() => null);
+    if (oldContent === null) return null;
+
+    const newContent = applyPatch(oldContent, change.diff);
+    if (!newContent) return null;
+
+    return {
+        type: "diff",
+        oldText: oldContent,
         newText: newContent,
         path: change.path,
         _meta: {
-            kind: change.kind.type,
+            kind: "update",
         },
     };
+}
+
+async function createDeleteFileContent(change: FileUpdateChange): Promise<ToolCallContent> {
+    // If the patch deletes a file, the old content may be only available from the diff.
+    const oldContent = await readFile(change.path, { encoding: "utf8"} ).catch(() =>
+        isUnifiedDiff(change.diff) ? patchToDeletedContent(change.diff) : change.diff
+    );
+
+    return {
+        type: "diff",
+        oldText: oldContent,
+        newText: "",
+        path: change.path,
+        _meta: {
+            kind: "delete",
+        }
+    }
 }
 
 function isUnifiedDiff(content: string): boolean {
