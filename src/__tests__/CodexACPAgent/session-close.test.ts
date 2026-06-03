@@ -10,6 +10,10 @@ import type { McpStartupResult } from "../../CodexAppServerClient";
 import type {
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
+    FileChangeRequestApprovalParams,
+    FileChangeRequestApprovalResponse,
+    McpServerElicitationRequestParams,
+    McpServerElicitationRequestResponse,
     SkillsListResponse,
     Thread,
     ThreadItem,
@@ -908,7 +912,7 @@ describe("CodexACPAgent - session close", () => {
         await expect(reopenedPrompt).resolves.toMatchObject({ stopReason: "end_turn" });
     });
 
-    it("cancels a reopened prompt that is waiting on an unidentified stale turn-start fence", async () => {
+    it("bounds a reopened prompt wait on an unidentified stale turn-start fence", async () => {
         const fixture = createCodexMockTestFixture();
         const sessionId = await createSession(fixture);
         const agent = fixture.getCodexAcpAgent();
@@ -929,6 +933,7 @@ describe("CodexACPAgent - session close", () => {
         const unsubscribeSpy = vi.spyOn(codexAppServerClient, "threadUnsubscribe").mockResolvedValue({
             status: "unsubscribed",
         });
+        const interruptSpy = vi.spyOn(codexAppServerClient, "turnInterrupt").mockResolvedValue({});
         vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue(
             createThreadResumeResponse(sessionId)
         );
@@ -951,18 +956,169 @@ describe("CodexACPAgent - session close", () => {
             mcpServers: [],
         });
 
+        vi.useFakeTimers();
         const reopenedPrompt = agent.prompt({
             sessionId,
             prompt: [{ type: "text", text: "New" }],
         });
+        try {
+            await Promise.resolve();
+            expect(turnStartResolvers.has("New")).toBe(false);
+
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(turnStartResolvers.has("New")).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+        turnStartResolvers.get("Old")!({ turn: createTurn("old-turn-id", "inProgress") });
+        await vi.waitFor(() => {
+            expect(interruptSpy).toHaveBeenCalledWith({
+                threadId: sessionId,
+                turnId: "old-turn-id",
+            });
+        });
+
+        fixture.clearAcpConnectionDump();
+        fixture.sendServerNotification({
+            method: "item/agentMessage/delta",
+            params: {
+                threadId: sessionId,
+                turnId: "old-turn-id",
+                itemId: "old-item-id",
+                delta: "stale after timeout",
+            },
+        } satisfies ServerNotification);
+        const staleApproval: CommandExecutionRequestApprovalParams = {
+            threadId: sessionId,
+            turnId: "old-turn-id",
+            itemId: "old-approval-id",
+            command: "echo stale",
+            cwd: "/workspace",
+            reason: null,
+            proposedExecpolicyAmendment: null,
+        };
+        await expect(fixture.sendServerRequest<CommandExecutionRequestApprovalResponse>(
+            "item/commandExecution/requestApproval",
+            staleApproval,
+        )).resolves.toEqual({ decision: "cancel" });
         await flushAsyncWork();
-        expect(turnStartResolvers.has("New")).toBe(false);
+        expect(fixture.getAcpConnectionEvents([])).toEqual([]);
+
+        turnStartResolvers.get("New")!({ turn: createTurn("new-turn-id", "inProgress") });
+        await expect(reopenedPrompt).resolves.toMatchObject({ stopReason: "end_turn" });
+        expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("fences notifications for a known turn when close interrupt fails", async () => {
+        const fixture = createCodexMockTestFixture();
+        const sessionId = await createSession(fixture);
+        const agent = fixture.getCodexAcpAgent();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "turnStart").mockImplementation(async (params: TurnStartParams) => {
+            const firstInput = params.input[0];
+            const text = firstInput?.type === "text" ? firstInput.text : "";
+            return {
+                turn: createTurn(text === "New" ? "new-turn-id" : "old-turn-id", "inProgress"),
+            };
+        });
+        const awaitTurnCompletedSpy = vi.spyOn(codexAppServerClient, "awaitTurnCompleted");
+        const interruptSpy = vi.spyOn(codexAppServerClient, "turnInterrupt")
+            .mockRejectedValue(new Error("transport closed"));
+        const unsubscribeSpy = vi.spyOn(codexAppServerClient, "threadUnsubscribe").mockResolvedValue({
+            status: "unsubscribed",
+        });
+        vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue(
+            createThreadResumeResponse(sessionId)
+        );
+
+        const oldPrompt = agent.prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "Old" }],
+        });
+
+        await vi.waitFor(() => {
+            expect(awaitTurnCompletedSpy).toHaveBeenCalledWith(sessionId, "old-turn-id");
+        });
 
         await expect(agent.closeSession({ sessionId })).resolves.toEqual({});
-        await expect(reopenedPrompt).resolves.toMatchObject({ stopReason: "cancelled" });
-        expect(turnStartResolvers.has("New")).toBe(false);
-        expect(unsubscribeSpy).toHaveBeenCalledTimes(2);
-        expect(unsubscribeSpy).toHaveBeenLastCalledWith({ threadId: sessionId });
+        await expect(oldPrompt).resolves.toMatchObject({ stopReason: "cancelled" });
+        expect(interruptSpy).toHaveBeenCalledWith({
+            threadId: sessionId,
+            turnId: "old-turn-id",
+        });
+        expect(unsubscribeSpy).toHaveBeenCalledWith({ threadId: sessionId });
+
+        await agent.resumeSession({
+            sessionId,
+            cwd: "/workspace",
+            mcpServers: [],
+        });
+
+        const reopenedPrompt = agent.prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "New" }],
+        });
+        await vi.waitFor(() => {
+            expect(awaitTurnCompletedSpy).toHaveBeenCalledWith(sessionId, "new-turn-id");
+        });
+
+        fixture.clearAcpConnectionDump();
+        fixture.sendServerNotification({
+            method: "item/agentMessage/delta",
+            params: {
+                threadId: sessionId,
+                turnId: "old-turn-id",
+                itemId: "old-item-id",
+                delta: "stale after failed interrupt",
+            },
+        } satisfies ServerNotification);
+        const staleCommandApproval: CommandExecutionRequestApprovalParams = {
+            threadId: sessionId,
+            turnId: "old-turn-id",
+            itemId: "old-command-approval-id",
+            command: "echo stale",
+            cwd: "/workspace",
+            reason: null,
+            proposedExecpolicyAmendment: null,
+        };
+        await expect(fixture.sendServerRequest<CommandExecutionRequestApprovalResponse>(
+            "item/commandExecution/requestApproval",
+            staleCommandApproval,
+        )).resolves.toEqual({ decision: "cancel" });
+
+        const staleFileApproval: FileChangeRequestApprovalParams = {
+            threadId: sessionId,
+            turnId: "old-turn-id",
+            itemId: "old-file-approval-id",
+            reason: null,
+            grantRoot: null,
+        };
+        await expect(fixture.sendServerRequest<FileChangeRequestApprovalResponse>(
+            "item/fileChange/requestApproval",
+            staleFileApproval,
+        )).resolves.toEqual({ decision: "cancel" });
+
+        const staleElicitation: McpServerElicitationRequestParams = {
+            threadId: sessionId,
+            turnId: "old-turn-id",
+            serverName: "old-mcp-server",
+            mode: "form",
+            _meta: null,
+            message: "stale elicitation",
+            requestedSchema: { type: "object", properties: {} },
+        };
+        await expect(fixture.sendServerRequest<McpServerElicitationRequestResponse>(
+            "mcpServer/elicitation/request",
+            staleElicitation,
+        )).resolves.toEqual({ action: "cancel", content: null, _meta: null });
+
+        fixture.sendServerNotification(createTurnCompletedNotification(sessionId, "old-turn-id"));
+        await flushAsyncWork();
+        expect(fixture.getAcpConnectionEvents([])).toEqual([]);
+
+        fixture.sendServerNotification(createTurnCompletedNotification(sessionId, "new-turn-id"));
+        await expect(reopenedPrompt).resolves.toMatchObject({ stopReason: "end_turn" });
     });
 
     it("interrupts a delayed turn start response after close completes", async () => {

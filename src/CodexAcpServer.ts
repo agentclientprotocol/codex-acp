@@ -1360,6 +1360,10 @@ export class CodexAcpServer implements acp.Agent {
             return;
         }
         sessionState.resolvedFailedInterruptTurnIds.add(turnId);
+        this.codexAcpClient.fenceCancelledTurn({
+            threadId: sessionState.sessionId,
+            turnId,
+        });
         this.codexAcpClient.resolveInterruptedTurn({
             threadId: sessionState.sessionId,
             turnId,

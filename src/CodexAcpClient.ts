@@ -570,6 +570,10 @@ export class CodexAcpClient {
         this.codexClient.resolveTurnInterrupted(params.threadId, params.turnId);
     }
 
+    fenceCancelledTurn(params: { threadId: string, turnId: string }): void {
+        this.codexClient.fenceCancelledTurn(params.threadId, params.turnId);
+    }
+
     async fetchAvailableModels(): Promise<Model[]> {
         const models: Model[] = [];
         let cursor: string | null = null;
