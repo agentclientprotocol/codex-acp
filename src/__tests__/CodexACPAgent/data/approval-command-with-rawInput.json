@@ -7,15 +7,6 @@
         "toolCallId": "item-with-command",
         "kind": "execute",
         "status": "pending",
-        "content": [
-          {
-            "type": "content",
-            "content": {
-              "type": "text",
-              "text": "Installing dependencies"
-            }
-          }
-        ],
         "rawInput": {
           "command": "npm install",
           "cwd": "/home/user/project"
@@ -37,7 +28,20 @@
           "name": "Reject",
           "kind": "reject_once"
         }
-      ]
+      ],
+      "_meta": {
+        "codex": {
+          "params": {
+            "threadId": "test-session-id",
+            "turnId": "turn-1",
+            "itemId": "item-with-command",
+            "reason": "Installing dependencies",
+            "command": "npm install",
+            "cwd": "/home/user/project",
+            "proposedExecpolicyAmendment": null
+          }
+        }
+      }
     }
   ]
 }

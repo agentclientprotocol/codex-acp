@@ -6,16 +6,7 @@
       "toolCall": {
         "toolCallId": "file-change-snapshot",
         "kind": "edit",
-        "status": "pending",
-        "content": [
-          {
-            "type": "content",
-            "content": {
-              "type": "text",
-              "text": "Modifying config file"
-            }
-          }
-        ]
+        "status": "pending"
       },
       "options": [
         {
@@ -33,7 +24,18 @@
           "name": "Reject",
           "kind": "reject_once"
         }
-      ]
+      ],
+      "_meta": {
+        "codex": {
+          "params": {
+            "threadId": "test-session-id",
+            "turnId": "turn-1",
+            "itemId": "file-change-snapshot",
+            "reason": "Modifying config file",
+            "grantRoot": null
+          }
+        }
+      }
     }
   ]
 }

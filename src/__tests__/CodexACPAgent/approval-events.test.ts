@@ -143,7 +143,7 @@ describe('Approval Events', () => {
                 params
             );
 
-            await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot(
+            await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
                 'data/approval-command-allow-once.json'
             );
 
@@ -172,7 +172,7 @@ describe('Approval Events', () => {
                 params
             );
 
-            await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot(
+            await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
                 'data/approval-command-with-rawInput.json'
             );
 
@@ -314,7 +314,7 @@ describe('Approval Events', () => {
                 params
             );
 
-            await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot(
+            await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
                 'data/approval-file-change.json'
             );
 
