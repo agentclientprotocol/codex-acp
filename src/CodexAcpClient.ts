@@ -21,6 +21,7 @@ import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
+import {sanitizeMcpServerName} from "./McpServerName";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
@@ -282,14 +283,18 @@ export class CodexAcpClient {
         // Deduplicates new servers against existing config to prevent Codex from deep-merging
         // incompatible field types (e.g., mixing url and stdio schemas).
         const existingNames = await this.getConfigMcpServerNames(projectPath);
-        const uniqueServers = mcpServers.filter(mcp => !existingNames.has(mcp.name));
+        const requestedServers = mcpServers.map(mcp => ({
+            name: sanitizeMcpServerName(mcp.name),
+            server: mcp,
+        }));
+        const uniqueServers = requestedServers.filter(mcp => !existingNames.has(mcp.name));
         if (uniqueServers.length === 0) {
             return mergedConfig;
         }
 
         return {
             ...mergedConfig,
-            "mcp_servers": Object.fromEntries(uniqueServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp)])),
+            "mcp_servers": Object.fromEntries(uniqueServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
         };
     }
 

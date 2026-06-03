@@ -6,6 +6,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import {
     createCodexMockTestFixture,
     createTestFixture,
+    createTestModel,
     createTestSessionState,
     type TestFixture
 } from "../acp-test-utils";
@@ -267,6 +268,66 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             }]
         });
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
+    });
+
+    it('sanitizes whitespace in ACP MCP server names before adding them to Codex config', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+            config: {
+                mcp_servers: {
+                    shared_mcp: {
+                        url: "https://example.com/mcp",
+                    },
+                },
+            },
+        } as any);
+        const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        await codexAcpClient.newSession({
+            cwd: "/workspace",
+            mcpServers: [{
+                name: "shared mcp",
+                command: "npx",
+                args: ["shared"],
+                env: [],
+            }, {
+                name: "stdio server\tone",
+                command: "npx",
+                args: ["stdio"],
+                env: [{name: "EXAMPLE", value: "1"}],
+            }, {
+                type: "http",
+                name: "http\nserver\u00a0two",
+                url: "https://example.com/http",
+                headers: [{name: "Authorization", value: "Bearer token"}],
+            }],
+        });
+
+        const threadStartRequest = threadStartSpy.mock.calls[0]![0];
+        expect(threadStartRequest.config?.["mcp_servers"]).toEqual({
+            stdio_server_one: {
+                command: "npx",
+                args: ["stdio"],
+                env: {EXAMPLE: "1"},
+            },
+            http_server_two: {
+                url: "https://example.com/http",
+                http_headers: {Authorization: "Bearer token"},
+            },
+        });
     });
 
     it('waits for typed mcp startup status updates and returns terminal states', async () => {

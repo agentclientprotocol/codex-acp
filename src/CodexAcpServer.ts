@@ -25,6 +25,7 @@ import {toPromptUsage} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
+import {sanitizeMcpServerName} from "./McpServerName";
 import {isExtMethodRequest} from "./AcpExtensions";
 import {
     createCommandExecutionUpdate,
@@ -209,7 +210,7 @@ export class CodexAcpServer implements acp.Agent {
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.pendingMcpStartupSessions.set(sessionId, {
-                requestedServers: new Set(requestedMcpServers.map(server => server.name)),
+                requestedServers: new Set(getRequestedMcpServerNames(requestedMcpServers)),
                 afterVersion: mcpServerStartupVersion,
             });
             this.publishMcpStartupStatusAsync(sessionId);
@@ -476,7 +477,7 @@ export class CodexAcpServer implements acp.Agent {
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.pendingMcpStartupSessions.set(sessionId, {
-                requestedServers: new Set(requestedMcpServers.map(server => server.name)),
+                requestedServers: new Set(getRequestedMcpServerNames(requestedMcpServers)),
                 afterVersion: mcpServerStartupVersion,
             });
             this.publishMcpStartupStatusAsync(sessionId);
@@ -957,5 +958,5 @@ export class CodexAcpServer implements acp.Agent {
 }
 
 function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
-    return Array.from(new Set(mcpServers.map(server => server.name)));
+    return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(server.name))));
 }
