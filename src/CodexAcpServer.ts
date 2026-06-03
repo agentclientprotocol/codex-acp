@@ -168,6 +168,23 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, SessionModelState, SessionModeState]> {
+        try {
+            return await this.tryCreateSession(request);
+        } catch (e) {
+            const error = e instanceof Error ? e : new Error(String(e));
+            await this.handleError(error);
+            throw e;
+        }
+    }
+
+    async handleError(e: Error){
+        if (e.message.includes("log out")) {
+            await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+            throw RequestError.internalError(`${(e.message)}\n\nYou have been logged out. Please try again.`);
+        }
+    }
+
+    async tryCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, SessionModelState, SessionModeState]> {
         await this.checkAuthorization();
         const requestedMcpServers = request.mcpServers ?? [];
         const mcpServerStartupVersion = requestedMcpServers.length > 0
