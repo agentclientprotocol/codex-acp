@@ -1127,6 +1127,61 @@ describe("CodexACPAgent - session close", () => {
         expect(unsubscribeSpy).toHaveBeenCalledWith({ threadId: sessionId });
     });
 
+    it("retries a failed interrupt when a delayed turn start returns after synthetic completion", async () => {
+        const fixture = createCodexMockTestFixture();
+        const sessionId = await createSession(fixture);
+        const agent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+
+        let resolveTurnStart!: (value: { turn: Turn }) => void;
+        const turnStartPromise = new Promise<{ turn: Turn }>((resolve) => {
+            resolveTurnStart = resolve;
+        });
+        const turnStartSpy = vi.spyOn(codexAppServerClient, "turnStart").mockReturnValue(turnStartPromise);
+        const awaitTurnCompletedSpy = vi.spyOn(codexAppServerClient, "awaitTurnCompleted");
+        const interruptSpy = vi.spyOn(codexAppServerClient, "turnInterrupt")
+            .mockRejectedValueOnce(new Error("turn not ready"))
+            .mockResolvedValue({});
+        const unsubscribeSpy = vi.spyOn(codexAppServerClient, "threadUnsubscribe").mockResolvedValue({
+            status: "unsubscribed",
+        });
+        const realResolveInterruptedTurn = codexAcpClient.resolveInterruptedTurn.bind(codexAcpClient);
+        vi.spyOn(codexAcpClient, "resolveInterruptedTurn").mockImplementation((params) => {
+            realResolveInterruptedTurn(params);
+            resolveTurnStart({ turn: createTurn(params.turnId, "inProgress") });
+        });
+
+        const promptPromise = agent.prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "Start a turn" }],
+        });
+
+        await vi.waitFor(() => {
+            expect(turnStartSpy).toHaveBeenCalled();
+        });
+        fixture.sendServerNotification(createTurnStartedNotification(sessionId, "observed-turn-id"));
+
+        const closePromise = agent.closeSession({ sessionId });
+        await vi.waitFor(() => {
+            expect(interruptSpy).toHaveBeenCalledTimes(2);
+        });
+
+        await expect(promptPromise).resolves.toMatchObject({ stopReason: "cancelled" });
+        await expect(closePromise).resolves.toEqual({});
+        expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+        expect(interruptSpy).toHaveBeenNthCalledWith(1, {
+            threadId: sessionId,
+            turnId: "observed-turn-id",
+        });
+        expect(interruptSpy).toHaveBeenNthCalledWith(2, {
+            threadId: sessionId,
+            turnId: "observed-turn-id",
+        });
+        expect(interruptSpy.mock.invocationCallOrder[1]!).toBeLessThan(unsubscribeSpy.mock.invocationCallOrder[0]!);
+        expect(unsubscribeSpy).toHaveBeenCalledWith({ threadId: sessionId });
+    });
+
     it("does not assign an observed turn-start notification to an arbitrary overlapping prompt", async () => {
         const fixture = createCodexMockTestFixture();
         const sessionId = await createSession(fixture);

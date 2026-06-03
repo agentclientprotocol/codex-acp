@@ -196,6 +196,7 @@ export class CodexAppServerClient {
             const turnStarted = turnStartedResult.response;
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnStarted.turn.id);
             if (earlyCompletion) {
+                onTurnStarted?.(turnStarted.turn.id);
                 return earlyCompletion;
             }
             const completionPromise = this.awaitTurnCompleted(params.threadId, turnStarted.turn.id);
