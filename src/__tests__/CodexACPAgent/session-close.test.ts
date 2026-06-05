@@ -6,7 +6,7 @@ import {
     type CodexMockTestFixture,
 } from "../acp-test-utils";
 import type {CodexAcpServer} from "../../CodexAcpServer";
-import type {CodexAcpClient} from "../../CodexAcpClient";
+import type {CodexAcpClient, SessionMetadata} from "../../CodexAcpClient";
 import type {McpStartupResult} from "../../CodexAppServerClient";
 import type {TurnStartResponse} from "../../app-server/v2";
 import type {McpServer} from "@agentclientprotocol/sdk";
@@ -61,7 +61,7 @@ describe("ACP session close", () => {
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
     });
 
-    it("cancels a prompt when close races with turn start", async () => {
+    it("does not wait for delayed turn start before closing", async () => {
         const {fixture, codexAcpAgent} = await createSession();
         const turnStart = deferred<TurnStartResponse>();
         const turnStartCalled = deferred<void>();
@@ -79,16 +79,24 @@ describe("ACP session close", () => {
         fixture.clearCodexConnectionDump();
 
         const closePromise = codexAcpAgent.closeSession({sessionId});
-        turnStart.resolve(createTurnStartResponse("turn-id"));
 
+        await expect(closePromise).resolves.toEqual({});
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
-        await closePromise;
 
         const requestMethods = fixture.getCodexConnectionEvents([])
             .flatMap(event => event.eventType === "request" ? [event.method] : []);
-        expect(requestMethods).toEqual(["turn/interrupt", "thread/unsubscribe"]);
+        expect(requestMethods).toEqual(["thread/unsubscribe"]);
         expect(fixture.getAcpConnectionDump([])).not.toContain("Conversation interrupted");
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
+
+        fixture.clearCodexConnectionDump();
+        turnStart.resolve(createTurnStartResponse("turn-id"));
+
+        await vi.waitFor(() => {
+            const lateRequestMethods = fixture.getCodexConnectionEvents([])
+                .flatMap(event => event.eventType === "request" ? [event.method] : []);
+            expect(lateRequestMethods).toContain("turn/interrupt");
+        });
     });
 
     it("does not hang when close interrupt fails during an active prompt", async () => {
@@ -160,6 +168,24 @@ describe("ACP session close", () => {
         unsubscribe.resolve(undefined);
         await closePromise;
     });
+
+    it("rejects an in-flight resume that completes after close", async () => {
+        const {codexAcpAgent, codexAcpClient} = await createSession();
+        const resume = deferred<SessionMetadata>();
+        vi.spyOn(codexAcpClient, "resumeSession").mockReturnValue(resume.promise);
+
+        const resumePromise = codexAcpAgent.resumeSession({
+            sessionId,
+            cwd: "/test/cwd",
+            mcpServers: [],
+        });
+
+        await codexAcpAgent.closeSession({sessionId});
+        resume.resolve(createSessionMetadata());
+
+        await expect(resumePromise).rejects.toThrow("Invalid request");
+        expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
+    });
 });
 
 async function createSession(options: {
@@ -209,6 +235,15 @@ function createTurnStartResponse(turnId: string): TurnStartResponse {
             completedAt: null,
             durationMs: null,
         },
+    };
+}
+
+function createSessionMetadata(): SessionMetadata {
+    return {
+        sessionId,
+        currentModelId: "model-id[medium]",
+        models: [createTestModel()],
+        currentServiceTier: null,
     };
 }
 
