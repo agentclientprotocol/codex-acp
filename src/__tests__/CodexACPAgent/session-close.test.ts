@@ -88,6 +88,36 @@ describe("ACP session close", () => {
         expect(fixture.getAcpConnectionDump([])).not.toContain("Conversation interrupted");
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
     });
+
+    it("does not hang when close interrupt fails during an active prompt", async () => {
+        const {fixture, codexAcpAgent} = await createSession();
+        const turnInterruptSpy = vi.spyOn(fixture.getCodexAcpClient(), "turnInterrupt")
+            .mockRejectedValue(new Error("interrupt failed"));
+
+        vi.spyOn(fixture.getCodexAppServerClient(), "turnStart").mockResolvedValue(createTurnStartResponse("turn-id"));
+
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId,
+            prompt: [{type: "text", text: "long running prompt"}],
+        });
+
+        await vi.waitFor(() => {
+            expect(codexAcpAgent.getSessionState(sessionId).currentTurnId).toBe("turn-id");
+        });
+        fixture.clearCodexConnectionDump();
+
+        await expect(codexAcpAgent.closeSession({sessionId})).resolves.toEqual({});
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+
+        expect(turnInterruptSpy).toHaveBeenCalledWith({
+            threadId: sessionId,
+            turnId: "turn-id",
+        });
+        await expect(fixture.getCodexConnectionDump([])).toMatchFileSnapshot(
+            "data/session-close-interrupt-failed.json"
+        );
+        expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
+    });
 });
 
 async function createSession(): Promise<{

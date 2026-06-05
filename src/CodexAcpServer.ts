@@ -886,18 +886,19 @@ export class CodexAcpServer implements acp.Agent {
                 threadId: sessionState.sessionId,
                 turnId,
             }));
-            if (resolveInterruptedTurn) {
-                this.codexAcpClient.resolveTurnInterrupted({
-                    threadId: sessionState.sessionId,
-                    turnId,
-                });
-            }
             logger.log(`${requestName} - turnInterrupt succeeded`, {
                 sessionId: sessionState.sessionId,
                 currentTurnId: turnId,
             });
         } catch (err) {
             logger.error(`${requestName} - turnInterrupt failed`, err);
+        } finally {
+            if (resolveInterruptedTurn) {
+                this.codexAcpClient.resolveTurnInterrupted({
+                    threadId: sessionState.sessionId,
+                    turnId,
+                });
+            }
         }
     }
 
