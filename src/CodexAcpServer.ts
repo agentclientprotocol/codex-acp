@@ -222,10 +222,16 @@ export class CodexAcpServer implements acp.Agent {
 
     private async closeStaleSessionOpen(sessionId: string, generation: number): Promise<void> {
         if (this.sessionOpenGenerations.get(sessionId) === generation) {
+            const staleCloseGeneration = this.bumpSessionGeneration(sessionId);
+            this.closingSessions.add(sessionId);
             try {
                 await this.runWithProcessCheck(() => this.codexAcpClient.closeSession(sessionId));
             } catch (err) {
                 logger.error(`Failed to close stale session open for ${sessionId}`, err);
+            } finally {
+                if (this.getSessionGeneration(sessionId) === staleCloseGeneration) {
+                    this.closingSessions.delete(sessionId);
+                }
             }
         }
         throw RequestError.invalidRequest(`Session ${sessionId} is closing`);

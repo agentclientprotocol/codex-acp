@@ -244,6 +244,51 @@ describe("ACP session close", () => {
         expect(closeSessionSpy).toHaveBeenCalledTimes(1);
         expect(codexAcpAgent.getSessionState(sessionId).sessionId).toBe(sessionId);
     });
+
+    it("blocks reopen while stale resume cleanup is unsubscribing", async () => {
+        const {codexAcpAgent, codexAcpClient} = await createSession();
+        const staleResume = deferred<SessionMetadata>();
+        const staleUnsubscribe = deferred<void>();
+        const resumeSpy = vi.spyOn(codexAcpClient, "resumeSession")
+            .mockReturnValueOnce(staleResume.promise)
+            .mockResolvedValueOnce(createSessionMetadata());
+        const closeSessionSpy = vi.spyOn(codexAcpClient, "closeSession")
+            .mockResolvedValueOnce()
+            .mockReturnValueOnce(staleUnsubscribe.promise);
+
+        const staleResumePromise = codexAcpAgent.resumeSession({
+            sessionId,
+            cwd: "/test/cwd",
+            mcpServers: [],
+        });
+
+        await codexAcpAgent.closeSession({sessionId});
+        staleResume.resolve(createSessionMetadata());
+
+        await vi.waitFor(() => {
+            expect(closeSessionSpy).toHaveBeenCalledTimes(2);
+        });
+
+        await expect(codexAcpAgent.resumeSession({
+            sessionId,
+            cwd: "/test/cwd",
+            mcpServers: [],
+        })).rejects.toThrow("Invalid request");
+        expect(resumeSpy).toHaveBeenCalledTimes(1);
+
+        staleUnsubscribe.resolve(undefined);
+        await expect(staleResumePromise).rejects.toThrow("Invalid request");
+
+        await expect(codexAcpAgent.resumeSession({
+            sessionId,
+            cwd: "/test/cwd",
+            mcpServers: [],
+        })).resolves.toEqual(expect.objectContaining({
+            models: expect.objectContaining({
+                currentModelId: "model-id[medium]",
+            }),
+        }));
+    });
 });
 
 async function createSession(options: {
