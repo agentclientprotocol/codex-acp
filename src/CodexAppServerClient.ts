@@ -97,6 +97,7 @@ export class CodexAppServerClient {
     private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
     private readonly pendingTurnCompletionResolvers = new Map<string, Map<string, (event: TurnCompletedNotification) => void>>();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
+    private readonly staleTurnIds = new Map<string, Set<string>>();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -114,6 +115,17 @@ export class CodexAppServerClient {
             if (isTurnCompletedNotification(serverNotification)) {
                 this.recordTurnCompleted(serverNotification.params);
             }
+            const routing = extractTurnRouting(serverNotification);
+            const staleTurnNotification = this.isStaleTurn(routing.threadId, routing.turnId);
+            if (staleTurnNotification) {
+                if (isTurnCompletedNotification(serverNotification) && routing.threadId !== null && routing.turnId !== null) {
+                    this.clearStaleTurn(routing.threadId, routing.turnId);
+                }
+                for (const callback of this.codexEventHandlers) {
+                    callback({ eventType: "notification", ...serverNotification });
+                }
+                return;
+            }
             this.notify(serverNotification);
             for (const callback of this.codexEventHandlers) {
                 callback({ eventType: "notification", ...serverNotification });
@@ -121,6 +133,9 @@ export class CodexAppServerClient {
         });
 
         this.connection.onRequest(CommandExecutionApprovalRequest, async (params) => {
+            if (this.isStaleTurn(params.threadId, params.turnId)) {
+                return { decision: "cancel" };
+            }
             const handler = this.approvalHandlers.get(params.threadId);
             if (!handler) {
                 return { decision: "cancel" };
@@ -129,6 +144,9 @@ export class CodexAppServerClient {
         });
 
         this.connection.onRequest(FileChangeApprovalRequest, async (params) => {
+            if (this.isStaleTurn(params.threadId, params.turnId)) {
+                return { decision: "cancel" };
+            }
             const handler = this.approvalHandlers.get(params.threadId);
             if (!handler) {
                 return { decision: "cancel" };
@@ -137,6 +155,9 @@ export class CodexAppServerClient {
         });
 
         this.connection.onRequest(McpServerElicitationRequest, async (params) => {
+            if (this.isStaleTurn(params.threadId, params.turnId)) {
+                return { action: "cancel", content: null, _meta: null };
+            }
             const handler = this.elicitationHandlers.get(params.threadId);
             if (!handler) {
                 return { action: "cancel", content: null, _meta: null };
@@ -191,6 +212,12 @@ export class CodexAppServerClient {
 
     async turnInterrupt(params: TurnInterruptParams): Promise<TurnInterruptResponse> {
         return await this.sendRequest({ method: "turn/interrupt", params: params });
+    }
+
+    markTurnStale(threadId: string, turnId: string): void {
+        const threadStaleTurns = this.staleTurnIds.get(threadId) ?? new Set<string>();
+        threadStaleTurns.add(turnId);
+        this.staleTurnIds.set(threadId, threadStaleTurns);
     }
 
     async threadStart(params: ThreadStartParams): Promise<ThreadStartResponse> {
@@ -341,6 +368,24 @@ export class CodexAppServerClient {
         }
     }
 
+    private isStaleTurn(threadId: string | null, turnId: string | null): boolean {
+        if (threadId === null || turnId === null) {
+            return false;
+        }
+        return this.staleTurnIds.get(threadId)?.has(turnId) ?? false;
+    }
+
+    private clearStaleTurn(threadId: string, turnId: string): void {
+        const threadStaleTurns = this.staleTurnIds.get(threadId);
+        if (!threadStaleTurns) {
+            return;
+        }
+        threadStaleTurns.delete(turnId);
+        if (threadStaleTurns.size === 0) {
+            this.staleTurnIds.delete(threadId);
+        }
+    }
+
     private getOrCreatePendingTurnCompletionResolvers(threadId: string): Map<string, (event: TurnCompletedNotification) => void> {
         const existing = this.pendingTurnCompletionResolvers.get(threadId);
         if (existing) {
@@ -474,4 +519,20 @@ function extractThreadId(notification: ServerNotification): string | null {
         return params.threadId;
     }
     return null;
+}
+
+function extractTurnRouting(notification: ServerNotification): { threadId: string | null, turnId: string | null } {
+    const params = notification.params as {
+        threadId?: unknown,
+        turnId?: unknown,
+        turn?: { id?: unknown },
+    } | undefined;
+    const threadId = extractThreadId(notification);
+    if (params && typeof params.turnId === "string") {
+        return {threadId, turnId: params.turnId};
+    }
+    if (params && typeof params.turn?.id === "string") {
+        return {threadId, turnId: params.turn.id};
+    }
+    return {threadId, turnId: null};
 }
