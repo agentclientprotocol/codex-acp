@@ -351,5 +351,5 @@ async function readFileContent(filePath: string): Promise<string | null> {
  * Removes synthetic "Moved to" from the end.
  */
 function recoverCorruptedDiff(diff: string): string {
-    return diff.replace(/\nMoved to: .*$/, "");
+    return diff.replace(/\n\nMoved to: .*$/, "");
 }
