@@ -1,5 +1,5 @@
 import type { ToolCallContent } from "@agentclientprotocol/sdk";
-import { applyPatch, parsePatch } from "diff";
+import { applyPatch, parsePatch, reversePatch } from "diff";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
@@ -293,18 +293,44 @@ async function createAddFileContent(change: FileUpdateChange): Promise<ToolCallC
 }
 
 async function createUpdateFileContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
-    const oldContent = await readFile(change.path, { encoding: "utf8" }).catch(() => null);
-    if (oldContent === null) return null;
+    if (change.kind.type !== "update") return null;
 
     const unifiedDiff = recoverCorruptedDiff(change.diff);
-    const newContent = applyPatch(oldContent, unifiedDiff);
-    if (!newContent) return null;
+    const movePath = change.kind.move_path;
 
+    const oldContent = await readFileContent(change.path);
+    if (oldContent !== null) {
+        const patchedContent = applyPatch(oldContent, unifiedDiff);
+        if (patchedContent === false) return null;
+        return createUpdateDiffContent(movePath ?? change.path, oldContent, patchedContent);
+    }
+
+    if (!movePath) return null;
+    const newContent = await readFileContent(movePath);
+    if (newContent === null) return null;
+
+    const revertedPatch = revertPatch(unifiedDiff);
+    if (!revertedPatch) return null;
+
+    const revertedContent = applyPatch(newContent, revertedPatch);
+    if (revertedContent === false) return null;
+
+    return createUpdateDiffContent(movePath, revertedContent, newContent);
+}
+
+function revertPatch(unifiedDiff: string) {
+    const [patch] = parsePatch(unifiedDiff);
+    if (!patch) return null;
+
+    return reversePatch(patch);
+}
+
+function createUpdateDiffContent(path: string, oldText: string, newText: string): ToolCallContent {
     return {
         type: "diff",
-        oldText: oldContent,
-        newText: newContent,
-        path: change.path,
+        oldText,
+        newText,
+        path,
         _meta: {
             kind: "update",
         },
@@ -313,9 +339,8 @@ async function createUpdateFileContent(change: FileUpdateChange): Promise<ToolCa
 
 async function createDeleteFileContent(change: FileUpdateChange): Promise<ToolCallContent> {
     // If the patch deletes a file, the old content may be only available from the diff.
-    const oldContent = await readFile(change.path, { encoding: "utf8"} ).catch(() =>
-        isUnifiedDiff(change.diff) ? patchToDeletedContent(change.diff) : change.diff
-    );
+    const fileContent = await readFileContent(change.path);
+    const oldContent = fileContent ?? (isUnifiedDiff(change.diff) ? patchToDeletedContent(change.diff) : change.diff);
 
     return {
         type: "diff",
@@ -326,6 +351,10 @@ async function createDeleteFileContent(change: FileUpdateChange): Promise<ToolCa
             kind: "delete",
         }
     }
+}
+
+async function readFileContent(filePath: string): Promise<string | null> {
+    return await readFile(filePath, { encoding: "utf8" }).catch(() => null);
 }
 
 /**

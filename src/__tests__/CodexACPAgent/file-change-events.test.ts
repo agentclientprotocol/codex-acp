@@ -330,6 +330,44 @@ Moved to: /test/project/NewFile.kt`,
                 {
                     oldText: 'old code line\n',
                     newText: 'new code line\n',
+                    path: '/test/project/NewFile.kt',
+                },
+            ],
+        });
+    });
+
+    it('should parse update diffs when the original file was moved already', async () => {
+        mockFileContent('/test/project/NewFile.kt', 'new code line\n');
+
+        const fileChange: ThreadItem = {
+            type: 'fileChange',
+            id: 'file-change-moved-file-exists',
+            changes: [
+                {
+                    path: '/test/project/OriginalFile.kt',
+                    kind: {
+                        type: 'update',
+                        move_path: '/test/project/NewFile.kt',
+                    },
+                    diff:
+`@@ -1 +1 @@
+-old code line
++new code line
+
+
+Moved to: /test/project/NewFile.kt`,
+                },
+            ],
+            status: 'inProgress',
+        };
+
+        const updateEvent = await createFileChangeUpdate(fileChange);
+        expect(updateEvent).toMatchObject({
+            content: [
+                {
+                    oldText: 'old code line\n',
+                    newText: 'new code line\n',
+                    path: '/test/project/NewFile.kt',
                 },
             ],
         });
