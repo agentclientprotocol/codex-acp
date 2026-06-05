@@ -5,6 +5,10 @@ on:
     - cron: '0 5 * * *' 
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: read
+
 env:
   CODEX_PACKAGE: '@openai/codex'
   CODEX_UPDATE_LABEL: 'codex-update'
