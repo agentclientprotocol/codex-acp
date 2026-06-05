@@ -49,6 +49,7 @@ describe('CodexACPAgent - initialize', () => {
                 sessionCapabilities: {
                     resume: {},
                     list: {},
+                    close: {},
                 },
                 mcpCapabilities: {
                     acp: false,

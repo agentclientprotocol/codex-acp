@@ -80,6 +80,9 @@ export class CodexAcpServer implements acp.Agent {
 
     private readonly sessions: Map<string, SessionState>;
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
+    private readonly pendingTurnStarts: Map<string, Promise<string | null>>;
+    private readonly activePromptCompletions: Map<string, Promise<void>>;
+    private readonly closingSessions: Set<string>;
 
     constructor(
         connection: acp.AgentSideConnection,
@@ -89,6 +92,9 @@ export class CodexAcpServer implements acp.Agent {
     ) {
         this.sessions = new Map();
         this.pendingMcpStartupSessions = new Map();
+        this.pendingTurnStarts = new Map();
+        this.activePromptCompletions = new Map();
+        this.closingSessions = new Set();
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
@@ -123,7 +129,8 @@ export class CodexAcpServer implements acp.Agent {
                 },
                 sessionCapabilities: {
                     resume: { },
-                    list: { }
+                    list: { },
+                    close: { },
                 },
                 mcpCapabilities: {
                     acp: false,
@@ -290,6 +297,36 @@ export class CodexAcpServer implements acp.Agent {
         logger.log("Listing sessions...", {cwd: params.cwd, cursor: params.cursor});
         await this.checkAuthorization();
         return await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
+    }
+
+    async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
+        logger.log("Closing session...", {sessionId: params.sessionId});
+        const sessionState = this.sessions.get(params.sessionId);
+        this.closingSessions.add(params.sessionId);
+
+        try {
+            if (sessionState) {
+                await this.interruptSessionTurn(sessionState, "Close", true);
+            } else {
+                logger.log("Close request received for unknown local session", {sessionId: params.sessionId});
+            }
+
+            const activePromptCompletion = this.activePromptCompletions.get(params.sessionId);
+            if (activePromptCompletion) {
+                await activePromptCompletion;
+            }
+
+            await this.runWithProcessCheck(() => this.codexAcpClient.closeSession(params.sessionId));
+            logger.log("Session closed", {sessionId: params.sessionId});
+        } finally {
+            this.sessions.delete(params.sessionId);
+            this.pendingMcpStartupSessions.delete(params.sessionId);
+            this.pendingTurnStarts.delete(params.sessionId);
+            this.activePromptCompletions.delete(params.sessionId);
+            this.closingSessions.delete(params.sessionId);
+        }
+
+        return {};
     }
 
     async newSession(
@@ -778,6 +815,9 @@ export class CodexAcpServer implements acp.Agent {
                     pendingStartup.afterVersion,
                 )
             );
+            if (!this.sessions.has(sessionId)) {
+                return;
+            }
             await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.requestedServers);
         } catch (err) {
             logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
@@ -807,6 +847,81 @@ export class CodexAcpServer implements acp.Agent {
         }
     }
 
+    private trackActivePrompt(sessionId: string): () => void {
+        let resolveCompletion: () => void = () => {};
+        const completion = new Promise<void>((resolve) => {
+            resolveCompletion = resolve;
+        });
+        this.activePromptCompletions.set(sessionId, completion);
+
+        let completed = false;
+        return () => {
+            if (completed) {
+                return;
+            }
+            completed = true;
+            if (this.activePromptCompletions.get(sessionId) === completion) {
+                this.activePromptCompletions.delete(sessionId);
+            }
+            resolveCompletion();
+        };
+    }
+
+    private async interruptSessionTurn(
+        sessionState: SessionState,
+        requestName: "Cancel" | "Close",
+        resolveInterruptedTurn: boolean,
+    ): Promise<void> {
+        const turnId = await this.getInterruptibleTurnId(sessionState, requestName);
+        if (!turnId) {
+            return;
+        }
+
+        logger.log(`${requestName} session requested`, {
+            sessionId: sessionState.sessionId,
+            currentTurnId: turnId,
+        });
+        try {
+            await this.runWithProcessCheck(() => this.codexAcpClient.turnInterrupt({
+                threadId: sessionState.sessionId,
+                turnId,
+            }));
+            if (resolveInterruptedTurn) {
+                this.codexAcpClient.resolveTurnInterrupted({
+                    threadId: sessionState.sessionId,
+                    turnId,
+                });
+            }
+            logger.log(`${requestName} - turnInterrupt succeeded`, {
+                sessionId: sessionState.sessionId,
+                currentTurnId: turnId,
+            });
+        } catch (err) {
+            logger.error(`${requestName} - turnInterrupt failed`, err);
+        }
+    }
+
+    private async getInterruptibleTurnId(
+        sessionState: SessionState,
+        requestName: "Cancel" | "Close",
+    ): Promise<string | null> {
+        if (sessionState.currentTurnId) {
+            return sessionState.currentTurnId;
+        }
+
+        const pendingTurnStart = this.pendingTurnStarts.get(sessionState.sessionId);
+        if (!pendingTurnStart) {
+            logger.log(`${requestName} request rejected: no current turn`, {sessionId: sessionState.sessionId});
+            return null;
+        }
+
+        const turnId = await pendingTurnStart;
+        if (!turnId) {
+            logger.log(`${requestName} request rejected: no current turn`, {sessionId: sessionState.sessionId});
+        }
+        return turnId;
+    }
+
     async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
         logger.log("Prompt received", {
             sessionId: params.sessionId,
@@ -815,6 +930,9 @@ export class CodexAcpServer implements acp.Agent {
         const sessionState = this.getSessionState(params.sessionId);
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
+        const completeActivePrompt = this.trackActivePrompt(params.sessionId);
+        let pendingTurnStart: Promise<string | null> | null = null;
+        let resolvePendingTurnStart: (turnId: string | null) => void = () => {};
 
         try {
             const eventHandler = new CodexEventHandler(this.connection, sessionState);
@@ -832,6 +950,14 @@ export class CodexAcpServer implements acp.Agent {
                 logger.log("Prompt handled by a command");
                 return {
                     stopReason: "end_turn",
+                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                    _meta: this.buildQuotaMeta(sessionState),
+                };
+            }
+
+            if (this.closingSessions.has(params.sessionId)) {
+                return {
+                    stopReason: "cancelled",
                     usage: this.buildPromptUsage(sessionState.lastTokenUsage),
                     _meta: this.buildQuotaMeta(sessionState),
                 };
@@ -857,21 +983,47 @@ export class CodexAcpServer implements acp.Agent {
                 sessionState.fastModeEnabled,
                 sessionState.currentModelSupportsFast,
             );
+            pendingTurnStart = new Promise<string | null>((resolve) => {
+                resolvePendingTurnStart = resolve;
+            });
+            this.pendingTurnStarts.set(params.sessionId, pendingTurnStart);
             const turnCompleted = await this.runWithProcessCheck(
-                () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, serviceTier, disableSummary, sessionState.cwd));
+                () => this.codexAcpClient.sendPrompt(
+                    params,
+                    agentMode,
+                    modelId,
+                    serviceTier,
+                    disableSummary,
+                    sessionState.cwd,
+                    (turnId) => {
+                        sessionState.currentTurnId = turnId;
+                        resolvePendingTurnStart(turnId);
+                    },
+                    () => this.closingSessions.has(params.sessionId),
+                ));
+
+            if (turnCompleted === null) {
+                return {
+                    stopReason: "cancelled",
+                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                    _meta: this.buildQuotaMeta(sessionState),
+                };
+            }
 
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
-                await this.connection.sessionUpdate({
-                    sessionId: params.sessionId,
-                    update: {
-                        sessionUpdate: "agent_message_chunk",
-                        content: {
-                            type: "text",
-                            text: "*Conversation interrupted*"
+                if (!this.closingSessions.has(params.sessionId) && this.sessions.has(params.sessionId)) {
+                    await this.connection.sessionUpdate({
+                        sessionId: params.sessionId,
+                        update: {
+                            sessionUpdate: "agent_message_chunk",
+                            content: {
+                                type: "text",
+                                text: "*Conversation interrupted*"
+                            }
                         }
-                    }
-                });
+                    });
+                }
                 return {
                     stopReason: "cancelled",
                     usage: this.buildPromptUsage(sessionState.lastTokenUsage),
@@ -896,6 +1048,11 @@ export class CodexAcpServer implements acp.Agent {
         } finally {
             logger.log("Prompt completed", {sessionId: params.sessionId});
             sessionState.currentTurnId = null;
+            if (pendingTurnStart !== null && this.pendingTurnStarts.get(params.sessionId) === pendingTurnStart) {
+                this.pendingTurnStarts.delete(params.sessionId);
+            }
+            resolvePendingTurnStart(null);
+            completeActivePrompt();
         }
     }
 
@@ -948,28 +1105,8 @@ export class CodexAcpServer implements acp.Agent {
             return;
         }
 
-        if (!sessionState.currentTurnId) {
-            logger.log("Cancel request rejected: no current turn", {sessionId: params.sessionId});
-            return;
-        }
-
-        logger.log("Cancel session requested", {
-            sessionId: params.sessionId,
-            currentTurnId: sessionState.currentTurnId
-        });
-        try {
-            // After turnInterrupt(), Codex will send turn/completed event, which will naturally complete awaitTurnCompleted()
-            await this.codexAcpClient.turnInterrupt({
-                threadId: params.sessionId,
-                turnId: sessionState.currentTurnId
-            });
-            logger.log("Cancel - turnInterrupt succeeded", {
-                sessionId: params.sessionId,
-                currentTurnId: sessionState.currentTurnId
-            });
-        } catch (err) {
-            logger.error(`Cancel - turnInterrupt failed`, err);
-        }
+        // After turnInterrupt(), Codex will send turn/completed, which naturally completes awaitTurnCompleted().
+        await this.interruptSessionTurn(sessionState, "Cancel", false);
     }
 }
 

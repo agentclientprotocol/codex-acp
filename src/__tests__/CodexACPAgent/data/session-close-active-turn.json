@@ -1,0 +1,21 @@
+{
+  "eventType": "request",
+  "method": "turn/interrupt",
+  "params": {
+    "threadId": "session-id",
+    "turnId": "turn-id"
+  }
+}
+{
+  "eventType": "response"
+}
+{
+  "eventType": "request",
+  "method": "thread/unsubscribe",
+  "params": {
+    "threadId": "session-id"
+  }
+}
+{
+  "eventType": "response"
+}

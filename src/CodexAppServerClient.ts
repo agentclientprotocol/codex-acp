@@ -33,6 +33,8 @@ import type {
     ThreadResumeResponse,
     ThreadStartParams,
     ThreadStartResponse,
+    ThreadUnsubscribeParams,
+    ThreadUnsubscribeResponse,
     TurnCompletedNotification,
     TurnInterruptParams,
     TurnInterruptResponse,
@@ -151,6 +153,12 @@ export class CodexAppServerClient {
         this.elicitationHandlers.set(threadId, handler);
     }
 
+    clearThreadHandlers(threadId: string): void {
+        this.notificationHandlers.delete(threadId);
+        this.approvalHandlers.delete(threadId);
+        this.elicitationHandlers.delete(threadId);
+    }
+
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
         return await this.sendRequest({ method: "initialize", params: params });
     }
@@ -159,7 +167,7 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "turn/start", params: params });
     }
 
-    async runTurn(params: TurnStartParams): Promise<TurnCompletedNotification> {
+    async runTurn(params: TurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
             capturedCompletions.push(event);
@@ -167,6 +175,7 @@ export class CodexAppServerClient {
 
         try {
             const turnStarted = await this.turnStart(params);
+            onTurnStarted?.(turnStarted.turn.id);
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnStarted.turn.id);
             releaseCapture();
             if (earlyCompletion) {
@@ -202,6 +211,10 @@ export class CodexAppServerClient {
 
     async threadRead(params: ThreadReadParams): Promise<ThreadReadResponse> {
         return await this.sendRequest({ method: "thread/read", params: params });
+    }
+
+    async threadUnsubscribe(params: ThreadUnsubscribeParams): Promise<ThreadUnsubscribeResponse> {
+        return await this.sendRequest({ method: "thread/unsubscribe", params: params });
     }
 
     async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
@@ -253,6 +266,21 @@ export class CodexAppServerClient {
         return await new Promise((resolve) => {
             const threadResolvers = this.getOrCreatePendingTurnCompletionResolvers(threadId);
             threadResolvers.set(turnId, resolve);
+        });
+    }
+
+    resolveTurnInterrupted(threadId: string, turnId: string): void {
+        this.recordTurnCompleted({
+            threadId,
+            turn: {
+                id: turnId,
+                items: [],
+                status: "interrupted",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            },
         });
     }
 
