@@ -213,10 +213,17 @@ export class CodexAcpServer implements acp.Agent {
         return generation;
     }
 
-    private assertSessionOpenCanInstall(sessionId: string, generation: number): void {
-        if (this.closingSessions.has(sessionId) || this.getSessionGeneration(sessionId) !== generation) {
-            throw RequestError.invalidRequest(`Session ${sessionId} is closing`);
+    private sessionOpenCanInstall(sessionId: string, generation: number): boolean {
+        return !this.closingSessions.has(sessionId) && this.getSessionGeneration(sessionId) === generation;
+    }
+
+    private async closeStaleSessionOpen(sessionId: string): Promise<void> {
+        try {
+            await this.runWithProcessCheck(() => this.codexAcpClient.closeSession(sessionId));
+        } catch (err) {
+            logger.error(`Failed to close stale session open for ${sessionId}`, err);
         }
+        throw RequestError.invalidRequest(`Session ${sessionId} is closing`);
     }
 
     private getSessionGeneration(sessionId: string): number {
@@ -251,7 +258,9 @@ export class CodexAcpServer implements acp.Agent {
         const account = await this.getActiveAccount();
         const {sessionId, currentModelId, models} = sessionMetadata;
         const sessionGeneration = requestedSessionGeneration ?? this.beginSessionOpen(sessionId);
-        this.assertSessionOpenCanInstall(sessionId, sessionGeneration);
+        if (!this.sessionOpenCanInstall(sessionId, sessionGeneration)) {
+            await this.closeStaleSessionOpen(sessionId);
+        }
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, "sessionId" in request);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
@@ -554,7 +563,9 @@ export class CodexAcpServer implements acp.Agent {
 
         const account = await this.getActiveAccount();
         const {sessionId, currentModelId, models, thread} = sessionMetadata;
-        this.assertSessionOpenCanInstall(sessionId, requestedSessionGeneration);
+        if (!this.sessionOpenCanInstall(sessionId, requestedSessionGeneration)) {
+            await this.closeStaleSessionOpen(sessionId);
+        }
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);

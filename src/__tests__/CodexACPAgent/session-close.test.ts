@@ -173,6 +173,7 @@ describe("ACP session close", () => {
         const {codexAcpAgent, codexAcpClient} = await createSession();
         const resume = deferred<SessionMetadata>();
         vi.spyOn(codexAcpClient, "resumeSession").mockReturnValue(resume.promise);
+        const closeSessionSpy = vi.spyOn(codexAcpClient, "closeSession");
 
         const resumePromise = codexAcpAgent.resumeSession({
             sessionId,
@@ -184,6 +185,8 @@ describe("ACP session close", () => {
         resume.resolve(createSessionMetadata());
 
         await expect(resumePromise).rejects.toThrow("Invalid request");
+        expect(closeSessionSpy).toHaveBeenCalledTimes(2);
+        expect(closeSessionSpy).toHaveBeenLastCalledWith(sessionId);
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
     });
 });
