@@ -55,14 +55,7 @@ describe('CodexEventHandler - file change events', () => {
                         {
                             path: '/test/project/NewFile.kt',
                             kind: { type: 'add' },
-                            diff: `--- /dev/null
-+++ /test/project/NewFile.kt
-@@ -0,0 +1,5 @@
-+package test.project
-+
-+class NewFile {
-+    fun hello() = "Hello"
-+}`,
+                            diff: 'package test.project\n\nclass NewFile {\n    fun hello() = "Hello"\n}\n',
                         },
                     ],
                     status: 'completed',
@@ -90,18 +83,12 @@ describe('CodexEventHandler - file change events', () => {
                         {
                             path: '/test/project/FileA.kt',
                             kind: { type: 'add' },
-                            diff: `--- /dev/null
-+++ /test/project/FileA.kt
-@@ -0,0 +1 @@
-+class FileA`,
+                            diff: 'class FileA\n',
                         },
                         {
                             path: '/test/project/FileB.kt',
                             kind: { type: 'add' },
-                            diff: `--- /dev/null
-+++ /test/project/FileB.kt
-@@ -0,0 +1 @@
-+class FileB`,
+                            diff: 'class FileB\n',
                         },
                     ],
                     status: 'completed',
@@ -158,12 +145,7 @@ describe('CodexEventHandler - file change events', () => {
                         {
                             path: '/test/project/OldFile.kt',
                             kind: { type: 'delete' },
-                            diff: `--- /test/project/OldFile.kt
-+++ /dev/null
-@@ -1,3 +0,0 @@
--package test.project
--
--class OldFile {}`,
+                            diff: 'package test.project\n\nclass OldFile {}',
                         },
                     ],
                     status: 'completed',
@@ -224,12 +206,7 @@ describe('CodexEventHandler - file change events', () => {
                         {
                             path: '/test/project/OldFile.kt',
                             kind: { type: 'delete' },
-                            diff: `--- /test/project/OldFile.kt
-+++ /dev/null
-@@ -1,3 +0,0 @@
--package test.project
--
--class OldFile {}`,
+                            diff: 'package test.project\n\nclass OldFile {}',
                         },
                     ],
                     status: 'completed',
@@ -274,19 +251,19 @@ describe('CodexEventHandler - file change events', () => {
         );
     });
 
-    it('should ignore broken unified diffs in file changes', async () => {
-        const fileChange: ThreadItem = {
+    it('should ignore broken unified diffs in update file changes', async () => {
+        const fileChange: ThreadItem & { type: 'fileChange' } = {
             type: 'fileChange',
             id: 'file-change-broken-diff',
             changes: [
                 {
-                    path: '/test/project/BrokenFile.kt',
-                    kind: { type: 'add' },
+                    path: '/test/project/OldFile.kt',
+                    kind: { type: 'update', move_path: null },
                     diff:
-`--- /dev/null
-+++ /test/project/BrokenFile.kt
+`--- /test/project/OldFile.kt
++++ /test/project/OldFile.kt
 @@ broken @@
-+class BrokenFile
++class UpdatedFile
 `,
                 },
             ],

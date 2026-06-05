@@ -108,13 +108,8 @@ describe("CodexACPAgent - loadSession", () => {
                                 {
                                     path: "/test/project/Added.txt",
                                     kind: { type: "add" },
-                                    diff: `--- /dev/null
-+++ /test/project/Added.txt
-@@ -0,0 +1,2 @@
-+Hello
-+World
-`,
-                                },
+                                    diff: "Hello\nWorld\n",
+                                }
                             ],
                             status: "completed",
                         },

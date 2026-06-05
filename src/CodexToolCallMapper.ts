@@ -274,17 +274,10 @@ async function createPatchContent(change: FileUpdateChange): Promise<ToolCallCon
 }
 
 async function createAddFileContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
-    let newText;
-    if (isUnifiedDiff(change.diff)) {
-        newText = applyPatch("", change.diff)
-        if (!newText) return null;
-    } else {
-        newText = change.diff;
-    }
     return {
         type: "diff",
         oldText: null,
-        newText: newText,
+        newText: change.diff, // app-server always returns file content instead of diff
         path: change.path,
         _meta: {
             kind: "add",
@@ -338,13 +331,9 @@ function createUpdateDiffContent(path: string, oldText: string, newText: string)
 }
 
 async function createDeleteFileContent(change: FileUpdateChange): Promise<ToolCallContent> {
-    // If the patch deletes a file, the old content may be only available from the diff.
-    const fileContent = await readFileContent(change.path);
-    const oldContent = fileContent ?? (isUnifiedDiff(change.diff) ? patchToDeletedContent(change.diff) : change.diff);
-
     return {
         type: "diff",
-        oldText: oldContent,
+        oldText: change.diff, // app-server always returns file content instead of diff
         newText: "",
         path: change.path,
         _meta: {
@@ -363,45 +352,4 @@ async function readFileContent(filePath: string): Promise<string | null> {
  */
 function recoverCorruptedDiff(diff: string): string {
     return diff.replace(/\nMoved to: .*$/, "");
-}
-
-function isUnifiedDiff(content: string): boolean {
-    return content.startsWith("--- ") || content.includes("\n--- ");
-}
-
-/**
- * Recreates the content of a deleted file from the unified diff.
- * @param unifiedDiff The unified diff of the file deletion patch
- */
-function patchToDeletedContent(unifiedDiff: string): string | null {
-    try {
-        const [patch] = parsePatch(unifiedDiff);
-        if (!patch || patch.hunks.length === 0) {
-            return null;
-        }
-
-        const oldLines: string[] = [];
-        let hasNoTrailingNewlineMarker = false;
-
-        for (const hunk of patch.hunks) {
-            for (const line of hunk.lines) {
-                if (line === "\\ No newline at end of file") {
-                    hasNoTrailingNewlineMarker = true;
-                    continue;
-                }
-                if (line.startsWith("-") || line.startsWith(" ")) {
-                    oldLines.push(line.slice(1));
-                }
-            }
-        }
-
-        if (oldLines.length === 0) {
-            return "";
-        }
-
-        const oldText = oldLines.join("\n");
-        return hasNoTrailingNewlineMarker || !unifiedDiff.endsWith("\n") ? oldText : `${oldText}\n`;
-    } catch {
-        return null;
-    }
 }
