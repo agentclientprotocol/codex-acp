@@ -7,7 +7,9 @@ import {
 } from "../acp-test-utils";
 import type {CodexAcpServer} from "../../CodexAcpServer";
 import type {CodexAcpClient} from "../../CodexAcpClient";
+import type {McpStartupResult} from "../../CodexAppServerClient";
 import type {TurnStartResponse} from "../../app-server/v2";
+import type {McpServer} from "@agentclientprotocol/sdk";
 
 const sessionId = "session-id";
 
@@ -118,9 +120,56 @@ describe("ACP session close", () => {
         );
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
     });
+
+    it("suppresses MCP startup updates while close is in progress", async () => {
+        const mcpStartup = deferred<McpStartupResult>();
+        const mcpServer: McpServer = {
+            name: "broken-mcp",
+            command: "npx",
+            args: ["broken"],
+            env: [],
+        };
+        const {fixture, codexAcpAgent, codexAcpClient} = await createSession({
+            mcpServers: [mcpServer],
+            configure: ({codexAcpClient}) => {
+                vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockReturnValue(mcpStartup.promise);
+            },
+        });
+        const unsubscribe = deferred<void>();
+        vi.spyOn(codexAcpClient, "closeSession").mockReturnValue(unsubscribe.promise);
+
+        await vi.waitFor(() => {
+            expect(codexAcpClient.awaitMcpServerStartup).toHaveBeenCalledWith(["broken-mcp"], expect.any(Number));
+        });
+        fixture.clearAcpConnectionDump();
+
+        const closePromise = codexAcpAgent.closeSession({sessionId});
+        await vi.waitFor(() => {
+            expect(codexAcpClient.closeSession).toHaveBeenCalledWith(sessionId);
+        });
+
+        mcpStartup.resolve({
+            ready: [],
+            failed: [{server: "broken-mcp", error: "boom"}],
+            cancelled: [],
+        });
+        await waitForMicrotasks();
+
+        expect(fixture.getAcpConnectionEvents([])).toEqual([]);
+
+        unsubscribe.resolve(undefined);
+        await closePromise;
+    });
 });
 
-async function createSession(): Promise<{
+async function createSession(options: {
+    mcpServers?: McpServer[],
+    configure?: (params: {
+        fixture: CodexMockTestFixture,
+        codexAcpAgent: CodexAcpServer,
+        codexAcpClient: CodexAcpClient,
+    }) => void,
+} = {}): Promise<{
     fixture: CodexMockTestFixture,
     codexAcpAgent: CodexAcpServer,
     codexAcpClient: CodexAcpClient,
@@ -140,7 +189,9 @@ async function createSession(): Promise<{
         currentServiceTier: null,
     });
 
-    await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
+    options.configure?.({fixture, codexAcpAgent, codexAcpClient});
+
+    await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: options.mcpServers ?? []});
     fixture.clearCodexConnectionDump();
     fixture.clearAcpConnectionDump();
 

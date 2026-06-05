@@ -815,14 +815,18 @@ export class CodexAcpServer implements acp.Agent {
                     pendingStartup.afterVersion,
                 )
             );
-            if (!this.sessions.has(sessionId)) {
+            if (!this.sessions.has(sessionId)
+                || this.closingSessions.has(sessionId)
+                || this.pendingMcpStartupSessions.get(sessionId) !== pendingStartup) {
                 return;
             }
             await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.requestedServers);
         } catch (err) {
             logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
         } finally {
-            this.pendingMcpStartupSessions.delete(sessionId);
+            if (this.pendingMcpStartupSessions.get(sessionId) === pendingStartup) {
+                this.pendingMcpStartupSessions.delete(sessionId);
+            }
         }
     }
 
