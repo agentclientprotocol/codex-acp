@@ -4,6 +4,37 @@
     {
       "sessionId": "test-session-id",
       "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "command-flow",
+        "kind": "execute",
+        "title": "echo hello",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "command-flow"
+          }
+        ],
+        "rawInput": {
+          "command": "echo hello",
+          "cwd": "/test/project"
+        },
+        "_meta": {
+          "terminal_info": {
+            "cwd": "/test/project",
+            "terminal_id": "command-flow"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-flow",
         "_meta": {
@@ -33,37 +64,6 @@
           "terminal_exit": {
             "exit_code": 0,
             "signal": null,
-            "terminal_id": "command-flow"
-          }
-        }
-      }
-    }
-  ]
-}
-{
-  "method": "sessionUpdate",
-  "args": [
-    {
-      "sessionId": "test-session-id",
-      "update": {
-        "sessionUpdate": "tool_call",
-        "toolCallId": "command-flow",
-        "kind": "execute",
-        "title": "echo hello",
-        "status": "in_progress",
-        "content": [
-          {
-            "type": "terminal",
-            "terminalId": "command-flow"
-          }
-        ],
-        "rawInput": {
-          "command": "echo hello",
-          "cwd": "/test/project"
-        },
-        "_meta": {
-          "terminal_info": {
-            "cwd": "/test/project",
             "terminal_id": "command-flow"
           }
         }

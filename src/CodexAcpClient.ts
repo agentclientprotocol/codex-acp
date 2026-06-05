@@ -49,6 +49,7 @@ export class CodexAcpClient {
     private gatewayConfig: GatewayConfig | null;
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
+    private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
 
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
@@ -388,16 +389,52 @@ export class CodexAcpClient {
         approvalHandler: ApprovalHandler,
         elicitationHandler: ElicitationHandler
     ) {
-        let notificationQueue = Promise.resolve();
         this.codexClient.onServerNotification(sessionId, (event) => {
-            notificationQueue = notificationQueue
-                .then(() => eventHandler(event))
-                .catch((error) => {
-                    logger.error("Error handling Codex session notification", error);
-                });
+            this.enqueueSessionNotification(sessionId, () => eventHandler(event));
         });
-        this.codexClient.onApprovalRequest(sessionId, approvalHandler);
-        this.codexClient.onElicitationRequest(sessionId, elicitationHandler);
+        this.codexClient.onApprovalRequest(sessionId, {
+            handleCommandExecution: async (params) => {
+                await this.waitForSessionNotifications(sessionId);
+                return await approvalHandler.handleCommandExecution(params);
+            },
+            handleFileChange: async (params) => {
+                await this.waitForSessionNotifications(sessionId);
+                return await approvalHandler.handleFileChange(params);
+            },
+        });
+        this.codexClient.onElicitationRequest(sessionId, {
+            handleElicitation: async (params) => {
+                await this.waitForSessionNotifications(sessionId);
+                return await elicitationHandler.handleElicitation(params);
+            },
+        });
+    }
+
+    async waitForSessionNotifications(sessionId: string): Promise<void> {
+        while (true) {
+            const queue = this.sessionNotificationQueues.get(sessionId);
+            if (!queue) return;
+            await queue;
+        }
+    }
+
+    private enqueueSessionNotification(sessionId: string, operation: () => void | Promise<void>): void {
+        const run = async () => {
+            try {
+                await operation();
+            } catch (error) {
+                logger.error("Error handling Codex session notification", error);
+            }
+        };
+
+        const previous = this.sessionNotificationQueues.get(sessionId);
+        const next = previous ? previous.then(run, run) : run();
+        this.sessionNotificationQueues.set(sessionId, next);
+        void next.finally(() => {
+            if (this.sessionNotificationQueues.get(sessionId) === next) {
+                this.sessionNotificationQueues.delete(sessionId);
+            }
+        });
     }
 
     async sendPrompt(

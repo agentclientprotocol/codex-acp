@@ -1154,6 +1154,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 }
             }
         });
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
 
         expect(sessionState.rateLimits).not.toBeNull();
         expect(sessionState.rateLimits!.size).toBe(2);

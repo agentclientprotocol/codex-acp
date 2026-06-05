@@ -440,6 +440,7 @@ export async function setupPromptAndSendNotifications(
     for (const notification of notifications) {
         fixture.sendServerNotification(notification);
     }
+    await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
 
     await vi.waitFor(() => {
         const dump = fixture.getAcpConnectionDump([]);

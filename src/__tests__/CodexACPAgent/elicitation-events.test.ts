@@ -288,6 +288,7 @@ describe('Elicitation Events', () => {
 
             fixture.sendServerNotification(startedNotification);
             fixture.sendServerNotification(completedNotification);
+            await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
             fixture.clearAcpConnectionDump();
 
             const params: McpServerElicitationRequestParams = {
@@ -340,6 +341,7 @@ describe('Elicitation Events', () => {
 
             fixture.sendServerNotification(startedNotification);
             fixture.sendServerNotification(resolvedNotification);
+            await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
             fixture.clearAcpConnectionDump();
 
             const params: McpServerElicitationRequestParams = {

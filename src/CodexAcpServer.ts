@@ -1222,6 +1222,8 @@ export class CodexAcpServer implements acp.Agent {
                 };
             }
 
+            await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
                 if (!this.sessionIsClosing(params.sessionId) && this.sessions.has(params.sessionId)) {
