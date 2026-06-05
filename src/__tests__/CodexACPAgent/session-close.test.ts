@@ -99,6 +99,33 @@ describe("ACP session close", () => {
         });
     });
 
+    it("does not start a turn after close while prompt startup is still refreshing skills", async () => {
+        const {fixture, codexAcpAgent} = await createSession();
+        const skillRefresh = deferred<{data: []}>();
+        const listSkillsSpy = vi.spyOn(fixture.getCodexAppServerClient(), "listSkills")
+            .mockReturnValue(skillRefresh.promise);
+        const turnStartSpy = vi.spyOn(fixture.getCodexAppServerClient(), "turnStart")
+            .mockResolvedValue(createTurnStartResponse("turn-id"));
+
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId,
+            prompt: [{type: "text", text: "prompt before turn start"}],
+        });
+
+        await vi.waitFor(() => {
+            expect(listSkillsSpy).toHaveBeenCalled();
+        });
+
+        await expect(codexAcpAgent.closeSession({sessionId})).resolves.toEqual({});
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+
+        skillRefresh.resolve({data: []});
+        await waitForMicrotasks();
+
+        expect(turnStartSpy).not.toHaveBeenCalled();
+        expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
+    });
+
     it("does not hang when close interrupt fails during an active prompt", async () => {
         const {fixture, codexAcpAgent} = await createSession();
         const turnInterruptSpy = vi.spyOn(fixture.getCodexAcpClient(), "turnInterrupt")
@@ -188,6 +215,34 @@ describe("ACP session close", () => {
         expect(closeSessionSpy).toHaveBeenCalledTimes(2);
         expect(closeSessionSpy).toHaveBeenLastCalledWith(sessionId);
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
+    });
+
+    it("does not let a stale resume unsubscribe a newer reopened session", async () => {
+        const {codexAcpAgent, codexAcpClient} = await createSession();
+        const staleResume = deferred<SessionMetadata>();
+        vi.spyOn(codexAcpClient, "resumeSession")
+            .mockReturnValueOnce(staleResume.promise)
+            .mockResolvedValueOnce(createSessionMetadata());
+        const closeSessionSpy = vi.spyOn(codexAcpClient, "closeSession");
+
+        const staleResumePromise = codexAcpAgent.resumeSession({
+            sessionId,
+            cwd: "/test/cwd",
+            mcpServers: [],
+        });
+
+        await codexAcpAgent.closeSession({sessionId});
+        await codexAcpAgent.resumeSession({
+            sessionId,
+            cwd: "/test/cwd",
+            mcpServers: [],
+        });
+
+        staleResume.resolve(createSessionMetadata());
+
+        await expect(staleResumePromise).rejects.toThrow("Invalid request");
+        expect(closeSessionSpy).toHaveBeenCalledTimes(1);
+        expect(codexAcpAgent.getSessionState(sessionId).sessionId).toBe(sessionId);
     });
 });
 
