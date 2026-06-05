@@ -384,11 +384,18 @@ export class CodexAcpClient {
 
     async subscribeToSessionEvents(
         sessionId: string,
-        eventHandler: (result: ServerNotification) => void,
+        eventHandler: (result: ServerNotification) => void | Promise<void>,
         approvalHandler: ApprovalHandler,
         elicitationHandler: ElicitationHandler
     ) {
-        this.codexClient.onServerNotification(sessionId, eventHandler);
+        let notificationQueue = Promise.resolve();
+        this.codexClient.onServerNotification(sessionId, (event) => {
+            notificationQueue = notificationQueue
+                .then(() => eventHandler(event))
+                .catch((error) => {
+                    logger.error("Error handling Codex session notification", error);
+                });
+        });
         this.codexClient.onApprovalRequest(sessionId, approvalHandler);
         this.codexClient.onElicitationRequest(sessionId, elicitationHandler);
     }

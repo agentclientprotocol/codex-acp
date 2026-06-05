@@ -6,23 +6,33 @@ import type { ThreadItem } from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
 import {AgentMode} from "../../AgentMode";
 
-const { mockFiles, mockFileContent, removeMockFile, clearMockFiles } = vi.hoisted(() => {
+const { mockFiles, mockReadDelays, mockFileContent, delayMockFileRead, removeMockFile, clearMockFiles } = vi.hoisted(() => {
     const files = new Map<string, string>();
+    const readDelays = new Map<string, Promise<void>>();
     return {
         mockFiles: files,
+        mockReadDelays: readDelays,
         mockFileContent: (path: string, content: string) => files.set(path, content),
+        delayMockFileRead: (path: string, delay: Promise<void>) => readDelays.set(path, delay),
         removeMockFile: (path: string) => files.delete(path),
-        clearMockFiles: () => files.clear(),
+        clearMockFiles: () => {
+            files.clear();
+            readDelays.clear();
+        },
     };
 });
 
 vi.mock('node:fs/promises', () => ({
-    readFile: (path: string) => {
+    readFile: async (path: string) => {
+        const delay = mockReadDelays.get(path);
+        if (delay) {
+            await delay;
+        }
         const content = mockFiles.get(path);
         if (content !== undefined) {
-            return Promise.resolve(content);
+            return content;
         }
-        return Promise.reject(new Error(`ENOENT: no such file or directory, open '${path}'`));
+        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
     },
 }));
 
@@ -274,6 +284,153 @@ describe('CodexEventHandler - file change events', () => {
         expect(updateEvent).toMatchObject({
             content: [],
         });
+    });
+
+    it('should handle update diffs when the file was already patched', async () => {
+        mockFileContent('/test/project/OldFile.kt', 'package test.project\n\nclass UpdatedFile {}\n');
+
+        const updateFileNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                item: {
+                    type: 'fileChange',
+                    id: 'file-change-already-patched',
+                    changes: [
+                        {
+                            path: '/test/project/OldFile.kt',
+                            kind: { type: 'update', move_path: null },
+                            diff:
+`@@ -1,3 +1,3 @@
+ package test.project
+ 
+-class OldFile {}
++class UpdatedFile {}
+`,
+                        },
+                    ],
+                    status: 'completed',
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [updateFileNotification]);
+
+        const updates = mockFixture.getAcpConnectionEvents(['id']).map((event) => event.args[0].update);
+        expect(updates).toMatchObject([
+            {
+                sessionUpdate: 'tool_call',
+                toolCallId: 'file-change-already-patched',
+                status: 'completed',
+                content: [
+                    {
+                        oldText: 'package test.project\n\nclass OldFile {}\n',
+                        newText: 'package test.project\n\nclass UpdatedFile {}\n',
+                        path: '/test/project/OldFile.kt',
+                    },
+                ],
+            },
+        ]);
+    });
+
+    it('should not emit completion before a slow file-change start event', async () => {
+        mockFileContent('/test/project/OldFile.kt', 'package test.project\n\nclass OldFile {}\n');
+
+        let releaseRead = () => {};
+        const blockedRead = new Promise<void>((resolve) => {
+            releaseRead = resolve;
+        });
+        delayMockFileRead('/test/project/OldFile.kt', blockedRead);
+
+        const fileChange = {
+            type: 'fileChange',
+            id: 'file-change-slow-start',
+            changes: [
+                {
+                    path: '/test/project/OldFile.kt',
+                    kind: { type: 'update', move_path: null },
+                    diff:
+`@@ -1,3 +1,3 @@
+ package test.project
+ 
+-class OldFile {}
++class UpdatedFile {}
+`,
+                },
+            ],
+        } satisfies Omit<ThreadItem & { type: 'fileChange' }, 'status'>;
+
+        const fileChangeStarted: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                item: {
+                    ...fileChange,
+                    status: 'inProgress',
+                },
+            },
+        };
+        const fileChangeCompleted: ServerNotification = {
+            method: 'item/completed',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                item: {
+                    ...fileChange,
+                    status: 'completed',
+                },
+            },
+        };
+
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const turn = { id: 'turn-id', items: [], status: 'inProgress' as const, error: null };
+        codexAppServerClient.turnStart = vi.fn().mockResolvedValue({ turn });
+        codexAppServerClient.awaitTurnCompleted = vi.fn().mockResolvedValue({
+            threadId: sessionId,
+            turn: { ...turn, status: 'completed' },
+        });
+        vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
+
+        await codexAcpAgent.prompt({
+            sessionId,
+            prompt: [{ type: 'text', text: 'test prompt' }],
+        });
+
+        mockFixture.clearAcpConnectionDump();
+        mockFixture.sendServerNotification(fileChangeStarted);
+        mockFixture.sendServerNotification(fileChangeCompleted);
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(mockFixture.getAcpConnectionEvents([])).toEqual([]);
+
+        releaseRead();
+        await vi.waitFor(() => {
+            expect(mockFixture.getAcpConnectionEvents([])).toHaveLength(2);
+        });
+
+        const updates = mockFixture.getAcpConnectionEvents([]).map((event) => event.args[0].update);
+        expect(updates).toMatchObject([
+            {
+                sessionUpdate: 'tool_call',
+                toolCallId: 'file-change-slow-start',
+                status: 'in_progress',
+                content: [
+                    {
+                        oldText: 'package test.project\n\nclass OldFile {}\n',
+                        newText: 'package test.project\n\nclass UpdatedFile {}\n',
+                        path: '/test/project/OldFile.kt',
+                    },
+                ],
+            },
+            {
+                sessionUpdate: 'tool_call_update',
+                toolCallId: 'file-change-slow-start',
+                status: 'completed',
+            },
+        ]);
     });
 
     it('should parse update diffs with move metadata appended', async () => {

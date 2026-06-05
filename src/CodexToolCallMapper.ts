@@ -294,7 +294,18 @@ async function createUpdateFileContent(change: FileUpdateChange): Promise<ToolCa
     const oldContent = await readFileContent(change.path);
     if (oldContent !== null) {
         const patchedContent = applyPatch(oldContent, unifiedDiff);
-        if (patchedContent === false) return null;
+        if (patchedContent === false) {
+            // If Codex runs in full access mode, the file might already be patched.
+            // we can verify this by checking if the reverted patch applies.
+            const revertedPatch = revertPatch(unifiedDiff);
+            if (revertedPatch) {
+                const revertedContent = applyPatch(oldContent, revertedPatch);
+                if (revertedContent !== false) {
+                    return createUpdateDiffContent(change.path, revertedContent, oldContent);
+                }
+            }
+            return null;
+        }
         return createUpdateDiffContent(movePath ?? change.path, oldContent, patchedContent);
     }
 
