@@ -403,7 +403,7 @@ export class CodexAcpClient {
         onTurnStarted?: (turnId: string) => void,
         shouldCancel?: () => boolean,
     ): Promise<TurnCompletedNotification | null> {
-        const input = buildPromptItems(request.prompt);
+        const input = buildPromptItems(request.prompt, agentMode.planInstructions);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
 
         await this.refreshSkills(cwd, request._meta);
@@ -603,8 +603,8 @@ export type SessionMetadataWithThread = SessionMetadata & {
     thread: Thread,
 }
 
-function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
-    return prompt.map((block): UserInput | null => {
+function buildPromptItems(prompt: acp.ContentBlock[], planInstructions?: string | null): UserInput[] {
+    const items = prompt.map((block): UserInput | null => {
         switch (block.type) {
             case "text":
                 return {type: "text", text: block.text, text_elements: []};
@@ -627,6 +627,10 @@ function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
                 return null;
         }
     }).filter((block): block is UserInput => block !== null);
+    if (planInstructions) {
+        items.unshift({type: "text", text: planInstructions, text_elements: []});
+    }
+    return items;
 }
 
 function formatUriAsLink(name: string | null | undefined, uri: string): string {

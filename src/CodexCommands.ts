@@ -201,6 +201,7 @@ export class CodexCommands {
         const lines = [
             `**Model:** ${sessionState.currentModelId}`,
             `**Directory:** ${sessionState.cwd}`,
+            `**Mode:** ${agentMode.name}`,
             `**Approval:** ${agentMode.approvalPolicy}`,
             `**Sandbox:** ${agentMode.sandboxMode}`,
             `**Account:** ${accountText}`,
