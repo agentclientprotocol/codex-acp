@@ -583,6 +583,7 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     private isSessionConfigEnabled(): boolean {
+        // Temporarily disabled for JB IDEs 2026.1 due to issues in session_config (LLM-28118)
         return !isJetBrains2026_1Client(this.clientInfo);
     }
 
