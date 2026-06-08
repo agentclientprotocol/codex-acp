@@ -401,6 +401,10 @@ export class CodexAcpClient {
                 await this.waitForSessionNotifications(sessionId);
                 return await approvalHandler.handleFileChange(params);
             },
+            handlePermissionsRequest: async (params) => {
+                await this.waitForSessionNotifications(sessionId);
+                return await approvalHandler.handlePermissionsRequest(params);
+            },
         });
         this.codexClient.onElicitationRequest(sessionId, {
             handleElicitation: async (params) => {

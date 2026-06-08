@@ -6,23 +6,48 @@
       "toolCall": {
         "toolCallId": "file-change-snapshot",
         "kind": "edit",
-        "status": "pending"
+        "status": "pending",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Modifying config file"
+            }
+          }
+        ]
       },
       "options": [
         {
           "optionId": "allow_once",
           "name": "Allow Once",
-          "kind": "allow_once"
+          "kind": "allow_once",
+          "_meta": {
+            "codex": {
+              "decision": "accept"
+            }
+          }
         },
         {
           "optionId": "allow_always",
           "name": "Allow for Session",
-          "kind": "allow_always"
+          "kind": "allow_always",
+          "_meta": {
+            "codex": {
+              "decision": "acceptForSession",
+              "grantRoot": null
+            }
+          }
         },
         {
           "optionId": "reject_once",
           "name": "Reject",
-          "kind": "reject_once"
+          "kind": "reject_once",
+          "_meta": {
+            "codex": {
+              "decision": "decline"
+            }
+          }
         }
       ],
       "_meta": {

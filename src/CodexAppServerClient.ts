@@ -44,11 +44,14 @@ import type {
     CommandExecutionRequestApprovalResponse,
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
+    PermissionsRequestApprovalParams,
+    PermissionsRequestApprovalResponse,
 } from "./app-server/v2";
 
 export interface ApprovalHandler {
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
     handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse>;
+    handlePermissionsRequest(params: PermissionsRequestApprovalParams): Promise<PermissionsRequestApprovalResponse>;
 }
 
 export interface ElicitationHandler {
@@ -77,6 +80,12 @@ const FileChangeApprovalRequest = new RequestType<
     FileChangeRequestApprovalResponse,
     void
 >('item/fileChange/requestApproval');
+
+const PermissionsApprovalRequest = new RequestType<
+    PermissionsRequestApprovalParams,
+    PermissionsRequestApprovalResponse,
+    void
+>('item/permissions/requestApproval');
 
 const McpServerElicitationRequest = new RequestType<
     McpServerElicitationRequestParams,
@@ -152,6 +161,17 @@ export class CodexAppServerClient {
                 return { decision: "cancel" };
             }
             return await handler.handleFileChange(params);
+        });
+
+        this.connection.onRequest(PermissionsApprovalRequest, async (params) => {
+            if (this.isStaleTurn(params.threadId, params.turnId)) {
+                return { permissions: {}, scope: "turn", strictAutoReview: true };
+            }
+            const handler = this.approvalHandlers.get(params.threadId);
+            if (!handler) {
+                return { permissions: {}, scope: "turn", strictAutoReview: true };
+            }
+            return await handler.handlePermissionsRequest(params);
         });
 
         this.connection.onRequest(McpServerElicitationRequest, async (params) => {
