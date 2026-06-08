@@ -13,7 +13,7 @@ import {
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
-import type {Model, TurnStartParams} from "../../app-server/v2";
+import type {Model, ReviewStartResponse, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 
@@ -815,6 +815,151 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(mockFixture.getAcpConnectionDump([])).toBe("");
     });
 
+    it('handles review slash commands through Codex app server', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture();
+        const reviewStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "reviewStart")
+            .mockResolvedValue(createReviewStartResponse());
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/review" }],
+        });
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/review focus on API compatibility" }],
+        });
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/review-branch main" }],
+        });
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/review-commit abc123" }],
+        });
+
+        expect(reviewStartSpy).toHaveBeenNthCalledWith(1, {
+            threadId: "session-id",
+            target: { type: "uncommittedChanges" },
+            delivery: "inline",
+        });
+        expect(reviewStartSpy).toHaveBeenNthCalledWith(2, {
+            threadId: "session-id",
+            target: { type: "custom", instructions: "focus on API compatibility" },
+            delivery: "inline",
+        });
+        expect(reviewStartSpy).toHaveBeenNthCalledWith(3, {
+            threadId: "session-id",
+            target: { type: "baseBranch", branch: "main" },
+            delivery: "inline",
+        });
+        expect(reviewStartSpy).toHaveBeenNthCalledWith(4, {
+            threadId: "session-id",
+            target: { type: "commit", sha: "abc123", title: null },
+            delivery: "inline",
+        });
+        expect(turnStartSpy).not.toHaveBeenCalled();
+    });
+
+    it('waits for review slash command completion', async () => {
+        const { mockFixture } = setupPromptFixture();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "reviewStart")
+            .mockResolvedValue(createReviewStartResponse());
+        let completeReview: (value: TurnCompletedNotification) => void = () => {};
+        const reviewCompletedPromise = new Promise<TurnCompletedNotification>((resolve) => {
+            completeReview = resolve;
+        });
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReturnValue(reviewCompletedPromise);
+
+        let promptResolved = false;
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/review" }],
+        }).then((response) => {
+            promptResolved = true;
+            return response;
+        });
+
+        await vi.waitFor(() => {
+            expect(mockFixture.getCodexAppServerClient().awaitTurnCompleted).toHaveBeenCalledWith(
+                "session-id",
+                "review-turn-id",
+            );
+        });
+        await Promise.resolve();
+        expect(promptResolved).toBe(false);
+
+        completeReview(createReviewCompletedNotification());
+        await expect(promptPromise).resolves.toEqual(expect.objectContaining({
+            stopReason: "end_turn",
+        }));
+        expect(promptResolved).toBe(true);
+    });
+
+    it('returns cancelled when review slash command is interrupted', async () => {
+        const { mockFixture } = setupPromptFixture();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "reviewStart")
+            .mockResolvedValue(createReviewStartResponse());
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockResolvedValue(createReviewCompletedNotification("interrupted"));
+
+        const response = await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/review" }],
+        });
+
+        expect(response.stopReason).toBe("cancelled");
+    });
+
+    it('waits for compact slash command completion', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture();
+        const compactStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadCompactStart")
+            .mockResolvedValue({});
+
+        let promptResolved = false;
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/compact" }],
+        }).then((response) => {
+            promptResolved = true;
+            return response;
+        });
+
+        await vi.waitFor(() => {
+            expect(compactStartSpy).toHaveBeenCalledWith({ threadId: "session-id" });
+        });
+        await Promise.resolve();
+        expect(promptResolved).toBe(false);
+
+        mockFixture.sendServerNotification({
+            method: "thread/compacted",
+            params: { threadId: "session-id", turnId: "compact-turn-id" },
+        });
+
+        await expect(promptPromise).resolves.toEqual(expect.objectContaining({
+            stopReason: "end_turn",
+        }));
+        expect(promptResolved).toBe(true);
+        expect(turnStartSpy).not.toHaveBeenCalled();
+        expect(mockFixture.getAcpConnectionDump([])).toContain("Context compacted");
+    });
+
+    it('reports missing review slash command input', async () => {
+        const { mockFixture } = setupPromptFixture();
+        const reviewStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "reviewStart")
+            .mockResolvedValue(createReviewStartResponse());
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/review-branch" }],
+        });
+
+        expect(reviewStartSpy).not.toHaveBeenCalled();
+        const [event] = mockFixture.getAcpConnectionEvents([]);
+        expect(event).toBeDefined();
+        expect(event!.args[0].update.content.text).toBe('Command "/review-branch" requires branch name.');
+    });
+
     it('handles logout command', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
@@ -1002,6 +1147,36 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         return { mockFixture, sessionState, turnStartSpy };
     }
 
+    function createReviewStartResponse(): ReviewStartResponse {
+        return {
+            reviewThreadId: "session-id",
+            turn: {
+                id: "review-turn-id",
+                items: [],
+                status: "inProgress",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            }
+        };
+    }
+
+    function createReviewCompletedNotification(status: "completed" | "interrupted" = "completed"): TurnCompletedNotification {
+        return {
+            threadId: "session-id",
+            turn: {
+                id: "review-turn-id",
+                items: [],
+                status,
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            }
+        };
+    }
+
     it ('should disable resasoning.summary if key authorization is used', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({ account: { type: "apiKey" } });
 
@@ -1138,6 +1313,67 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/thread-compacted.json");
+    });
+
+    it ('should surface contextCompaction item as user-visible message', async () => {
+        const sessionId = "test-session-id";
+        const { mockFixture } = setupPromptFixture({ sessionId });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "test" }],
+        });
+
+        mockFixture.clearAcpConnectionDump();
+
+        mockFixture.sendServerNotification({
+            method: "item/completed",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-id",
+                item: { type: "contextCompaction", id: "context-compaction-id" },
+            },
+        });
+
+        await vi.waitFor(() => {
+            const dump = mockFixture.getAcpConnectionDump([]);
+            expect(dump.length).toBeGreaterThan(0);
+        });
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/thread-compacted.json");
+    });
+
+    it ('should surface exitedReviewMode item as user-visible review output', async () => {
+        const sessionId = "test-session-id";
+        const { mockFixture } = setupPromptFixture({ sessionId });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "test" }],
+        });
+
+        mockFixture.clearAcpConnectionDump();
+
+        mockFixture.sendServerNotification({
+            method: "item/completed",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-id",
+                item: {
+                    type: "exitedReviewMode",
+                    id: "review-output-id",
+                    review: "No findings.",
+                },
+            },
+        });
+
+        await vi.waitFor(() => {
+            const events = mockFixture.getAcpConnectionEvents([]);
+            expect(events.length).toBeGreaterThan(0);
+        });
+
+        const [event] = mockFixture.getAcpConnectionEvents([]);
+        expect(event!.args[0].update.content.text).toBe("No findings.");
     });
 
     it ('should accumulate rate limits from multiple notifications', async () => {

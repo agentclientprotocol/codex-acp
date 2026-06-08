@@ -1259,8 +1259,34 @@ export class CodexAcpServer implements acp.Agent {
                 approvalHandler,
                 elicitationHandler);
 
-            if (await this.availableCommands.tryHandleCommand(params.prompt, sessionState)) {
+            const commandResult = await this.availableCommands.tryHandleCommand(params.prompt, sessionState);
+            if (commandResult.handled) {
                 logger.log("Prompt handled by a command");
+                await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                if (commandResult.turnCompleted?.turn.status === "interrupted") {
+                    if (!this.sessionIsClosing(params.sessionId) && this.sessions.has(params.sessionId)) {
+                        await this.connection.sessionUpdate({
+                            sessionId: params.sessionId,
+                            update: {
+                                sessionUpdate: "agent_message_chunk",
+                                content: {
+                                    type: "text",
+                                    text: "*Conversation interrupted*"
+                                }
+                            }
+                        });
+                    }
+                    return {
+                        stopReason: "cancelled",
+                        usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                        _meta: this.buildQuotaMeta(sessionState),
+                    };
+                }
+                const error = eventHandler.getFailure()
+                if (error) {
+                    // noinspection ExceptionCaughtLocallyJS
+                    throw error;
+                }
                 return {
                     stopReason: "end_turn",
                     usage: this.buildPromptUsage(sessionState.lastTokenUsage),

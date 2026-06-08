@@ -28,6 +28,7 @@ import type {
     GetAccountResponse,
     ListMcpServerStatusResponse,
     Model,
+    ReviewTarget,
     SkillsListParams,
     SkillsListResponse,
     Thread,
@@ -272,6 +273,22 @@ export class CodexAcpClient {
 
     async deleteSession(sessionId: string): Promise<void> {
         await this.codexClient.threadArchive({threadId: sessionId});
+    }
+
+    async runReview(
+        sessionId: string,
+        target: ReviewTarget,
+        onTurnStarted?: (turnId: string) => void,
+    ): Promise<TurnCompletedNotification> {
+        return await this.codexClient.runReview({
+            threadId: sessionId,
+            target,
+            delivery: "inline",
+        }, onTurnStarted);
+    }
+
+    async runCompact(sessionId: string): Promise<void> {
+        await this.codexClient.runCompact({threadId: sessionId});
     }
 
     async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {

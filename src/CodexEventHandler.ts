@@ -137,13 +137,7 @@ export class CodexEventHandler {
             case "item/autoApprovalReview/completed":
                 return this.handleGuardianApprovalReviewCompleted(notification.params);
             case "thread/compacted":
-                return {
-                    sessionUpdate: "agent_message_chunk",
-                    content: {
-                        type: "text",
-                        text: "*Context compacted to fit the model's context window.*\n\n"
-                    }
-                };
+                return this.createContextCompactedEvent();
             case "model/rerouted":
                 return this.createModelReroutedEvent(notification.params);
             case "fuzzyFileSearch/sessionUpdated":
@@ -362,11 +356,37 @@ export class CodexEventHandler {
             case "imageView":
             case "imageGeneration":
             case "enteredReviewMode":
-            case "exitedReviewMode":
-            case "contextCompaction":
             case "plan":
                 return null;
+            case "exitedReviewMode":
+                return this.createExitedReviewModeEvent(event.item);
+            case "contextCompaction":
+                return this.createContextCompactedEvent();
         }
+    }
+
+    private createExitedReviewModeEvent(item: ThreadItem & { type: "exitedReviewMode" }): UpdateSessionEvent | null {
+        const text = item.review.trim();
+        if (text.length === 0) {
+            return null;
+        }
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text,
+            }
+        };
+    }
+
+    private createContextCompactedEvent(): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: "*Context compacted to fit the model's context window.*\n\n"
+            }
+        };
     }
 
     private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
