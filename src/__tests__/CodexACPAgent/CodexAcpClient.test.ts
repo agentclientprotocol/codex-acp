@@ -1179,7 +1179,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         };
     }
 
-    it ('should disable resasoning.summary if key authorization is used', async () => {
+    it ('should disable reasoning.summary if key authorization is used', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({ account: { type: "apiKey" } });
 
         await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
@@ -1187,14 +1187,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "none" }));
     });
 
-    it ('should not disable resasoning.summary by default', async () => {
+    it ('should enable reasoning.summary by default', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({
             account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
         });
 
         await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
 
-        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: null }));
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "auto" }));
     });
 
     it ('should disable reasoning.summary when model lacks reasoning', async () => {
@@ -1208,7 +1208,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "none" }));
     });
 
-    it ('should not disable reasoning.summary when model supports reasoning', async () => {
+    it ('should enable reasoning.summary when model supports reasoning', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({
             account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
             supportedReasoningEfforts: [
@@ -1219,7 +1219,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
 
-        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: null }));
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "auto" }));
     });
 
     it ('should reject prompt with images when model does not support image input', async () => {

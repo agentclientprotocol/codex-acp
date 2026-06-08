@@ -480,7 +480,7 @@ export class CodexAcpClient {
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: agentMode.sandboxPolicy,
-            summary: disableSummary ? "none" : null,
+            summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,

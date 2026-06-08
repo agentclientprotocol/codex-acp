@@ -20,6 +20,9 @@ import type {
     ItemStartedNotification,
     ThreadItem,
     ModelReroutedNotification,
+    ReasoningSummaryPartAddedNotification,
+    ReasoningSummaryTextDeltaNotification,
+    ReasoningTextDeltaNotification,
     ThreadGoalClearedNotification,
     ThreadGoalUpdatedNotification,
     ThreadTokenUsageUpdatedNotification,
@@ -60,6 +63,7 @@ export class CodexEventHandler {
     private readonly activeGuardianApprovalReviews = new Set<string>();
     private readonly activeImageGenerationItems = new Set<string>();
     private readonly emittedImageViewItems = new Set<string>();
+    private readonly seenReasoningDeltaItemIds = new Set<string>();
 
     constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
@@ -145,6 +149,12 @@ export class CodexEventHandler {
                 return this.handleGuardianApprovalReviewCompleted(notification.params);
             case "thread/compacted":
                 return this.createContextCompactedEvent();
+            case "item/reasoning/summaryTextDelta":
+                return this.createReasoningDeltaEvent(notification.params);
+            case "item/reasoning/textDelta":
+                return this.createReasoningDeltaEvent(notification.params);
+            case "item/reasoning/summaryPartAdded":
+                return this.createReasoningSectionBreakEvent(notification.params);
             case "model/rerouted":
                 return this.createModelReroutedEvent(notification.params);
             case "fuzzyFileSearch/sessionUpdated":
@@ -159,9 +169,6 @@ export class CodexEventHandler {
             case "command/exec/outputDelta":
             case "hook/started":
             case "hook/completed":
-            case "item/reasoning/summaryTextDelta":
-            case "item/reasoning/summaryPartAdded":
-            case "item/reasoning/textDelta":
             case "turn/diff/updated":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
@@ -290,6 +297,28 @@ export class CodexEventHandler {
         };
     }
 
+    private createReasoningDeltaEvent(
+        event: ReasoningSummaryTextDeltaNotification | ReasoningTextDeltaNotification
+    ): UpdateSessionEvent {
+        this.seenReasoningDeltaItemIds.add(event.itemId);
+        return this.createAgentThoughtEvent(event.delta);
+    }
+
+    private createReasoningSectionBreakEvent(event: ReasoningSummaryPartAddedNotification): UpdateSessionEvent {
+        this.seenReasoningDeltaItemIds.add(event.itemId);
+        return this.createAgentThoughtEvent("\n\n");
+    }
+
+    private createAgentThoughtEvent(text: string): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+                type: "text",
+                text,
+            }
+        };
+    }
+
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
@@ -351,15 +380,10 @@ export class CodexEventHandler {
                 }
                 return createImageGenerationUpdate(event.item);
             case "reasoning":
-                const summary = event.item.summary[0];
-                if (!summary) return null;
-                return {
-                    sessionUpdate: "agent_thought_chunk",
-                    content: {
-                        type: "text",
-                        text: summary
-                    }
+                if (this.seenReasoningDeltaItemIds.delete(event.item.id)) {
+                    return null;
                 }
+                return this.createCompletedReasoningEvent(event.item);
             case "webSearch":
                 return createWebSearchCompleteUpdate(event.item);
             case "collabAgentToolCall":
@@ -374,6 +398,15 @@ export class CodexEventHandler {
             case "contextCompaction":
                 return this.createContextCompactedEvent();
         }
+    }
+
+    private createCompletedReasoningEvent(item: ThreadItem & { type: "reasoning" }): UpdateSessionEvent | null {
+        const parts = item.summary.length > 0 ? item.summary : item.content;
+        const text = parts.filter(part => part.length > 0).join("\n\n");
+        if (text.length === 0) {
+            return null;
+        }
+        return this.createAgentThoughtEvent(text);
     }
 
     private createExitedReviewModeEvent(item: ThreadItem & { type: "exitedReviewMode" }): UpdateSessionEvent | null {
