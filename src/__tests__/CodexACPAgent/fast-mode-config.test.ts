@@ -1,4 +1,5 @@
 import {describe, expect, it, vi} from "vitest";
+import * as acp from "@agentclientprotocol/sdk";
 import {
     createCodexMockTestFixture,
     createTestModel,
@@ -13,7 +14,10 @@ import {
 } from "../../FastModeConfig";
 
 describe("Fast mode session config", () => {
-    async function createSession(currentServiceTier: "fast" | "flex" | null = null) {
+    async function createSession(
+        currentServiceTier: "fast" | "flex" | null = null,
+        clientInfo: acp.Implementation | null = null
+    ) {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
@@ -29,6 +33,11 @@ describe("Fast mode session config", () => {
             currentModelId: "fast-model[medium]",
             models: [fastModel],
             currentServiceTier,
+        });
+
+        await codexAcpAgent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientInfo,
         });
 
         const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
@@ -56,6 +65,55 @@ describe("Fast mode session config", () => {
 
         expect(response.configOptions).toEqual([createFastModeConfigOption(true)]);
         expect(codexAcpAgent.getSessionState("session-id").fastModeEnabled).toBe(true);
+    });
+
+    it("omits Fast mode config options for JetBrains 2026.1 IntelliJ clients", async () => {
+        const {response} = await createSession(null, {
+            name: "JetBrains.WebStorm",
+            version: "2026.1.1",
+            title: "WebStorm 2026.1.1",
+            _meta: {
+                platform: "intellij",
+            },
+        });
+
+        expect(response.configOptions).toBeUndefined();
+    });
+
+    it("omits Fast mode config options for JetBrains 2026.1 clients by name", async () => {
+        const {response} = await createSession(null, {
+            name: "JetBrains.IDE",
+            version: "2026.1",
+            title: "JetBrains IDE",
+        });
+
+        expect(response.configOptions).toBeUndefined();
+    });
+
+    it("keeps Fast mode config options for JetBrains clients outside 2026.1", async () => {
+        const {response} = await createSession(null, {
+            name: "JetBrains.WebStorm",
+            version: "2026.2.0",
+            title: "WebStorm 2026.2.0",
+            _meta: {
+                platform: "intellij",
+            },
+        });
+
+        expect(response.configOptions).toEqual([createFastModeConfigOption(false)]);
+    });
+
+    it("keeps Fast mode config options for non-JetBrains 2026.1 clients", async () => {
+        const {response} = await createSession(null, {
+            name: "VSCode",
+            version: "2026.1.1",
+            title: "VS Code",
+            _meta: {
+                platform: "vscode",
+            },
+        });
+
+        expect(response.configOptions).toEqual([createFastModeConfigOption(false)]);
     });
 
     it("toggles Fast mode through session config options", async () => {

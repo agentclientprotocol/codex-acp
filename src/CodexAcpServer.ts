@@ -42,6 +42,7 @@ import {
     resolveFastServiceTier,
 } from "./FastModeConfig";
 import packageJson from "../package.json";
+import {isJetBrains2026_1Client} from "./JBUtils";
 
 export interface SessionState {
     sessionId: string,
@@ -90,6 +91,7 @@ export class CodexAcpServer implements acp.Agent {
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
     private readonly availableCommands: CodexCommands;
+    private clientInfo: acp.Implementation | null;
 
     private readonly sessions: Map<string, SessionState>;
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
@@ -116,6 +118,7 @@ export class CodexAcpServer implements acp.Agent {
         this.codexAcpClient = codexAcpClient;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.getExitCode = getExitCode ?? (() => null);
+        this.clientInfo = null;
         this.availableCommands = new CodexCommands(
             connection,
             codexAcpClient,
@@ -127,6 +130,7 @@ export class CodexAcpServer implements acp.Agent {
         _params: acp.InitializeRequest,
     ): Promise<acp.InitializeResponse> {
         logger.log("Initialize request received");
+        this.clientInfo = _params.clientInfo ?? null;
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
@@ -382,7 +386,7 @@ export class CodexAcpServer implements acp.Agent {
         return {
             models: modelState,
             modes: modeState,
-            configOptions: this.createSessionConfigOptions(this.getSessionState(sessionId)),
+            ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
         };
     }
 
@@ -398,7 +402,7 @@ export class CodexAcpServer implements acp.Agent {
         return {
             models: modelState,
             modes: modeState,
-            configOptions: this.createSessionConfigOptions(this.getSessionState(sessionId)),
+            ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
         };
     }
 
@@ -458,7 +462,7 @@ export class CodexAcpServer implements acp.Agent {
             sessionId: sessionId,
             models: modelState,
             modes: modeState,
-            configOptions: this.createSessionConfigOptions(this.getSessionState(sessionId)),
+            ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
         };
     }
 
@@ -565,6 +569,21 @@ export class CodexAcpServer implements acp.Agent {
         return [
             createFastModeConfigOption(sessionState.fastModeEnabled),
         ];
+    }
+
+    private createSessionConfigOptionsResponse(sessionState: SessionState): {
+        configOptions?: Array<acp.SessionConfigOption>;
+    } {
+        if (!this.isSessionConfigEnabled()) {
+            return {};
+        }
+        return {
+            configOptions: this.createSessionConfigOptions(sessionState),
+        };
+    }
+
+    private isSessionConfigEnabled(): boolean {
+        return !isJetBrains2026_1Client(this.clientInfo);
     }
 
     private publishAvailableCommandsAsync(sessionId: string) {
