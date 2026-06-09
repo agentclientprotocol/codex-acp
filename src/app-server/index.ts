@@ -25,6 +25,7 @@ export type { AskForApproval } from "./AskForApproval";
 export type { AudioContent } from "./AudioContent";
 export type { AuthMode } from "./AuthMode";
 export type { AuthStatusChangeNotification } from "./AuthStatusChangeNotification";
+export type { AutoCompactTokenLimitScope } from "./AutoCompactTokenLimitScope";
 export type { BackgroundEventEvent } from "./BackgroundEventEvent";
 export type { BlobResourceContents } from "./BlobResourceContents";
 export type { ByteRange } from "./ByteRange";
@@ -154,6 +155,7 @@ export type { MacOsSeatbeltProfileExtensions } from "./MacOsSeatbeltProfileExten
 export type { McpAuthStatus } from "./McpAuthStatus";
 export type { McpInvocation } from "./McpInvocation";
 export type { McpListToolsResponseEvent } from "./McpListToolsResponseEvent";
+export type { McpServerInfo } from "./McpServerInfo";
 export type { McpStartupCompleteEvent } from "./McpStartupCompleteEvent";
 export type { McpStartupFailure } from "./McpStartupFailure";
 export type { McpStartupStatus } from "./McpStartupStatus";
