@@ -39,6 +39,7 @@ import {
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
     createMcpToolCallUpdate,
+    formatWebSearchTitle,
 } from "./CodexToolCallMapper";
 import {
     createFastModeConfigOption,
@@ -898,7 +899,7 @@ export class CodexAcpServer implements acp.Agent {
             sessionUpdate: "tool_call",
             toolCallId: item.id,
             kind: "search",
-            title: this.formatWebSearchTitle(item),
+            title: formatWebSearchTitle(item),
             status: "completed",
             rawInput: {
                 query: item.query,
@@ -956,29 +957,6 @@ export class CodexAcpServer implements acp.Agent {
                 text: `Plan:\n${item.text}`,
             },
         };
-    }
-
-    private formatWebSearchTitle(item: ThreadItem & { type: "webSearch" }): string {
-        const action = item.action;
-        if (!action) {
-            return item.query ? `Web search: ${item.query}` : "Web search";
-        }
-        switch (action.type) {
-            case "search": {
-                const queries = action.queries?.filter((query) => query && query.length > 0) ?? [];
-                const query = action.query ?? (queries.length > 0 ? queries.join(", ") : null) ?? item.query;
-                return query ? `Web search: ${query}` : "Web search";
-            }
-            case "openPage":
-                return action.url ? `Open page: ${action.url}` : "Open page";
-            case "findInPage": {
-                const pattern = action.pattern ? ` for '${action.pattern}'` : "";
-                const url = action.url ? ` in ${action.url}` : "";
-                return `Find in page${pattern}${url}`.trim();
-            }
-            case "other":
-                return "Web search";
-        }
     }
 
     private toAcpToolCallStatus(status: CollabAgentToolCallStatus): "in_progress" | "completed" | "failed" {

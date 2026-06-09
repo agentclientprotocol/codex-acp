@@ -40,6 +40,8 @@ import {
     createFuzzyFileSearchComplete,
     createFuzzyFileSearchStartOrUpdate,
     createMcpToolCallUpdate,
+    createWebSearchCompleteUpdate,
+    createWebSearchStartUpdate,
     fuzzyFileSearchToolCallId,
 } from "./CodexToolCallMapper";
 import { stripShellPrefix } from "./CommandUtils";
@@ -303,12 +305,13 @@ export class CodexEventHandler {
                 return await createMcpToolCallUpdate(event.item);
             case "dynamicToolCall":
                 return await createDynamicToolCallUpdate(event.item);
+            case "webSearch":
+                return createWebSearchStartUpdate(event.item);
             case "collabAgentToolCall":
             case "userMessage":
             case "hookPrompt":
             case "agentMessage":
             case "reasoning":
-            case "webSearch":
             case "imageView":
             case "imageGeneration":
             case "enteredReviewMode":
@@ -348,11 +351,12 @@ export class CodexEventHandler {
                         text: summary
                     }
                 }
+            case "webSearch":
+                return createWebSearchCompleteUpdate(event.item);
             case "collabAgentToolCall":
             case "userMessage":
             case "hookPrompt":
             case "agentMessage":
-            case "webSearch":
             case "imageView":
             case "imageGeneration":
             case "enteredReviewMode":

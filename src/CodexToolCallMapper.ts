@@ -229,6 +229,64 @@ export function createFuzzyFileSearchComplete(
     };
 }
 
+export function createWebSearchStartUpdate(
+    item: ThreadItem & { type: "webSearch" }
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "search",
+        title: formatWebSearchTitle(item),
+        status: "in_progress",
+        rawInput: createWebSearchRawInput(item),
+    };
+}
+
+export function createWebSearchCompleteUpdate(
+    item: ThreadItem & { type: "webSearch" }
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        title: formatWebSearchTitle(item),
+        status: "completed",
+        rawInput: createWebSearchRawInput(item),
+    };
+}
+
+export function formatWebSearchTitle(item: ThreadItem & { type: "webSearch" }): string {
+    const action = item.action;
+    if (!action) {
+        return item.query ? `Web search: ${item.query}` : "Web search";
+    }
+    switch (action.type) {
+        case "search": {
+            const queries = action.queries?.filter((query) => query && query.length > 0) ?? [];
+            const query = action.query ?? (queries.length > 0 ? queries.join(", ") : null) ?? item.query;
+            return query ? `Web search: ${query}` : "Web search";
+        }
+        case "openPage":
+            return action.url ? `Open page: ${action.url}` : "Open page";
+        case "findInPage": {
+            const pattern = action.pattern ? ` for '${action.pattern}'` : "";
+            const url = action.url ? ` in ${action.url}` : "";
+            return `Find in page${pattern}${url}`.trim();
+        }
+        case "other":
+            return "Web search";
+    }
+}
+
+function createWebSearchRawInput(item: ThreadItem & { type: "webSearch" }): {
+    query: string,
+    action: (ThreadItem & { type: "webSearch" })["action"],
+} {
+    return {
+        query: item.query,
+        action: item.action,
+    };
+}
+
 function createCommandActionEvent(
     id: string,
     status: CommandExecutionStatus,
