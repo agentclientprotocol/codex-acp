@@ -34,6 +34,10 @@ import {
     createFileChangeUpdate,
     createGuardianApprovalReviewToolCall,
     createGuardianApprovalReviewToolCallUpdate,
+    createImageGenerationCompleteUpdate,
+    createImageGenerationStartUpdate,
+    createImageGenerationUpdate,
+    createImageViewUpdate,
     createMcpRawInput,
     createMcpRawOutput,
     createFuzzyFileSearchComplete,
@@ -54,6 +58,8 @@ export class CodexEventHandler {
     private failure: RequestError | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
     private readonly activeGuardianApprovalReviews = new Set<string>();
+    private readonly activeImageGenerationItems = new Set<string>();
+    private readonly emittedImageViewItems = new Set<string>();
 
     constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
@@ -296,13 +302,17 @@ export class CodexEventHandler {
                 return await createDynamicToolCallUpdate(event.item);
             case "webSearch":
                 return createWebSearchStartUpdate(event.item);
+            case "imageView":
+                this.emittedImageViewItems.add(event.item.id);
+                return createImageViewUpdate(event.item);
+            case "imageGeneration":
+                this.activeImageGenerationItems.add(event.item.id);
+                return createImageGenerationStartUpdate(event.item);
             case "collabAgentToolCall":
             case "userMessage":
             case "hookPrompt":
             case "agentMessage":
             case "reasoning":
-            case "imageView":
-            case "imageGeneration":
             case "enteredReviewMode":
             case "exitedReviewMode":
             case "contextCompaction":
@@ -330,6 +340,16 @@ export class CodexEventHandler {
                 }
             case "commandExecution":
                 return this.completeCommandExecutionEvent(event.item);
+            case "imageView":
+                if (this.emittedImageViewItems.delete(event.item.id)) {
+                    return null;
+                }
+                return createImageViewUpdate(event.item);
+            case "imageGeneration":
+                if (this.activeImageGenerationItems.delete(event.item.id)) {
+                    return createImageGenerationCompleteUpdate(event.item);
+                }
+                return createImageGenerationUpdate(event.item);
             case "reasoning":
                 const summary = event.item.summary[0];
                 if (!summary) return null;
@@ -346,8 +366,6 @@ export class CodexEventHandler {
             case "userMessage":
             case "hookPrompt":
             case "agentMessage":
-            case "imageView":
-            case "imageGeneration":
             case "enteredReviewMode":
             case "plan":
                 return null;

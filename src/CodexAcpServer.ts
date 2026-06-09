@@ -38,6 +38,8 @@ import {
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
+    createImageGenerationUpdate,
+    createImageViewUpdate,
     createMcpToolCallUpdate,
     formatWebSearchTitle,
 } from "./CodexToolCallMapper";
@@ -837,9 +839,9 @@ export class CodexAcpServer implements acp.Agent {
             case "webSearch":
                 return [this.createWebSearchUpdate(item)];
             case "imageView":
-                return [this.createImageViewUpdate(item)];
+                return [createImageViewUpdate(item)];
             case "imageGeneration":
-                return [];
+                return [createImageGenerationUpdate(item)];
             case "enteredReviewMode":
                 return [this.createReviewModeUpdate(item, true)];
             case "exitedReviewMode":
@@ -904,22 +906,6 @@ export class CodexAcpServer implements acp.Agent {
             rawInput: {
                 query: item.query,
                 action: item.action,
-            },
-        };
-    }
-
-    private createImageViewUpdate(
-        item: ThreadItem & { type: "imageView" }
-    ): UpdateSessionEvent {
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: item.id,
-            kind: "read",
-            title: "View image",
-            status: "completed",
-            locations: [{ path: item.path }],
-            rawInput: {
-                path: item.path,
             },
         };
     }

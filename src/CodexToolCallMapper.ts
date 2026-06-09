@@ -1,4 +1,4 @@
-import type { ToolCallContent } from "@agentclientprotocol/sdk";
+import type { ContentBlock, ToolCallContent } from "@agentclientprotocol/sdk";
 import { applyPatch, parsePatch, reversePatch } from "diff";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -112,6 +112,69 @@ export async function createDynamicToolCallUpdate(
     item: ThreadItem & { type: "dynamicToolCall" }
 ): Promise<UpdateSessionEvent> {
     return createExecuteToolCallUpdate(item, item.tool, { arguments: item.arguments })
+}
+
+export function createImageViewUpdate(
+    item: ThreadItem & { type: "imageView" }
+): UpdateSessionEvent {
+    const displayPath = item.path;
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "read",
+        title: `View Image ${displayPath}`,
+        status: "completed",
+        content: [createContent({
+            type: "resource_link",
+            name: displayPath,
+            uri: displayPath,
+        })],
+        locations: [{ path: item.path }],
+        rawInput: {
+            path: item.path,
+        },
+    };
+}
+
+export function createImageGenerationStartUpdate(
+    item: ThreadItem & { type: "imageGeneration" }
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "other",
+        title: "Image generation",
+        status: "in_progress",
+        rawInput: {
+            id: item.id,
+        },
+    };
+}
+
+export function createImageGenerationCompleteUpdate(
+    item: ThreadItem & { type: "imageGeneration" }
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        status: imageGenerationToolStatus(item.status),
+        content: imageGenerationContent(item),
+        rawOutput: imageGenerationRawOutput(item),
+    };
+}
+
+export function createImageGenerationUpdate(
+    item: ThreadItem & { type: "imageGeneration" }
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "other",
+        title: "Image generation",
+        status: imageGenerationToolStatus(item.status),
+        content: imageGenerationContent(item),
+        rawOutput: imageGenerationRawOutput(item),
+    };
 }
 
 export async function createExecuteToolCallUpdate(
@@ -448,6 +511,74 @@ function shellQuote(arg: string): string {
         return arg;
     }
     return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+function imageGenerationToolStatus(status: string): AcpToolCallStatus {
+    switch (status) {
+        case "completed":
+            return "completed";
+        case "generating":
+        case "in_progress":
+        case "inProgress":
+        case "incomplete":
+            return "in_progress";
+        case "failed":
+            return "failed";
+        default:
+            return "completed";
+    }
+}
+
+function imageGenerationContent(
+    item: ThreadItem & { type: "imageGeneration" }
+): ToolCallContent[] {
+    const content: ToolCallContent[] = [];
+
+    if (item.revisedPrompt && item.revisedPrompt.trim() !== "") {
+        content.push(createContent({
+            type: "text",
+            text: `Revised prompt: ${item.revisedPrompt}`,
+        }));
+    }
+
+    if (item.result.trim() !== "") {
+        const image: ContentBlock = item.savedPath && item.savedPath.trim() !== ""
+            ? {
+                type: "image",
+                data: item.result,
+                mimeType: "image/png",
+                uri: item.savedPath,
+            }
+            : {
+                type: "image",
+                data: item.result,
+                mimeType: "image/png",
+            };
+        content.push(createContent(image));
+    }
+
+    return content;
+}
+
+function imageGenerationRawOutput(
+    item: ThreadItem & { type: "imageGeneration" }
+): Record<string, string | null> {
+    const output: Record<string, string | null> = {
+        status: item.status,
+        revisedPrompt: item.revisedPrompt,
+        result: item.result,
+    };
+    if ("savedPath" in item) {
+        output["savedPath"] = item.savedPath ?? null;
+    }
+    return output;
+}
+
+function createContent(content: ContentBlock): ToolCallContent {
+    return {
+        type: "content",
+        content,
+    };
 }
 
 async function createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {

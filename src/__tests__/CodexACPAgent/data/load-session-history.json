@@ -217,3 +217,75 @@
     }
   ]
 }
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "item-image-view-1",
+        "kind": "read",
+        "title": "View Image /test/project/input.png",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "resource_link",
+              "name": "/test/project/input.png",
+              "uri": "/test/project/input.png"
+            }
+          }
+        ],
+        "locations": [
+          {
+            "path": "/test/project/input.png"
+          }
+        ],
+        "rawInput": {
+          "path": "/test/project/input.png"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "item-image-generation-1",
+        "kind": "other",
+        "title": "Image generation",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Revised prompt: A tiny blue square"
+            }
+          },
+          {
+            "type": "content",
+            "content": {
+              "type": "image",
+              "data": "iVBORw0KGgo=",
+              "mimeType": "image/png",
+              "uri": "/test/project/generated-blue-square.png"
+            }
+          }
+        ],
+        "rawOutput": {
+          "status": "completed",
+          "revisedPrompt": "A tiny blue square",
+          "result": "iVBORw0KGgo=",
+          "savedPath": "/test/project/generated-blue-square.png"
+        }
+      }
+    }
+  ]
+}
