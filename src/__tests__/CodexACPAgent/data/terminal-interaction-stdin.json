@@ -6,10 +6,11 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-123",
-        "status": "completed",
-        "rawOutput": {
-          "formatted_output": "file1.txt\nfile2.txt\nfile3.txt\n",
-          "exit_code": 0
+        "_meta": {
+          "terminal_output_delta": {
+            "data": "\ncontinue\n",
+            "terminal_id": "command-123"
+          }
         }
       }
     }

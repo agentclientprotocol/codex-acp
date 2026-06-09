@@ -23,6 +23,7 @@ import type {
     ReasoningSummaryPartAddedNotification,
     ReasoningSummaryTextDeltaNotification,
     ReasoningTextDeltaNotification,
+    TerminalInteractionNotification,
     ThreadGoalClearedNotification,
     ThreadGoalUpdatedNotification,
     ThreadTokenUsageUpdatedNotification,
@@ -32,6 +33,7 @@ import type {
 import type { McpStartupCompleteEvent } from "./app-server";
 import {toTokenCount} from "./TokenCount";
 import {
+    commandExecutionUsesTerminalOutput,
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
@@ -51,6 +53,7 @@ import {
     fuzzyFileSearchToolCallId,
 } from "./CodexToolCallMapper";
 import { stripShellPrefix } from "./CommandUtils";
+import {createTerminalOutputMeta, type TerminalOutputMode} from "./TerminalOutputMode";
 
 export { stripShellPrefix };
 
@@ -64,6 +67,8 @@ export class CodexEventHandler {
     private readonly activeImageGenerationItems = new Set<string>();
     private readonly emittedImageViewItems = new Set<string>();
     private readonly seenReasoningDeltaItemIds = new Set<string>();
+    private readonly terminalCommandIds = new Set<string>();
+    private readonly terminalCommandOutputIds = new Set<string>();
 
     constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
@@ -165,13 +170,14 @@ export class CodexEventHandler {
                 return this.createThreadGoalUpdatedEvent(notification.params);
             case "thread/goal/cleared":
                 return this.createThreadGoalClearedEvent(notification.params);
+            case "item/commandExecution/terminalInteraction":
+                return this.createTerminalInteractionEvent(notification.params);
             // ignored events
             case "command/exec/outputDelta":
             case "hook/started":
             case "hook/completed":
             case "turn/diff/updated":
             case "turn/moderationMetadata":
-            case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
             case "item/fileChange/patchUpdated":
             case "account/updated":
@@ -324,8 +330,15 @@ export class CodexEventHandler {
         switch (event.item.type) {
             case "fileChange":
                 return await createFileChangeUpdate(event.item);
-            case "commandExecution":
+            case "commandExecution": {
+                if (commandExecutionUsesTerminalOutput(event.item)) {
+                    this.terminalCommandIds.add(event.item.id);
+                } else {
+                    this.terminalCommandIds.delete(event.item.id);
+                    this.terminalCommandOutputIds.delete(event.item.id);
+                }
                 return await createCommandExecutionUpdate(event.item);
+            }
             case "mcpToolCall":
                 return await createMcpToolCallUpdate(event.item);
             case "dynamicToolCall":
@@ -435,16 +448,38 @@ export class CodexEventHandler {
     }
 
     private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
+        if (this.terminalCommandIds.has(event.itemId) && event.delta.length > 0) {
+            this.terminalCommandOutputIds.add(event.itemId);
+        }
+        return this.createCommandOutputEvent(event.itemId, event.delta, this.commandOutputMode(event.itemId));
+    }
+
+    private createCommandOutputEvent(
+        itemId: string,
+        data: string,
+        terminalOutputMode: TerminalOutputMode
+    ): UpdateSessionEvent {
         return {
             sessionUpdate: "tool_call_update",
-            toolCallId: event.itemId,
-            _meta: {
-                terminal_output_delta: {
-                    data: event.delta,
-                    terminal_id: event.itemId
-                }
-            }
+            toolCallId: itemId,
+            _meta: createTerminalOutputMeta(terminalOutputMode, itemId, data),
         }
+    }
+
+    private createTerminalInteractionEvent(event: TerminalInteractionNotification): UpdateSessionEvent {
+        return this.createCommandOutputDeltaEvent({
+            threadId: event.threadId,
+            turnId: event.turnId,
+            itemId: event.itemId,
+            delta: `\n${event.stdin}\n`,
+        });
+    }
+
+    private commandOutputMode(itemId: string): TerminalOutputMode {
+        if (this.sessionState.terminalOutputMode === "terminal_output" && !this.terminalCommandIds.has(itemId)) {
+            return "terminal_output_delta";
+        }
+        return this.sessionState.terminalOutputMode;
     }
 
     private createMcpToolProgressEvent(event: { itemId: string, message: string }): UpdateSessionEvent {
@@ -495,7 +530,7 @@ export class CodexEventHandler {
     }
 
     private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {
-        return {
+        const update: UpdateSessionEvent = {
             sessionUpdate: "tool_call_update",
             toolCallId: item.id,
             status: item.status === "completed" ? "completed" : "failed",
@@ -503,14 +538,29 @@ export class CodexEventHandler {
                 formatted_output: item.aggregatedOutput ?? "",
                 exit_code: item.exitCode
             },
-            _meta: {
-                terminal_exit: {
-                    exit_code: item.exitCode,
-                    signal: null,
-                    terminal_id: item.id
-                }
-            }
+        };
+
+        const commandHadTerminal = this.terminalCommandIds.delete(item.id);
+        const commandHadOutput = this.terminalCommandOutputIds.delete(item.id);
+        if (!commandHadTerminal) {
+            return update;
         }
+        const terminalMeta: Record<string, unknown> = {};
+        if (!commandHadOutput && item.aggregatedOutput) {
+            Object.assign(
+                terminalMeta,
+                createTerminalOutputMeta(this.sessionState.terminalOutputMode, item.id, item.aggregatedOutput)
+            );
+        }
+        terminalMeta["terminal_exit"] = {
+            exit_code: item.exitCode,
+            signal: null,
+            terminal_id: item.id
+        };
+        return {
+            ...update,
+            _meta: terminalMeta,
+        };
     }
 
     private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {

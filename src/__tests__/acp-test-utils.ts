@@ -346,6 +346,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
         fastModeEnabled: false,
         currentModelSupportsFast: false,
+        terminalOutputMode: "terminal_output_delta",
         ...overrides,
     };
 }

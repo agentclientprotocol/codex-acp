@@ -34,6 +34,8 @@ type GuardianApprovalReviewNotification =
     | ItemGuardianApprovalReviewStartedNotification
     | ItemGuardianApprovalReviewCompletedNotification;
 type WebSearchItem = ThreadItem & { type: "webSearch" };
+type CommandExecutionItem = ThreadItem & { type: "commandExecution" };
+type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
 
 function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
     switch (status) {
@@ -66,32 +68,23 @@ export async function createFileChangeUpdate(
     };
 }
 
-export async function createCommandExecutionUpdate(
-    item: ThreadItem & { type: "commandExecution" }
-): Promise<UpdateSessionEvent> {
+export async function createCommandExecutionUpdate(item: CommandExecutionItem): Promise<UpdateSessionEvent> {
     const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
     if (commandAction) {
         return createCommandActionEvent(item.id, item.status, item.cwd, commandAction);
     }
     const command = stripShellPrefix(item.command);
-    return {
+    return createTerminalCommandEvent({
         sessionUpdate: "tool_call",
         toolCallId: item.id,
         kind: "execute",
         title: command,
         status: toAcpStatus(item.status),
-        content: [{ type: "terminal", terminalId: item.id }],
         rawInput: {
             command: item.command,
             cwd: item.cwd,
         },
-        _meta: {
-            terminal_info: {
-                cwd: item.cwd,
-                terminal_id: item.id,
-            },
-        },
-    };
+    }, item.id, item.cwd);
 }
 
 export async function createMcpToolCallUpdate(
@@ -348,50 +341,70 @@ function createCommandActionEvent(
     commandAction: CommandAction
 ): UpdateSessionEvent {
     const acpStatus = toAcpStatus(status);
-    if (commandAction.type === "read") {
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: id,
-            status: acpStatus,
-            kind: "read",
-            title: `Read file '${commandAction.path}'`,
-            locations: [{ path: commandAction.path }],
-        };
-    } else if (commandAction.type === "search") {
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: id,
-            status: acpStatus,
-            kind: "search",
-            title: createSearchTitle(commandAction.query, commandAction.path),
-        };
-    } else if (commandAction.type === "listFiles") {
-        const title = commandAction.path
-            ? `List files in '${commandAction.path}'`
-            : "List files";
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: id,
-            status: acpStatus,
-            kind: "read",
-            title: title,
-        };
+    switch (commandAction.type) {
+        case "read":
+            return {
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: acpStatus,
+                kind: "read",
+                title: `Read file '${commandAction.path}'`,
+                locations: [{ path: commandAction.path }],
+            };
+        case "search":
+            return {
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: acpStatus,
+                kind: "search",
+                title: createSearchTitle(commandAction.query, commandAction.path),
+            };
+        case "listFiles": {
+            const title = commandAction.path
+                ? `List files in '${commandAction.path}'`
+                : "List files";
+            return {
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: acpStatus,
+                kind: "read",
+                title: title,
+            };
+        }
+        case "unknown":
+            return createTerminalCommandEvent({
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: acpStatus,
+                kind: "execute",
+                title: stripShellPrefix(commandAction.command),
+                rawInput: {
+                    command: commandAction.command,
+                    cwd,
+                },
+            }, id, cwd);
     }
+}
+
+export function commandExecutionUsesTerminalOutput(item: CommandExecutionItem): boolean {
+    const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
+    return commandAction === undefined || commandAction.type === "unknown";
+}
+
+function createTerminalCommandEvent(
+    event: AcpToolCallEvent,
+    terminalId: string,
+    cwd: string,
+): UpdateSessionEvent {
+    const { rawInput, ...eventWithoutRawInput } = event;
     return {
-        sessionUpdate: "tool_call",
-        toolCallId: id,
-        status: acpStatus,
-        kind: "execute",
-        title: stripShellPrefix(commandAction.command),
-        content: [{ type: "terminal", terminalId: id }],
-        rawInput: {
-            command: commandAction.command,
-            cwd,
-        },
+        ...eventWithoutRawInput,
+        content: [{ type: "terminal", terminalId }],
+        ...(rawInput === undefined ? {} : { rawInput }),
         _meta: {
             terminal_info: {
                 cwd,
-                terminal_id: id,
+                terminal_id: terminalId,
             },
         },
     };

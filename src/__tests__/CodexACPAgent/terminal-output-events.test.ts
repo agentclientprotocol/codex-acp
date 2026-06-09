@@ -106,6 +106,25 @@ describe('CodexEventHandler - terminal output events', () => {
         );
     });
 
+    it('should stream terminal interaction stdin as terminal output delta', async () => {
+        const terminalInteractionNotification: ServerNotification = {
+            method: 'item/commandExecution/terminalInteraction',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'command-123',
+                processId: 'pid-456',
+                stdin: 'continue',
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [terminalInteractionNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/terminal-interaction-stdin.json'
+        );
+    });
+
     it('should send formatted output on command completion', async () => {
         const commandCompletedNotification: ServerNotification = {
             method: 'item/completed',
@@ -257,6 +276,231 @@ describe('CodexEventHandler - terminal output events', () => {
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/terminal-full-flow.json'
+        );
+    });
+
+    it('should use terminal_output meta when supported', async () => {
+        const terminalOutputSessionState = createTestSessionState({
+            sessionId,
+            currentModelId: 'model-id[effort]',
+            agentMode: AgentMode.DEFAULT_AGENT_MODE,
+            terminalOutputMode: 'terminal_output',
+        });
+        const commandStartNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                startedAtMs: 0,
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-terminal-output',
+                    command: 'python manage.py migrate',
+                    cwd: '/test/project',
+                    processId: null,
+                    source: 'agent',
+                    status: 'inProgress',
+                    commandActions: [],
+                    aggregatedOutput: null,
+                    exitCode: null,
+                    durationMs: null,
+                },
+            },
+        };
+        const outputDeltaNotification: ServerNotification = {
+            method: 'item/commandExecution/outputDelta',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'command-terminal-output',
+                delta: 'Applying migrations\n',
+            },
+        };
+        const terminalInteractionNotification: ServerNotification = {
+            method: 'item/commandExecution/terminalInteraction',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'command-terminal-output',
+                processId: 'pid-456',
+                stdin: 'yes',
+            },
+        };
+        const commandCompletedNotification: ServerNotification = {
+            method: 'item/completed',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                completedAtMs: 0,
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-terminal-output',
+                    command: 'python manage.py migrate',
+                    cwd: '/test/project',
+                    processId: 'pid-456',
+                    source: 'agent',
+                    status: 'completed',
+                    commandActions: [],
+                    aggregatedOutput: 'Applying migrations\n\nyes\nDone\n',
+                    exitCode: 0,
+                    durationMs: 250,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, terminalOutputSessionState, [
+            commandStartNotification,
+            outputDeltaNotification,
+            terminalInteractionNotification,
+            commandCompletedNotification
+        ]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/terminal-output-meta-flow.json'
+        );
+    });
+
+    it('should flush aggregated output when terminal_output command completes without deltas', async () => {
+        const terminalOutputSessionState = createTestSessionState({
+            sessionId,
+            currentModelId: 'model-id[effort]',
+            agentMode: AgentMode.DEFAULT_AGENT_MODE,
+            terminalOutputMode: 'terminal_output',
+        });
+        const commandStartNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                startedAtMs: 0,
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-terminal-output-completion',
+                    command: 'git status --short',
+                    cwd: '/test/project',
+                    processId: null,
+                    source: 'agent',
+                    status: 'inProgress',
+                    commandActions: [],
+                    aggregatedOutput: null,
+                    exitCode: null,
+                    durationMs: null,
+                },
+            },
+        };
+        const commandCompletedNotification: ServerNotification = {
+            method: 'item/completed',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                completedAtMs: 0,
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-terminal-output-completion',
+                    command: 'git status --short',
+                    cwd: '/test/project',
+                    processId: 'pid-456',
+                    source: 'agent',
+                    status: 'completed',
+                    commandActions: [],
+                    aggregatedOutput: 'M src/CodexEventHandler.ts\n',
+                    exitCode: 0,
+                    durationMs: 25,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, terminalOutputSessionState, [
+            commandStartNotification,
+            commandCompletedNotification
+        ]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/terminal-output-completion-fallback.json'
+        );
+    });
+
+    it('should keep parsed non-terminal command output on legacy delta metadata', async () => {
+        const terminalOutputSessionState = createTestSessionState({
+            sessionId,
+            currentModelId: 'model-id[effort]',
+            agentMode: AgentMode.DEFAULT_AGENT_MODE,
+            terminalOutputMode: 'terminal_output',
+        });
+        const commandStartNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                startedAtMs: 0,
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-read-file',
+                    command: 'cat README.md',
+                    cwd: '/test/project',
+                    processId: null,
+                    source: 'agent',
+                    status: 'inProgress',
+                    commandActions: [
+                        {
+                            type: 'read',
+                            command: 'cat README.md',
+                            name: 'cat',
+                            path: '/test/project/README.md',
+                        },
+                    ],
+                    aggregatedOutput: null,
+                    exitCode: null,
+                    durationMs: null,
+                },
+            },
+        };
+        const outputDeltaNotification: ServerNotification = {
+            method: 'item/commandExecution/outputDelta',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'command-read-file',
+                delta: '# Project\n',
+            },
+        };
+        const commandCompletedNotification: ServerNotification = {
+            method: 'item/completed',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                completedAtMs: 0,
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-read-file',
+                    command: 'cat README.md',
+                    cwd: '/test/project',
+                    processId: 'pid-456',
+                    source: 'agent',
+                    status: 'completed',
+                    commandActions: [
+                        {
+                            type: 'read',
+                            command: 'cat README.md',
+                            name: 'cat',
+                            path: '/test/project/README.md',
+                        },
+                    ],
+                    aggregatedOutput: '# Project\n',
+                    exitCode: 0,
+                    durationMs: 10,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, terminalOutputSessionState, [
+            commandStartNotification,
+            outputDeltaNotification,
+            commandCompletedNotification
+        ]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/terminal-output-parsed-command-legacy-delta.json'
         );
     });
 

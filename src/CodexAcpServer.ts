@@ -53,6 +53,7 @@ import {
 } from "./FastModeConfig";
 import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
+import {resolveTerminalOutputMode, type TerminalOutputMode} from "./TerminalOutputMode";
 
 export interface SessionState {
     sessionId: string,
@@ -71,6 +72,7 @@ export interface SessionState {
     fastModeEnabled: boolean;
     currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
+    terminalOutputMode: TerminalOutputMode;
 }
 
 interface PendingMcpStartupSession {
@@ -103,6 +105,7 @@ export class CodexAcpServer implements acp.Agent {
     private readonly getExitCode: () => number | null;
     private readonly availableCommands: CodexCommands;
     private clientInfo: acp.Implementation | null;
+    private terminalOutputMode: TerminalOutputMode;
 
     private readonly sessions: Map<string, SessionState>;
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
@@ -130,6 +133,7 @@ export class CodexAcpServer implements acp.Agent {
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.getExitCode = getExitCode ?? (() => null);
         this.clientInfo = null;
+        this.terminalOutputMode = "terminal_output_delta";
         this.availableCommands = new CodexCommands(
             connection,
             codexAcpClient,
@@ -142,6 +146,7 @@ export class CodexAcpServer implements acp.Agent {
     ): Promise<acp.InitializeResponse> {
         logger.log("Initialize request received");
         this.clientInfo = _params.clientInfo ?? null;
+        this.terminalOutputMode = resolveTerminalOutputMode(_params.clientCapabilities);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
@@ -353,6 +358,7 @@ export class CodexAcpServer implements acp.Agent {
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
+            terminalOutputMode: this.terminalOutputMode,
         }
         this.sessions.set(sessionId, sessionState);
         resumeSubscribed = false;
@@ -777,6 +783,7 @@ export class CodexAcpServer implements acp.Agent {
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
+            terminalOutputMode: this.terminalOutputMode,
         };
         this.sessions.set(sessionId, sessionState);
         subscribed = false;
