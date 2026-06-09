@@ -7,6 +7,7 @@ export type { AgentMessageContent } from "./AgentMessageContent";
 export type { AgentMessageContentDeltaEvent } from "./AgentMessageContentDeltaEvent";
 export type { AgentMessageDeltaEvent } from "./AgentMessageDeltaEvent";
 export type { AgentMessageEvent } from "./AgentMessageEvent";
+export type { AgentMessageInputContent } from "./AgentMessageInputContent";
 export type { AgentMessageItem } from "./AgentMessageItem";
 export type { AgentPath } from "./AgentPath";
 export type { AgentReasoningDeltaEvent } from "./AgentReasoningDeltaEvent";
