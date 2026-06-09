@@ -18,6 +18,8 @@ import type {
     ItemCompletedNotification,
     ItemStartedNotification, ThreadItem,
     ModelReroutedNotification,
+    ThreadGoalClearedNotification,
+    ThreadGoalUpdatedNotification,
     ThreadTokenUsageUpdatedNotification,
     TurnPlanUpdatedNotification,
     WarningNotification
@@ -138,6 +140,10 @@ export class CodexEventHandler {
                 return this.handleFuzzyFileSearchSessionUpdated(notification.params);
             case "fuzzyFileSearch/sessionCompleted":
                 return this.handleFuzzyFileSearchSessionCompleted(notification.params);
+            case "thread/goal/updated":
+                return this.createThreadGoalUpdatedEvent(notification.params);
+            case "thread/goal/cleared":
+                return this.createThreadGoalClearedEvent(notification.params);
             // ignored events
             case "command/exec/outputDelta":
             case "item/autoApprovalReview/started":
@@ -174,8 +180,6 @@ export class CodexEventHandler {
             case "rawResponseItem/completed":
             case "thread/started":
             case "item/plan/delta":
-            case "thread/goal/updated":
-            case "thread/goal/cleared":
             case "remoteControl/status/changed":
             case "app/list/updated":
             case "thread/settings/updated":
@@ -242,6 +246,48 @@ export class CodexEventHandler {
                 type: "text",
                 text: `Model rerouted from ${event.fromModel} to ${event.toModel} (${event.reason}).\n\n`
             }
+        };
+    }
+
+    private createThreadGoalUpdatedEvent(event: ThreadGoalUpdatedNotification): UpdateSessionEvent {
+        const status = this.formatThreadGoalStatus(event.goal.status);
+        const objective = event.goal.objective.trim();
+        const text = objective.includes("\n")
+            ? `Goal updated (${status}):\n${objective}`
+            : `Goal updated (${status}): ${objective}`;
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text,
+            },
+        };
+    }
+
+    private formatThreadGoalStatus(status: ThreadGoalUpdatedNotification["goal"]["status"]): string {
+        switch (status) {
+            case "active":
+                return "active";
+            case "paused":
+                return "paused";
+            case "budgetLimited":
+                return "budget limited";
+            case "blocked":
+                return "blocked";
+            case "usageLimited":
+                return "usage limited";
+            case "complete":
+                return "complete";
+        }
+    }
+
+    private createThreadGoalClearedEvent(_event: ThreadGoalClearedNotification): UpdateSessionEvent {
+        return {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: "Goal cleared.",
+            },
         };
     }
 
