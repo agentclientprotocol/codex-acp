@@ -105,8 +105,7 @@ describeE2E("E2E tests", () => {
         });
     });
 
-    // Currently, `additionalRoots` are not propagated when listing skills
-    it.skip("lists skills from additional session roots", async () => {
+    it("lists skills from additional session roots", async () => {
         fixture = await createAuthenticatedFixture();
         const additionalSkillsRoot = path.join(fixture.workspaceDir, "custom-skills");
         fixture.writeSkill({
