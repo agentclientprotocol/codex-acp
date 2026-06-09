@@ -41,6 +41,7 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
         sessionId: "session-id",
         currentModelId,
         models: availableModels,
+        additionalDirectories: [],
     });
 
     const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
@@ -169,6 +170,7 @@ describe("Session config options", () => {
             sessionId: "session-id",
             currentModelId: "fast-model[medium]",
             models: [fast],
+            additionalDirectories: [],
         });
         await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
 

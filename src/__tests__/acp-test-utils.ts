@@ -338,6 +338,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         rateLimits: null,
         account: null,
         cwd: "/test/cwd",
+        additionalDirectories: [],
         sessionId: "session-id",
         currentModelId: "model-id[effort]",
         availableModels: [],

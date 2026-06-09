@@ -78,6 +78,7 @@ export interface SessionState {
     rateLimits: RateLimitsMap | null;
     account: Account | null;
     cwd: string;
+    additionalDirectories: string[];
     fastModeEnabled: boolean;
     currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
@@ -178,6 +179,7 @@ export class CodexAcpServer implements acp.Agent {
                     list: { },
                     close: { },
                     delete: { },
+                    additionalDirectories: {},
                 },
                 mcpCapabilities: {
                     acp: false,
@@ -366,6 +368,7 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: account,
             cwd: request.cwd,
+            additionalDirectories: sessionMetadata.additionalDirectories,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
@@ -439,7 +442,20 @@ export class CodexAcpServer implements acp.Agent {
     async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
         logger.log("Listing sessions...", {cwd: params.cwd, cursor: params.cursor});
         await this.checkAuthorization();
-        return await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
+        const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
+        return {
+            ...response,
+            sessions: response.sessions.map((session) => {
+                const activeSession = this.sessions.get(session.sessionId);
+                if (!activeSession || activeSession.additionalDirectories.length === 0) {
+                    return session;
+                }
+                return {
+                    ...session,
+                    additionalDirectories: activeSession.additionalDirectories,
+                };
+            }),
+        };
     }
 
     async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
@@ -803,6 +819,7 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: account,
             cwd: request.cwd,
+            additionalDirectories: sessionMetadata.additionalDirectories,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
@@ -1327,6 +1344,7 @@ export class CodexAcpServer implements acp.Agent {
                     serviceTier,
                     disableSummary,
                     sessionState.cwd,
+                    sessionState.additionalDirectories,
                     (turnId) => {
                         if (this.promptIsClosedOrStale(params.sessionId, activePrompt)) {
                             this.interruptLateStartedTurn(params.sessionId, turnId);

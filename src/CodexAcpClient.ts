@@ -31,6 +31,7 @@ import type {
     ReviewTarget,
     SkillsListParams,
     SkillsListResponse,
+    SandboxPolicy,
     Thread,
     ThreadSourceKind,
     TurnCompletedNotification,
@@ -51,6 +52,7 @@ export class CodexAcpClient {
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
+    private skillExtraRoots: string[] = [];
 
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
@@ -203,10 +205,11 @@ export class CodexAcpClient {
     }
 
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
-        await this.refreshSkills(request.cwd, request._meta);
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories);
+        await this.refreshSkills(request.cwd, additionalDirectories, request._meta);
 
         const response = await this.codexClient.threadResume({
-            config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
             modelProvider: this.getResumeModelProvider(),
             threadId: request.sessionId,
@@ -219,12 +222,16 @@ export class CodexAcpClient {
             currentModelId: currentModelId,
             models: codexModels,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            additionalDirectories,
         }
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories);
+        await this.refreshSkills(request.cwd, additionalDirectories, request._meta);
+
         const response = await this.codexClient.threadResume({
-            config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
             modelProvider: this.getResumeModelProvider(),
             threadId: request.sessionId,
@@ -238,14 +245,16 @@ export class CodexAcpClient {
             models: codexModels,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             thread: response.thread,
+            additionalDirectories,
         };
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
-        await this.refreshSkills(request.cwd, request._meta);
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories);
+        await this.refreshSkills(request.cwd, additionalDirectories, request._meta);
 
         const response = await this.codexClient.threadStart({
-            config: await this.createSessionConfig(request.cwd, request.mcpServers),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });
@@ -260,6 +269,7 @@ export class CodexAcpClient {
             currentModelId: currentModelId,
             models: codexModels,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            additionalDirectories,
         };
     }
 
@@ -299,17 +309,21 @@ export class CodexAcpClient {
         return this.codexClient.getMcpServerStartupVersion();
     }
 
-    private async createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): Promise<JsonObject> {
+    private async createSessionConfig(
+        projectPath: string,
+        additionalDirectories: string[],
+        mcpServers: Array<McpServer>
+    ): Promise<JsonObject> {
+        const sessionRoots = [projectPath, ...additionalDirectories];
         const mergedConfig = {
             ...mergeGatewayConfig(this.config, this.gatewayConfig),
-            projects: {
-                [projectPath]: {
-                    trust_level: "trusted",
-                }
-            },
+            projects: Object.fromEntries(sessionRoots.map(root => [root, {
+                trust_level: "trusted",
+            }])),
         };
+        const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
         if (mcpServers.length === 0) {
-            return mergedConfig;
+            return configWithWorkspaceRoots;
         }
 
         // Deduplicates new servers against existing config to prevent Codex from deep-merging
@@ -321,11 +335,11 @@ export class CodexAcpClient {
         }));
         const uniqueServers = requestedServers.filter(mcp => !existingNames.has(mcp.name));
         if (uniqueServers.length === 0) {
-            return mergedConfig;
+            return configWithWorkspaceRoots;
         }
 
         return {
-            ...mergedConfig,
+            ...configWithWorkspaceRoots,
             "mcp_servers": Object.fromEntries(uniqueServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
         };
     }
@@ -349,17 +363,25 @@ export class CodexAcpClient {
         return this.getModelProvider() ?? "openai";
     }
 
-    private async refreshSkills(cwd: string, meta?: Record<string, unknown> | null): Promise<void> {
+    private async refreshSkills(
+        cwd: string,
+        additionalDirectories: string[],
+        meta?: Record<string, unknown> | null
+    ): Promise<void> {
         if (!cwd) {
             return;
         }
 
-        const additionalRoots = readAdditionalRoots(meta).map(root => path.join(root, ".agents", "skills"));
-        if (additionalRoots.length > 0) {
+        const additionalRoots = uniqueStrings([
+            ...readAdditionalRoots(meta),
+            ...additionalDirectories,
+        ]).map(root => path.join(root, ".agents", "skills"));
+        if (!arraysEqual(this.skillExtraRoots, additionalRoots)) {
             await this.codexClient.skillsExtraRootsSet({ extraRoots: additionalRoots });
+            this.skillExtraRoots = additionalRoots;
         }
         await this.codexClient.listSkills({
-            cwds: [cwd],
+            cwds: [cwd, ...additionalDirectories],
             forceReload: true,
         });
     }
@@ -465,13 +487,14 @@ export class CodexAcpClient {
         serviceTier: ServiceTier | null,
         disableSummary: boolean,
         cwd: string,
+        additionalDirectories: string[],
         onTurnStarted?: (turnId: string) => void,
         shouldCancel?: () => boolean,
     ): Promise<TurnCompletedNotification | null> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
 
-        await this.refreshSkills(cwd, request._meta);
+        await this.refreshSkills(cwd, additionalDirectories, request._meta);
         if (shouldCancel?.()) {
             return null;
         }
@@ -479,7 +502,7 @@ export class CodexAcpClient {
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
-            sandboxPolicy: agentMode.sandboxPolicy,
+            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
             summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
@@ -662,6 +685,7 @@ export type SessionMetadata = {
     currentModelId: string,
     models: Model[],
     currentServiceTier?: ServiceTier | null,
+    additionalDirectories: string[],
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
@@ -732,10 +756,92 @@ function readAdditionalRoots(meta: Record<string, unknown> | null | undefined): 
         return [];
     }
 
-    return Array.from(new Set(rawRoots
+    return uniqueStrings(rawRoots
         .filter((value): value is string => typeof value === "string")
         .map(value => value.trim())
-        .filter(value => value.length > 0)));
+        .filter(value => value.length > 0));
+}
+
+function readAdditionalDirectories(cwd: string, rawDirectories: unknown): string[] {
+    if (rawDirectories === undefined) {
+        return [];
+    }
+    if (rawDirectories === null) {
+        throw RequestError.invalidParams(undefined, "additionalDirectories must be an array");
+    }
+    if (!Array.isArray(rawDirectories)) {
+        throw RequestError.invalidParams(undefined, "additionalDirectories must be an array");
+    }
+
+    const directories: string[] = [];
+    const seen = new Set<string>([cwd]);
+    for (const directory of rawDirectories) {
+        if (typeof directory !== "string") {
+            throw RequestError.invalidParams(undefined, "additionalDirectories entries must be strings");
+        }
+        if (directory.length === 0) {
+            throw RequestError.invalidParams(undefined, "additionalDirectories entries must not be empty");
+        }
+        if (!path.isAbsolute(directory)) {
+            throw RequestError.invalidParams(undefined, "additionalDirectories entries must be absolute paths");
+        }
+        if (!seen.has(directory)) {
+            seen.add(directory);
+            directories.push(directory);
+        }
+    }
+
+    return directories;
+}
+
+function mergeSandboxWorkspaceWriteRoots(config: JsonObject, roots: string[]): JsonObject {
+    if (roots.length === 0) {
+        return config;
+    }
+
+    const existingSandboxConfig = isJsonObject(config["sandbox_workspace_write"])
+        ? config["sandbox_workspace_write"]
+        : {};
+    const existingWritableRoots = Array.isArray(existingSandboxConfig["writable_roots"])
+        ? existingSandboxConfig["writable_roots"].filter((value): value is string => typeof value === "string")
+        : [];
+
+    return {
+        ...config,
+        sandbox_workspace_write: {
+            ...existingSandboxConfig,
+            writable_roots: uniqueStrings([...existingWritableRoots, ...roots]),
+        },
+    };
+}
+
+function addAdditionalDirectoriesToSandboxPolicy(
+    sandboxPolicy: SandboxPolicy,
+    additionalDirectories: string[]
+): SandboxPolicy {
+    if (additionalDirectories.length === 0 || sandboxPolicy.type !== "workspaceWrite") {
+        return sandboxPolicy;
+    }
+
+    return {
+        ...sandboxPolicy,
+        writableRoots: uniqueStrings([...sandboxPolicy.writableRoots, ...additionalDirectories]),
+    };
+}
+
+function uniqueStrings(values: string[]): string[] {
+    return Array.from(new Set(values));
+}
+
+function arraysEqual(left: string[], right: string[]): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+    return left.every((value, index) => value === right[index]);
+}
+
+function isJsonObject(value: JsonValue | undefined): value is JsonObject {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function mergeGatewayConfig(config: JsonObject, gatewayConfig: GatewayConfig | null): JsonObject {
