@@ -1,0 +1,20 @@
+{
+  "eventType": "request",
+  "method": "thread/unsubscribe",
+  "params": {
+    "threadId": "session-id"
+  }
+}
+{
+  "eventType": "response"
+}
+{
+  "eventType": "request",
+  "method": "thread/archive",
+  "params": {
+    "threadId": "session-id"
+  }
+}
+{
+  "eventType": "response"
+}

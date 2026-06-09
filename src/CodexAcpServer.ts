@@ -160,6 +160,7 @@ export class CodexAcpServer implements acp.Agent {
                     resume: { },
                     list: { },
                     close: { },
+                    delete: { },
                 },
                 mcpCapabilities: {
                     acp: false,
@@ -453,6 +454,41 @@ export class CodexAcpServer implements acp.Agent {
         }
 
         return {};
+    }
+
+    async unstable_deleteSession(params: acp.DeleteSessionRequest): Promise<acp.DeleteSessionResponse> {
+        logger.log("Deleting session...", {sessionId: params.sessionId});
+        const sessionId = params.sessionId;
+        const shouldCloseLocalSession = this.hasLocalSession(sessionId);
+
+        this.beginSessionCloseFence(sessionId);
+        try {
+            if (shouldCloseLocalSession) {
+                await this.closeSession({sessionId});
+            } else {
+                this.bumpSessionGeneration(sessionId);
+            }
+
+            await this.runWithProcessCheck(() => this.codexAcpClient.deleteSession(sessionId));
+            logger.log("Session deleted", {sessionId});
+        } finally {
+            this.endSessionCloseFence(sessionId);
+        }
+
+        return {};
+    }
+
+    private hasLocalSession(sessionId: string): boolean {
+        return this.sessions.has(sessionId)
+            || this.pendingMcpStartupSessions.has(sessionId)
+            || this.pendingTurnStarts.has(sessionId)
+            || this.activePrompts.has(sessionId)
+            || this.hasPendingSessionOpen(sessionId)
+            || this.sessionIsClosing(sessionId);
+    }
+
+    private hasPendingSessionOpen(sessionId: string): boolean {
+        return this.sessionOpenGenerations.get(sessionId) === this.getSessionGeneration(sessionId);
     }
 
     async newSession(

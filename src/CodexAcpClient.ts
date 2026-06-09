@@ -270,6 +270,10 @@ export class CodexAcpClient {
         }
     }
 
+    async deleteSession(sessionId: string): Promise<void> {
+        await this.codexClient.threadArchive({threadId: sessionId});
+    }
+
     async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
         return await this.codexClient.awaitMcpServerStartup(serverNames, afterVersion);
     }

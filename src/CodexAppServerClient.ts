@@ -24,6 +24,8 @@ import type {
     SkillsExtraRootsSetParams,
     SkillsListParams,
     SkillsListResponse,
+    ThreadArchiveParams,
+    ThreadArchiveResponse,
     ThreadLoadedListParams,
     ThreadLoadedListResponse,
     ThreadListParams,
@@ -239,6 +241,10 @@ export class CodexAppServerClient {
 
     async threadRead(params: ThreadReadParams): Promise<ThreadReadResponse> {
         return await this.sendRequest({ method: "thread/read", params: params });
+    }
+
+    async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
+        return await this.sendRequest({ method: "thread/archive", params: params });
     }
 
     async threadUnsubscribe(params: ThreadUnsubscribeParams): Promise<ThreadUnsubscribeResponse> {

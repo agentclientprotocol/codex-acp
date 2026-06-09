@@ -50,6 +50,7 @@ describe('CodexACPAgent - initialize', () => {
                     resume: {},
                     list: {},
                     close: {},
+                    delete: {},
                 },
                 mcpCapabilities: {
                     acp: false,
