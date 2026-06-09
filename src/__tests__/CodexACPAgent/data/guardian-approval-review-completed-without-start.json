@@ -1,0 +1,46 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "guardian_assessment:review-orphaned",
+        "kind": "think",
+        "title": "Guardian Review",
+        "status": "failed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Status: Denied\nAction: network access to api.example.com\nRisk: high\nRationale: The network target is not permitted."
+            }
+          }
+        ],
+        "rawInput": {
+          "threadId": "test-session-id",
+          "turnId": "turn-1",
+          "startedAtMs": 1000,
+          "completedAtMs": 1800,
+          "reviewId": "review-orphaned",
+          "targetItemId": null,
+          "decisionSource": "agent",
+          "review": {
+            "status": "denied",
+            "riskLevel": "high",
+            "userAuthorization": "low",
+            "rationale": "The network target is not permitted."
+          },
+          "action": {
+            "type": "networkAccess",
+            "target": "",
+            "host": "api.example.com",
+            "protocol": "https",
+            "port": 443
+          }
+        }
+      }
+    }
+  ]
+}

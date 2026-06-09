@@ -13,6 +13,12 @@ import type {
     CommandExecutionStatus,
     DynamicToolCallStatus,
     FileUpdateChange,
+    GuardianApprovalReview,
+    GuardianApprovalReviewAction,
+    GuardianApprovalReviewStatus,
+    GuardianCommandSource,
+    ItemGuardianApprovalReviewCompletedNotification,
+    ItemGuardianApprovalReviewStartedNotification,
     McpToolCallError,
     McpToolCallResult,
     McpToolCallStatus,
@@ -24,6 +30,9 @@ import {logger} from "./Logger";
 
 type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+type GuardianApprovalReviewNotification =
+    | ItemGuardianApprovalReviewStartedNotification
+    | ItemGuardianApprovalReviewCompletedNotification;
 
 function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
     switch (status) {
@@ -143,6 +152,36 @@ export function createMcpRawOutput(
     };
 }
 
+export function guardianApprovalReviewToolCallId(reviewId: string): string {
+    return `guardian_assessment:${reviewId}`;
+}
+
+export function createGuardianApprovalReviewToolCall(
+    event: GuardianApprovalReviewNotification,
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: guardianApprovalReviewToolCallId(event.reviewId),
+        kind: "think",
+        title: "Guardian Review",
+        status: toAcpGuardianApprovalReviewStatus(event.review.status),
+        content: createGuardianApprovalReviewContent(event.review, event.action),
+        rawInput: event as unknown as Record<string, JsonValue>,
+    };
+}
+
+export function createGuardianApprovalReviewToolCallUpdate(
+    event: GuardianApprovalReviewNotification,
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: guardianApprovalReviewToolCallId(event.reviewId),
+        status: toAcpGuardianApprovalReviewStatus(event.review.status),
+        content: createGuardianApprovalReviewContent(event.review, event.action),
+        rawOutput: event as unknown as Record<string, JsonValue>,
+    };
+}
+
 export function fuzzyFileSearchToolCallId(sessionId: string): string {
     return `fuzzyFileSearch.${sessionId}`;
 }
@@ -255,6 +294,108 @@ function createSearchTitle(query: string | null, path: string | null): string {
         return `Search in '${path}'`;
     }
     return "Search";
+}
+
+function toAcpGuardianApprovalReviewStatus(status: GuardianApprovalReviewStatus): AcpToolCallStatus {
+    switch (status) {
+        case "inProgress":
+            return "in_progress";
+        case "approved":
+            return "completed";
+        case "denied":
+        case "aborted":
+        case "timedOut":
+            return "failed";
+    }
+}
+
+function createGuardianApprovalReviewContent(
+    review: GuardianApprovalReview,
+    action: GuardianApprovalReviewAction,
+): ToolCallContent[] {
+    const lines = [`Status: ${formatGuardianApprovalReviewStatus(review.status)}`];
+    const actionSummary = createGuardianApprovalReviewActionSummary(action);
+    if (actionSummary) {
+        lines.push(`Action: ${actionSummary}`);
+    }
+    if (review.riskLevel) {
+        lines.push(`Risk: ${review.riskLevel}`);
+    }
+    if (review.rationale?.trim()) {
+        lines.push(`Rationale: ${review.rationale}`);
+    }
+
+    return [{
+        type: "content",
+        content: {
+            type: "text",
+            text: lines.join("\n"),
+        },
+    }];
+}
+
+function formatGuardianApprovalReviewStatus(status: GuardianApprovalReviewStatus): string {
+    switch (status) {
+        case "inProgress":
+            return "In progress";
+        case "approved":
+            return "Approved";
+        case "denied":
+            return "Denied";
+        case "aborted":
+            return "Aborted";
+        case "timedOut":
+            return "Timed out";
+    }
+}
+
+function createGuardianApprovalReviewActionSummary(action: GuardianApprovalReviewAction): string | null {
+    switch (action.type) {
+        case "command":
+            return `${guardianCommandSourceLabel(action.source)} ${action.command}`;
+        case "execve": {
+            const command = action.argv.length > 0 ? action.argv : [action.program];
+            return `${guardianCommandSourceLabel(action.source)} ${shellJoin(command)}`;
+        }
+        case "applyPatch":
+            if (action.files.length === 1) {
+                return `apply_patch touching ${action.files[0]}`;
+            }
+            return `apply_patch touching ${action.files.length} files`;
+        case "networkAccess": {
+            const label = action.target.length > 0 ? action.target : action.host;
+            return `network access to ${label}`;
+        }
+        case "mcpToolCall": {
+            const label = action.connectorName ?? action.server;
+            return `MCP ${action.toolName} on ${label}`;
+        }
+        case "requestPermissions":
+            return action.reason ?? "request additional permissions";
+    }
+}
+
+function guardianCommandSourceLabel(source: GuardianCommandSource): string {
+    switch (source) {
+        case "shell":
+            return "shell";
+        case "unifiedExec":
+            return "exec";
+    }
+}
+
+function shellJoin(args: string[]): string {
+    return args.map(shellQuote).join(" ");
+}
+
+function shellQuote(arg: string): string {
+    if (arg.length === 0) {
+        return "''";
+    }
+    if (/^[A-Za-z0-9_/:=+.,@%-]+$/.test(arg)) {
+        return arg;
+    }
+    return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
 async function createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {

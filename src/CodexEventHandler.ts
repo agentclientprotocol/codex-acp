@@ -15,8 +15,11 @@ import type {
     ConfigWarningNotification,
     ErrorNotification,
     GuardianWarningNotification,
+    ItemGuardianApprovalReviewCompletedNotification,
+    ItemGuardianApprovalReviewStartedNotification,
     ItemCompletedNotification,
-    ItemStartedNotification, ThreadItem,
+    ItemStartedNotification,
+    ThreadItem,
     ModelReroutedNotification,
     ThreadTokenUsageUpdatedNotification,
     TurnPlanUpdatedNotification,
@@ -28,6 +31,8 @@ import {
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
+    createGuardianApprovalReviewToolCall,
+    createGuardianApprovalReviewToolCallUpdate,
     createMcpRawInput,
     createMcpRawOutput,
     createFuzzyFileSearchComplete,
@@ -45,6 +50,7 @@ export class CodexEventHandler {
     private readonly sessionState: SessionState;
     private failure: RequestError | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
+    private readonly activeGuardianApprovalReviews = new Set<string>();
 
     constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
         this.connection = connection;
@@ -124,6 +130,10 @@ export class CodexEventHandler {
                 return this.createWarningEvent(notification.params);
             case "guardianWarning":
                 return this.createGuardianWarningEvent(notification.params);
+            case "item/autoApprovalReview/started":
+                return this.handleGuardianApprovalReviewStarted(notification.params);
+            case "item/autoApprovalReview/completed":
+                return this.handleGuardianApprovalReviewCompleted(notification.params);
             case "thread/compacted":
                 return {
                     sessionUpdate: "agent_message_chunk",
@@ -140,8 +150,6 @@ export class CodexEventHandler {
                 return this.handleFuzzyFileSearchSessionCompleted(notification.params);
             // ignored events
             case "command/exec/outputDelta":
-            case "item/autoApprovalReview/started":
-            case "item/autoApprovalReview/completed":
             case "hook/started":
             case "hook/completed":
             case "item/reasoning/summaryTextDelta":
@@ -485,5 +493,24 @@ export class CodexEventHandler {
         const toolCallId = fuzzyFileSearchToolCallId(params.sessionId);
         this.activeFuzzyFileSearchSessions.delete(toolCallId);
         return createFuzzyFileSearchComplete(params);
+    }
+
+    private handleGuardianApprovalReviewStarted(
+        params: ItemGuardianApprovalReviewStartedNotification
+    ): UpdateSessionEvent {
+        if (this.activeGuardianApprovalReviews.has(params.reviewId)) {
+            return createGuardianApprovalReviewToolCallUpdate(params);
+        }
+        this.activeGuardianApprovalReviews.add(params.reviewId);
+        return createGuardianApprovalReviewToolCall(params);
+    }
+
+    private handleGuardianApprovalReviewCompleted(
+        params: ItemGuardianApprovalReviewCompletedNotification
+    ): UpdateSessionEvent {
+        if (this.activeGuardianApprovalReviews.delete(params.reviewId)) {
+            return createGuardianApprovalReviewToolCallUpdate(params);
+        }
+        return createGuardianApprovalReviewToolCall(params);
     }
 }

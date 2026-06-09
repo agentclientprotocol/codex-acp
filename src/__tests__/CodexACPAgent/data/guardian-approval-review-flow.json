@@ -1,0 +1,94 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "guardian_assessment:review-1",
+        "kind": "think",
+        "title": "Guardian Review",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Status: In progress\nAction: exec /bin/ls -l\nRisk: medium\nRationale: Checking whether this command should run automatically."
+            }
+          }
+        ],
+        "rawInput": {
+          "threadId": "test-session-id",
+          "turnId": "turn-1",
+          "startedAtMs": 1000,
+          "reviewId": "review-1",
+          "targetItemId": "command-1",
+          "review": {
+            "status": "inProgress",
+            "riskLevel": "medium",
+            "userAuthorization": "unknown",
+            "rationale": "Checking whether this command should run automatically."
+          },
+          "action": {
+            "type": "execve",
+            "source": "unifiedExec",
+            "program": "/bin/ls",
+            "argv": [
+              "/bin/ls",
+              "-l"
+            ],
+            "cwd": "/test/project"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "guardian_assessment:review-1",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Status: Approved\nAction: exec /bin/ls -l\nRisk: low\nRationale: The command only lists files."
+            }
+          }
+        ],
+        "rawOutput": {
+          "threadId": "test-session-id",
+          "turnId": "turn-1",
+          "startedAtMs": 1000,
+          "completedAtMs": 1500,
+          "reviewId": "review-1",
+          "targetItemId": "command-1",
+          "decisionSource": "agent",
+          "review": {
+            "status": "approved",
+            "riskLevel": "low",
+            "userAuthorization": "medium",
+            "rationale": "The command only lists files."
+          },
+          "action": {
+            "type": "execve",
+            "source": "unifiedExec",
+            "program": "/bin/ls",
+            "argv": [
+              "/bin/ls",
+              "-l"
+            ],
+            "cwd": "/test/project"
+          }
+        }
+      }
+    }
+  ]
+}
