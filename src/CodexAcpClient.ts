@@ -333,6 +333,9 @@ export class CodexAcpClient {
             return;
         }
         const additionalRoots = readAdditionalRoots(meta);
+        if (additionalRoots.length > 0) {
+            await this.codexClient.skillsExtraRootsSet({ extraRoots: additionalRoots });
+        }
         await this.codexClient.listSkills({
             cwds: [cwd],
             forceReload: true,
