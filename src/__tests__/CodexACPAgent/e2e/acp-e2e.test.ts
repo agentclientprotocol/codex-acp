@@ -112,7 +112,7 @@ describeE2E("E2E tests", () => {
             name: "session-root-skill",
             description: "Session root skill",
             body: "This skill exists only in an additional root passed at session creation.",
-        }, additionalSkillsRoot);
+        }, path.join(additionalSkillsRoot, ".agents", "skills"));
 
         const session = await fixture.connection.newSession({
             cwd: fixture.workspaceDir,

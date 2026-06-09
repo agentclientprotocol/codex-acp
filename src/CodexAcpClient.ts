@@ -332,7 +332,8 @@ export class CodexAcpClient {
         if (!cwd) {
             return;
         }
-        const additionalRoots = readAdditionalRoots(meta);
+
+        const additionalRoots = readAdditionalRoots(meta).map(root => path.join(root, ".agents", "skills"));
         if (additionalRoots.length > 0) {
             await this.codexClient.skillsExtraRootsSet({ extraRoots: additionalRoots });
         }
