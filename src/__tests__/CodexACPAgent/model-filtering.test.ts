@@ -26,6 +26,8 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 additionalSpeedTiers: [],
+                serviceTiers: [],
+                defaultServiceTier: null,
                 isDefault: false,
                 inputModalities: []
             },
@@ -42,6 +44,8 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 additionalSpeedTiers: [],
+                serviceTiers: [],
+                defaultServiceTier: null,
                 isDefault: false,
                 inputModalities: []
             },
@@ -58,6 +62,8 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 additionalSpeedTiers: [],
+                serviceTiers: [],
+                defaultServiceTier: null,
                 isDefault: false,
                 inputModalities: []
             },
@@ -74,6 +80,8 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 additionalSpeedTiers: [],
+                serviceTiers: [],
+                defaultServiceTier: null,
                 isDefault: false,
                 inputModalities: []
             },
@@ -90,6 +98,8 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 additionalSpeedTiers: [],
+                serviceTiers: [],
+                defaultServiceTier: null,
                 isDefault: false,
                 inputModalities: []
             },
@@ -106,6 +116,8 @@ describe("Model filtering", () => {
                 defaultReasoningEffort: "medium",
                 supportsPersonality: false,
                 additionalSpeedTiers: [],
+                serviceTiers: [],
+                defaultServiceTier: null,
                 isDefault: false,
                 inputModalities: []
             },

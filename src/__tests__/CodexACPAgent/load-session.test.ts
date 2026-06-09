@@ -33,6 +33,8 @@ describe("CodexACPAgent - loadSession", () => {
             inputModalities: ["text", "image"],
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: true,
         };
 
@@ -43,6 +45,9 @@ describe("CodexACPAgent - loadSession", () => {
 
         const thread: Thread = {
             id: "session-1",
+            sessionId: "session-1",
+            parentThreadId: null,
+            threadSource: null,
             forkedFromId: null,
             preview: "Hi",
             ephemeral: false,
@@ -61,6 +66,7 @@ describe("CodexACPAgent - loadSession", () => {
             turns: [
                 {
                     id: "turn-1",
+                    itemsView: "full",
                     status: "completed",
                     error: null,
                     startedAt: null,
@@ -70,6 +76,7 @@ describe("CodexACPAgent - loadSession", () => {
                         {
                             type: "userMessage",
                             id: "item-user-1",
+                            clientId: null,
                             content: [
                                 { type: "text", text: "Hi", text_elements: [] },
                                 { type: "image", url: "https://example.com/image.png" },
@@ -120,6 +127,7 @@ describe("CodexACPAgent - loadSession", () => {
                             tool: "search",
                             status: "completed",
                             arguments: {},
+                            pluginId: null,
                             result: null,
                             error: null,
                             durationMs: null,
@@ -191,6 +199,8 @@ describe("CodexACPAgent - loadSession", () => {
             inputModalities: ["text"],
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: true,
         };
 
@@ -263,6 +273,8 @@ describe("CodexACPAgent - loadSession", () => {
             inputModalities: ["text"],
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: true,
         };
 

@@ -31,6 +31,7 @@
           "params": {
             "threadId": "test-session-id",
             "turnId": "turn-1",
+            "startedAtMs": 0,
             "itemId": "item-snapshot",
             "reason": "Running npm install",
             "proposedExecpolicyAmendment": null

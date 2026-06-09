@@ -246,6 +246,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 inputModalities: ["text"],
                 supportsPersonality: false,
                 additionalSpeedTiers: [],
+                serviceTiers: [],
+                defaultServiceTier: null,
                 isDefault: true
             }],
             nextCursor: null
@@ -262,10 +264,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(listSkillsSpy).toHaveBeenCalledWith({
             cwds: ["/workspace"],
             forceReload: true,
-            perCwdExtraUserRoots: [{
-                cwd: "/workspace",
-                extraUserRoots: ["/skills/one", "/skills/two"]
-            }]
         });
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
     });
@@ -450,10 +448,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(listSkillsSpy).toHaveBeenCalledWith({
             cwds: ["/workspace"],
             forceReload: true,
-            perCwdExtraUserRoots: [{
-                cwd: "/workspace",
-                extraUserRoots: ["/skills/one", "/skills/two"]
-            }]
         });
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(turnStartSpy.mock.invocationCallOrder[0]!);
     });
@@ -477,6 +471,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         return {
             id,
             items: [],
+            itemsView: "notLoaded" as const,
             status,
             error: null,
             startedAt: null,
@@ -718,6 +713,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: {
                 id: "turn-id",
                 items: [],
+                itemsView: "notLoaded",
                 status: "completed",
                 error: null,
                 startedAt: null,
@@ -750,7 +746,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await expect(
             fixture.getCodexAcpAgent().resumeSession({cwd: "", sessionId: sessionId})
-        ).rejects.toThrow("invalid thread id");
+        ).rejects.toThrow("invalid session id");
     });
 
     it('should return available builtin commands', async () => {
@@ -867,6 +863,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             data: [
                 {
                     name: "fs",
+                    serverInfo: null,
                     tools: {listFiles: {name: "listFiles", inputSchema: {type: "object"}}},
                     resources: [{name: "workspace", uri: "file:///workspace"}],
                     resourceTemplates: [],
@@ -874,6 +871,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 },
                 {
                     name: "browser",
+                    serverInfo: null,
                     tools: {},
                     resources: [],
                     resourceTemplates: [],
@@ -931,6 +929,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             defaultReasoningEffort: 'medium',
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: false,
             inputModalities: []
         },
@@ -949,6 +949,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             defaultReasoningEffort: 'low',
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: true,
             inputModalities: []
         }
@@ -975,6 +977,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: {
                 id: "turn-id",
                 items: [],
+                itemsView: "notLoaded",
                 status: "inProgress",
                 error: null,
                 startedAt: null,
@@ -987,6 +990,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: {
                 id: "turn-id",
                 items: [],
+                itemsView: "notLoaded",
                 status: "completed",
                 error: null,
                 startedAt: null,
@@ -1086,6 +1090,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 primary: { usedPercent: 25, resetsAt: null, windowDurationMins: 60 },
                 secondary: null,
                 credits: null,
+                individualLimit: null,
                 planType: null,
                 rateLimitReachedType: null,
             }
@@ -1099,6 +1104,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 primary: { usedPercent: 80, resetsAt: null, windowDurationMins: 1440 },
                 secondary: null,
                 credits: null,
+                individualLimit: null,
                 planType: null,
                 rateLimitReachedType: null,
             }
@@ -1152,6 +1158,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     primary: { usedPercent: 30, resetsAt: null, windowDurationMins: 60 },
                     secondary: null,
                     credits: null,
+                    individualLimit: null,
                     planType: null,
                     rateLimitReachedType: null,
                 }
@@ -1167,6 +1174,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     primary: { usedPercent: 50, resetsAt: null, windowDurationMins: 1440 },
                     secondary: null,
                     credits: null,
+                    individualLimit: null,
                     planType: null,
                     rateLimitReachedType: null,
                 }
@@ -1185,6 +1193,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 primary: { usedPercent: 30, resetsAt: null, windowDurationMins: 60 },
                 secondary: null,
                 credits: null,
+                individualLimit: null,
                 planType: null,
                 rateLimitReachedType: null,
             }
@@ -1198,6 +1207,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 primary: { usedPercent: 50, resetsAt: null, windowDurationMins: 1440 },
                 secondary: null,
                 credits: null,
+                individualLimit: null,
                 planType: null,
                 rateLimitReachedType: null,
             }

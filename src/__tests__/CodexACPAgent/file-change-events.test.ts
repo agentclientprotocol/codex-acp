@@ -58,6 +58,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-1',
@@ -86,6 +87,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-2',
@@ -120,6 +122,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-raw',
@@ -148,6 +151,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-3',
@@ -179,6 +183,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'fileChange',
                     id: 'file-delete-raw',
@@ -209,6 +214,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-3',
@@ -239,6 +245,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'fileChange',
                     id: 'file-delete-raw',
@@ -294,6 +301,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'fileChange',
                     id: 'file-change-already-patched',
@@ -366,6 +374,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     ...fileChange,
                     status: 'inProgress',
@@ -377,6 +386,7 @@ describe('CodexEventHandler - file change events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                completedAtMs: 0,
                 item: {
                     ...fileChange,
                     status: 'completed',

@@ -14,6 +14,9 @@ describe("CodexACPAgent - list sessions", () => {
 
         const threadA: Thread = {
             id: "sess-1",
+            sessionId: "sess-1",
+            parentThreadId: null,
+            threadSource: null,
             forkedFromId: null,
             preview: "First session",
             ephemeral: false,
@@ -33,6 +36,9 @@ describe("CodexACPAgent - list sessions", () => {
         };
         const threadB: Thread = {
             id: "sess-2",
+            sessionId: "sess-2",
+            parentThreadId: null,
+            threadSource: null,
             forkedFromId: null,
             preview: "Other session",
             ephemeral: false,
@@ -96,6 +102,9 @@ describe("CodexACPAgent - list sessions", () => {
 
         const thread: Thread = {
             id: "sess-1",
+            sessionId: "sess-1",
+            parentThreadId: null,
+            threadSource: null,
             forkedFromId: null,
             preview: "Preview text",
             ephemeral: false,

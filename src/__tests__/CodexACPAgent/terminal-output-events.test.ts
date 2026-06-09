@@ -25,6 +25,7 @@ describe('CodexEventHandler - terminal output events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'commandExecution',
                     id: 'command-123',
@@ -62,6 +63,7 @@ describe('CodexEventHandler - terminal output events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'commandExecution',
                     id: 'command-shell-prefix',
@@ -110,6 +112,7 @@ describe('CodexEventHandler - terminal output events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                completedAtMs: 0,
                 item: {
                     type: 'commandExecution',
                     id: 'command-123',
@@ -139,6 +142,7 @@ describe('CodexEventHandler - terminal output events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                completedAtMs: 0,
                 item: {
                     type: 'commandExecution',
                     id: 'command-456',
@@ -168,6 +172,7 @@ describe('CodexEventHandler - terminal output events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                completedAtMs: 0,
                 item: {
                     type: 'dynamicToolCall',
                     id: 'dyn-tool-123',
@@ -195,6 +200,7 @@ describe('CodexEventHandler - terminal output events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 item: {
                     type: 'commandExecution',
                     id: 'command-flow',
@@ -226,6 +232,7 @@ describe('CodexEventHandler - terminal output events', () => {
             params: {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                completedAtMs: 0,
                 item: {
                     type: 'commandExecution',
                     id: 'command-flow',

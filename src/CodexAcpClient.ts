@@ -217,7 +217,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
-            currentServiceTier: response.serviceTier ?? null,
+            currentServiceTier: response.serviceTier as ServiceTier ?? null,
         }
     }
 
@@ -235,7 +235,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
-            currentServiceTier: response.serviceTier ?? null,
+            currentServiceTier: response.serviceTier as ServiceTier ?? null,
             thread: response.thread,
         };
     }
@@ -258,7 +258,7 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
-            currentServiceTier: response.serviceTier ?? null,
+            currentServiceTier: response.serviceTier as ServiceTier ?? null,
         };
     }
 
@@ -336,10 +336,6 @@ export class CodexAcpClient {
         await this.codexClient.listSkills({
             cwds: [cwd],
             forceReload: true,
-            perCwdExtraUserRoots: [{
-                cwd: cwd,
-                extraUserRoots: additionalRoots
-            }]
         });
     }
 

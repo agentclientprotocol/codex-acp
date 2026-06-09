@@ -178,6 +178,9 @@ export class CodexEventHandler {
             case "thread/goal/cleared":
             case "remoteControl/status/changed":
             case "app/list/updated":
+            case "thread/settings/updated":
+            case "process/outputDelta":
+            case "process/exited":
                 return null;
         }
     }

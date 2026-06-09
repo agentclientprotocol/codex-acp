@@ -367,6 +367,8 @@ export function createTestModel(overrides?: Partial<Model>): Model {
         inputModalities: ["text", "image"],
         supportsPersonality: false,
         additionalSpeedTiers: [],
+        serviceTiers: [],
+        defaultServiceTier: null,
         isDefault: true,
         ...overrides,
     };
@@ -388,6 +390,7 @@ export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string)
         turn: {
             id: "turn-id",
             items: [],
+            itemsView: "notLoaded",
             status: "inProgress",
             error: null,
             startedAt: null,
@@ -400,6 +403,7 @@ export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string)
         turn: {
             id: "turn-id",
             items: [],
+            itemsView: "notLoaded",
             status: "completed",
             error: null,
             startedAt: null,

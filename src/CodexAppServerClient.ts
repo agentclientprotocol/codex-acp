@@ -302,6 +302,7 @@ export class CodexAppServerClient {
             turn: {
                 id: turnId,
                 items: [],
+                itemsView: "notLoaded",
                 status: "interrupted",
                 error: null,
                 startedAt: null,

@@ -5,13 +5,7 @@
     "cwds": [
       "/test/cwd"
     ],
-    "forceReload": true,
-    "perCwdExtraUserRoots": [
-      {
-        "cwd": "cwd",
-        "extraUserRoots": []
-      }
-    ]
+    "forceReload": true
   }
 }
 {
