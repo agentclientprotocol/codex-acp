@@ -78,6 +78,23 @@ describeE2E("E2E tests", () => {
         });
     });
 
+    it("enters Plan mode via setSessionMode and reflects it in /status", async () => {
+        fixture = await createAuthenticatedFixture();
+        const session = await fixture.createSession();
+
+        const targetMode = AgentMode.Plan;
+        await fixture.connection.setSessionMode({
+            sessionId: session.sessionId,
+            modeId: targetMode.id,
+        });
+
+        await fixture.expectStatus(session.sessionId, {
+            Mode: targetMode.name,
+            Approval: targetMode.approvalPolicy,
+            Sandbox: targetMode.sandboxMode,
+        });
+    });
+
     it("respects INITIAL_AGENT_MODE when seeding the initial session mode", async () => {
         const initialMode = AgentMode.ReadOnly;
         fixture = await createAuthenticatedFixture(initialMode);

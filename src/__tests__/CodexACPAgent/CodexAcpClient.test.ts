@@ -1057,6 +1057,46 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         }));
     });
 
+    it ('should inject the plan instruction as the first input item in Plan mode', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({ agentMode: AgentMode.Plan });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "Add feature X" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            input: [
+                { type: "text", text: AgentMode.Plan.planInstructions, text_elements: [] },
+                { type: "text", text: "Add feature X", text_elements: [] },
+            ],
+            approvalPolicy: "never",
+            sandboxPolicy: { type: "readOnly", networkAccess: false },
+        }));
+    });
+
+    it ('should not inject the plan instruction in Agent mode', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({ agentMode: AgentMode.Agent });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "Add feature X" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            input: [
+                { type: "text", text: "Add feature X", text_elements: [] },
+            ],
+        }));
+    });
+
+    it ('should not inject the plan instruction in Read-only mode', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({ agentMode: AgentMode.ReadOnly });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "Add feature X" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            input: [
+                { type: "text", text: "Add feature X", text_elements: [] },
+            ],
+            approvalPolicy: "on-request",
+        }));
+    });
+
     it ('should show rate limits from multiple sources in status', async () => {
         const rateLimits: RateLimitsMap = new Map();
         rateLimits.set("limit-1", {
