@@ -192,7 +192,9 @@ export class CodexCommands {
                 }
                 const target: ReviewTarget = {type: "uncommittedChanges"};
                 const turnCompleted = await this.runWithProcessCheck(() =>
-                    this.codexAcpClient.runReview(sessionId, target)
+                    this.codexAcpClient.runReview(sessionId, target, (turnId) => {
+                        sessionState.currentTurnId = turnId;
+                    })
                 );
                 return {handled: true, turnCompleted};
             }

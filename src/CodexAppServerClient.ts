@@ -217,7 +217,10 @@ export class CodexAppServerClient {
         }
     }
 
-    async runReview(params: ReviewStartParams): Promise<TurnCompletedNotification> {
+    async runReview(
+        params: ReviewStartParams,
+        onTurnStarted?: (turnId: string) => void
+    ): Promise<TurnCompletedNotification> {
         if (params.delivery === "detached") {
             throw new Error("runReview only supports inline review delivery");
         }
@@ -228,6 +231,7 @@ export class CodexAppServerClient {
 
         try {
             const reviewStarted = await this.reviewStart(params);
+            onTurnStarted?.(reviewStarted.turn.id);
             const earlyCompletion = capturedCompletions.find(event =>
                 event.threadId === reviewStarted.reviewThreadId
                 && event.turn.id === reviewStarted.turn.id

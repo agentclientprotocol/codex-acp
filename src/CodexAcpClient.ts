@@ -475,12 +475,16 @@ export class CodexAcpClient {
         this.codexClient.markTurnStale(params.threadId, params.turnId);
     }
 
-    async runReview(threadId: string, target: ReviewTarget): Promise<TurnCompletedNotification> {
+    async runReview(
+        threadId: string,
+        target: ReviewTarget,
+        onTurnStarted?: (turnId: string) => void
+    ): Promise<TurnCompletedNotification> {
         return await this.codexClient.runReview({
             threadId,
             target,
             delivery: "inline",
-        });
+        }, onTurnStarted);
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {

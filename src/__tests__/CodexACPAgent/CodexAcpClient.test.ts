@@ -938,7 +938,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         expect(response.stopReason).toBe("end_turn");
-        expect(reviewSpy).toHaveBeenCalledWith("session-id", {type: "uncommittedChanges"});
+        expect(reviewSpy).toHaveBeenCalledWith(
+            "session-id",
+            {type: "uncommittedChanges"},
+            expect.any(Function)
+        );
     });
 
     it('rejects review command arguments', async () => {
@@ -986,6 +990,64 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         expect(response.stopReason).toBe("cancelled");
         expect(mockFixture.getAcpConnectionDump([])).toContain("*Conversation interrupted*");
+    });
+
+    it('interrupts an active review command when cancelled', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const sessionState: SessionState = createTestSessionState({sessionId: "session-id"});
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+        // @ts-expect-error - exercising cancellation for a registered session
+        codexAcpAgent.sessions.set("session-id", sessionState);
+
+        const reviewStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "reviewStart").mockResolvedValue({
+            reviewThreadId: "session-id",
+            turn: {
+                id: "review-turn",
+                items: [],
+                itemsView: "full",
+                status: "inProgress",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null
+            }
+        });
+        let completeReview: (value: TurnCompletedNotification) => void = () => {};
+        const reviewCompleted = new Promise<TurnCompletedNotification>((resolve) => {
+            completeReview = resolve;
+        });
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted").mockReturnValue(reviewCompleted);
+        const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt").mockResolvedValue();
+
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "/review"}]
+        });
+        await vi.waitFor(() => {
+            expect(reviewStartSpy).toHaveBeenCalled();
+        });
+
+        await codexAcpAgent.cancel({sessionId: "session-id"});
+        completeReview({
+            threadId: "session-id",
+            turn: {
+                id: "review-turn",
+                items: [],
+                itemsView: "full",
+                status: "interrupted",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null
+            }
+        });
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+
+        expect(turnInterruptSpy).toHaveBeenCalledWith({
+            threadId: "session-id",
+            turnId: "review-turn"
+        });
     });
 
     it('propagates review command event handler failures', async () => {
