@@ -265,9 +265,10 @@ export class CodexEventHandler {
             case "imageGeneration":
             case "enteredReviewMode":
             case "exitedReviewMode":
-            case "contextCompaction":
             case "plan":
                 return null;
+            case "contextCompaction":
+                return this.createContextCompactionUpdate(event.item);
         }
     }
 
@@ -309,10 +310,32 @@ export class CodexEventHandler {
             case "imageGeneration":
             case "enteredReviewMode":
             case "exitedReviewMode":
-            case "contextCompaction":
             case "plan":
                 return null;
+            case "contextCompaction":
+                return {
+                    sessionUpdate: "tool_call_update",
+                    toolCallId: event.item.id,
+                    status: "completed",
+                    content: [{
+                        type: "content",
+                        content: {
+                            type: "text",
+                            text: "Context compacted.",
+                        },
+                    }],
+                };
         }
+    }
+
+    private createContextCompactionUpdate(item: ThreadItem & { type: "contextCompaction" }): UpdateSessionEvent {
+        return {
+            sessionUpdate: "tool_call",
+            toolCallId: item.id,
+            kind: "other",
+            title: "Compact context",
+            status: "in_progress",
+        };
     }
 
     private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {

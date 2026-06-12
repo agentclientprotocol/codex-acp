@@ -22,6 +22,11 @@
             "input": null
           },
           {
+            "name": "compact",
+            "description": "Summarize the conversation to free tokens.",
+            "input": null
+          },
+          {
             "name": "logout",
             "description": "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
             "input": null

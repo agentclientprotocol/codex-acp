@@ -829,6 +829,55 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(fixture.getAcpConnectionDump(["sessionId"])).toMatchFileSnapshot("data/command-logout.json");
     });
 
+    it('handles compact command', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const sessionState: SessionState = createTestSessionState();
+
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId: sessionState.sessionId,
+            prompt: [{ type: "text", text: "/compact " }],
+        });
+
+        await vi.waitFor(() => {
+            expect(mockFixture.getCodexConnectionEvents([])).toContainEqual({
+                eventType: "request",
+                method: "thread/compact/start",
+                params: { threadId: sessionState.sessionId },
+            });
+        });
+        let settled = false;
+        void promptPromise.then(() => {
+            settled = true;
+        });
+        await Promise.resolve();
+        expect(settled).toBe(false);
+
+        mockFixture.sendServerNotification({
+            method: "item/started",
+            params: {
+                threadId: sessionState.sessionId,
+                turnId: "compact-turn-id",
+                startedAtMs: 0,
+                item: { type: "contextCompaction", id: "compact-item-id" },
+            },
+        });
+        mockFixture.sendServerNotification({
+            method: "item/completed",
+            params: {
+                threadId: sessionState.sessionId,
+                turnId: "compact-turn-id",
+                completedAtMs: 1,
+                item: { type: "contextCompaction", id: "compact-item-id" },
+            },
+        });
+
+        await expect(promptPromise).resolves.toMatchObject({ stopReason: "end_turn" });
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-compact.json");
+    });
+
     it('handles skills command', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});

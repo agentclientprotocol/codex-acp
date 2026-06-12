@@ -28,6 +28,8 @@ import type {
     ThreadLoadedListResponse,
     ThreadListParams,
     ThreadListResponse,
+    ThreadCompactStartParams,
+    ThreadCompactStartResponse,
     ThreadReadParams,
     ThreadReadResponse,
     ThreadResumeParams,
@@ -99,6 +101,7 @@ export class CodexAppServerClient {
     private readonly pendingTurnCompletionResolvers = new Map<string, Map<string, (event: TurnCompletedNotification) => void>>();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
+    private readonly pendingCompactResolvers = new Map<string, Set<CompactCompletionResolver>>();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -116,6 +119,7 @@ export class CodexAppServerClient {
             if (isTurnCompletedNotification(serverNotification)) {
                 this.recordTurnCompleted(serverNotification.params);
             }
+            this.recordCompactCompletion(serverNotification);
             const routing = extractTurnRouting(serverNotification);
             const staleTurnNotification = this.isStaleTurn(routing.threadId, routing.turnId);
             if (staleTurnNotification) {
@@ -235,6 +239,21 @@ export class CodexAppServerClient {
 
     async threadLoadedList(params: ThreadLoadedListParams): Promise<ThreadLoadedListResponse> {
         return await this.sendRequest({ method: "thread/loaded/list", params: params });
+    }
+
+    async threadCompactStart(params: ThreadCompactStartParams): Promise<ThreadCompactStartResponse> {
+        return await this.sendRequest({ method: "thread/compact/start", params });
+    }
+
+    async runThreadCompact(params: ThreadCompactStartParams): Promise<void> {
+        const completion = this.awaitCompactCompleted(params.threadId);
+        try {
+            await this.threadCompactStart(params);
+            await completion.promise;
+        } catch (err) {
+            completion.dispose();
+            throw err;
+        }
     }
 
     async threadRead(params: ThreadReadParams): Promise<ThreadReadResponse> {
@@ -374,6 +393,52 @@ export class CodexAppServerClient {
         }
     }
 
+    private awaitCompactCompleted(threadId: string): { promise: Promise<void>; dispose: () => void } {
+        let resolver: CompactCompletionResolver | null = null;
+        const promise = new Promise<void>((resolve, reject) => {
+            resolver = { resolve, reject };
+            const resolvers = this.pendingCompactResolvers.get(threadId) ?? new Set<CompactCompletionResolver>();
+            resolvers.add(resolver);
+            this.pendingCompactResolvers.set(threadId, resolvers);
+        });
+
+        return {
+            promise,
+            dispose: () => {
+                if (resolver === null) {
+                    return;
+                }
+                const resolvers = this.pendingCompactResolvers.get(threadId);
+                resolvers?.delete(resolver);
+                if (resolvers?.size === 0) {
+                    this.pendingCompactResolvers.delete(threadId);
+                }
+                resolver = null;
+            },
+        };
+    }
+
+    private recordCompactCompletion(notification: ServerNotification): void {
+        const compactResult = getCompactCompletionResult(notification);
+        if (compactResult === null) {
+            return;
+        }
+
+        const resolvers = this.pendingCompactResolvers.get(compactResult.threadId);
+        if (!resolvers) {
+            return;
+        }
+        this.pendingCompactResolvers.delete(compactResult.threadId);
+
+        for (const resolver of resolvers) {
+            if (compactResult.error) {
+                resolver.reject(compactResult.error);
+            } else {
+                resolver.resolve();
+            }
+        }
+    }
+
     private isStaleTurn(threadId: string | null, turnId: string | null): boolean {
         if (threadId === null || turnId === null) {
             return false;
@@ -505,6 +570,16 @@ type McpServerStartupResolver = {
     resolve: (result: McpStartupResult) => void;
 };
 
+type CompactCompletionResolver = {
+    resolve: () => void;
+    reject: (error: Error) => void;
+};
+
+type CompactCompletionResult = {
+    threadId: string;
+    error: Error | null;
+};
+
 function isMcpServerStatusUpdatedNotification(notification: ServerNotification): notification is {
     method: "mcpServer/startupStatus/updated";
     params: McpServerStatusUpdatedNotification;
@@ -517,6 +592,45 @@ function isTurnCompletedNotification(notification: ServerNotification): notifica
     params: TurnCompletedNotification;
 } {
     return notification.method === "turn/completed";
+}
+
+function getCompactCompletionResult(notification: ServerNotification): CompactCompletionResult | null {
+    switch (notification.method) {
+        case "thread/compacted":
+            return {
+                threadId: notification.params.threadId,
+                error: null,
+            };
+        case "item/completed":
+            if (notification.params.item.type !== "contextCompaction") {
+                return null;
+            }
+            return {
+                threadId: notification.params.threadId,
+                error: null,
+            };
+        case "turn/completed":
+            if (!notification.params.turn.items.some(item => item.type === "contextCompaction")) {
+                return null;
+            }
+            if (notification.params.turn.status === "failed") {
+                return {
+                    threadId: notification.params.threadId,
+                    error: new Error(notification.params.turn.error?.message ?? "Context compaction failed"),
+                };
+            }
+            return {
+                threadId: notification.params.threadId,
+                error: null,
+            };
+        case "error":
+            return {
+                threadId: notification.params.threadId,
+                error: new Error(notification.params.error.message),
+            };
+        default:
+            return null;
+    }
 }
 
 function extractThreadId(notification: ServerNotification): string | null {

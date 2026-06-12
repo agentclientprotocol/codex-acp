@@ -1,0 +1,52 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Compacting context...\n\n"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "compact-item-id",
+        "kind": "other",
+        "title": "Compact context",
+        "status": "in_progress"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "compact-item-id",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Context compacted."
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

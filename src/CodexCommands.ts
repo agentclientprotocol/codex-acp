@@ -84,6 +84,11 @@ export class CodexCommands {
                 input: null
             },
             {
+                name: "compact",
+                description: "Summarize the conversation to free tokens.",
+                input: null
+            },
+            {
                 name: "logout",
                 description: "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
                 input: null
@@ -128,6 +133,16 @@ export class CodexCommands {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text: "Logged out from Codex account." }
                 });
+                return true;
+            }
+            case "compact": {
+                const session = new ACPSessionConnection(this.connection, sessionId);
+                await session.update({
+                    sessionUpdate: "agent_message_chunk",
+                    content: { type: "text", text: "Compacting context...\n\n" }
+                });
+                await this.runWithProcessCheck(() => this.codexAcpClient.compactSession(sessionId));
+                await this.codexAcpClient.waitForSessionNotifications(sessionId);
                 return true;
             }
             case "skills": {
