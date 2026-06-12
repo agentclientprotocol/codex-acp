@@ -214,7 +214,7 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     async handleError(e: Error){
-        if (e.message.includes("log out")) {
+        if (e.message.includes("log out") || e.message.includes("cloud requirements")) {
             await this.runWithProcessCheck(() => this.codexAcpClient.logout());
             throw RequestError.internalError(`${(e.message)}\n\nYou have been logged out. Please try again.`);
         }
