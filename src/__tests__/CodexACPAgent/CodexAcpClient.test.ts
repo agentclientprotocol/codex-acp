@@ -966,6 +966,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(result).toEqual(ModelId.create('5.2-codex', 'medium'));
     });
 
+    it('should keep a model id that is not in the advertised catalog (custom provider)', () => {
+        const result = fixture.getCodexAcpClient().createModelId(mockModels, 'MiniMax-M3', 'high');
+        expect(result).toEqual(ModelId.create('MiniMax-M3', 'high'));
+    });
+
+    it('should default the effort for an uncatalogued model when reasoningEffort is null', () => {
+        const result = fixture.getCodexAcpClient().createModelId(mockModels, 'MiniMax-M3', null);
+        expect(result).toEqual(ModelId.create('MiniMax-M3', 'medium'));
+    });
+
     /**
      * Sets up a mock fixture with turnStart/awaitTurnCompleted spied on,
      * and a given session state. Returns the fixture and turnStart spy.

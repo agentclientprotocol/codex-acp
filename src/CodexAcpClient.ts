@@ -376,15 +376,30 @@ export class CodexAcpClient {
      * Falls back to model defaults if parameters are missing or unsupported.
      */
     createModelId(availableModels: Model[], modelId: string | null, reasoningEffort: ReasoningEffort | null): ModelId {
-        const selectedModel =
-            availableModels.find(m => m.id === modelId) ??
-            availableModels.find(m => m.isDefault);
+        const selectedModel = availableModels.find(m => m.id === modelId);
+        if (selectedModel) {
+            return ModelId.create(selectedModel.id, reasoningEffort ?? selectedModel.defaultReasoningEffort);
+        }
 
-        if (!selectedModel) {
+        // The configured model is not in Codex's advertised catalog. This is
+        // expected for custom providers (e.g. a self-hosted or third-party
+        // model), whose model ids the catalog does not enumerate. Keep the
+        // requested model id instead of silently substituting the built-in
+        // default. This mirrors the Codex CLI, which keeps the configured model
+        // and merely warns "Model metadata not found. Defaulting to fallback
+        // metadata." Substituting the default here pins a wrong model id onto
+        // every turn and makes requests to custom-provider endpoints fail with
+        // "unknown model".
+        if (modelId) {
+            return ModelId.create(modelId, reasoningEffort ?? "medium");
+        }
+
+        const defaultModel = availableModels.find(m => m.isDefault);
+        if (!defaultModel) {
             throw new Error(`Model selection failed: No model found for ID "${modelId}" and no default model is defined.`);
         }
 
-        return ModelId.create(selectedModel.id, reasoningEffort ?? selectedModel.defaultReasoningEffort);
+        return ModelId.create(defaultModel.id, reasoningEffort ?? defaultModel.defaultReasoningEffort);
     }
 
     async subscribeToSessionEvents(
