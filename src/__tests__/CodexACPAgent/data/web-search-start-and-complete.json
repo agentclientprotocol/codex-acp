@@ -10,6 +10,8 @@
         "title": "Web search: agent client protocol",
         "status": "in_progress",
         "rawInput": {
+          "type": "webSearch",
+          "id": "web-search-1",
           "query": "agent client protocol",
           "action": {
             "type": "search",
@@ -32,6 +34,8 @@
         "title": "Web search: agent client protocol",
         "status": "completed",
         "rawInput": {
+          "type": "webSearch",
+          "id": "web-search-1",
           "query": "agent client protocol",
           "action": {
             "type": "search",
