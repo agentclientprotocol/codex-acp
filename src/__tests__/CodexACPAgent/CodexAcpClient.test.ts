@@ -377,11 +377,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             additionalDirectories: [null],
             mcpServers: [],
         } as unknown as acp.NewSessionRequest)).rejects.toThrow("additionalDirectories entries must be strings");
-        await expect(codexAcpClient.newSession({
-            cwd: "/workspace",
-            additionalDirectories: null,
-            mcpServers: [],
-        } as unknown as acp.NewSessionRequest)).rejects.toThrow("additionalDirectories must be an array");
     });
 
     it('sanitizes whitespace in ACP MCP server names before adding them to Codex config', async () => {
@@ -533,7 +528,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(session.sessionId).toBe("thread-id");
     });
 
-    it('prefetches session additional skill roots before turn start', async () => {
+    it('prefetches skills before turn start', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
@@ -555,14 +550,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const promptRequest: acp.PromptRequest = {
             sessionId: "session-id",
             prompt: [{ type: "text", text: "Hello" }],
-            _meta: {
-                additionalRoots: ["/skills/one", " /skills/two ", 7]
-            }
         };
         await codexAcpAgent.prompt(promptRequest);
 
         expect(listSkillsSpy).toHaveBeenCalledWith({
-            cwds: ["/workspace", "/skills/one", "/skills/two"],
+            cwds: ["/workspace"],
             forceReload: true,
         });
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(turnStartSpy.mock.invocationCallOrder[0]!);
