@@ -31,6 +31,7 @@ describe("CodexEventHandler - web search events", () => {
                 params: {
                     threadId: sessionId,
                     turnId: "turn-1",
+                    startedAtMs: 0,
                     item: {
                         type: "webSearch",
                         id: "web-search-1",
@@ -48,6 +49,7 @@ describe("CodexEventHandler - web search events", () => {
                 params: {
                     threadId: sessionId,
                     turnId: "turn-1",
+                    completedAtMs: 0,
                     item: {
                         type: "webSearch",
                         id: "web-search-1",
@@ -76,6 +78,7 @@ describe("CodexEventHandler - web search events", () => {
                 params: {
                     threadId: sessionId,
                     turnId: "turn-1",
+                    startedAtMs: 0,
                     item: {
                         type: "webSearch",
                         id: "web-open-1",
@@ -92,6 +95,7 @@ describe("CodexEventHandler - web search events", () => {
                 params: {
                     threadId: sessionId,
                     turnId: "turn-1",
+                    startedAtMs: 0,
                     item: {
                         type: "webSearch",
                         id: "web-find-1",
