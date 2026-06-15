@@ -340,19 +340,19 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         mockFixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
-            params: { name: "alpha", status: "starting", error: null }
+            params: { threadId: "thread-id", name: "alpha", status: "starting", error: null }
         });
         mockFixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
-            params: { name: "beta", status: "starting", error: null }
+            params: { threadId: "thread-id", name: "beta", status: "starting", error: null }
         });
         mockFixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
-            params: { name: "alpha", status: "ready", error: null }
+            params: { threadId: "thread-id", name: "alpha", status: "ready", error: null }
         });
         mockFixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
-            params: { name: "beta", status: "ready", error: null }
+            params: { threadId: "thread-id", name: "beta", status: "ready", error: null }
         });
 
         const startup = await startupPromise;
@@ -403,7 +403,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         mockFixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
-            params: { name: "broken-mcp", status: "failed", error: "boom" }
+            params: { threadId: "thread-id", name: "broken-mcp", status: "failed", error: "boom" }
         });
 
         await vi.waitFor(() => {
