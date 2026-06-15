@@ -262,13 +262,13 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         expect(listSkillsSpy).toHaveBeenCalledWith({
-            cwds: ["/workspace"],
+            cwds: ["/workspace", "/skills/one", "/skills/two"],
             forceReload: true,
         });
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
     });
 
-    it('applies ACP additional directories to new session config and skill discovery', async () => {
+    it('prefers ACP additional directories over legacy meta roots for new session skill discovery', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
@@ -290,6 +290,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             cwd: "/workspace",
             additionalDirectories: ["/workspace/extra", "/workspace", "/workspace/extra"],
             mcpServers: [],
+            _meta: {
+                additionalRoots: ["/skills/one", "/workspace/extra", "/workspace"],
+            },
         });
 
         expect(session.additionalDirectories).toEqual(["/workspace/extra"]);
@@ -559,7 +562,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await codexAcpAgent.prompt(promptRequest);
 
         expect(listSkillsSpy).toHaveBeenCalledWith({
-            cwds: ["/workspace"],
+            cwds: ["/workspace", "/skills/one", "/skills/two"],
             forceReload: true,
         });
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(turnStartSpy.mock.invocationCallOrder[0]!);

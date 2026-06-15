@@ -205,8 +205,8 @@ export class CodexAcpClient {
     }
 
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
-        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories);
-        await this.refreshSkills(request.cwd, additionalDirectories, request._meta);
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
@@ -227,8 +227,8 @@ export class CodexAcpClient {
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
-        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories);
-        await this.refreshSkills(request.cwd, additionalDirectories, request._meta);
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
@@ -250,8 +250,8 @@ export class CodexAcpClient {
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
-        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories);
-        await this.refreshSkills(request.cwd, additionalDirectories, request._meta);
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadStart({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
@@ -365,23 +365,19 @@ export class CodexAcpClient {
 
     private async refreshSkills(
         cwd: string,
-        additionalDirectories: string[],
-        meta?: Record<string, unknown> | null
+        additionalRoots: string[]
     ): Promise<void> {
         if (!cwd) {
             return;
         }
 
-        const additionalRoots = uniqueStrings([
-            ...readAdditionalRoots(meta),
-            ...additionalDirectories,
-        ]).map(root => path.join(root, ".agents", "skills"));
-        if (!arraysEqual(this.skillExtraRoots, additionalRoots)) {
-            await this.codexClient.skillsExtraRootsSet({ extraRoots: additionalRoots });
-            this.skillExtraRoots = additionalRoots;
+        const skillExtraRoots = additionalRoots.map(root => path.join(root, ".agents", "skills"));
+        if (!arraysEqual(this.skillExtraRoots, skillExtraRoots)) {
+            await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
+            this.skillExtraRoots = skillExtraRoots;
         }
         await this.codexClient.listSkills({
-            cwds: [cwd, ...additionalDirectories],
+            cwds: [cwd, ...additionalRoots],
             forceReload: true,
         });
     }
@@ -493,8 +489,7 @@ export class CodexAcpClient {
     ): Promise<TurnCompletedNotification | null> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
-
-        await this.refreshSkills(cwd, additionalDirectories, request._meta);
+        await this.refreshSkills(cwd, additionalDirectories);
         if (shouldCancel?.()) {
             return null;
         }
@@ -750,10 +745,10 @@ interface GatewayConfig {
     }
 }
 
-function readAdditionalRoots(meta: Record<string, unknown> | null | undefined): string[] {
+function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[] | undefined {
     const rawRoots = meta?.["additionalRoots"];
     if (!Array.isArray(rawRoots)) {
-        return [];
+        return undefined;
     }
 
     return uniqueStrings(rawRoots
@@ -762,15 +757,10 @@ function readAdditionalRoots(meta: Record<string, unknown> | null | undefined): 
         .filter(value => value.length > 0));
 }
 
-function readAdditionalDirectories(cwd: string, rawDirectories: unknown): string[] {
-    if (rawDirectories === undefined) {
+function readAdditionalDirectories(cwd: string, additionalDirectories?: string[],  meta?: Record<string, unknown> | null): string[] {
+    const rawDirectories = additionalDirectories ?? readMetaAdditionalRoots(meta);
+    if (!rawDirectories) {
         return [];
-    }
-    if (rawDirectories === null) {
-        throw RequestError.invalidParams(undefined, "additionalDirectories must be an array");
-    }
-    if (!Array.isArray(rawDirectories)) {
-        throw RequestError.invalidParams(undefined, "additionalDirectories must be an array");
     }
 
     const directories: string[] = [];
