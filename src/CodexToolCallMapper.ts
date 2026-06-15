@@ -33,6 +33,7 @@ type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
 type GuardianApprovalReviewNotification =
     | ItemGuardianApprovalReviewStartedNotification
     | ItemGuardianApprovalReviewCompletedNotification;
+type WebSearchItem = ThreadItem & { type: "webSearch" };
 
 function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
     switch (status) {
@@ -230,7 +231,7 @@ export function createFuzzyFileSearchComplete(
 }
 
 export function createWebSearchStartUpdate(
-    item: ThreadItem & { type: "webSearch" }
+    item: WebSearchItem
 ): UpdateSessionEvent {
     return {
         sessionUpdate: "tool_call",
@@ -238,23 +239,23 @@ export function createWebSearchStartUpdate(
         kind: "search",
         title: formatWebSearchTitle(item),
         status: "in_progress",
-        rawInput: createWebSearchRawInput(item),
+        rawInput: item,
     };
 }
 
 export function createWebSearchCompleteUpdate(
-    item: ThreadItem & { type: "webSearch" }
+    item: WebSearchItem
 ): UpdateSessionEvent {
     return {
         sessionUpdate: "tool_call_update",
         toolCallId: item.id,
         title: formatWebSearchTitle(item),
         status: "completed",
-        rawInput: createWebSearchRawInput(item),
+        rawInput: item,
     };
 }
 
-export function formatWebSearchTitle(item: ThreadItem & { type: "webSearch" }): string {
+export function formatWebSearchTitle(item: WebSearchItem): string {
     const action = item.action;
     if (!action) {
         return item.query ? `Web search: ${item.query}` : "Web search";
@@ -275,16 +276,6 @@ export function formatWebSearchTitle(item: ThreadItem & { type: "webSearch" }): 
         case "other":
             return "Web search";
     }
-}
-
-function createWebSearchRawInput(item: ThreadItem & { type: "webSearch" }): {
-    query: string,
-    action: (ThreadItem & { type: "webSearch" })["action"],
-} {
-    return {
-        query: item.query,
-        action: item.action,
-    };
 }
 
 function createCommandActionEvent(
