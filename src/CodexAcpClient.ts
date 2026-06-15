@@ -686,12 +686,22 @@ function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
                     const context = `<context ref="${resource.uri}">\n${resource.text}\n</context>`;
                     return {type: "text", text: `${link}\n${context}`, text_elements: []};
                 }
-                return null;
+                if (isImageMimeType(resource.mimeType)) {
+                    return {type: "image", url: `data:${resource.mimeType};base64,${resource.blob}`};
+                }
+                const link = formatUriAsLink(null, resource.uri);
+                const mimeType = resource.mimeType ?? "application/octet-stream";
+                const context = `<context ref="${resource.uri}" mimeType="${mimeType}" encoding="base64">\n${resource.blob}\n</context>`;
+                return {type: "text", text: `${link}\n${context}`, text_elements: []};
             }
             case "audio":
                 return null;
         }
     }).filter((block): block is UserInput => block !== null);
+}
+
+function isImageMimeType(mimeType: string | null | undefined): mimeType is string {
+    return mimeType?.startsWith("image/") ?? false;
 }
 
 function formatUriAsLink(name: string | null | undefined, uri: string): string {

@@ -35,6 +35,15 @@
         "type": "text",
         "text": "[@notes.txt](file:///tmp/notes.txt)\n<context ref=\"file:///tmp/notes.txt\">\nNotes body\n</context>",
         "text_elements": []
+      },
+      {
+        "type": "image",
+        "url": "data:image/png;base64,iVBORw0KGgo="
+      },
+      {
+        "type": "text",
+        "text": "[@archive.bin](file:///tmp/archive.bin)\n<context ref=\"file:///tmp/archive.bin\" mimeType=\"application/octet-stream\" encoding=\"base64\">\nAAEC\n</context>",
+        "text_elements": []
       }
     ],
     "approvalPolicy": "on-request",

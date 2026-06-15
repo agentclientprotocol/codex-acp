@@ -730,6 +730,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             { type: "image", mimeType: "image/png", data: "abc123", uri: "https://example.com/image.png" },
             { type: "resource_link", name: "report.txt", uri: "file:///tmp/report.txt" },
             { type: "resource", resource: { uri: "file:///tmp/notes.txt", text: "Notes body" } as acp.EmbeddedResourceResource },
+            { type: "resource", resource: { uri: "file:///tmp/pixel.png", mimeType: "image/png", blob: "iVBORw0KGgo=" } as acp.EmbeddedResourceResource },
+            { type: "resource", resource: { uri: "file:///tmp/archive.bin", mimeType: "application/octet-stream", blob: "AAEC" } as acp.EmbeddedResourceResource },
         ];
 
         await codexAcpAgent.prompt({ sessionId: "session-id", prompt });
