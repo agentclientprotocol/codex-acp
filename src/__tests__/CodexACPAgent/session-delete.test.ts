@@ -21,7 +21,7 @@ describe("ACP session delete", () => {
     it("archives sessions that are not active locally", async () => {
         const fixture = createCodexMockTestFixture();
 
-        await expect(fixture.getCodexAcpAgent().unstable_deleteSession({sessionId})).resolves.toEqual({});
+        await expect(fixture.getCodexAcpAgent().deleteSession({sessionId})).resolves.toEqual({});
 
         await expect(fixture.getCodexConnectionDump([])).toMatchFileSnapshot(
             "data/session-delete-unknown-local.json"
@@ -31,7 +31,7 @@ describe("ACP session delete", () => {
     it("closes local session resources before archiving", async () => {
         const {fixture, codexAcpAgent} = await createSession();
 
-        await expect(codexAcpAgent.unstable_deleteSession({sessionId})).resolves.toEqual({});
+        await expect(codexAcpAgent.deleteSession({sessionId})).resolves.toEqual({});
 
         await expect(fixture.getCodexConnectionDump([])).toMatchFileSnapshot(
             "data/session-delete-idle.json"
@@ -45,7 +45,7 @@ describe("ACP session delete", () => {
         await codexAcpAgent.closeSession({sessionId});
         fixture.clearCodexConnectionDump();
 
-        await expect(codexAcpAgent.unstable_deleteSession({sessionId})).resolves.toEqual({});
+        await expect(codexAcpAgent.deleteSession({sessionId})).resolves.toEqual({});
 
         await expect(fixture.getCodexConnectionDump([])).toMatchFileSnapshot(
             "data/session-delete-unknown-local.json"
@@ -56,7 +56,7 @@ describe("ACP session delete", () => {
         const {fixture, codexAcpAgent} = await createSession();
         codexAcpAgent.getSessionState(sessionId).currentTurnId = "turn-id";
 
-        await expect(codexAcpAgent.unstable_deleteSession({sessionId})).resolves.toEqual({});
+        await expect(codexAcpAgent.deleteSession({sessionId})).resolves.toEqual({});
 
         await expect(fixture.getCodexConnectionDump([])).toMatchFileSnapshot(
             "data/session-delete-active-turn.json"
@@ -73,7 +73,7 @@ describe("ACP session delete", () => {
         vi.spyOn(codexAcpClient, "deleteSession").mockReturnValue(archive.promise);
         const resumeSessionSpy = vi.spyOn(codexAcpClient, "resumeSession");
 
-        const deletePromise = codexAcpAgent.unstable_deleteSession({sessionId});
+        const deletePromise = codexAcpAgent.deleteSession({sessionId});
         await vi.waitFor(() => {
             expect(codexAcpClient.deleteSession).toHaveBeenCalledWith(sessionId);
         });
@@ -95,7 +95,7 @@ describe("ACP session delete", () => {
         vi.spyOn(codexAcpClient, "deleteSession").mockReturnValue(archive.promise);
         const loadSessionSpy = vi.spyOn(codexAcpClient, "loadSession");
 
-        const deletePromise = codexAcpAgent.unstable_deleteSession({sessionId});
+        const deletePromise = codexAcpAgent.deleteSession({sessionId});
         await vi.waitFor(() => {
             expect(codexAcpClient.deleteSession).toHaveBeenCalledWith(sessionId);
         });

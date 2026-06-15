@@ -6,6 +6,7 @@ import {
     REASONING_EFFORT_CONFIG_ID,
 } from "../../ModelConfigOption";
 import type {Model, ReasoningEffortOption} from "../../app-server/v2";
+import {LEGACY_SET_SESSION_MODEL_METHOD} from "../../AcpExtensions";
 
 const lowEffort: ReasoningEffortOption = {reasoningEffort: "low", description: "Fast"};
 const mediumEffort: ReasoningEffortOption = {reasoningEffort: "medium", description: "Balanced"};
@@ -43,7 +44,7 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
     });
 
     const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
-    return {codexAcpAgent, response};
+    return {codexAcpAgent, codexAcpClient, response};
 }
 
 describe("Session config options", () => {
@@ -187,6 +188,20 @@ describe("Session config options", () => {
 
         const sessionState = codexAcpAgent.getSessionState("session-id");
         expect(sessionState.availableModels.map(m => m.id)).toEqual(["fast-model", "extra-model"]);
+    });
+
+    it("changes the model through the legacy session/set_model extMethod", async () => {
+        const {fast, slow} = buildModels();
+        const {codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
+        vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue([fast, slow]);
+
+        const response = await codexAcpAgent.extMethod(LEGACY_SET_SESSION_MODEL_METHOD, {
+            sessionId: "session-id",
+            modelId: "slow-model[medium]",
+        });
+
+        expect(response).toEqual({});
+        expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("slow-model[medium]");
     });
 
     it("rejects unknown model, effort, and mode values", async () => {

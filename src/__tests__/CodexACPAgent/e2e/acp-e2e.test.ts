@@ -1,6 +1,7 @@
 import path from "node:path";
 import {afterEach, expect, it} from "vitest";
 import {AgentMode} from "../../../AgentMode";
+import {legacySetSessionModel} from "../../../AcpExtensions";
 import {
     createAuthenticatedFixture,
     createGatewayFixture,
@@ -49,7 +50,7 @@ describeE2E("E2E tests", () => {
         expect(models.availableModels.length).toBeGreaterThan(0);
         expect(models.currentModelId).toBe(DEFAULT_TEST_MODEL_ID.toString());
 
-        await fixture.connection.unstable_setSessionModel({
+        await legacySetSessionModel(fixture.connection, {
             sessionId: session.sessionId,
             modelId: OTHER_TEST_MODEL_ID.toString(),
         });

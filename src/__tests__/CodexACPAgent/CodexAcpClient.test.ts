@@ -109,7 +109,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const authenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
         expect(authenticatedResponse).toEqual({type: "api-key"});
 
-        await keyFixture.getCodexAcpAgent().unstable_logout({});
+        await keyFixture.getCodexAcpAgent().logout({});
         const logoutResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
         expect(logoutResponse).toEqual({type: "unauthenticated"});
     });
@@ -210,7 +210,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
-        const logoutSpy = vi.spyOn(codexAcpAgent, "unstable_logout").mockResolvedValue();
+        const logoutSpy = vi.spyOn(codexAcpAgent, "logout").mockResolvedValue();
 
         await expect(codexAcpAgent.extMethod("authentication/logout", {})).resolves.toEqual({});
         expect(logoutSpy).toHaveBeenCalledWith({});
