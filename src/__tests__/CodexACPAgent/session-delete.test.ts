@@ -129,6 +129,7 @@ async function createSession(): Promise<{
         currentModelId: "model-id[medium]",
         models: [model],
         currentServiceTier: null,
+        additionalDirectories: [],
     });
 
     await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
