@@ -1153,6 +1153,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: {
                 id: "review-turn-id",
                 items: [],
+                itemsView: "notLoaded",
                 status: "inProgress",
                 error: null,
                 startedAt: null,
@@ -1168,6 +1169,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: {
                 id: "review-turn-id",
                 items: [],
+                itemsView: "notLoaded",
                 status,
                 error: null,
                 startedAt: null,
@@ -1331,6 +1333,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             params: {
                 threadId: sessionId,
                 turnId: "turn-id",
+                completedAtMs: 0,
                 item: { type: "contextCompaction", id: "context-compaction-id" },
             },
         });
@@ -1359,6 +1362,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             params: {
                 threadId: sessionId,
                 turnId: "turn-id",
+                completedAtMs: 0,
                 item: {
                     type: "exitedReviewMode",
                     id: "review-output-id",
