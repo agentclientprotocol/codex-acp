@@ -342,7 +342,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         fixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
-            params: { name: "broken-mcp", status: "failed", error: "boom" }
+            params: { threadId: "session-1", name: "broken-mcp", status: "failed", error: "boom" }
         });
 
         await loadPromise;

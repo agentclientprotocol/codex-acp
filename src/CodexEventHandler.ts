@@ -170,6 +170,7 @@ export class CodexEventHandler {
             case "hook/started":
             case "hook/completed":
             case "turn/diff/updated":
+            case "turn/moderationMetadata":
             case "item/commandExecution/terminalInteraction":
             case "item/fileChange/outputDelta":
             case "item/fileChange/patchUpdated":
