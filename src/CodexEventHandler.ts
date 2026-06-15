@@ -14,7 +14,6 @@ import type {
     CommandExecutionOutputDeltaNotification,
     ConfigWarningNotification,
     ErrorNotification,
-    GuardianWarningNotification,
     ItemGuardianApprovalReviewCompletedNotification,
     ItemGuardianApprovalReviewStartedNotification,
     ItemCompletedNotification,
@@ -131,7 +130,7 @@ export class CodexEventHandler {
             case "warning":
                 return this.createWarningEvent(notification.params);
             case "guardianWarning":
-                return this.createGuardianWarningEvent(notification.params);
+                return null;
             case "item/autoApprovalReview/started":
                 return this.handleGuardianApprovalReviewStarted(notification.params);
             case "item/autoApprovalReview/completed":
@@ -233,16 +232,6 @@ export class CodexEventHandler {
             content: {
                 type: "text",
                 text: `Warning: ${event.message}\n\n`
-            }
-        };
-    }
-
-    private createGuardianWarningEvent(event: GuardianWarningNotification): UpdateSessionEvent {
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: `Guardian warning: ${event.message}\n\n`
             }
         };
     }

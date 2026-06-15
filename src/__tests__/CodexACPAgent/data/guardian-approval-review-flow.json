@@ -14,7 +14,7 @@
             "type": "content",
             "content": {
               "type": "text",
-              "text": "Status: In progress\nAction: exec /bin/ls -l\nRisk: medium\nRationale: Checking whether this command should run automatically."
+              "text": "Status: In progress\nAction: exec /bin/ls -l\nRisk: medium\nAuthorization: unknown\nRationale: Checking whether this command should run automatically."
             }
           }
         ],
@@ -59,7 +59,7 @@
             "type": "content",
             "content": {
               "type": "text",
-              "text": "Status: Approved\nAction: exec /bin/ls -l\nRisk: low\nRationale: The command only lists files."
+              "text": "Status: Approved\nAction: exec /bin/ls -l\nRisk: low\nAuthorization: medium\nRationale: The command only lists files."
             }
           }
         ],

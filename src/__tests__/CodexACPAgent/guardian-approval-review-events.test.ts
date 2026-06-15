@@ -73,10 +73,27 @@ describe("CodexEventHandler - Guardian approval review events", () => {
                 },
             },
         };
+        const duplicateWarning: ServerNotification = {
+            method: "guardianWarning",
+            params: {
+                threadId: sessionId,
+                message: "Automatic approval review approved (risk: low, authorization: medium): The command only lists files.",
+            },
+        };
 
-        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [started, completed]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            started,
+            duplicateWarning,
+            completed,
+        ]);
 
-        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+        const dump = mockFixture.getAcpConnectionDump([]);
+        expect(dump).not.toContain("agent_message_chunk");
+        expect(dump).not.toContain("Guardian warning");
+        expect(dump).not.toContain("Automatic approval review approved");
+        expect(dump).toContain("tool_call_update");
+        expect(dump).toContain("Authorization: medium");
+        await expect(dump).toMatchFileSnapshot(
             "data/guardian-approval-review-flow.json"
         );
     });
@@ -113,5 +130,22 @@ describe("CodexEventHandler - Guardian approval review events", () => {
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             "data/guardian-approval-review-completed-without-start.json"
         );
+    });
+
+    it("ignores Guardian warnings that are not approval review summaries", async () => {
+        const warning: ServerNotification = {
+            method: "guardianWarning",
+            params: {
+                threadId: sessionId,
+                message: "Automatic approval review rejected too many approval requests for this turn (3 consecutive, 5 in the last 10 reviews); interrupting the turn.",
+            },
+        };
+
+        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
+        mockFixture.sendServerNotification(warning);
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+
+        const dump = mockFixture.getAcpConnectionDump([]);
+        expect(dump).toBe("");
     });
 });

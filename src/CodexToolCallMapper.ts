@@ -321,6 +321,9 @@ function createGuardianApprovalReviewContent(
     if (review.riskLevel) {
         lines.push(`Risk: ${review.riskLevel}`);
     }
+    if (review.userAuthorization) {
+        lines.push(`Authorization: ${review.userAuthorization}`);
+    }
     if (review.rationale?.trim()) {
         lines.push(`Rationale: ${review.rationale}`);
     }
