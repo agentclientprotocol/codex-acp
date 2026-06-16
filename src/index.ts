@@ -42,6 +42,7 @@ function startAcpServer() {
     const configString = process.env["CODEX_CONFIG"];
     const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
     const modelProvider = process.env["MODEL_PROVIDER"];
+    const disableMcpConfigFiltering = process.env["DISABLE_MCP_CONFIG_FILTERING"] === "true";
     const config = configString ? JSON.parse(configString) : undefined;
     const parsedAuthRequest = authRequestString ? JSON.parse(authRequestString) : undefined;
     const defaultAuthRequest = parsedAuthRequest && isCodexAuthRequest(parsedAuthRequest) ? parsedAuthRequest : undefined;
@@ -72,7 +73,7 @@ function startAcpServer() {
 
     function createAgent(connection: acp.AgentSideConnection): CodexAcpServer {
         const appServerClient = new CodexAppServerClient(codexConnection.connection);
-        const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
+        const codexClient = new CodexAcpClient(appServerClient, config, modelProvider, disableMcpConfigFiltering);
         return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.process.exitCode);
     }
 

@@ -48,6 +48,7 @@ export class CodexAcpClient {
     private readonly codexClient: CodexAppServerClient;
     private readonly config: JsonObject;
     private readonly modelProvider: string | null;
+    private readonly disableMcpConfigFiltering: boolean;
     private gatewayConfig: GatewayConfig | null;
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
@@ -55,10 +56,11 @@ export class CodexAcpClient {
     private skillExtraRoots: string[] = [];
 
 
-    constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
+    constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string, disableMcpConfigFiltering = false) {
         this.codexClient = codexClient;
         this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
+        this.disableMcpConfigFiltering = disableMcpConfigFiltering;
         this.gatewayConfig = null;
     }
 
@@ -328,7 +330,9 @@ export class CodexAcpClient {
 
         // Deduplicates new servers against existing config to prevent Codex from deep-merging
         // incompatible field types (e.g., mixing url and stdio schemas).
-        const existingNames = await this.getConfigMcpServerNames(projectPath);
+        const existingNames = this.disableMcpConfigFiltering
+            ? new Set<string>()
+            : await this.getConfigMcpServerNames(projectPath);
         const requestedServers = mcpServers.map(mcp => ({
             name: sanitizeMcpServerName(mcp.name),
             server: mcp,
