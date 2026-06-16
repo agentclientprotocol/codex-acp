@@ -237,6 +237,10 @@ export class CodexAcpClient {
             threadId: request.sessionId,
         });
         onSubscribed?.();
+        const historyResponse = await this.codexClient.threadRead({
+            threadId: response.thread.id,
+            includeTurns: true,
+        });
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
@@ -244,7 +248,7 @@ export class CodexAcpClient {
             currentModelId: currentModelId,
             models: codexModels,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
-            thread: response.thread,
+            thread: historyResponse.thread,
             additionalDirectories,
         };
     }

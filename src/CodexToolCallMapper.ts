@@ -27,6 +27,10 @@ import type {
 } from "./app-server/v2";
 import type { JsonValue } from "./app-server/serde_json/JsonValue";
 import {logger} from "./Logger";
+import {
+    createTerminalOutputMeta,
+    type TerminalOutputMode,
+} from "./TerminalOutputMode";
 
 type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -85,6 +89,47 @@ export async function createCommandExecutionUpdate(item: CommandExecutionItem): 
             cwd: item.cwd,
         },
     }, item.id, item.cwd);
+}
+
+export function createCommandExecutionCompleteUpdate(
+    item: CommandExecutionItem,
+    terminalOutputMode: TerminalOutputMode,
+): UpdateSessionEvent | null {
+    if (item.status === "inProgress") {
+        return null;
+    }
+
+    const update: UpdateSessionEvent = {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        status: item.status === "completed" ? "completed" : "failed",
+        rawOutput: {
+            formatted_output: item.aggregatedOutput ?? "",
+            exit_code: item.exitCode,
+        },
+    };
+
+    if (!commandExecutionUsesTerminalOutput(item)) {
+        return update;
+    }
+
+    const terminalMeta: Record<string, unknown> = {};
+    if (item.aggregatedOutput) {
+        Object.assign(
+            terminalMeta,
+            createTerminalOutputMeta(terminalOutputMode, item.id, item.aggregatedOutput),
+        );
+    }
+    terminalMeta["terminal_exit"] = {
+        exit_code: item.exitCode,
+        signal: null,
+        terminal_id: item.id,
+    };
+
+    return {
+        ...update,
+        _meta: terminalMeta,
+    };
 }
 
 export async function createMcpToolCallUpdate(
@@ -334,12 +379,12 @@ export function formatWebSearchTitle(item: WebSearchItem): string {
     }
 }
 
-function createCommandActionEvent(
+export function createCommandActionEvent(
     id: string,
     status: CommandExecutionStatus,
     cwd: string,
     commandAction: CommandAction
-): UpdateSessionEvent {
+): AcpToolCallEvent {
     const acpStatus = toAcpStatus(status);
     switch (commandAction.type) {
         case "read":
@@ -395,7 +440,7 @@ function createTerminalCommandEvent(
     event: AcpToolCallEvent,
     terminalId: string,
     cwd: string,
-): UpdateSessionEvent {
+): AcpToolCallEvent {
     const { rawInput, ...eventWithoutRawInput } = event;
     return {
         ...eventWithoutRawInput,

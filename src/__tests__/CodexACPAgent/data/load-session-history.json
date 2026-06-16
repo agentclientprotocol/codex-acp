@@ -154,6 +154,34 @@
     {
       "sessionId": "session-1",
       "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "item-cmd-1",
+        "status": "completed",
+        "rawOutput": {
+          "formatted_output": "Added.txt\nREADME.md\n",
+          "exit_code": 0
+        },
+        "_meta": {
+          "terminal_output_delta": {
+            "data": "Added.txt\nREADME.md\n",
+            "terminal_id": "item-cmd-1"
+          },
+          "terminal_exit": {
+            "exit_code": 0,
+            "signal": null,
+            "terminal_id": "item-cmd-1"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-file-1",
         "title": "Editing files",

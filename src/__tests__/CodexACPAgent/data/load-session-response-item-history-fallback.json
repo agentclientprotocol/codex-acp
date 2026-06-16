@@ -1,0 +1,202 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "mcp",
+            "description": "List configured Model Context Protocol (MCP) tools.",
+            "input": null
+          },
+          {
+            "name": "skills",
+            "description": "List available skills.",
+            "input": null
+          },
+          {
+            "name": "status",
+            "description": "Display session configuration and token usage.",
+            "input": null
+          },
+          {
+            "name": "review",
+            "description": "Review uncommitted changes, or review with custom instructions.",
+            "input": {
+              "hint": "optional review instructions"
+            }
+          },
+          {
+            "name": "review-branch",
+            "description": "Review changes relative to a base branch.",
+            "input": {
+              "hint": "branch name"
+            }
+          },
+          {
+            "name": "review-commit",
+            "description": "Review a specific commit.",
+            "input": {
+              "hint": "commit sha"
+            }
+          },
+          {
+            "name": "compact",
+            "description": "Summarize conversation to avoid hitting the context limit.",
+            "input": null
+          },
+          {
+            "name": "logout",
+            "description": "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
+            "input": null
+          }
+        ]
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "user_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "List the files"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "Need to inspect the directory."
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-rg",
+        "status": "in_progress",
+        "kind": "search",
+        "title": "Search for 'Service' in src"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-rg",
+        "status": "completed",
+        "rawOutput": {
+          "output": "Chunk ID: search123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nsrc/service.ts:export class Service {}\n"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-read",
+        "status": "in_progress",
+        "kind": "read",
+        "title": "Read file '/test/project/src/index.ts'",
+        "locations": [
+          {
+            "path": "/test/project/src/index.ts"
+          }
+        ]
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-read",
+        "status": "completed",
+        "rawOutput": {
+          "output": "Chunk ID: read123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\n     1\tconsole.log('hi');\n"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-ls",
+        "status": "in_progress",
+        "kind": "read",
+        "title": "List files"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-ls",
+        "status": "completed",
+        "rawOutput": {
+          "output": "Chunk ID: abc123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nREADME.md\nsrc\n"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "The directory contains README.md and src."
+        }
+      }
+    }
+  ]
+}

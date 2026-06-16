@@ -33,6 +33,7 @@ import {CodexCommands} from "./CodexCommands";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
+import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
 import {
     type LegacyLoadSessionResponse,
     type LegacyNewSessionResponse,
@@ -44,6 +45,7 @@ import {
     LEGACY_SET_SESSION_MODEL_METHOD,
 } from "./AcpExtensions";
 import {
+    createCommandExecutionCompleteUpdate,
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
@@ -850,9 +852,21 @@ export class CodexAcpServer implements acp.Agent {
 
     private async streamThreadHistory(sessionId: string, thread: Thread): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
+        const sessionState = this.getSessionState(sessionId);
+        const responseItemFallbackUpdates = await createResponseItemHistoryFallbackUpdates(
+            thread,
+            sessionState.terminalOutputMode,
+        );
+        if (responseItemFallbackUpdates) {
+            for (const update of responseItemFallbackUpdates) {
+                await session.update(update);
+            }
+            return;
+        }
+
         for (const turn of thread.turns) {
             for (const item of turn.items) {
-                const updates = await this.createHistoryUpdates(item);
+                const updates = await this.createHistoryUpdates(item, sessionState);
                 for (const update of updates) {
                     await session.update(update);
                 }
@@ -860,7 +874,7 @@ export class CodexAcpServer implements acp.Agent {
         }
     }
 
-    private async createHistoryUpdates(item: ThreadItem): Promise<UpdateSessionEvent[]> {
+    private async createHistoryUpdates(item: ThreadItem, sessionState: SessionState): Promise<UpdateSessionEvent[]> {
         switch (item.type) {
             case "userMessage":
                 return this.createUserMessageUpdates(item);
@@ -876,8 +890,14 @@ export class CodexAcpServer implements acp.Agent {
                 return this.createReasoningUpdates(item);
             case "fileChange":
                 return [await createFileChangeUpdate(item)];
-            case "commandExecution":
-                return [await createCommandExecutionUpdate(item)];
+            case "commandExecution": {
+                const updates = [await createCommandExecutionUpdate(item)];
+                const completeUpdate = createCommandExecutionCompleteUpdate(item, sessionState.terminalOutputMode);
+                if (completeUpdate) {
+                    updates.push(completeUpdate);
+                }
+                return updates;
+            }
             case "mcpToolCall":
                 return [await createMcpToolCallUpdate(item)];
             case "dynamicToolCall":
