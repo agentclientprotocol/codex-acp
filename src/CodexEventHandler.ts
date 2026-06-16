@@ -173,6 +173,7 @@ export class CodexEventHandler {
             case "item/commandExecution/terminalInteraction":
                 return this.createTerminalInteractionEvent(notification.params);
             // ignored events
+            case "thread/deleted":
             case "command/exec/outputDelta":
             case "hook/started":
             case "hook/completed":
@@ -352,6 +353,7 @@ export class CodexEventHandler {
                 this.activeImageGenerationItems.add(event.item.id);
                 return createImageGenerationStartUpdate(event.item);
             case "collabAgentToolCall":
+            case "subAgentActivity":
             case "userMessage":
             case "hookPrompt":
             case "agentMessage":
@@ -400,17 +402,20 @@ export class CodexEventHandler {
                 return this.createCompletedReasoningEvent(event.item);
             case "webSearch":
                 return createWebSearchCompleteUpdate(event.item);
+            case "exitedReviewMode":
+                return this.createExitedReviewModeEvent(event.item);
+            case "contextCompaction":
+                return this.createContextCompactedEvent();
+            //ignored types
             case "collabAgentToolCall":
+            case "subAgentActivity":
             case "userMessage":
             case "hookPrompt":
             case "agentMessage":
             case "enteredReviewMode":
             case "plan":
                 return null;
-            case "exitedReviewMode":
-                return this.createExitedReviewModeEvent(event.item);
-            case "contextCompaction":
-                return this.createContextCompactedEvent();
+
         }
     }
 

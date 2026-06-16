@@ -848,6 +848,7 @@ export class CodexAcpServer implements acp.Agent {
             case "userMessage":
                 return this.createUserMessageUpdates(item);
             case "hookPrompt":
+            case "subAgentActivity":
                 return [];
             case "agentMessage":
                 return [{
