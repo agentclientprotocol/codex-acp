@@ -397,11 +397,11 @@ export class CodexApprovalHandler implements ApprovalHandler {
         if (permissions.fileSystem?.entries?.length) {
             content.push(`File System Entries: ${JSON.stringify(permissions.fileSystem.entries)}`);
         }
-        return content.length > 0 ? content.join("\n") : null;
+        return content.length > 0 ? content.join("\n\n") : null;
     }
 
     private createContent(lines: Array<string | null | undefined>): acp.ToolCallContent[] | undefined {
-        const text = lines.filter((line): line is string => !!line).join("\n");
+        const text = lines.filter((line): line is string => !!line).join("\n\n");
         if (!text) return undefined;
         return [{
             type: "content",

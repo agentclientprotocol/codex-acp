@@ -34,7 +34,7 @@
             "type": "content",
             "content": {
               "type": "text",
-              "text": "Need extra access\nNetwork Access: true\nFile System Read Access: /home/user/project\nFile System Write Access: /home/user/project/tmp"
+              "text": "Need extra access\n\nNetwork Access: true\n\nFile System Read Access: /home/user/project\n\nFile System Write Access: /home/user/project/tmp"
             }
           }
         ]
