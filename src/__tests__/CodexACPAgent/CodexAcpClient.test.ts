@@ -329,6 +329,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             reasoningEffort: "medium",
             serviceTier: null,
         } as any);
+        const threadReadSpy = vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+        });
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
             data: [createTestModel({id: "gpt-5"})],
             nextCursor: null,
@@ -355,6 +358,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(threadResumeSpy.mock.calls[1]![0].config?.["projects"]).toEqual({
             "/workspace": {trust_level: "trusted"},
             "/workspace/load-extra": {trust_level: "trusted"},
+        });
+        expect(threadReadSpy).toHaveBeenCalledWith({
+            threadId: "thread-id",
+            includeTurns: true,
         });
     });
 
