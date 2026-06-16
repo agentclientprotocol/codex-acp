@@ -355,6 +355,27 @@ describe("CodexACPAgent - loadSession", () => {
                         type: "function_call",
                         name: "exec_command",
                         arguments: JSON.stringify({
+                            cmd: "rg \"Missing\" src",
+                            workdir: "/test/project",
+                            yield_time_ms: 1000,
+                        }),
+                        call_id: "call-rg-failed",
+                    },
+                },
+                {
+                    type: "response_item",
+                    payload: {
+                        type: "function_call_output",
+                        call_id: "call-rg-failed",
+                        output: "Chunk ID: search456\nWall time: 0.0000 seconds\nProcess exited with code 1\nOutput:\n",
+                    },
+                },
+                {
+                    type: "response_item",
+                    payload: {
+                        type: "function_call",
+                        name: "exec_command",
+                        arguments: JSON.stringify({
                             cmd: "nl -ba src/index.ts | sed -n '1,40p'",
                             workdir: "/test/project",
                             yield_time_ms: 1000,

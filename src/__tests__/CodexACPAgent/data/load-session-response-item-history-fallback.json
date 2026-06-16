@@ -125,6 +125,37 @@
       "sessionId": "session-legacy",
       "update": {
         "sessionUpdate": "tool_call",
+        "toolCallId": "call-rg-failed",
+        "status": "in_progress",
+        "kind": "search",
+        "title": "Search for 'Missing' in src"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-rg-failed",
+        "status": "failed",
+        "rawOutput": {
+          "output": "Chunk ID: search456\nWall time: 0.0000 seconds\nProcess exited with code 1\nOutput:\n"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "tool_call",
         "toolCallId": "call-read",
         "status": "in_progress",
         "kind": "read",

@@ -337,7 +337,7 @@ function createFunctionCallOutputUpdate(
         return {
             sessionUpdate: "tool_call_update",
             toolCallId,
-            status: "completed",
+            status,
             rawOutput: { output: item["output"] },
         };
     }
