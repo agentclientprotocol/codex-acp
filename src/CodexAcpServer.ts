@@ -866,6 +866,8 @@ export class CodexAcpServer implements acp.Agent {
                 return [await createDynamicToolCallUpdate(item)];
             case "collabAgentToolCall":
                 return [this.createCollabAgentToolCallUpdate(item)];
+            case "subAgentActivity":
+                return [];
             case "webSearch":
                 return [this.createWebSearchUpdate(item)];
             case "imageView":

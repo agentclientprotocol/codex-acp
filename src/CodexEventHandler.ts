@@ -202,6 +202,7 @@ export class CodexEventHandler {
             case "externalAgentConfig/import/completed":
             case "rawResponseItem/completed":
             case "thread/started":
+            case "thread/deleted":
             case "item/plan/delta":
             case "remoteControl/status/changed":
             case "app/list/updated":
@@ -352,6 +353,7 @@ export class CodexEventHandler {
                 this.activeImageGenerationItems.add(event.item.id);
                 return createImageGenerationStartUpdate(event.item);
             case "collabAgentToolCall":
+            case "subAgentActivity":
             case "userMessage":
             case "hookPrompt":
             case "agentMessage":
@@ -401,6 +403,7 @@ export class CodexEventHandler {
             case "webSearch":
                 return createWebSearchCompleteUpdate(event.item);
             case "collabAgentToolCall":
+            case "subAgentActivity":
             case "userMessage":
             case "hookPrompt":
             case "agentMessage":
