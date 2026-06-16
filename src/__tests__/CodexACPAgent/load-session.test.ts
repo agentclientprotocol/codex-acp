@@ -321,10 +321,18 @@ describe("CodexACPAgent - loadSession", () => {
                     },
                 },
                 {
+                    type: "event_msg",
+                    payload: {
+                        type: "agent_reasoning",
+                        text: "Need to inspect the directory.",
+                    },
+                },
+                {
                     type: "response_item",
                     payload: {
                         type: "reasoning",
-                        summary: [{ type: "summary_text", text: "Need to inspect the directory." }],
+                        summary: [],
+                        content: [],
                         encrypted_content: null,
                     },
                 },

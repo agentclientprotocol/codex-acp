@@ -190,6 +190,8 @@ function createEventMsgUpdates(record: JsonRecord): UpdateSessionEvent[] | null 
     switch (payload["type"]) {
         case "user_message":
             return createUserMessageEventUpdates(payload);
+        case "agent_reasoning":
+            return createAgentReasoningEventUpdates(payload);
         default:
             return [];
     }
@@ -208,6 +210,18 @@ function createUserMessageEventUpdates(payload: JsonRecord): UpdateSessionEvent[
         sessionUpdate: "user_message_chunk",
         content,
     }));
+}
+
+function createAgentReasoningEventUpdates(payload: JsonRecord): UpdateSessionEvent[] {
+    const text = stringValue(payload["text"]);
+    if (text === null || text.length === 0) {
+        return [];
+    }
+
+    return [{
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text },
+    }];
 }
 
 function imageBlocks(images: unknown): ContentBlock[] {
