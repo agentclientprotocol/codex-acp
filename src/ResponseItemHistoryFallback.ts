@@ -16,16 +16,32 @@ type AcpToolCallUpdateStatus = NonNullable<Extract<UpdateSessionEvent, {
 type LegacyFunctionCallUpdate = {
     update: AcpToolCallEvent;
     usesTerminal: boolean;
+    isExecCommand: boolean;
 };
 type ParsedShellCommand = {
     tokens: string[];
 };
 
+function historyFallbackUpdateKey(update: UpdateSessionEvent): string | null {
+    switch (update.sessionUpdate) {
+        case "user_message_chunk":
+        case "agent_message_chunk":
+        case "agent_thought_chunk":
+            return `${update.sessionUpdate}:${JSON.stringify(update.content)}`;
+        case "tool_call":
+            return `tool_call:${update.toolCallId}:start`;
+        case "tool_call_update":
+            return `tool_call:${update.toolCallId}:update`;
+        default:
+            return null;
+    }
+}
+
 export async function createResponseItemHistoryFallbackUpdates(
     thread: Thread,
     terminalOutputMode: TerminalOutputMode,
 ): Promise<UpdateSessionEvent[] | null> {
-    if (!thread.path || threadHasToolItems(thread)) {
+    if (!thread.path) {
         return null;
     }
 
@@ -36,16 +52,32 @@ export async function createResponseItemHistoryFallbackUpdates(
         return null;
     }
 
-    return parseResponseItemHistoryFallback(contents, terminalOutputMode);
+    return parseResponseItemHistoryFallback(contents, terminalOutputMode, toolCallIdsFromThread(thread));
 }
 
 export function parseResponseItemHistoryFallback(
     contents: string,
     terminalOutputMode: TerminalOutputMode,
+    existingToolCallIds: Set<string> = new Set(),
 ): UpdateSessionEvent[] | null {
     const updates: UpdateSessionEvent[] = [];
     const terminalToolCallIds = new Set<string>();
-    let sawFunctionCall = false;
+    const execToolCallIds = new Set<string>();
+    const skippedToolCallIds = new Set<string>();
+    const emittedToolCallIds = new Set<string>();
+    let recoveredFunctionCall = false;
+    let lastUpdateKey: string | null = null;
+
+    const pushUpdates = (nextUpdates: UpdateSessionEvent[]) => {
+        for (const update of nextUpdates) {
+            const key = historyFallbackUpdateKey(update);
+            if (key && key === lastUpdateKey) {
+                continue;
+            }
+            updates.push(update);
+            lastUpdateKey = key;
+        }
+    };
 
     for (const line of contents.split(/\r?\n/)) {
         const record = parseJsonRecord(line);
@@ -55,7 +87,7 @@ export function parseResponseItemHistoryFallback(
 
         const eventMsgUpdates = createEventMsgUpdates(record);
         if (eventMsgUpdates) {
-            updates.push(...eventMsgUpdates);
+            pushUpdates(eventMsgUpdates);
             continue;
         }
 
@@ -66,27 +98,48 @@ export function parseResponseItemHistoryFallback(
 
         switch (item["type"]) {
             case "message":
-                updates.push(...createMessageUpdates(item));
+                pushUpdates(createMessageUpdates(item));
                 break;
             case "reasoning":
-                updates.push(...createReasoningUpdates(item));
+                pushUpdates(createReasoningUpdates(item));
                 break;
             case "function_call": {
+                const toolCallId = stringValue(item["call_id"]);
+                if (toolCallId && existingToolCallIds.has(toolCallId)) {
+                    skippedToolCallIds.add(toolCallId);
+                    break;
+                }
+                if (toolCallId && emittedToolCallIds.has(toolCallId)) {
+                    break;
+                }
                 const result = createFunctionCallUpdate(item);
                 if (!result) {
                     break;
                 }
-                sawFunctionCall = true;
+                recoveredFunctionCall = true;
+                emittedToolCallIds.add(result.update.toolCallId);
                 if (result.usesTerminal) {
                     terminalToolCallIds.add(result.update.toolCallId);
                 }
-                updates.push(result.update);
+                if (result.isExecCommand) {
+                    execToolCallIds.add(result.update.toolCallId);
+                }
+                pushUpdates([result.update]);
                 break;
             }
             case "function_call_output": {
-                const update = createFunctionCallOutputUpdate(item, terminalOutputMode, terminalToolCallIds);
+                const toolCallId = stringValue(item["call_id"]);
+                if (toolCallId && skippedToolCallIds.has(toolCallId)) {
+                    break;
+                }
+                const update = createFunctionCallOutputUpdate(
+                    item,
+                    terminalOutputMode,
+                    terminalToolCallIds,
+                    execToolCallIds,
+                );
                 if (update) {
-                    updates.push(update);
+                    pushUpdates([update]);
                 }
                 break;
             }
@@ -95,14 +148,23 @@ export function parseResponseItemHistoryFallback(
         }
     }
 
-    return sawFunctionCall ? updates : null;
+    return recoveredFunctionCall ? updates : null;
 }
 
-function threadHasToolItems(thread: Thread): boolean {
-    return thread.turns.some((turn) => turn.items.some(isToolThreadItem));
+function toolCallIdsFromThread(thread: Thread): Set<string> {
+    const ids = new Set<string>();
+    for (const turn of thread.turns) {
+        for (const item of turn.items) {
+            const id = toolCallIdFromThreadItem(item);
+            if (id) {
+                ids.add(id);
+            }
+        }
+    }
+    return ids;
 }
 
-function isToolThreadItem(item: ThreadItem): boolean {
+function toolCallIdFromThreadItem(item: ThreadItem): string | null {
     switch (item.type) {
         case "commandExecution":
         case "fileChange":
@@ -112,7 +174,7 @@ function isToolThreadItem(item: ThreadItem): boolean {
         case "webSearch":
         case "imageView":
         case "imageGeneration":
-            return true;
+            return item.id;
         case "userMessage":
         case "hookPrompt":
         case "agentMessage":
@@ -122,7 +184,7 @@ function isToolThreadItem(item: ThreadItem): boolean {
         case "enteredReviewMode":
         case "exitedReviewMode":
         case "contextCompaction":
-            return false;
+            return null;
     }
 }
 
@@ -312,6 +374,7 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
         return {
             update: createCommandActionEvent(toolCallId, "inProgress", cwd, commandAction),
             usesTerminal: false,
+            isExecCommand: true,
         };
     }
 
@@ -325,12 +388,13 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
     };
 
     if (!functionCallUsesTerminal(item)) {
-        return { update, usesTerminal: false };
+        return { update, usesTerminal: false, isExecCommand: false };
     }
 
     return {
         update: withTerminalContent(update, toolCallId, cwd),
         usesTerminal: true,
+        isExecCommand: true,
     };
 }
 
@@ -338,6 +402,7 @@ function createFunctionCallOutputUpdate(
     item: JsonRecord,
     terminalOutputMode: TerminalOutputMode,
     terminalToolCallIds: Set<string>,
+    execToolCallIds: Set<string>,
 ): UpdateSessionEvent | null {
     const toolCallId = stringValue(item["call_id"]);
     if (!toolCallId) {
@@ -345,8 +410,8 @@ function createFunctionCallOutputUpdate(
     }
 
     const output = outputText(item["output"]);
-    const exitCode = parseExitCode(output);
-    const status = statusFromExitCode(exitCode);
+    const exitCode = parseExitCode(item["output"], output);
+    const status = statusFromExitCode(exitCode, output, execToolCallIds.has(toolCallId));
     if (!terminalToolCallIds.has(toolCallId)) {
         return {
             sessionUpdate: "tool_call_update",
@@ -1004,7 +1069,15 @@ function outputText(output: unknown): string {
     }).join("\n");
 }
 
-function parseExitCode(output: string): number | null {
+function parseExitCode(rawOutput: unknown, output: string): number | null {
+    const record = asRecord(rawOutput);
+    if (record) {
+        const exitCode = numberValue(record["exit_code"]) ?? numberValue(record["exitCode"]);
+        if (exitCode !== null) {
+            return exitCode;
+        }
+    }
+
     const match = output.match(/Process exited with code (-?\d+)/);
     if (!match) {
         return null;
@@ -1019,8 +1092,25 @@ function parseExitCode(output: string): number | null {
     return Number.isFinite(exitCode) ? exitCode : null;
 }
 
-function statusFromExitCode(exitCode: number | null): AcpToolCallUpdateStatus {
-    return exitCode === null || exitCode === 0 ? "completed" : "failed";
+function statusFromExitCode(
+    exitCode: number | null,
+    output: string,
+    isExecCommand: boolean,
+): AcpToolCallUpdateStatus {
+    if (exitCode !== null) {
+        return exitCode === 0 ? "completed" : "failed";
+    }
+
+    return isExecCommand && looksLikeCommandFailure(output) ? "failed" : "completed";
+}
+
+function looksLikeCommandFailure(output: string): boolean {
+    const trimmed = output.trim();
+    if (trimmed.length === 0) {
+        return false;
+    }
+
+    return /(^|\n)(Error|Failed|Command failed|Sandbox error|No such file or directory|Permission denied|Operation not permitted|ENOENT|EACCES)(:|\b)/i.test(trimmed);
 }
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -1032,4 +1122,8 @@ function asRecord(value: unknown): JsonRecord | null {
 
 function stringValue(value: unknown): string | null {
     return typeof value === "string" ? value : null;
+}
+
+function numberValue(value: unknown): number | null {
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

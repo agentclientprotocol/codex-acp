@@ -486,6 +486,17 @@ describe("CodexACPAgent - loadSession", () => {
                                 content: [{ type: "text", text: "List the files", text_elements: [] }],
                             },
                             {
+                                type: "reasoning",
+                                id: "item-reasoning-1",
+                                summary: ["Need to inspect the directory."],
+                                content: [],
+                            },
+                            {
+                                type: "plan",
+                                id: "item-plan-1",
+                                text: "Inspect project files",
+                            },
+                            {
                                 type: "agentMessage",
                                 id: "item-agent-1",
                                 text: "The directory contains README.md and src.",

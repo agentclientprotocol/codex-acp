@@ -93,6 +93,21 @@
     {
       "sessionId": "session-legacy",
       "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Plan:\nInspect project files"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "call-rg",
         "status": "in_progress",

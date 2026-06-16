@@ -857,20 +857,20 @@ export class CodexAcpServer implements acp.Agent {
             thread,
             sessionState.terminalOutputMode,
         );
-        if (responseItemFallbackUpdates) {
-            for (const update of responseItemFallbackUpdates) {
-                await session.update(update);
-            }
-            return;
-        }
 
+        const threadUpdates: UpdateSessionEvent[] = [];
         for (const turn of thread.turns) {
             for (const item of turn.items) {
                 const updates = await this.createHistoryUpdates(item, sessionState);
-                for (const update of updates) {
-                    await session.update(update);
-                }
+                threadUpdates.push(...updates);
             }
+        }
+
+        const updates = responseItemFallbackUpdates
+            ? mergeHistoryUpdates(responseItemFallbackUpdates, threadUpdates)
+            : threadUpdates;
+        for (const update of updates) {
+            await session.update(update);
         }
     }
 
@@ -1492,6 +1492,71 @@ export class CodexAcpServer implements acp.Agent {
 
         // After turnInterrupt(), Codex will send turn/completed, which naturally completes awaitTurnCompleted().
         await this.interruptSessionTurn(sessionState, "Cancel", false);
+    }
+}
+
+function mergeHistoryUpdates(
+    responseItemFallbackUpdates: UpdateSessionEvent[],
+    threadUpdates: UpdateSessionEvent[],
+): UpdateSessionEvent[] {
+    const merged: UpdateSessionEvent[] = [];
+    const seen = new Set<string>();
+    let fallbackIndex = 0;
+
+    const pushUpdate = (update: UpdateSessionEvent) => {
+        const key = historyUpdateKey(update);
+        if (key && seen.has(key)) {
+            return;
+        }
+        if (key) {
+            seen.add(key);
+        }
+        merged.push(update);
+    };
+
+    const flushFallbackThrough = (targetKey: string): boolean => {
+        const matchIndex = responseItemFallbackUpdates.findIndex((update, index) => (
+            index >= fallbackIndex && historyUpdateKey(update) === targetKey
+        ));
+        if (matchIndex === -1) {
+            return false;
+        }
+
+        while (fallbackIndex <= matchIndex) {
+            pushUpdate(responseItemFallbackUpdates[fallbackIndex]!);
+            fallbackIndex += 1;
+        }
+        return true;
+    };
+
+    for (const update of threadUpdates) {
+        const key = historyUpdateKey(update);
+        if (key && flushFallbackThrough(key)) {
+            continue;
+        }
+        pushUpdate(update);
+    }
+
+    while (fallbackIndex < responseItemFallbackUpdates.length) {
+        pushUpdate(responseItemFallbackUpdates[fallbackIndex]!);
+        fallbackIndex += 1;
+    }
+
+    return merged;
+}
+
+function historyUpdateKey(update: UpdateSessionEvent): string | null {
+    switch (update.sessionUpdate) {
+        case "user_message_chunk":
+        case "agent_message_chunk":
+        case "agent_thought_chunk":
+            return `${update.sessionUpdate}:${JSON.stringify(update.content)}`;
+        case "tool_call":
+            return `tool_call:${update.toolCallId}:start`;
+        case "tool_call_update":
+            return `tool_call:${update.toolCallId}:update`;
+        default:
+            return null;
     }
 }
 
