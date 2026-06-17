@@ -35,6 +35,7 @@ url = "https://example.com/mcp"
     });
 
     afterEach(() => {
+        vi.unstubAllEnvs();
         removeDirectoryWithRetry(codexHome);
     });
 
@@ -65,5 +66,41 @@ url = "https://example.com/mcp"
         const transportDump = fixture.getAcpConnectionDump([]);
         expect(transportDump).contain("Configured MCP servers:");
         expect(transportDump).contain("- shared-mcp");
+    });
+
+    it('should pass the conflicting ACP MCP through when config filtering is disabled', async () => {
+        vi.stubEnv("DISABLE_MCP_CONFIG_FILTERING", "true");
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+
+        const conflictingMcp: McpServerStdio = {
+            name: "shared-mcp",
+            command: "./node_modules/.bin/mcp-hello-world",
+            args: ["example"],
+            env: [{name: "example", value: "example"}],
+        };
+
+        await codexAcpAgent.newSession({
+            cwd: "",
+            mcpServers: [conflictingMcp],
+        });
+
+        const threadStartRequest = fixture.getCodexConnectionEvents([])
+            .find(event => event.eventType === "request" && event.method === "thread/start");
+        expect(threadStartRequest).toMatchObject({
+            params: {
+                config: {
+                    mcp_servers: {
+                        "shared-mcp": {
+                            command: "./node_modules/.bin/mcp-hello-world",
+                            args: ["example"],
+                            env: {example: "example"},
+                        },
+                    },
+                },
+            },
+        });
     });
 });
