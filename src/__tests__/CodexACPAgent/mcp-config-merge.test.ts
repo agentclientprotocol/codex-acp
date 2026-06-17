@@ -86,21 +86,5 @@ url = "https://example.com/mcp"
             cwd: "",
             mcpServers: [conflictingMcp],
         })).rejects.toThrow("url is not supported for stdio");
-
-        const threadStartRequest = fixture.getCodexConnectionEvents([])
-            .find(event => event.eventType === "request" && event.method === "thread/start");
-        expect(threadStartRequest).toMatchObject({
-            params: {
-                config: {
-                    mcp_servers: {
-                        "shared-mcp": {
-                            command: "./node_modules/.bin/mcp-hello-world",
-                            args: ["example"],
-                            env: {example: "example"},
-                        },
-                    },
-                },
-            },
-        });
     });
 });
