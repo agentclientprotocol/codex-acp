@@ -439,6 +439,58 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    it('passes conflicting ACP MCP servers through when config filtering is disabled', async () => {
+        vi.stubEnv("DISABLE_MCP_CONFIG_FILTERING", "true");
+        try {
+            const mockFixture = createCodexMockTestFixture();
+            const codexAcpClient = mockFixture.getCodexAcpClient();
+            const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+            vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+            const configReadSpy = vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+                config: {
+                    mcp_servers: {
+                        shared_mcp: {
+                            url: "https://example.com/mcp",
+                        },
+                    },
+                },
+            } as any);
+            const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+                thread: {id: "thread-id"} as any,
+                model: "gpt-5",
+                reasoningEffort: "medium",
+                serviceTier: null,
+            } as any);
+            vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+                data: [createTestModel({id: "gpt-5"})],
+                nextCursor: null,
+            });
+
+            await codexAcpClient.newSession({
+                cwd: "/workspace",
+                mcpServers: [{
+                    name: "shared mcp",
+                    command: "npx",
+                    args: ["shared"],
+                    env: [],
+                }],
+            });
+
+            const threadStartRequest = threadStartSpy.mock.calls[0]![0];
+            expect(configReadSpy).not.toHaveBeenCalled();
+            expect(threadStartRequest.config?.["mcp_servers"]).toEqual({
+                shared_mcp: {
+                    command: "npx",
+                    args: ["shared"],
+                    env: {},
+                },
+            });
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
     it('waits for typed mcp startup status updates and returns terminal states', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
