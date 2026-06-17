@@ -101,12 +101,6 @@ export class CodexApprovalHandler implements ApprovalHandler {
         params: CommandExecutionRequestApprovalParams
     ): acp.RequestPermissionRequest {
         const options = this.buildCommandOptions(params).map(({ option }) => option);
-        const content = this.createContent([
-            params.reason ?? null,
-            this.formatNetworkApprovalContext(params),
-            this.formatExecpolicyAmendment(params),
-            this.formatNetworkPolicyAmendments(params),
-        ]);
         return {
             sessionId,
             toolCall: {
@@ -114,7 +108,6 @@ export class CodexApprovalHandler implements ApprovalHandler {
                 kind: "execute",
                 status: "pending",
                 rawInput: params.command ? { command: stripShellPrefix(params.command), cwd: params.cwd } : null,
-                ...(content ? { content } : {}),
             },
             options,
             _meta: { codex: { params } }
@@ -126,17 +119,12 @@ export class CodexApprovalHandler implements ApprovalHandler {
         params: FileChangeRequestApprovalParams
     ): acp.RequestPermissionRequest {
         const options = this.buildFileChangeOptions(params).map(({ option }) => option);
-        const content = this.createContent([
-            params.reason ?? null,
-            params.grantRoot ? `Grant Root: ${params.grantRoot}` : null,
-        ]);
         return {
             sessionId,
             toolCall: {
                 toolCallId: params.itemId,
                 kind: "edit",
                 status: "pending",
-                ...(content ? { content } : {}),
             },
             options,
             _meta: { codex: { params } }
@@ -361,26 +349,6 @@ export class CodexApprovalHandler implements ApprovalHandler {
         return amendment.action === "allow"
             ? `Allow ${amendment.host} in the Future`
             : `Block ${amendment.host} in the Future`;
-    }
-
-    private formatNetworkApprovalContext(params: CommandExecutionRequestApprovalParams): string | null {
-        const context = params.networkApprovalContext;
-        if (!context) return null;
-        return `Network Approval Context: ${context.protocol} ${context.host}`;
-    }
-
-    private formatExecpolicyAmendment(params: CommandExecutionRequestApprovalParams): string | null {
-        const amendment = params.proposedExecpolicyAmendment;
-        if (!amendment || amendment.length === 0) return null;
-        return `Proposed Command Pattern: ${amendment.join(" ")}`;
-    }
-
-    private formatNetworkPolicyAmendments(params: CommandExecutionRequestApprovalParams): string | null {
-        const amendments = params.proposedNetworkPolicyAmendments;
-        if (!amendments || amendments.length === 0) return null;
-        return `Proposed Network Policy Amendments: ${amendments
-            .map((amendment) => `${amendment.action} ${amendment.host}`)
-            .join(", ")}`;
     }
 
     private formatRequestedPermissions(permissions: RequestPermissionProfile): string | null {

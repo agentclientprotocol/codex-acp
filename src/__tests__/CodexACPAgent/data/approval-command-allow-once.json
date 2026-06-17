@@ -7,16 +7,7 @@
         "toolCallId": "item-snapshot",
         "kind": "execute",
         "status": "pending",
-        "rawInput": null,
-        "content": [
-          {
-            "type": "content",
-            "content": {
-              "type": "text",
-              "text": "Running npm install"
-            }
-          }
-        ]
+        "rawInput": null
       },
       "options": [
         {

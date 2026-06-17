@@ -6,16 +6,7 @@
       "toolCall": {
         "toolCallId": "file-change-snapshot",
         "kind": "edit",
-        "status": "pending",
-        "content": [
-          {
-            "type": "content",
-            "content": {
-              "type": "text",
-              "text": "Modifying config file"
-            }
-          }
-        ]
+        "status": "pending"
       },
       "options": [
         {

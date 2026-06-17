@@ -10,16 +10,7 @@
         "rawInput": {
           "command": "npm install",
           "cwd": "/home/user/project"
-        },
-        "content": [
-          {
-            "type": "content",
-            "content": {
-              "type": "text",
-              "text": "Installing dependencies"
-            }
-          }
-        ]
+        }
       },
       "options": [
         {
