@@ -68,7 +68,7 @@ url = "https://example.com/mcp"
         expect(transportDump).contain("- shared-mcp");
     });
 
-    it('should pass the conflicting ACP MCP through when config filtering is disabled', async () => {
+    it('should not filter the conflicting ACP MCP when config filtering is disabled', async () => {
         vi.stubEnv("DISABLE_MCP_CONFIG_FILTERING", "true");
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
@@ -82,10 +82,10 @@ url = "https://example.com/mcp"
             env: [{name: "example", value: "example"}],
         };
 
-        await codexAcpAgent.newSession({
+        await expect(codexAcpAgent.newSession({
             cwd: "",
             mcpServers: [conflictingMcp],
-        });
+        })).rejects.toThrow("url is not supported for stdio");
 
         const threadStartRequest = fixture.getCodexConnectionEvents([])
             .find(event => event.eventType === "request" && event.method === "thread/start");
