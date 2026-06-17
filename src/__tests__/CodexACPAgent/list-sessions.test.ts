@@ -14,6 +14,9 @@ describe("CodexACPAgent - list sessions", () => {
 
         const threadA: Thread = {
             id: "sess-1",
+            sessionId: "sess-1",
+            parentThreadId: null,
+            threadSource: null,
             forkedFromId: null,
             preview: "First session",
             ephemeral: false,
@@ -33,6 +36,9 @@ describe("CodexACPAgent - list sessions", () => {
         };
         const threadB: Thread = {
             id: "sess-2",
+            sessionId: "sess-2",
+            parentThreadId: null,
+            threadSource: null,
             forkedFromId: null,
             preview: "Other session",
             ephemeral: false,
@@ -96,6 +102,9 @@ describe("CodexACPAgent - list sessions", () => {
 
         const thread: Thread = {
             id: "sess-1",
+            sessionId: "sess-1",
+            parentThreadId: null,
+            threadSource: null,
             forkedFromId: null,
             preview: "Preview text",
             ephemeral: false,
@@ -127,5 +136,82 @@ describe("CodexACPAgent - list sessions", () => {
         await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
             "data/list-sessions-thread-name.json"
         );
+    });
+
+    it("includes tracked additional directories for active sessions", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({
+            account: null,
+            requiresOpenaiAuth: false,
+        });
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "sess-1",
+            currentModelId: "gpt-5[medium]",
+            models: [{
+                id: "gpt-5",
+                model: "gpt-5",
+                upgrade: null,
+                upgradeInfo: null,
+                availabilityNux: null,
+                displayName: "gpt-5",
+                description: "test model",
+                hidden: false,
+                supportedReasoningEfforts: [{reasoningEffort: "medium", description: "balanced"}],
+                defaultReasoningEffort: "medium",
+                inputModalities: ["text"],
+                supportsPersonality: false,
+                additionalSpeedTiers: [],
+                serviceTiers: [],
+                defaultServiceTier: null,
+                isDefault: true,
+            }],
+            currentServiceTier: null,
+            additionalDirectories: ["/repo/extra"],
+        });
+        const thread: Thread = {
+            id: "sess-1",
+            sessionId: "sess-1",
+            parentThreadId: null,
+            threadSource: null,
+            forkedFromId: null,
+            preview: "First session",
+            ephemeral: false,
+            modelProvider: "openai",
+            createdAt: 100,
+            updatedAt: 200,
+            status: { type: "idle" },
+            path: null,
+            cwd: "/repo/project",
+            cliVersion: "0.0.0",
+            source: "cli",
+            agentNickname: null,
+            agentRole: null,
+            gitInfo: null,
+            name: null,
+            turns: [],
+        };
+        vi.spyOn(codexAppServerClient, "threadList").mockResolvedValue({
+            data: [thread],
+            nextCursor: null,
+            backwardsCursor: null,
+        });
+
+        await codexAcpAgent.newSession({
+            cwd: "/repo/project",
+            additionalDirectories: ["/repo/extra"],
+            mcpServers: [],
+        });
+
+        const response = await codexAcpAgent.listSessions({
+            cwd: null,
+            cursor: null,
+        });
+
+        expect(response.sessions[0]?.additionalDirectories).toEqual(["/repo/extra"]);
     });
 });

@@ -2,11 +2,20 @@ import type * as acp from "@agentclientprotocol/sdk";
 import type {AgentSideConnection, AvailableCommand} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection} from "./ACPSessionConnection";
 import type {CodexAcpClient} from "./CodexAcpClient";
-import type {RateLimitSnapshot, SkillsListEntry} from "./app-server/v2";
+import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, TurnCompletedNotification} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
 import {logger} from "./Logger";
+
+type ParsedSlashCommand = {
+    name: string;
+    rest: string;
+};
+
+export type CommandHandleResult =
+    | { handled: false }
+    | { handled: true, turnCompleted?: TurnCompletedNotification };
 
 export class CodexCommands {
     private readonly connection: AgentSideConnection;
@@ -84,6 +93,26 @@ export class CodexCommands {
                 input: null
             },
             {
+                name: "review",
+                description: "Review uncommitted changes, or review with custom instructions.",
+                input: { hint: "optional review instructions" }
+            },
+            {
+                name: "review-branch",
+                description: "Review changes relative to a base branch.",
+                input: { hint: "branch name" }
+            },
+            {
+                name: "review-commit",
+                description: "Review a specific commit.",
+                input: { hint: "commit sha" }
+            },
+            {
+                name: "compact",
+                description: "Summarize conversation to avoid hitting the context limit.",
+                input: null
+            },
+            {
                 name: "logout",
                 description: "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
                 input: null
@@ -91,7 +120,7 @@ export class CodexCommands {
         ];
     }
 
-    private getCommandName(prompt: acp.ContentBlock[]): string | null {
+    private parseCommand(prompt: acp.ContentBlock[]): ParsedSlashCommand | null {
         const firstBlock = prompt[0];
         if (!firstBlock || firstBlock.type != "text") return null;
 
@@ -102,16 +131,54 @@ export class CodexCommands {
         if (commandText.length === 0) return null;
 
         const [name] = commandText.split(/\s+/);
-        return name?.toLowerCase() ?? null;
+        if (!name) return null;
+
+        return {
+            name: name.toLowerCase(),
+            rest: commandText.slice(name.length).trim(),
+        };
     }
 
-    async tryHandleCommand(prompt: acp.ContentBlock[], sessionState: SessionState): Promise<boolean> {
-        const commandName = this.getCommandName(prompt);
-        if (commandName === null) return false;
-        if (commandName.startsWith("$")) return false;
+    async tryHandleCommand(prompt: acp.ContentBlock[], sessionState: SessionState): Promise<CommandHandleResult> {
+        const command = this.parseCommand(prompt);
+        if (command === null) return { handled: false };
+        const commandName = command.name;
+        if (commandName.startsWith("$")) return { handled: false };
 
         const sessionId = sessionState.sessionId;
         switch (commandName) {
+            case "compact": {
+                await this.runWithProcessCheck(() => this.codexAcpClient.runCompact(sessionId));
+                return { handled: true };
+            }
+            case "review": {
+                const target = this.buildReviewTarget(command.rest);
+                const turnCompleted = await this.runReviewCommand(sessionState, target);
+                return { handled: true, turnCompleted };
+            }
+            case "review-branch": {
+                if (command.rest.length === 0) {
+                    await this.sendCommandUsageMessage(commandName, "branch name", sessionId);
+                    return { handled: true };
+                }
+                const turnCompleted = await this.runReviewCommand(sessionState, {
+                    type: "baseBranch",
+                    branch: command.rest,
+                });
+                return { handled: true, turnCompleted };
+            }
+            case "review-commit": {
+                if (command.rest.length === 0) {
+                    await this.sendCommandUsageMessage(commandName, "commit sha", sessionId);
+                    return { handled: true };
+                }
+                const turnCompleted = await this.runReviewCommand(sessionState, {
+                    type: "commit",
+                    sha: command.rest,
+                    title: null,
+                });
+                return { handled: true, turnCompleted };
+            }
             case "status": {
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 const message = this.buildStatusMessage(sessionState);
@@ -119,7 +186,7 @@ export class CodexCommands {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text: message }
                 });
-                return true;
+                return { handled: true };
             }
             case "logout": {
                 await this.runWithProcessCheck(() => this.codexAcpClient.logout());
@@ -128,7 +195,7 @@ export class CodexCommands {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text: "Logged out from Codex account." }
                 });
-                return true;
+                return { handled: true };
             }
             case "skills": {
                 const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills());
@@ -145,7 +212,7 @@ export class CodexCommands {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text }
                 });
-                return true;
+                return { handled: true };
             }
             case "mcp": {
                 const servers = await this.runWithProcessCheck(() => this.codexAcpClient.listMcpServers());
@@ -166,12 +233,43 @@ export class CodexCommands {
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text }
                 });
-                return true;
+                return { handled: true };
             }
             default:
                 await this.sendUnknownCommandMessage(commandName, sessionId);
-                return true;
+                return { handled: true };
         }
+    }
+
+    private async runReviewCommand(sessionState: SessionState, target: ReviewTarget): Promise<TurnCompletedNotification> {
+        return await this.runWithProcessCheck(() => this.codexAcpClient.runReview(
+            sessionState.sessionId,
+            target,
+            (turnId) => {
+                sessionState.currentTurnId = turnId;
+            },
+        ));
+    }
+
+    private buildReviewTarget(instructions: string): ReviewTarget {
+        if (instructions.length === 0) {
+            return { type: "uncommittedChanges" };
+        }
+        return {
+            type: "custom",
+            instructions,
+        };
+    }
+
+    private async sendCommandUsageMessage(name: string, inputHint: string, sessionId: string): Promise<void> {
+        const session = new ACPSessionConnection(this.connection, sessionId);
+        await session.update({
+            sessionUpdate: "agent_message_chunk",
+            content: {
+                type: "text",
+                text: `Command "/${name}" requires ${inputHint}.`
+            }
+        });
     }
 
     private async sendUnknownCommandMessage(name: string, sessionId: string): Promise<void> {

@@ -338,6 +338,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         rateLimits: null,
         account: null,
         cwd: "/test/cwd",
+        additionalDirectories: [],
         sessionId: "session-id",
         currentModelId: "model-id[effort]",
         availableModels: [],
@@ -346,6 +347,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
         fastModeEnabled: false,
         currentModelSupportsFast: false,
+        terminalOutputMode: "terminal_output_delta",
         ...overrides,
     };
 }
@@ -367,6 +369,8 @@ export function createTestModel(overrides?: Partial<Model>): Model {
         inputModalities: ["text", "image"],
         supportsPersonality: false,
         additionalSpeedTiers: [],
+        serviceTiers: [],
+        defaultServiceTier: null,
         isDefault: true,
         ...overrides,
     };
@@ -388,6 +392,7 @@ export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string)
         turn: {
             id: "turn-id",
             items: [],
+            itemsView: "notLoaded",
             status: "inProgress",
             error: null,
             startedAt: null,
@@ -400,6 +405,7 @@ export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string)
         turn: {
             id: "turn-id",
             items: [],
+            itemsView: "notLoaded",
             status: "completed",
             error: null,
             startedAt: null,

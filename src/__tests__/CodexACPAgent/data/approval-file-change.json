@@ -55,6 +55,7 @@
           "params": {
             "threadId": "test-session-id",
             "turnId": "turn-1",
+            "startedAtMs": 0,
             "itemId": "file-change-snapshot",
             "reason": "Modifying config file",
             "grantRoot": null

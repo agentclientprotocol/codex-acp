@@ -1,0 +1,10 @@
+{
+  "eventType": "request",
+  "method": "thread/archive",
+  "params": {
+    "threadId": "session-id"
+  }
+}
+{
+  "eventType": "response"
+}

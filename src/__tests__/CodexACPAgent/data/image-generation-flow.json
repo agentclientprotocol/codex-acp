@@ -1,0 +1,55 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "image-generation-1",
+        "kind": "other",
+        "title": "Image generation",
+        "status": "in_progress",
+        "rawInput": {
+          "id": "image-generation-1"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "image-generation-1",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Revised prompt: A tiny blue square"
+            }
+          },
+          {
+            "type": "content",
+            "content": {
+              "type": "image",
+              "data": "iVBORw0KGgo=",
+              "mimeType": "image/png",
+              "uri": "/tmp/codex/generated-blue-square.png"
+            }
+          }
+        ],
+        "rawOutput": {
+          "status": "completed",
+          "revisedPrompt": "A tiny blue square",
+          "result": "iVBORw0KGgo=",
+          "savedPath": "/tmp/codex/generated-blue-square.png"
+        }
+      }
+    }
+  ]
+}

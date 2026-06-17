@@ -1,0 +1,49 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "web-open-1",
+        "kind": "search",
+        "title": "Open page: https://agentclientprotocol.com",
+        "status": "in_progress",
+        "rawInput": {
+          "type": "webSearch",
+          "id": "web-open-1",
+          "query": "https://agentclientprotocol.com",
+          "action": {
+            "type": "openPage",
+            "url": "https://agentclientprotocol.com"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "web-find-1",
+        "kind": "search",
+        "title": "Find in page for 'tool calls' in https://agentclientprotocol.com/protocol",
+        "status": "in_progress",
+        "rawInput": {
+          "type": "webSearch",
+          "id": "web-find-1",
+          "query": "protocol",
+          "action": {
+            "type": "findInPage",
+            "url": "https://agentclientprotocol.com/protocol",
+            "pattern": "tool calls"
+          }
+        }
+      }
+    }
+  ]
+}

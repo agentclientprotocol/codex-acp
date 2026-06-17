@@ -1,0 +1,91 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "command-terminal-output",
+        "kind": "execute",
+        "title": "python manage.py migrate",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "command-terminal-output"
+          }
+        ],
+        "rawInput": {
+          "command": "python manage.py migrate",
+          "cwd": "/test/project"
+        },
+        "_meta": {
+          "terminal_info": {
+            "cwd": "/test/project",
+            "terminal_id": "command-terminal-output"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "command-terminal-output",
+        "_meta": {
+          "terminal_output": {
+            "data": "Applying migrations\n",
+            "terminal_id": "command-terminal-output"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "command-terminal-output",
+        "_meta": {
+          "terminal_output": {
+            "data": "\nyes\n",
+            "terminal_id": "command-terminal-output"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "command-terminal-output",
+        "status": "completed",
+        "rawOutput": {
+          "formatted_output": "Applying migrations\n\nyes\nDone\n",
+          "exit_code": 0
+        },
+        "_meta": {
+          "terminal_exit": {
+            "exit_code": 0,
+            "signal": null,
+            "terminal_id": "command-terminal-output"
+          }
+        }
+      }
+    }
+  ]
+}

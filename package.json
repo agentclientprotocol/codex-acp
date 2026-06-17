@@ -3,7 +3,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "0.0.45",
+  "version": "0.0.46",
   "description": "",
   "main": "dist/index.js",
   "bin": {
@@ -54,15 +54,15 @@
   "type": "module",
   "devDependencies": {
     "@types/node": "^24.10.1",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.1",
     "mcp-hello-world": "^1.1.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.0.10"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.22.1",
-    "@openai/codex": "^0.128.0",
+    "@agentclientprotocol/sdk": "^0.25.1",
+    "@openai/codex": "^0.140.0",
     "diff": "^8.0.3",
     "open": "^11.0.0",
     "vscode-jsonrpc": "^8.2.1"

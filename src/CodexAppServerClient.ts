@@ -21,8 +21,15 @@ import type {
     McpServerStatusUpdatedNotification,
     ModelListParams,
     ModelListResponse,
+    ReviewStartParams,
+    ReviewStartResponse,
+    SkillsExtraRootsSetParams,
     SkillsListParams,
     SkillsListResponse,
+    ThreadArchiveParams,
+    ThreadArchiveResponse,
+    ThreadCompactStartParams,
+    ThreadCompactStartResponse,
     ThreadLoadedListParams,
     ThreadLoadedListResponse,
     ThreadListParams,
@@ -46,6 +53,7 @@ import type {
     FileChangeRequestApprovalResponse,
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
+    ItemCompletedNotification,
 } from "./app-server/v2";
 
 export interface ApprovalHandler {
@@ -105,6 +113,7 @@ export class CodexAppServerClient {
     private readonly mcpServerStartupStates = new Map<string, McpServerStartupSnapshot>();
     private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
     private readonly pendingTurnCompletionResolvers = new Map<string, Map<string, (event: TurnCompletedNotification) => void>>();
+    private readonly pendingCompactionCompletionResolvers = new Map<string, Set<(event: CompactionCompletedNotification) => void>>();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
 
@@ -123,6 +132,9 @@ export class CodexAppServerClient {
             }
             if (isTurnCompletedNotification(serverNotification)) {
                 this.recordTurnCompleted(serverNotification.params);
+            }
+            if (isCompactionCompletedNotification(serverNotification)) {
+                this.recordCompactionCompleted(serverNotification);
             }
             const routing = extractTurnRouting(serverNotification);
             const staleTurnNotification = this.isStaleTurn(routing.threadId, routing.turnId);
@@ -230,8 +242,38 @@ export class CodexAppServerClient {
         }
     }
 
+    async runReview(params: ReviewStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
+        const capturedCompletions: Array<TurnCompletedNotification> = [];
+        const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
+            capturedCompletions.push(event);
+        });
+
+        try {
+            const reviewStarted = await this.reviewStart(params);
+            onTurnStarted?.(reviewStarted.turn.id);
+            const earlyCompletion = capturedCompletions.find(event => event.turn.id === reviewStarted.turn.id);
+            releaseCapture();
+            if (earlyCompletion) {
+                return earlyCompletion;
+            }
+            return await this.awaitTurnCompleted(reviewStarted.reviewThreadId, reviewStarted.turn.id);
+        } finally {
+            releaseCapture();
+        }
+    }
+
+    async runCompact(params: ThreadCompactStartParams): Promise<CompactionCompletedNotification> {
+        const compactionCompleted = this.awaitCompactionCompleted(params.threadId);
+        await this.threadCompactStart(params);
+        return await compactionCompleted;
+    }
+
     async turnInterrupt(params: TurnInterruptParams): Promise<TurnInterruptResponse> {
         return await this.sendRequest({ method: "turn/interrupt", params: params });
+    }
+
+    async reviewStart(params: ReviewStartParams): Promise<ReviewStartResponse> {
+        return await this.sendRequest({ method: "review/start", params: params });
     }
 
     markTurnStale(threadId: string, turnId: string): void {
@@ -260,8 +302,16 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/read", params: params });
     }
 
+    async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
+        return await this.sendRequest({ method: "thread/archive", params: params });
+    }
+
     async threadUnsubscribe(params: ThreadUnsubscribeParams): Promise<ThreadUnsubscribeResponse> {
         return await this.sendRequest({ method: "thread/unsubscribe", params: params });
+    }
+
+    async threadCompactStart(params: ThreadCompactStartParams): Promise<ThreadCompactStartResponse> {
+        return await this.sendRequest({ method: "thread/compact/start", params: params });
     }
 
     async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
@@ -316,12 +366,21 @@ export class CodexAppServerClient {
         });
     }
 
+    async awaitCompactionCompleted(threadId: string): Promise<CompactionCompletedNotification> {
+        return await new Promise((resolve) => {
+            const resolvers = this.pendingCompactionCompletionResolvers.get(threadId) ?? new Set();
+            resolvers.add(resolve);
+            this.pendingCompactionCompletionResolvers.set(threadId, resolvers);
+        });
+    }
+
     resolveTurnInterrupted(threadId: string, turnId: string): void {
         this.recordTurnCompleted({
             threadId,
             turn: {
                 id: turnId,
                 items: [],
+                itemsView: "notLoaded",
                 status: "interrupted",
                 error: null,
                 startedAt: null,
@@ -333,6 +392,10 @@ export class CodexAppServerClient {
 
     async listModels(params: ModelListParams): Promise<ModelListResponse> {
         return await this.sendRequest({ method: "model/list", params });
+    }
+
+    async skillsExtraRootsSet(params: SkillsExtraRootsSetParams): Promise<void> {
+        return await this.sendRequest({ method: "skills/extraRoots/set", params });
     }
 
     async listSkills(params: SkillsListParams): Promise<SkillsListResponse> {
@@ -385,6 +448,21 @@ export class CodexAppServerClient {
         }
         for (const capture of captures) {
             capture(event);
+        }
+    }
+
+    private recordCompactionCompleted(event: CompactionCompletedNotification): void {
+        const threadId = extractThreadId(event);
+        if (threadId === null) {
+            return;
+        }
+        const resolvers = this.pendingCompactionCompletionResolvers.get(threadId);
+        if (!resolvers) {
+            return;
+        }
+        this.pendingCompactionCompletionResolvers.delete(threadId);
+        for (const resolve of resolvers) {
+            resolve(event);
         }
     }
 
@@ -501,6 +579,10 @@ export type CodexConnectionEvent =
     | ({ eventType: "response" } & unknown)
     | ({ eventType: "notification" } & ServerNotification);
 
+export type CompactionCompletedNotification =
+    | { method: "thread/compacted", params: Extract<ServerNotification, { method: "thread/compacted" }>["params"] }
+    | { method: "item/completed", params: ItemCompletedNotification & { item: Extract<ItemCompletedNotification["item"], { type: "contextCompaction" }> } };
+
 type CodexRequest = DistributiveOmit<ClientRequest, "id">
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
@@ -531,6 +613,13 @@ function isTurnCompletedNotification(notification: ServerNotification): notifica
     params: TurnCompletedNotification;
 } {
     return notification.method === "turn/completed";
+}
+
+function isCompactionCompletedNotification(notification: ServerNotification): notification is CompactionCompletedNotification {
+    if (notification.method === "thread/compacted") {
+        return true;
+    }
+    return notification.method === "item/completed" && notification.params.item.type === "contextCompaction";
 }
 
 function extractThreadId(notification: ServerNotification): string | null {

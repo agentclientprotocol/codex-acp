@@ -1,0 +1,59 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "command-terminal-output-completion",
+        "kind": "execute",
+        "title": "git status --short",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "command-terminal-output-completion"
+          }
+        ],
+        "rawInput": {
+          "command": "git status --short",
+          "cwd": "/test/project"
+        },
+        "_meta": {
+          "terminal_info": {
+            "cwd": "/test/project",
+            "terminal_id": "command-terminal-output-completion"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "command-terminal-output-completion",
+        "status": "completed",
+        "rawOutput": {
+          "formatted_output": "M src/CodexEventHandler.ts\n",
+          "exit_code": 0
+        },
+        "_meta": {
+          "terminal_output": {
+            "data": "M src/CodexEventHandler.ts\n",
+            "terminal_id": "command-terminal-output-completion"
+          },
+          "terminal_exit": {
+            "exit_code": 0,
+            "signal": null,
+            "terminal_id": "command-terminal-output-completion"
+          }
+        }
+      }
+    }
+  ]
+}

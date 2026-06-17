@@ -1,4 +1,4 @@
-import type { ToolCallContent } from "@agentclientprotocol/sdk";
+import type { ContentBlock, ToolCallContent } from "@agentclientprotocol/sdk";
 import { applyPatch, parsePatch, reversePatch } from "diff";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -13,6 +13,12 @@ import type {
     CommandExecutionStatus,
     DynamicToolCallStatus,
     FileUpdateChange,
+    GuardianApprovalReview,
+    GuardianApprovalReviewAction,
+    GuardianApprovalReviewStatus,
+    GuardianCommandSource,
+    ItemGuardianApprovalReviewCompletedNotification,
+    ItemGuardianApprovalReviewStartedNotification,
     McpToolCallError,
     McpToolCallResult,
     McpToolCallStatus,
@@ -24,6 +30,12 @@ import {logger} from "./Logger";
 
 type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+type GuardianApprovalReviewNotification =
+    | ItemGuardianApprovalReviewStartedNotification
+    | ItemGuardianApprovalReviewCompletedNotification;
+type WebSearchItem = ThreadItem & { type: "webSearch" };
+type CommandExecutionItem = ThreadItem & { type: "commandExecution" };
+type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
 
 function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
     switch (status) {
@@ -56,32 +68,23 @@ export async function createFileChangeUpdate(
     };
 }
 
-export async function createCommandExecutionUpdate(
-    item: ThreadItem & { type: "commandExecution" }
-): Promise<UpdateSessionEvent> {
+export async function createCommandExecutionUpdate(item: CommandExecutionItem): Promise<UpdateSessionEvent> {
     const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
     if (commandAction) {
         return createCommandActionEvent(item.id, item.status, item.cwd, commandAction);
     }
     const command = stripShellPrefix(item.command);
-    return {
+    return createTerminalCommandEvent({
         sessionUpdate: "tool_call",
         toolCallId: item.id,
         kind: "execute",
         title: command,
         status: toAcpStatus(item.status),
-        content: [{ type: "terminal", terminalId: item.id }],
         rawInput: {
             command: item.command,
             cwd: item.cwd,
         },
-        _meta: {
-            terminal_info: {
-                cwd: item.cwd,
-                terminal_id: item.id,
-            },
-        },
-    };
+    }, item.id, item.cwd);
 }
 
 export async function createMcpToolCallUpdate(
@@ -102,6 +105,69 @@ export async function createDynamicToolCallUpdate(
     item: ThreadItem & { type: "dynamicToolCall" }
 ): Promise<UpdateSessionEvent> {
     return createExecuteToolCallUpdate(item, item.tool, { arguments: item.arguments })
+}
+
+export function createImageViewUpdate(
+    item: ThreadItem & { type: "imageView" }
+): UpdateSessionEvent {
+    const displayPath = item.path;
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "read",
+        title: `View Image ${displayPath}`,
+        status: "completed",
+        content: [createContent({
+            type: "resource_link",
+            name: displayPath,
+            uri: displayPath,
+        })],
+        locations: [{ path: item.path }],
+        rawInput: {
+            path: item.path,
+        },
+    };
+}
+
+export function createImageGenerationStartUpdate(
+    item: ThreadItem & { type: "imageGeneration" }
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "other",
+        title: "Image generation",
+        status: "in_progress",
+        rawInput: {
+            id: item.id,
+        },
+    };
+}
+
+export function createImageGenerationCompleteUpdate(
+    item: ThreadItem & { type: "imageGeneration" }
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        status: imageGenerationToolStatus(item.status),
+        content: imageGenerationContent(item),
+        rawOutput: imageGenerationRawOutput(item),
+    };
+}
+
+export function createImageGenerationUpdate(
+    item: ThreadItem & { type: "imageGeneration" }
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "other",
+        title: "Image generation",
+        status: imageGenerationToolStatus(item.status),
+        content: imageGenerationContent(item),
+        rawOutput: imageGenerationRawOutput(item),
+    };
 }
 
 export async function createExecuteToolCallUpdate(
@@ -140,6 +206,36 @@ export function createMcpRawOutput(
     return {
         result,
         error,
+    };
+}
+
+export function guardianApprovalReviewToolCallId(reviewId: string): string {
+    return `guardian_assessment:${reviewId}`;
+}
+
+export function createGuardianApprovalReviewToolCall(
+    event: GuardianApprovalReviewNotification,
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: guardianApprovalReviewToolCallId(event.reviewId),
+        kind: "think",
+        title: "Guardian Review",
+        status: toAcpGuardianApprovalReviewStatus(event.review.status),
+        content: createGuardianApprovalReviewContent(event.review, event.action),
+        rawInput: event as unknown as Record<string, JsonValue>,
+    };
+}
+
+export function createGuardianApprovalReviewToolCallUpdate(
+    event: GuardianApprovalReviewNotification,
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: guardianApprovalReviewToolCallId(event.reviewId),
+        status: toAcpGuardianApprovalReviewStatus(event.review.status),
+        content: createGuardianApprovalReviewContent(event.review, event.action),
+        rawOutput: event as unknown as Record<string, JsonValue>,
     };
 }
 
@@ -190,6 +286,54 @@ export function createFuzzyFileSearchComplete(
     };
 }
 
+export function createWebSearchStartUpdate(
+    item: WebSearchItem
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "search",
+        title: formatWebSearchTitle(item),
+        status: "in_progress",
+        rawInput: item,
+    };
+}
+
+export function createWebSearchCompleteUpdate(
+    item: WebSearchItem
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        title: formatWebSearchTitle(item),
+        status: "completed",
+        rawInput: item,
+    };
+}
+
+export function formatWebSearchTitle(item: WebSearchItem): string {
+    const action = item.action;
+    if (!action) {
+        return item.query ? `Web search: ${item.query}` : "Web search";
+    }
+    switch (action.type) {
+        case "search": {
+            const queries = action.queries?.filter((query) => query && query.length > 0) ?? [];
+            const query = action.query ?? (queries.length > 0 ? queries.join(", ") : null) ?? item.query;
+            return query ? `Web search: ${query}` : "Web search";
+        }
+        case "openPage":
+            return action.url ? `Open page: ${action.url}` : "Open page";
+        case "findInPage": {
+            const pattern = action.pattern ? ` for '${action.pattern}'` : "";
+            const url = action.url ? ` in ${action.url}` : "";
+            return `Find in page${pattern}${url}`.trim();
+        }
+        case "other":
+            return "Web search";
+    }
+}
+
 function createCommandActionEvent(
     id: string,
     status: CommandExecutionStatus,
@@ -197,50 +341,70 @@ function createCommandActionEvent(
     commandAction: CommandAction
 ): UpdateSessionEvent {
     const acpStatus = toAcpStatus(status);
-    if (commandAction.type === "read") {
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: id,
-            status: acpStatus,
-            kind: "read",
-            title: `Read file '${commandAction.path}'`,
-            locations: [{ path: commandAction.path }],
-        };
-    } else if (commandAction.type === "search") {
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: id,
-            status: acpStatus,
-            kind: "search",
-            title: createSearchTitle(commandAction.query, commandAction.path),
-        };
-    } else if (commandAction.type === "listFiles") {
-        const title = commandAction.path
-            ? `List files in '${commandAction.path}'`
-            : "List files";
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: id,
-            status: acpStatus,
-            kind: "read",
-            title: title,
-        };
+    switch (commandAction.type) {
+        case "read":
+            return {
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: acpStatus,
+                kind: "read",
+                title: `Read file '${commandAction.path}'`,
+                locations: [{ path: commandAction.path }],
+            };
+        case "search":
+            return {
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: acpStatus,
+                kind: "search",
+                title: createSearchTitle(commandAction.query, commandAction.path),
+            };
+        case "listFiles": {
+            const title = commandAction.path
+                ? `List files in '${commandAction.path}'`
+                : "List files";
+            return {
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: acpStatus,
+                kind: "read",
+                title: title,
+            };
+        }
+        case "unknown":
+            return createTerminalCommandEvent({
+                sessionUpdate: "tool_call",
+                toolCallId: id,
+                status: acpStatus,
+                kind: "execute",
+                title: stripShellPrefix(commandAction.command),
+                rawInput: {
+                    command: commandAction.command,
+                    cwd,
+                },
+            }, id, cwd);
     }
+}
+
+export function commandExecutionUsesTerminalOutput(item: CommandExecutionItem): boolean {
+    const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
+    return commandAction === undefined || commandAction.type === "unknown";
+}
+
+function createTerminalCommandEvent(
+    event: AcpToolCallEvent,
+    terminalId: string,
+    cwd: string,
+): UpdateSessionEvent {
+    const { rawInput, ...eventWithoutRawInput } = event;
     return {
-        sessionUpdate: "tool_call",
-        toolCallId: id,
-        status: acpStatus,
-        kind: "execute",
-        title: stripShellPrefix(commandAction.command),
-        content: [{ type: "terminal", terminalId: id }],
-        rawInput: {
-            command: commandAction.command,
-            cwd,
-        },
+        ...eventWithoutRawInput,
+        content: [{ type: "terminal", terminalId }],
+        ...(rawInput === undefined ? {} : { rawInput }),
         _meta: {
             terminal_info: {
                 cwd,
-                terminal_id: id,
+                terminal_id: terminalId,
             },
         },
     };
@@ -255,6 +419,179 @@ function createSearchTitle(query: string | null, path: string | null): string {
         return `Search in '${path}'`;
     }
     return "Search";
+}
+
+function toAcpGuardianApprovalReviewStatus(status: GuardianApprovalReviewStatus): AcpToolCallStatus {
+    switch (status) {
+        case "inProgress":
+            return "in_progress";
+        case "approved":
+            return "completed";
+        case "denied":
+        case "aborted":
+        case "timedOut":
+            return "failed";
+    }
+}
+
+function createGuardianApprovalReviewContent(
+    review: GuardianApprovalReview,
+    action: GuardianApprovalReviewAction,
+): ToolCallContent[] {
+    const lines = [`Status: ${formatGuardianApprovalReviewStatus(review.status)}`];
+    const actionSummary = createGuardianApprovalReviewActionSummary(action);
+    if (actionSummary) {
+        lines.push(`Action: ${actionSummary}`);
+    }
+    if (review.riskLevel) {
+        lines.push(`Risk: ${review.riskLevel}`);
+    }
+    if (review.userAuthorization) {
+        lines.push(`Authorization: ${review.userAuthorization}`);
+    }
+    if (review.rationale?.trim()) {
+        lines.push(`Rationale: ${review.rationale}`);
+    }
+
+    return [{
+        type: "content",
+        content: {
+            type: "text",
+            text: lines.join("\n"),
+        },
+    }];
+}
+
+function formatGuardianApprovalReviewStatus(status: GuardianApprovalReviewStatus): string {
+    switch (status) {
+        case "inProgress":
+            return "In progress";
+        case "approved":
+            return "Approved";
+        case "denied":
+            return "Denied";
+        case "aborted":
+            return "Aborted";
+        case "timedOut":
+            return "Timed out";
+    }
+}
+
+function createGuardianApprovalReviewActionSummary(action: GuardianApprovalReviewAction): string | null {
+    switch (action.type) {
+        case "command":
+            return `${guardianCommandSourceLabel(action.source)} ${action.command}`;
+        case "execve": {
+            const command = action.argv.length > 0 ? action.argv : [action.program];
+            return `${guardianCommandSourceLabel(action.source)} ${shellJoin(command)}`;
+        }
+        case "applyPatch":
+            if (action.files.length === 1) {
+                return `apply_patch touching ${action.files[0]}`;
+            }
+            return `apply_patch touching ${action.files.length} files`;
+        case "networkAccess": {
+            const label = action.target.length > 0 ? action.target : action.host;
+            return `network access to ${label}`;
+        }
+        case "mcpToolCall": {
+            const label = action.connectorName ?? action.server;
+            return `MCP ${action.toolName} on ${label}`;
+        }
+        case "requestPermissions":
+            return action.reason ?? "request additional permissions";
+    }
+}
+
+function guardianCommandSourceLabel(source: GuardianCommandSource): string {
+    switch (source) {
+        case "shell":
+            return "shell";
+        case "unifiedExec":
+            return "exec";
+    }
+}
+
+function shellJoin(args: string[]): string {
+    return args.map(shellQuote).join(" ");
+}
+
+function shellQuote(arg: string): string {
+    if (arg.length === 0) {
+        return "''";
+    }
+    if (/^[A-Za-z0-9_/:=+.,@%-]+$/.test(arg)) {
+        return arg;
+    }
+    return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+function imageGenerationToolStatus(status: string): AcpToolCallStatus {
+    switch (status) {
+        case "completed":
+            return "completed";
+        case "generating":
+        case "in_progress":
+        case "inProgress":
+        case "incomplete":
+            return "in_progress";
+        case "failed":
+            return "failed";
+        default:
+            return "completed";
+    }
+}
+
+function imageGenerationContent(
+    item: ThreadItem & { type: "imageGeneration" }
+): ToolCallContent[] {
+    const content: ToolCallContent[] = [];
+
+    if (item.revisedPrompt && item.revisedPrompt.trim() !== "") {
+        content.push(createContent({
+            type: "text",
+            text: `Revised prompt: ${item.revisedPrompt}`,
+        }));
+    }
+
+    if (item.result.trim() !== "") {
+        const image: ContentBlock = item.savedPath && item.savedPath.trim() !== ""
+            ? {
+                type: "image",
+                data: item.result,
+                mimeType: "image/png",
+                uri: item.savedPath,
+            }
+            : {
+                type: "image",
+                data: item.result,
+                mimeType: "image/png",
+            };
+        content.push(createContent(image));
+    }
+
+    return content;
+}
+
+function imageGenerationRawOutput(
+    item: ThreadItem & { type: "imageGeneration" }
+): Record<string, string | null> {
+    const output: Record<string, string | null> = {
+        status: item.status,
+        revisedPrompt: item.revisedPrompt,
+        result: item.result,
+    };
+    if ("savedPath" in item) {
+        output["savedPath"] = item.savedPath ?? null;
+    }
+    return output;
+}
+
+function createContent(content: ContentBlock): ToolCallContent {
+    return {
+        type: "content",
+        content,
+    };
 }
 
 async function createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {

@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk";
-import {RequestError, type SessionId, type SessionModelState, type SessionModeState} from "@agentclientprotocol/sdk";
+import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
@@ -33,12 +33,24 @@ import {CodexCommands} from "./CodexCommands";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
-import {isExtMethodRequest} from "./AcpExtensions";
+import {
+    type LegacyLoadSessionResponse,
+    type LegacyNewSessionResponse,
+    type LegacyResumeSessionResponse,
+    type LegacySessionModelState,
+    type LegacySetSessionModelRequest,
+    type LegacySetSessionModelResponse,
+    isExtMethodRequest,
+    LEGACY_SET_SESSION_MODEL_METHOD,
+} from "./AcpExtensions";
 import {
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
+    createImageGenerationUpdate,
+    createImageViewUpdate,
     createMcpToolCallUpdate,
+    formatWebSearchTitle,
 } from "./CodexToolCallMapper";
 import {
     createFastModeConfigOption,
@@ -50,6 +62,7 @@ import {
 } from "./FastModeConfig";
 import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
+import {resolveTerminalOutputMode, type TerminalOutputMode} from "./TerminalOutputMode";
 
 export interface SessionState {
     sessionId: string,
@@ -65,9 +78,11 @@ export interface SessionState {
     rateLimits: RateLimitsMap | null;
     account: Account | null;
     cwd: string;
+    additionalDirectories: string[];
     fastModeEnabled: boolean;
     currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
+    terminalOutputMode: TerminalOutputMode;
 }
 
 interface PendingMcpStartupSession {
@@ -100,6 +115,7 @@ export class CodexAcpServer implements acp.Agent {
     private readonly getExitCode: () => number | null;
     private readonly availableCommands: CodexCommands;
     private clientInfo: acp.Implementation | null;
+    private terminalOutputMode: TerminalOutputMode;
 
     private readonly sessions: Map<string, SessionState>;
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
@@ -127,6 +143,7 @@ export class CodexAcpServer implements acp.Agent {
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.getExitCode = getExitCode ?? (() => null);
         this.clientInfo = null;
+        this.terminalOutputMode = "terminal_output_delta";
         this.availableCommands = new CodexCommands(
             connection,
             codexAcpClient,
@@ -139,6 +156,7 @@ export class CodexAcpServer implements acp.Agent {
     ): Promise<acp.InitializeResponse> {
         logger.log("Initialize request received");
         this.clientInfo = _params.clientInfo ?? null;
+        this.terminalOutputMode = resolveTerminalOutputMode(_params.clientCapabilities);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
@@ -160,6 +178,8 @@ export class CodexAcpServer implements acp.Agent {
                     resume: { },
                     list: { },
                     close: { },
+                    delete: { },
+                    additionalDirectories: {},
                 },
                 mcpCapabilities: {
                     acp: false,
@@ -180,9 +200,11 @@ export class CodexAcpServer implements acp.Agent {
             case "authentication/status":
                 return await this.runWithProcessCheck(() => this.codexAcpClient.getAuthenticationStatus());
             case "authentication/logout": {
-                await this.unstable_logout({});
+                await this.logout({});
                 return {};
             }
+            case LEGACY_SET_SESSION_MODEL_METHOD:
+                return await this.unstable_setSessionModel(this.parseLegacySetSessionModelParams(methodRequest.params));
         }
     }
 
@@ -203,7 +225,7 @@ export class CodexAcpServer implements acp.Agent {
         }
     }
 
-    async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, SessionModelState, SessionModeState]> {
+    async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
         try {
             return await this.tryCreateSession(request);
         } catch (e) {
@@ -214,7 +236,7 @@ export class CodexAcpServer implements acp.Agent {
     }
 
     async handleError(e: Error){
-        if (e.message.includes("log out")) {
+        if (e.message.includes("log out") || e.message.includes("cloud requirements")) {
             await this.runWithProcessCheck(() => this.codexAcpClient.logout());
             throw RequestError.internalError(`${(e.message)}\n\nYou have been logged out. Please try again.`);
         }
@@ -283,7 +305,7 @@ export class CodexAcpServer implements acp.Agent {
         return generation;
     }
 
-    async tryCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, SessionModelState, SessionModeState]> {
+    async tryCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
         const requestedSessionGeneration = "sessionId" in request
             ? this.beginSessionOpen(request.sessionId)
             : null;
@@ -346,9 +368,11 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: account,
             cwd: request.cwd,
+            additionalDirectories: sessionMetadata.additionalDirectories,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
+            terminalOutputMode: this.terminalOutputMode,
         }
         this.sessions.set(sessionId, sessionState);
         resumeSubscribed = false;
@@ -362,7 +386,7 @@ export class CodexAcpServer implements acp.Agent {
         }
 
         this.publishAvailableCommandsAsync(sessionId);
-        const sessionModelState: SessionModelState = this.createModelState(models, currentModelId);
+        const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
 
         return [sessionId, sessionModelState, sessionModeState];
@@ -376,7 +400,7 @@ export class CodexAcpServer implements acp.Agent {
         return accountResponse.account;
     }
 
-    async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
+    async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
         logger.log("Loading session...", {sessionId: params.sessionId});
         const {
             sessionId,
@@ -399,7 +423,7 @@ export class CodexAcpServer implements acp.Agent {
         };
     }
 
-    async resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
+    async resumeSession(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
         logger.log("Resuming session...", {sessionId: params.sessionId});
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -418,7 +442,20 @@ export class CodexAcpServer implements acp.Agent {
     async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
         logger.log("Listing sessions...", {cwd: params.cwd, cursor: params.cursor});
         await this.checkAuthorization();
-        return await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
+        const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
+        return {
+            ...response,
+            sessions: response.sessions.map((session) => {
+                const activeSession = this.sessions.get(session.sessionId);
+                if (!activeSession || activeSession.additionalDirectories.length === 0) {
+                    return session;
+                }
+                return {
+                    ...session,
+                    additionalDirectories: activeSession.additionalDirectories,
+                };
+            }),
+        };
     }
 
     async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
@@ -455,9 +492,44 @@ export class CodexAcpServer implements acp.Agent {
         return {};
     }
 
+    async deleteSession(params: acp.DeleteSessionRequest): Promise<acp.DeleteSessionResponse> {
+        logger.log("Deleting session...", {sessionId: params.sessionId});
+        const sessionId = params.sessionId;
+        const shouldCloseLocalSession = this.hasLocalSession(sessionId);
+
+        this.beginSessionCloseFence(sessionId);
+        try {
+            if (shouldCloseLocalSession) {
+                await this.closeSession({sessionId});
+            } else {
+                this.bumpSessionGeneration(sessionId);
+            }
+
+            await this.runWithProcessCheck(() => this.codexAcpClient.deleteSession(sessionId));
+            logger.log("Session deleted", {sessionId});
+        } finally {
+            this.endSessionCloseFence(sessionId);
+        }
+
+        return {};
+    }
+
+    private hasLocalSession(sessionId: string): boolean {
+        return this.sessions.has(sessionId)
+            || this.pendingMcpStartupSessions.has(sessionId)
+            || this.pendingTurnStarts.has(sessionId)
+            || this.activePrompts.has(sessionId)
+            || this.hasPendingSessionOpen(sessionId)
+            || this.sessionIsClosing(sessionId);
+    }
+
+    private hasPendingSessionOpen(sessionId: string): boolean {
+        return this.sessionOpenGenerations.get(sessionId) === this.getSessionGeneration(sessionId);
+    }
+
     async newSession(
         params: acp.NewSessionRequest,
-    ): Promise<acp.NewSessionResponse> {
+    ): Promise<LegacyNewSessionResponse> {
         logger.log("Starting new session...");
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -488,7 +560,7 @@ export class CodexAcpServer implements acp.Agent {
         return { };
     }
 
-    async unstable_logout(_params: acp.LogoutRequest): Promise<void> {
+    async logout(_params: acp.LogoutRequest): Promise<void> {
         logger.log("Logout request received");
         await this.runWithProcessCheck(() => this.codexAcpClient.logout());
         logger.log("Logout request completed");
@@ -585,7 +657,7 @@ export class CodexAcpServer implements acp.Agent {
         sessionState.currentModelSupportsFast = modelSupportsFast(model);
     }
 
-    async unstable_setSessionModel(params: acp.SetSessionModelRequest): Promise<acp.SetSessionModelResponse | void> {
+    async unstable_setSessionModel(params: LegacySetSessionModelRequest): Promise<LegacySetSessionModelResponse> {
         logger.log("Set session model requested", {
             sessionId: params.sessionId,
             modelId: params.modelId
@@ -614,6 +686,18 @@ export class CodexAcpServer implements acp.Agent {
         this.applyModelAndEffort(sessionState, model, reasoningEffort);
 
         return {};
+    }
+
+    private parseLegacySetSessionModelParams(params: Record<string, unknown>): LegacySetSessionModelRequest {
+        const sessionId = params["sessionId"];
+        const modelId = params["modelId"];
+        if (typeof sessionId !== "string" || typeof modelId !== "string") {
+            throw RequestError.invalidParams();
+        }
+        return {
+            sessionId: sessionId,
+            modelId: modelId,
+        };
     }
 
     private createSessionConfigOptions(sessionState: SessionState): Array<acp.SessionConfigOption> {
@@ -658,7 +742,7 @@ export class CodexAcpServer implements acp.Agent {
             .join("-");
     }
 
-    private createModelState(availableModels: Model[], selectedModelId: string): SessionModelState {
+    private createModelState(availableModels: Model[], selectedModelId: string): LegacySessionModelState {
         const allowedModels = availableModels
             .flatMap((model) =>
                 model.supportedReasoningEfforts.map((effort) => ({
@@ -677,7 +761,7 @@ export class CodexAcpServer implements acp.Agent {
         request: acp.LoadSessionRequest
     ): Promise<{
         sessionId: SessionId;
-        modelState: SessionModelState;
+        modelState: LegacySessionModelState;
         modeState: SessionModeState;
         thread: Thread;
     }> {
@@ -735,9 +819,11 @@ export class CodexAcpServer implements acp.Agent {
             rateLimits: null,
             account: account,
             cwd: request.cwd,
+            additionalDirectories: sessionMetadata.additionalDirectories,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
+            terminalOutputMode: this.terminalOutputMode,
         };
         this.sessions.set(sessionId, sessionState);
         subscribed = false;
@@ -751,7 +837,7 @@ export class CodexAcpServer implements acp.Agent {
         }
 
         await this.availableCommands.publish(sessionId);
-        const sessionModelState: SessionModelState = this.createModelState(models, currentModelId);
+        const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
 
         return {
@@ -779,6 +865,7 @@ export class CodexAcpServer implements acp.Agent {
             case "userMessage":
                 return this.createUserMessageUpdates(item);
             case "hookPrompt":
+            case "subAgentActivity":
                 return [];
             case "agentMessage":
                 return [{
@@ -800,9 +887,9 @@ export class CodexAcpServer implements acp.Agent {
             case "webSearch":
                 return [this.createWebSearchUpdate(item)];
             case "imageView":
-                return [this.createImageViewUpdate(item)];
+                return [createImageViewUpdate(item)];
             case "imageGeneration":
-                return [];
+                return [createImageGenerationUpdate(item)];
             case "enteredReviewMode":
                 return [this.createReviewModeUpdate(item, true)];
             case "exitedReviewMode":
@@ -862,27 +949,11 @@ export class CodexAcpServer implements acp.Agent {
             sessionUpdate: "tool_call",
             toolCallId: item.id,
             kind: "search",
-            title: this.formatWebSearchTitle(item),
+            title: formatWebSearchTitle(item),
             status: "completed",
             rawInput: {
                 query: item.query,
                 action: item.action,
-            },
-        };
-    }
-
-    private createImageViewUpdate(
-        item: ThreadItem & { type: "imageView" }
-    ): UpdateSessionEvent {
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: item.id,
-            kind: "read",
-            title: "View image",
-            status: "completed",
-            locations: [{ path: item.path }],
-            rawInput: {
-                path: item.path,
             },
         };
     }
@@ -920,29 +991,6 @@ export class CodexAcpServer implements acp.Agent {
                 text: `Plan:\n${item.text}`,
             },
         };
-    }
-
-    private formatWebSearchTitle(item: ThreadItem & { type: "webSearch" }): string {
-        const action = item.action;
-        if (!action) {
-            return item.query ? `Web search: ${item.query}` : "Web search";
-        }
-        switch (action.type) {
-            case "search": {
-                const queries = action.queries?.filter((query) => query && query.length > 0) ?? [];
-                const query = action.query ?? (queries.length > 0 ? queries.join(", ") : null) ?? item.query;
-                return query ? `Web search: ${query}` : "Web search";
-            }
-            case "openPage":
-                return action.url ? `Open page: ${action.url}` : "Open page";
-            case "findInPage": {
-                const pattern = action.pattern ? ` for '${action.pattern}'` : "";
-                const url = action.url ? ` in ${action.url}` : "";
-                return `Find in page${pattern}${url}`.trim();
-            }
-            case "other":
-                return "Web search";
-        }
     }
 
     private toAcpToolCallStatus(status: CollabAgentToolCallStatus): "in_progress" | "completed" | "failed" {
@@ -1223,8 +1271,34 @@ export class CodexAcpServer implements acp.Agent {
                 approvalHandler,
                 elicitationHandler);
 
-            if (await this.availableCommands.tryHandleCommand(params.prompt, sessionState)) {
+            const commandResult = await this.availableCommands.tryHandleCommand(params.prompt, sessionState);
+            if (commandResult.handled) {
                 logger.log("Prompt handled by a command");
+                await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                if (commandResult.turnCompleted?.turn.status === "interrupted") {
+                    if (!this.sessionIsClosing(params.sessionId) && this.sessions.has(params.sessionId)) {
+                        await this.connection.sessionUpdate({
+                            sessionId: params.sessionId,
+                            update: {
+                                sessionUpdate: "agent_message_chunk",
+                                content: {
+                                    type: "text",
+                                    text: "*Conversation interrupted*"
+                                }
+                            }
+                        });
+                    }
+                    return {
+                        stopReason: "cancelled",
+                        usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                        _meta: this.buildQuotaMeta(sessionState),
+                    };
+                }
+                const error = eventHandler.getFailure()
+                if (error) {
+                    // noinspection ExceptionCaughtLocallyJS
+                    throw error;
+                }
                 return {
                     stopReason: "end_turn",
                     usage: this.buildPromptUsage(sessionState.lastTokenUsage),
@@ -1270,6 +1344,7 @@ export class CodexAcpServer implements acp.Agent {
                     serviceTier,
                     disableSummary,
                     sessionState.cwd,
+                    sessionState.additionalDirectories,
                     (turnId) => {
                         if (this.promptIsClosedOrStale(params.sessionId, activePrompt)) {
                             this.interruptLateStartedTurn(params.sessionId, turnId);

@@ -33,6 +33,8 @@ describe("CodexACPAgent - loadSession", () => {
             inputModalities: ["text", "image"],
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: true,
         };
 
@@ -43,6 +45,9 @@ describe("CodexACPAgent - loadSession", () => {
 
         const thread: Thread = {
             id: "session-1",
+            sessionId: "session-1",
+            parentThreadId: null,
+            threadSource: null,
             forkedFromId: null,
             preview: "Hi",
             ephemeral: false,
@@ -61,6 +66,7 @@ describe("CodexACPAgent - loadSession", () => {
             turns: [
                 {
                     id: "turn-1",
+                    itemsView: "full",
                     status: "completed",
                     error: null,
                     startedAt: null,
@@ -70,6 +76,7 @@ describe("CodexACPAgent - loadSession", () => {
                         {
                             type: "userMessage",
                             id: "item-user-1",
+                            clientId: null,
                             content: [
                                 { type: "text", text: "Hi", text_elements: [] },
                                 { type: "image", url: "https://example.com/image.png" },
@@ -120,6 +127,7 @@ describe("CodexACPAgent - loadSession", () => {
                             tool: "search",
                             status: "completed",
                             arguments: {},
+                            pluginId: null,
                             result: null,
                             error: null,
                             durationMs: null,
@@ -134,6 +142,19 @@ describe("CodexACPAgent - loadSession", () => {
                             contentItems: [{ type: "inputText", text: "Done" }],
                             success: true,
                             durationMs: 3,
+                        },
+                        {
+                            type: "imageView",
+                            id: "item-image-view-1",
+                            path: "/test/project/input.png",
+                        },
+                        {
+                            type: "imageGeneration",
+                            id: "item-image-generation-1",
+                            status: "completed",
+                            revisedPrompt: "A tiny blue square",
+                            result: "iVBORw0KGgo=",
+                            savedPath: "/test/project/generated-blue-square.png",
                         },
                     ],
                 },
@@ -191,6 +212,8 @@ describe("CodexACPAgent - loadSession", () => {
             inputModalities: ["text"],
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: true,
         };
 
@@ -263,6 +286,8 @@ describe("CodexACPAgent - loadSession", () => {
             inputModalities: ["text"],
             supportsPersonality: false,
             additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
             isDefault: true,
         };
 
@@ -317,7 +342,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         fixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
-            params: { name: "broken-mcp", status: "failed", error: "boom" }
+            params: { threadId: "session-1", name: "broken-mcp", status: "failed", error: "boom" }
         });
 
         await loadPromise;

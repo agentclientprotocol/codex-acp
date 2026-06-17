@@ -20,4 +20,23 @@ describe("New session logout handling", () => {
             });
         expect(logoutSpy).toHaveBeenCalledOnce();
     });
+
+    it("recovers when newSession fails with a failed to reload config error", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+
+        const errorMessage = `Internal error: "failed to reload config: Failed to load cloud requirements (workspace-managed policies)."`;
+        vi.spyOn(codexAppServerClient, "threadStart").mockRejectedValue(new Error(errorMessage));
+
+        const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
+
+        await expect(codexAcpAgent.newSession({cwd: "", mcpServers: []}))
+            .rejects.toMatchObject({
+                data: expect.stringContaining("You have been logged out. Please try again."),
+            });
+        expect(logoutSpy).toHaveBeenCalledOnce();
+    });
 });

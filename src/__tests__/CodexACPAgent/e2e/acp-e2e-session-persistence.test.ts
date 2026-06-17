@@ -1,4 +1,5 @@
 import {afterEach, expect, it} from "vitest";
+import {legacySetSessionModel, type LegacyLoadSessionResponse} from "../../../AcpExtensions";
 import {
     createAuthenticatedFixture,
     describeE2E,
@@ -22,7 +23,7 @@ describeE2E("E2E session persistence tests", () => {
         beforeRestartFixture = await createAuthenticatedFixture();
         const sessionId = (await beforeRestartFixture.createSession()).sessionId;
 
-        await beforeRestartFixture.connection.unstable_setSessionModel({sessionId, modelId: OTHER_TEST_MODEL_ID.toString()});
+        await legacySetSessionModel(beforeRestartFixture.connection, {sessionId, modelId: OTHER_TEST_MODEL_ID.toString()});
         const memorizedToken = "token-for-tests-123";
         await beforeRestartFixture.expectPromptText(
             sessionId,
@@ -36,7 +37,7 @@ describeE2E("E2E session persistence tests", () => {
             sessionId,
             cwd: afterRestartFixture.workspaceDir,
             mcpServers: [],
-        });
+        }) as LegacyLoadSessionResponse;
         expect(loadSessionResponse.models?.currentModelId).toBe(OTHER_TEST_MODEL_ID.toString());
 
         await afterRestartFixture.expectPromptText(

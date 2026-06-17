@@ -72,6 +72,7 @@ describe('Approval Events', () => {
                     turnId: 'turn-1',
                     itemId: `item-${optionId}`,
                     reason: 'Test command',
+                    startedAtMs: 0,
                     proposedExecpolicyAmendment: null,
                 };
 
@@ -96,6 +97,7 @@ describe('Approval Events', () => {
             const params: CommandExecutionRequestApprovalParams = {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 itemId: 'item-cancelled',
                 reason: null,
                 proposedExecpolicyAmendment: null,
@@ -204,6 +206,7 @@ describe('Approval Events', () => {
             const params: CommandExecutionRequestApprovalParams = {
                 threadId: 'non-existent-session',
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 itemId: 'item-no-handler',
                 reason: null,
                 proposedExecpolicyAmendment: null,
@@ -226,6 +229,7 @@ describe('Approval Events', () => {
             const params: CommandExecutionRequestApprovalParams = {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 itemId: 'item-snapshot',
                 reason: 'Running npm install',
                 proposedExecpolicyAmendment: null,
@@ -253,6 +257,7 @@ describe('Approval Events', () => {
             const params: CommandExecutionRequestApprovalParams = {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 itemId: 'item-with-command',
                 reason: 'Installing dependencies',
                 command: 'npm install',
@@ -290,6 +295,7 @@ describe('Approval Events', () => {
             const params: CommandExecutionRequestApprovalParams = {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 itemId: 'item-shell-prefix',
                 reason: 'Installing dependencies',
                 command,
@@ -329,6 +335,7 @@ describe('Approval Events', () => {
                 const params: FileChangeRequestApprovalParams = {
                     threadId: sessionId,
                     turnId: 'turn-1',
+                    startedAtMs: 0,
                     itemId: `file-change-${optionId}`,
                     reason: 'Test file change',
                     grantRoot: null,
@@ -355,6 +362,7 @@ describe('Approval Events', () => {
             const params: FileChangeRequestApprovalParams = {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 itemId: 'file-change-cancelled',
                 reason: null,
                 grantRoot: null,
@@ -375,6 +383,7 @@ describe('Approval Events', () => {
             const params: FileChangeRequestApprovalParams = {
                 threadId: 'non-existent-session',
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 itemId: 'file-change-no-handler',
                 reason: null,
                 grantRoot: null,
@@ -397,6 +406,7 @@ describe('Approval Events', () => {
             const params: FileChangeRequestApprovalParams = {
                 threadId: sessionId,
                 turnId: 'turn-1',
+                startedAtMs: 0,
                 itemId: 'file-change-snapshot',
                 reason: 'Modifying config file',
                 grantRoot: null,
