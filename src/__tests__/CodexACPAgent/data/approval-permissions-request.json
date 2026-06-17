@@ -12,6 +12,8 @@
           "threadId": "test-session-id",
           "turnId": "turn-1",
           "itemId": "permissions-snapshot",
+          "environmentId": null,
+          "startedAtMs": 0,
           "cwd": "/home/user/project",
           "reason": "Need extra access",
           "permissions": {
@@ -105,6 +107,8 @@
             "threadId": "test-session-id",
             "turnId": "turn-1",
             "itemId": "permissions-snapshot",
+            "environmentId": null,
+            "startedAtMs": 0,
             "cwd": "/home/user/project",
             "reason": "Need extra access",
             "permissions": {
