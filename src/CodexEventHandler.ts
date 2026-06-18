@@ -354,6 +354,7 @@ export class CodexEventHandler {
                 return createImageGenerationStartUpdate(event.item);
             case "collabAgentToolCall":
             case "subAgentActivity":
+            case "sleep":
             case "userMessage":
             case "hookPrompt":
             case "agentMessage":
@@ -409,6 +410,7 @@ export class CodexEventHandler {
             //ignored types
             case "collabAgentToolCall":
             case "subAgentActivity":
+            case "sleep":
             case "userMessage":
             case "hookPrompt":
             case "agentMessage":
