@@ -17,6 +17,7 @@ export type { AgentReasoningRawContentEvent } from "./AgentReasoningRawContentEv
 export type { AgentReasoningSectionBreakEvent } from "./AgentReasoningSectionBreakEvent";
 export type { AgentStatus } from "./AgentStatus";
 export type { Annotations } from "./Annotations";
+export type { ApiPathString } from "./ApiPathString";
 export type { ApplyPatchApprovalParams } from "./ApplyPatchApprovalParams";
 export type { ApplyPatchApprovalRequestEvent } from "./ApplyPatchApprovalRequestEvent";
 export type { ApplyPatchApprovalResponse } from "./ApplyPatchApprovalResponse";
@@ -227,6 +228,7 @@ export type { ResourceContent } from "./ResourceContent";
 export type { ResourceLink } from "./ResourceLink";
 export type { ResourceTemplate } from "./ResourceTemplate";
 export type { ResponseItem } from "./ResponseItem";
+export type { ResponseItemMetadata } from "./ResponseItemMetadata";
 export type { ResumeConversationParams } from "./ResumeConversationParams";
 export type { ResumeConversationResponse } from "./ResumeConversationResponse";
 export type { ReviewCodeLocation } from "./ReviewCodeLocation";
