@@ -57,6 +57,13 @@ function startAcpServer() {
     });
 
     const codexConnection = startCodexConnection(codexPath);
+
+    const maxStderrTailChars = 2 * 1024;
+    let stderr = "";
+    codexConnection.process.stderr.addListener("data", (data: Buffer) => {
+        stderr = (stderr + data.toString()).slice(-maxStderrTailChars);
+    });
+
     process.stdin.on("close", (chunk: Buffer) => {
         codexConnection.process.stdin.end();
         // Kill the codex process if it doesn't exit naturally
@@ -73,7 +80,7 @@ function startAcpServer() {
     function createAgent(connection: acp.AgentSideConnection): CodexAcpServer {
         const appServerClient = new CodexAppServerClient(codexConnection.connection);
         const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
-        return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.process.exitCode);
+        return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.process.exitCode, () => stderr);
     }
 
     new acp.AgentSideConnection(createAgent, acpJsonStream);

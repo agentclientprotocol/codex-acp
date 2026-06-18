@@ -113,6 +113,7 @@ export class CodexAcpServer implements acp.Agent {
     private readonly connection: acp.AgentSideConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
+    private readonly getRecentStderr: () => string;
     private readonly availableCommands: CodexCommands;
     private clientInfo: acp.Implementation | null;
     private terminalOutputMode: TerminalOutputMode;
@@ -130,6 +131,7 @@ export class CodexAcpServer implements acp.Agent {
         codexAcpClient: CodexAcpClient,
         defaultAuthRequest?: CodexAuthRequest,
         getExitCode?: () => number | null,
+        getRecentStderr?: () => string,
     ) {
         this.sessions = new Map();
         this.pendingMcpStartupSessions = new Map();
@@ -142,6 +144,7 @@ export class CodexAcpServer implements acp.Agent {
         this.codexAcpClient = codexAcpClient;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.getExitCode = getExitCode ?? (() => null);
+        this.getRecentStderr = getRecentStderr ?? (() => "");
         this.clientInfo = null;
         this.terminalOutputMode = "terminal_output_delta";
         this.availableCommands = new CodexCommands(
@@ -1458,7 +1461,9 @@ export class CodexAcpServer implements acp.Agent {
                 throw new RequestError(requestErrorCode, `VC++ redistributable should be installed`);
             }
             if (exitCode !== null) {
-                throw new RequestError(requestErrorCode, `Codex process has exited with code ${exitCode}`);
+                const stderr = this.getRecentStderr().trim();
+                const detail = stderr ? `:\n${stderr}` : "";
+                throw new RequestError(requestErrorCode, `Codex process has exited with code ${exitCode}${detail}`);
             }
             throw err;
         }
