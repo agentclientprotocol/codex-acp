@@ -1,8 +1,10 @@
-import type {AgentSideConnection, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk";
+import type {McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
 import {CodexAcpClient} from '../CodexAcpClient';
 import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';
 import {startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexAcpServer, type SessionState} from "../CodexAcpServer";
+import type {AcpClientConnection} from "../ACPSessionConnection";
 import type {ServerNotification} from "../app-server";
 import type {MessageConnection} from "vscode-jsonrpc/node";
 import path from "node:path";
@@ -15,7 +17,7 @@ import type {Model, ReasoningEffortOption} from "../app-server/v2";
 export type MethodCallEvent = { method: string; args: any[] };
 
 export interface SmartMockConfig {
-    returnValues?: Map<string, () => any>;
+    returnValues?: Map<string, (args: any[]) => any>;
 }
 
 export function createSmartMock<T extends object>(
@@ -28,12 +30,22 @@ export function createSmartMock<T extends object>(
                 onCall({ method: String(prop), args });
                 const returnValueFn = config?.returnValues?.get(String(prop));
                 if (returnValueFn) {
-                    return returnValueFn();
+                    return returnValueFn(args);
                 }
                 return { mock: "Mocked return" };
             };
         }
     });
+}
+
+function normalizeAcpConnectionEvent(event: MethodCallEvent): MethodCallEvent {
+    if (event.method === "request" && event.args[0] === acp.methods.client.session.requestPermission) {
+        return {method: "requestPermission", args: [event.args[1]]};
+    }
+    if (event.method === "notify" && event.args[0] === acp.methods.client.session.update) {
+        return {method: "sessionUpdate", args: [event.args[1]]};
+    }
+    return event;
 }
 
 export interface TestFixture {
@@ -57,7 +69,7 @@ export interface CodexConnectionDumpOptions {
 }
 
 export interface AcpConnectionConfig {
-    connection: AgentSideConnection;
+    connection: AcpClientConnection;
     events: MethodCallEvent[];
     eventHandlers: ((event: MethodCallEvent) => void)[];
 }
@@ -71,9 +83,10 @@ export interface ConnectionConfig {
 export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
     const acpConnectionEvents = config.acpConnection?.events ?? [];
     const acpEventHandlers = config.acpConnection?.eventHandlers ?? [];
-    const acpConnection = config.acpConnection?.connection ?? createSmartMock<AgentSideConnection>((event) => {
-        acpConnectionEvents.push(event);
-        acpEventHandlers.forEach(handler => handler(event));
+    const acpConnection = config.acpConnection?.connection ?? createSmartMock<AcpClientConnection>((event) => {
+        const normalizedEvent = normalizeAcpConnectionEvent(event);
+        acpConnectionEvents.push(normalizedEvent);
+        acpEventHandlers.forEach(handler => handler(normalizedEvent));
     });
 
     const codexAppServerClient = new CodexAppServerClient(config.connection);
@@ -258,12 +271,19 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
     // Create ACP connection with configurable permission response
     const acpConnectionEvents: MethodCallEvent[] = [];
     const acpEventHandlers: ((event: MethodCallEvent) => void)[] = [];
-    const returnValues = new Map<string, () => any>();
+    const returnValues = new Map<string, (args: any[]) => any>();
+    returnValues.set('request', (args) => {
+        if (args[0] === acp.methods.client.session.requestPermission) {
+            return permissionState.response;
+        }
+        return { mock: "Mocked return" };
+    });
     returnValues.set('requestPermission', () => permissionState.response);
 
-    const acpConnection = createSmartMock<AgentSideConnection>((event) => {
-        acpConnectionEvents.push(event);
-        acpEventHandlers.forEach(handler => handler(event));
+    const acpConnection = createSmartMock<AcpClientConnection>((event) => {
+        const normalizedEvent = normalizeAcpConnectionEvent(event);
+        acpConnectionEvents.push(normalizedEvent);
+        acpEventHandlers.forEach(handler => handler(normalizedEvent));
     }, { returnValues });
 
     const baseFixture = createBaseTestFixture({

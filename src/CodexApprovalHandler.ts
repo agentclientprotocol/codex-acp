@@ -17,6 +17,7 @@ import type {
 import {logger} from "./Logger";
 import {stripShellPrefix} from "./CodexEventHandler";
 import {ApprovalOptionId} from "./ApprovalOptionId";
+import type {AcpClientConnection} from "./ACPSessionConnection";
 
 type CommandDecisionOption = {
     option: acp.PermissionOption;
@@ -43,11 +44,11 @@ function permissionOption(
 }
 
 export class CodexApprovalHandler implements ApprovalHandler {
-    private readonly connection: acp.AgentSideConnection;
+    private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
 
     constructor(
-        connection: acp.AgentSideConnection,
+        connection: AcpClientConnection,
         sessionState: SessionState
     ) {
         this.connection = connection;
@@ -60,7 +61,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const sessionId = this.sessionState.sessionId;
             const acpRequest = this.buildCommandPermissionRequest(sessionId, params);
-            const response = await this.connection.requestPermission(acpRequest);
+            const response = await this.connection.request(acp.methods.client.session.requestPermission, acpRequest);
             return this.convertCommandResponse(params, response);
         } catch (error) {
             logger.error("Error requesting command execution permission", error);
@@ -74,7 +75,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const sessionId = this.sessionState.sessionId;
             const acpRequest = this.buildFileChangePermissionRequest(sessionId, params);
-            const response = await this.connection.requestPermission(acpRequest);
+            const response = await this.connection.request(acp.methods.client.session.requestPermission, acpRequest);
             return this.convertFileChangeResponse(params, response);
         } catch (error) {
             logger.error("Error requesting file change permission", error);
@@ -88,7 +89,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const sessionId = this.sessionState.sessionId;
             const acpRequest = this.buildPermissionsRequest(sessionId, params);
-            const response = await this.connection.requestPermission(acpRequest);
+            const response = await this.connection.request(acp.methods.client.session.requestPermission, acpRequest);
             return this.convertPermissionsResponse(params, response);
         } catch (error) {
             logger.error("Error requesting permissions", error);

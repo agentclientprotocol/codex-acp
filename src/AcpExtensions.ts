@@ -1,5 +1,5 @@
 import type {
-    ClientSideConnection,
+    ClientContext,
     LoadSessionResponse,
     NewSessionResponse,
     ResumeSessionResponse,
@@ -61,8 +61,8 @@ export type LegacySetSessionModelExtRequest = {
 }
 
 export async function legacySetSessionModel(
-    connection: Pick<ClientSideConnection, "extMethod">,
+    connection: Pick<ClientContext, "request">,
     params: LegacySetSessionModelRequest,
 ): Promise<LegacySetSessionModelResponse> {
-    return await connection.extMethod(LEGACY_SET_SESSION_MODEL_METHOD, params) as LegacySetSessionModelResponse;
+    return await connection.request<LegacySetSessionModelResponse, LegacySetSessionModelRequest>(LEGACY_SET_SESSION_MODEL_METHOD, params);
 }

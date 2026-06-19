@@ -6,7 +6,7 @@ import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {type CodexAuthRequest, getCodexAuthMethods} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
 import type {McpStartupResult} from "./CodexAppServerClient";
-import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
+import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort} from "./app-server";
 import type {
     Account,
@@ -102,7 +102,7 @@ interface ActivePrompt {
     complete: () => void;
 }
 
-export class CodexAcpServer implements acp.Agent {
+export class CodexAcpServer {
     private static readonly MODEL_NAME_TOKEN_OVERRIDES: Record<string, string> = {
         gpt: "GPT",
         mini: "Mini",
@@ -110,7 +110,7 @@ export class CodexAcpServer implements acp.Agent {
     };
 
     private readonly codexAcpClient: CodexAcpClient;
-    private readonly connection: acp.AgentSideConnection;
+    private readonly connection: AcpClientConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
     private readonly getRecentStderr: () => string;
@@ -127,7 +127,7 @@ export class CodexAcpServer implements acp.Agent {
     private readonly sessionOpenGenerations: Map<string, number>;
 
     constructor(
-        connection: acp.AgentSideConnection,
+        connection: AcpClientConnection,
         codexAcpClient: CodexAcpClient,
         defaultAuthRequest?: CodexAuthRequest,
         getExitCode?: () => number | null,
@@ -1110,7 +1110,7 @@ export class CodexAcpServer implements acp.Agent {
             : mcpStartup;
 
         for (const update of CodexEventHandler.createMcpStartupUpdates(filteredStartup)) {
-            await this.connection.sessionUpdate({
+            await this.connection.notify(acp.methods.client.session.update, {
                 sessionId,
                 update,
             });
@@ -1281,7 +1281,7 @@ export class CodexAcpServer implements acp.Agent {
                 await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                 if (commandResult.turnCompleted?.turn.status === "interrupted") {
                     if (!this.sessionIsClosing(params.sessionId) && this.sessions.has(params.sessionId)) {
-                        await this.connection.sessionUpdate({
+                        await this.connection.notify(acp.methods.client.session.update, {
                             sessionId: params.sessionId,
                             update: {
                                 sessionUpdate: "agent_message_chunk",
@@ -1382,7 +1382,7 @@ export class CodexAcpServer implements acp.Agent {
             // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
                 if (!this.sessionIsClosing(params.sessionId) && this.sessions.has(params.sessionId)) {
-                    await this.connection.sessionUpdate({
+                    await this.connection.notify(acp.methods.client.session.update, {
                         sessionId: params.sessionId,
                         update: {
                             sessionUpdate: "agent_message_chunk",

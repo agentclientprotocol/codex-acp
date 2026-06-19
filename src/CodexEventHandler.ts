@@ -6,7 +6,7 @@ import type {
 import type {SessionState} from "./CodexAcpServer";
 import * as acp from "@agentclientprotocol/sdk";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
-import {ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
+import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
     AccountRateLimitsUpdatedNotification,
     AgentMessageDeltaNotification,
@@ -59,7 +59,7 @@ export { stripShellPrefix };
 
 export class CodexEventHandler {
 
-    private readonly connection: acp.AgentSideConnection;
+    private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
     private failure: RequestError | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
@@ -70,7 +70,7 @@ export class CodexEventHandler {
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
 
-    constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
+    constructor(connection: AcpClientConnection, sessionState: SessionState) {
         this.connection = connection;
         this.sessionState = sessionState;
     }

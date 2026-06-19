@@ -10,6 +10,7 @@ import type {
 } from "./app-server/v2";
 import { logger } from "./Logger";
 import { McpApprovalOptionId } from "./McpApprovalOptionId";
+import type {AcpClientConnection} from "./ACPSessionConnection";
 
 // Standard elicitation options (non-tool-call approval).
 const ELICITATION_OPTIONS: acp.PermissionOption[] = [
@@ -66,7 +67,7 @@ function buildToolApprovalOptions(persistOptions: Set<PersistValue>): acp.Permis
 }
 
 export class CodexElicitationHandler implements ElicitationHandler {
-    private readonly connection: acp.AgentSideConnection;
+    private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
     // In Rust, the MCP elicitation handler receives ElicitationRequestEvent directly from the MCP
     // protocol layer, where id is set to "mcp_tool_call_approval_<call_id>" — the call ID is extracted
@@ -85,7 +86,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
     // (threadId, serverName).
     private readonly pendingMcpApprovals = new Map<string, string>();
 
-    constructor(connection: acp.AgentSideConnection, sessionState: SessionState) {
+    constructor(connection: AcpClientConnection, sessionState: SessionState) {
         this.connection = connection;
         this.sessionState = sessionState;
     }
@@ -111,11 +112,11 @@ export class CodexElicitationHandler implements ElicitationHandler {
     ): Promise<McpServerElicitationRequestResponse> {
         try {
             const { request, correlatedCallId } = this.buildPermissionRequest(params);
-            const response = await this.connection.requestPermission(request);
+            const response = await this.connection.request(acp.methods.client.session.requestPermission, request);
             if (correlatedCallId !== undefined && response.outcome.outcome !== "cancelled") {
                 const optionId = response.outcome.optionId;
                 if (optionId !== McpApprovalOptionId.Decline) {
-                    await this.connection.sessionUpdate({
+                    await this.connection.notify(acp.methods.client.session.update, {
                         sessionId: this.sessionState.sessionId,
                         update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
                     });

@@ -1,6 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import type {AgentSideConnection, AvailableCommand} from "@agentclientprotocol/sdk";
-import {ACPSessionConnection} from "./ACPSessionConnection";
+import type {AvailableCommand} from "@agentclientprotocol/sdk";
+import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, TurnCompletedNotification} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
@@ -18,12 +18,12 @@ export type CommandHandleResult =
     | { handled: true, turnCompleted?: TurnCompletedNotification };
 
 export class CodexCommands {
-    private readonly connection: AgentSideConnection;
+    private readonly connection: AcpClientConnection;
     private readonly codexAcpClient: CodexAcpClient;
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
 
     constructor(
-        connection: AgentSideConnection,
+        connection: AcpClientConnection,
         codexAcpClient: CodexAcpClient,
         runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>
     ) {
