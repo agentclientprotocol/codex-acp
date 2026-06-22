@@ -1,28 +1,25 @@
-This package lists codex only as a dev dependency and requires the codex binary.
-It may not work with versions other than the one specified in package.json.
+This package uses the bundled `@openai/codex` dependency by default.
+Set `CODEX_PATH` to run a different Codex binary; versions other than the one specified in `package.json` may not be compatible.
 
 ### Quick start
 
 #### Develop on Windows?
+
 - Download and install [C++ redistributable package](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version)
 
-#### Adjust acp config for IDE
+#### Adjust ACP client config
 
 Run from sources
+
 1. Install dependencies `npm install`
-2. Adjust acp config for IDE
+2. Adjust ACP client config
+
 ```json
 {
   "agent_servers": {
     "Codex (app-server)": {
-      "command": "npx",
-      "args": [
-        "npm",
-        "run",
-        "start",
-        "--prefix",
-        "/path/to/project/"
-      ],
+      "command": "npm",
+      "args": ["run", "start", "--prefix", "/path/to/project/"],
       "env": {
         "CODEX_PATH": "node_modules/.bin/codex",
         "APP_SERVER_LOGS": "optional/path/to/existing/log/directory"
@@ -33,17 +30,19 @@ Run from sources
 ```
 
 Run from binaries
-1. Download acp-server binary archive from https://github.com/JetBrains/codex-acp/tags
+
+1. Download a `codex-acp-<platform>.zip` archive from https://github.com/agentclientprotocol/codex-acp/releases
 2. Unzip the archive:
    ```bash
    unzip codex-acp-<platform>.zip
    ```
-3. Adjust acp config for IDE
+3. Adjust ACP client config
+
 ```json
 {
   "agent_servers": {
     "Codex (app-server)": {
-      "command": "/path/to/acp-server",
+      "command": "/path/to/codex-acp",
       "env": {
         "CODEX_PATH": "/path/to/codex"
       }
