@@ -367,15 +367,16 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
         return null;
     }
 
+    const isExecCommand = name === "exec_command";
     const args = parseFunctionArguments(item["arguments"]);
-    const command = name === "exec_command" ? commandFromFunctionArguments(args) : null;
-    const cwd = name === "exec_command" ? cwdFromFunctionArguments(args) : "";
+    const command = isExecCommand ? commandFromFunctionArguments(args) : null;
+    const cwd = isExecCommand ? cwdFromFunctionArguments(args) : "";
     const commandAction = command ? inferCommandAction(command, cwd) : null;
     if (commandAction) {
         return {
             update: createCommandActionEvent(toolCallId, "inProgress", cwd, commandAction),
             usesTerminal: false,
-            isExecCommand: true,
+            isExecCommand,
         };
     }
 
@@ -389,13 +390,13 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
     };
 
     if (!functionCallUsesTerminal(item)) {
-        return { update, usesTerminal: false, isExecCommand: false };
+        return { update, usesTerminal: false, isExecCommand };
     }
 
     return {
         update: withTerminalContent(update, toolCallId, cwd),
         usesTerminal: true,
-        isExecCommand: true,
+        isExecCommand,
     };
 }
 
