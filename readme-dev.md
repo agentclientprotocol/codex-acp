@@ -31,7 +31,7 @@ Run from sources
 
 Run from binaries
 
-1. Download a `codex-acp-<platform>.zip` archive from https://github.com/agentclientprotocol/codex-acp/releases
+1. Download a `codex-acp-<platform>.zip` archive from https://github.com/agentclientprotocol/codex-acp/releases (`<platform>` is one of: `linux`, `darwin`, `win32`)
 2. Unzip the archive:
    ```bash
    unzip codex-acp-<platform>.zip
@@ -69,6 +69,6 @@ npm run package:all
 
 ### Update supported Codex version
 
-1. Update Codex dependency: `package.json`
+1. Update the `@openai/codex` version in `package.json` (under `dependencies`).
 2. Regenerate Codex types in `src/app-server/`: `npm run generate-types`
 3. Ensure there are no type errors or failed tests: `npm run typecheck` and `npm run test`
