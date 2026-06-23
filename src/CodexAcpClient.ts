@@ -178,7 +178,7 @@ export class CodexAcpClient {
             return sessionModelProvider;
         }
         const settingsModelProvider = await this.codexClient.configRead({includeLayers: false});
-        return settingsModelProvider.config.model_provider ?? null;
+        return settingsModelProvider?.config?.model_provider ?? null;
     }
 
     async logout(): Promise<void> {
@@ -211,7 +211,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: this.getResumeModelProvider(),
+            modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         onSubscribed?.();
@@ -233,7 +233,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: this.getResumeModelProvider(),
+            modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         onSubscribed?.();
@@ -363,10 +363,10 @@ export class CodexAcpClient {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
     }
 
-    private getResumeModelProvider(): string {
-        // Passing `null` forces codex to use the persisted provider for resumed session instead of default one
-        // Explicit fallback to "openai" fixes error `Model provider not found` at least for ChatGPT authentication
-        return this.getModelProvider() ?? "openai";
+    private async getResumeModelProvider(): Promise<string> {
+        // Prefer an explicit/gateway provider, then the provider persisted in Codex config.
+        // Keep OpenAI as the final fallback for ChatGPT-authenticated sessions without a configured provider.
+        return (await this.getCurrentModelProvider()) ?? "openai";
     }
 
     private async refreshSkills(
