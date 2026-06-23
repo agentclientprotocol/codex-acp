@@ -144,7 +144,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
             ? buildToolApprovalOptions(parsePersistOptions(meta))
             : ELICITATION_OPTIONS;
 
-        if (params.mode === "form") {
+        if (params.mode === "form" || params.mode === "openai/form") {
             const correlatedCallId = isToolApproval
                 ? this.popPendingApproval(params.threadId, params.serverName)
                 : undefined;

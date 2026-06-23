@@ -186,6 +186,7 @@ export class CodexEventHandler {
             case "mcpServer/startupStatus/updated":
             case "serverRequest/resolved":
             case "model/verification":
+            case "model/safetyBuffering/updated":
             case "windows/worldWritableWarning":
             case "thread/realtime/started":
             case "thread/realtime/itemAdded":
@@ -207,6 +208,7 @@ export class CodexEventHandler {
             case "remoteControl/status/changed":
             case "app/list/updated":
             case "thread/settings/updated":
+            case "externalAgentConfig/import/progress":
             case "process/outputDelta":
             case "process/exited":
                 return null;

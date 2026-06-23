@@ -162,7 +162,7 @@ export class CodexAcpClient {
             case "chatgpt":
                 return {
                     type: "chat-gpt",
-                    email: account.email,
+                    email: account.email ?? "",
                 };
             case "amazonBedrock":
                 return {
@@ -178,7 +178,7 @@ export class CodexAcpClient {
             return sessionModelProvider;
         }
         const settingsModelProvider = await this.codexClient.configRead({includeLayers: false});
-        return settingsModelProvider.config.model_provider;
+        return settingsModelProvider.config.model_provider ?? null;
     }
 
     async logout(): Promise<void> {
