@@ -34,6 +34,8 @@ import type { McpStartupCompleteEvent } from "./app-server";
 import {toTokenCount} from "./TokenCount";
 import {
     commandExecutionUsesTerminalOutput,
+    createCollabAgentToolCallCompleteUpdate,
+    createCollabAgentToolCallUpdate,
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
@@ -355,6 +357,7 @@ export class CodexEventHandler {
                 this.activeImageGenerationItems.add(event.item.id);
                 return createImageGenerationStartUpdate(event.item);
             case "collabAgentToolCall":
+                return createCollabAgentToolCallUpdate(event.item);
             case "subAgentActivity":
             case "sleep":
             case "userMessage":
@@ -405,12 +408,13 @@ export class CodexEventHandler {
                 return this.createCompletedReasoningEvent(event.item);
             case "webSearch":
                 return createWebSearchCompleteUpdate(event.item);
+            case "collabAgentToolCall":
+                return createCollabAgentToolCallCompleteUpdate(event.item);
             case "exitedReviewMode":
                 return this.createExitedReviewModeEvent(event.item);
             case "contextCompaction":
                 return this.createContextCompactedEvent();
             //ignored types
-            case "collabAgentToolCall":
             case "subAgentActivity":
             case "sleep":
             case "userMessage":

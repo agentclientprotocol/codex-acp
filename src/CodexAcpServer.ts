@@ -10,7 +10,6 @@ import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent}
 import type {InputModality, ReasoningEffort} from "./app-server";
 import type {
     Account,
-    CollabAgentToolCallStatus,
     Model,
     ReasoningEffortOption,
     Thread,
@@ -45,6 +44,7 @@ import {
     LEGACY_SET_SESSION_MODEL_METHOD,
 } from "./AcpExtensions";
 import {
+    createCollabAgentToolCallUpdate,
     createCommandExecutionCompleteUpdate,
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
@@ -907,7 +907,7 @@ export class CodexAcpServer {
             case "dynamicToolCall":
                 return [await createDynamicToolCallUpdate(item)];
             case "collabAgentToolCall":
-                return [this.createCollabAgentToolCallUpdate(item)];
+                return [createCollabAgentToolCallUpdate(item)];
             case "webSearch":
                 return [this.createWebSearchUpdate(item)];
             case "imageView":
@@ -945,25 +945,6 @@ export class CodexAcpServer {
             sessionUpdate: "agent_thought_chunk",
             content: { type: "text", text: text },
         }));
-    }
-
-    private createCollabAgentToolCallUpdate(
-        item: ThreadItem & { type: "collabAgentToolCall" }
-    ): UpdateSessionEvent {
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: item.id,
-            kind: "other",
-            title: `collab.${item.tool}`,
-            status: this.toAcpToolCallStatus(item.status),
-            rawInput: {
-                prompt: item.prompt,
-                senderThreadId: item.senderThreadId,
-                receiverThreadIds: item.receiverThreadIds,
-                agentsStates: item.agentsStates,
-                status: item.status,
-            },
-        };
     }
 
     private createWebSearchUpdate(
@@ -1015,17 +996,6 @@ export class CodexAcpServer {
                 text: `Plan:\n${item.text}`,
             },
         };
-    }
-
-    private toAcpToolCallStatus(status: CollabAgentToolCallStatus): "in_progress" | "completed" | "failed" {
-        switch (status) {
-            case "inProgress":
-                return "in_progress";
-            case "completed":
-                return "completed";
-            case "failed":
-                return "failed";
-        }
     }
 
     private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {

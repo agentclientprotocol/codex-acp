@@ -9,6 +9,7 @@ import type {
     FuzzyFileSearchSessionUpdatedNotification
 } from "./app-server";
 import type {
+    CollabAgentToolCallStatus,
     CommandAction,
     CommandExecutionStatus,
     DynamicToolCallStatus,
@@ -32,12 +33,13 @@ import {
     type TerminalOutputMode,
 } from "./TerminalOutputMode";
 
-type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus;
+type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus | CollabAgentToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
 type GuardianApprovalReviewNotification =
     | ItemGuardianApprovalReviewStartedNotification
     | ItemGuardianApprovalReviewCompletedNotification;
 type WebSearchItem = ThreadItem & { type: "webSearch" };
+type CollabAgentToolCallItem = ThreadItem & { type: "collabAgentToolCall" };
 type CommandExecutionItem = ThreadItem & { type: "commandExecution" };
 type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
 
@@ -353,6 +355,41 @@ export function createWebSearchCompleteUpdate(
         title: formatWebSearchTitle(item),
         status: "completed",
         rawInput: item,
+    };
+}
+
+export function createCollabAgentToolCallUpdate(
+    item: CollabAgentToolCallItem
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "other",
+        title: item.tool,
+        status: toAcpStatus(item.status),
+        rawInput: createCollabAgentToolCallRawInput(item),
+    };
+}
+
+export function createCollabAgentToolCallCompleteUpdate(
+    item: CollabAgentToolCallItem
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        title: item.tool,
+        status: toAcpStatus(item.status),
+        rawInput: createCollabAgentToolCallRawInput(item),
+    };
+}
+
+function createCollabAgentToolCallRawInput(item: CollabAgentToolCallItem) {
+    return {
+        prompt: item.prompt,
+        senderThreadId: item.senderThreadId,
+        receiverThreadIds: item.receiverThreadIds,
+        agentsStates: item.agentsStates,
+        status: item.status,
     };
 }
 
