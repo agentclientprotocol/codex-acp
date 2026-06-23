@@ -184,6 +184,7 @@ function toolCallIdFromThreadItem(item: ThreadItem): string | null {
         case "enteredReviewMode":
         case "exitedReviewMode":
         case "contextCompaction":
+        case "sleep":
             return null;
     }
 }
