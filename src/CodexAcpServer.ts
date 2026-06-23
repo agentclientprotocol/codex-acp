@@ -323,7 +323,7 @@ export class CodexAcpServer {
         let sessionMetadata: SessionMetadata;
         let resumeSubscribed = false;
         if ("sessionId" in request) {
-            logger.log(`Resume existing session: ${request.sessionId}...`)
+            logger.log(`Resume existing session: ${request.sessionId}...`);
             try {
                 sessionMetadata = await this.runWithProcessCheck(() =>
                     this.codexAcpClient.resumeSession(request, () => {
@@ -337,7 +337,7 @@ export class CodexAcpServer {
                 throw err;
             }
         } else {
-            logger.log(`Create new session...`)
+            logger.log(`Create new session...`);
             sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(request));
         }
 
@@ -378,7 +378,7 @@ export class CodexAcpServer {
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             terminalOutputMode: this.terminalOutputMode,
-        }
+        };
         this.sessions.set(sessionId, sessionState);
         resumeSubscribed = false;
 
@@ -1318,7 +1318,7 @@ export class CodexAcpServer {
                         _meta: this.buildQuotaMeta(sessionState),
                     };
                 }
-                const error = eventHandler.getFailure()
+                const error = eventHandler.getFailure();
                 if (error) {
                     // noinspection ExceptionCaughtLocallyJS
                     throw error;
@@ -1420,7 +1420,7 @@ export class CodexAcpServer {
                 };
             }
 
-            const error = eventHandler.getFailure()
+            const error = eventHandler.getFailure();
             if (error) {
                 // noinspection ExceptionCaughtLocallyJS
                 throw error;

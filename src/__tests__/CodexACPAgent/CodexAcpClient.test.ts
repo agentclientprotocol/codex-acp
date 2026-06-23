@@ -56,10 +56,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         keyFixture.clearCodexConnectionDump();
 
-        const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}}
+        const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}};
         await codexAcpAgent.authenticate(authRequest);
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
-        expect(newSessionResponse.sessionId).toBeDefined()
+        expect(newSessionResponse.sessionId).toBeDefined();
 
         const transportEvents = keyFixture.getCodexConnectionEvents([...ignoredFields, "upgrade"]);
         const transportMethods = transportEvents.flatMap(event => "method" in event ? [event.method] : []);
@@ -149,8 +149,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(authenticatedResponse).toEqual({type: "gateway", name: "custom-gateway"});
 
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
-        expect(newSessionResponse.sessionId).toBeDefined()
-    })
+        expect(newSessionResponse.sessionId).toBeDefined();
+    });
 
     it('should show account in /status for api key auth and hide it for gateway auth', async () => {
         const authFixture = createTestFixture();

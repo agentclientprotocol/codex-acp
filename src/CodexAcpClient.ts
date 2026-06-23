@@ -107,7 +107,7 @@ export class CodexAcpClient {
             case "gateway":
                 if (!authRequest._meta) throw RequestError.invalidRequest();
 
-                const gatewaySettings = authRequest._meta["gateway"]
+                const gatewaySettings = authRequest._meta["gateway"];
                 if (!gatewaySettings) throw RequestError.invalidRequest();
 
                 const baseUrl = gatewaySettings.baseUrl;
@@ -127,7 +127,7 @@ export class CodexAcpClient {
                         http_headers: headers,
                         wire_api: "responses"
                     }
-                }
+                };
 
                 // Early return: model provider information will be sent to Codex later during the session creation
                 return true;
