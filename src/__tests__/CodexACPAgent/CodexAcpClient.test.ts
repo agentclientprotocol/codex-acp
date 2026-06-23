@@ -1412,6 +1412,26 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         }));
     });
 
+    it ('should use inline image data for internal image URIs', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({
+            supportedInputModalities: ["text", "image"],
+        });
+
+        const prompt: acp.ContentBlock[] = [
+            { type: "text", text: "Hello" },
+            { type: "image", mimeType: "image/png", data: "abc123", uri: "zed:///agent/pasted-image?name=Image" },
+        ];
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            input: [
+                { type: "text", text: "Hello", text_elements: [] },
+                { type: "image", url: "data:image/png;base64,abc123" },
+            ]
+        }));
+    });
+
     it ('should show rate limits from multiple sources in status', async () => {
         const rateLimits: RateLimitsMap = new Map();
         rateLimits.set("limit-1", {
