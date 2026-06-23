@@ -971,8 +971,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const turnCompleted = deferred<TurnCompletedNotification>();
         vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
             .mockReturnValue(turnCompleted.promise);
+        const turnInterrupt = deferred<void>();
         const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt")
-            .mockResolvedValue();
+            .mockReturnValue(turnInterrupt.promise);
         const controller = new AbortController();
 
         const promptPromise = mockFixture.getCodexAcpAgent().prompt({
@@ -992,11 +993,22 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             });
         });
 
+        mockFixture.sendServerNotification({
+            method: "item/agentMessage/delta",
+            params: {
+                threadId: "session-id",
+                turnId: "turn-id",
+                itemId: "tail-item",
+                delta: "tail output",
+            },
+        });
         turnCompleted.resolve({
             threadId: "session-id",
             turn: createTurn("turn-id", "completed"),
         });
         await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
+        expect(mockFixture.getAcpConnectionDump([])).toContain("tail output");
+        turnInterrupt.resolve(undefined);
     });
 
     it('interrupts a late-started turn after the ACP prompt request is cancelled', async () => {
