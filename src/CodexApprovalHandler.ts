@@ -46,13 +46,16 @@ function permissionOption(
 export class CodexApprovalHandler implements ApprovalHandler {
     private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
+    private readonly cancellationSignal: AbortSignal | undefined;
 
     constructor(
         connection: AcpClientConnection,
-        sessionState: SessionState
+        sessionState: SessionState,
+        cancellationSignal?: AbortSignal,
     ) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.cancellationSignal = cancellationSignal;
     }
 
     async handleCommandExecution(
@@ -61,7 +64,11 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const sessionId = this.sessionState.sessionId;
             const acpRequest = this.buildCommandPermissionRequest(sessionId, params);
-            const response = await this.connection.request(acp.methods.client.session.requestPermission, acpRequest);
+            const response = await this.connection.request(
+                acp.methods.client.session.requestPermission,
+                acpRequest,
+                this.requestOptions(),
+            );
             return this.convertCommandResponse(params, response);
         } catch (error) {
             logger.error("Error requesting command execution permission", error);
@@ -75,7 +82,11 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const sessionId = this.sessionState.sessionId;
             const acpRequest = this.buildFileChangePermissionRequest(sessionId, params);
-            const response = await this.connection.request(acp.methods.client.session.requestPermission, acpRequest);
+            const response = await this.connection.request(
+                acp.methods.client.session.requestPermission,
+                acpRequest,
+                this.requestOptions(),
+            );
             return this.convertFileChangeResponse(params, response);
         } catch (error) {
             logger.error("Error requesting file change permission", error);
@@ -89,12 +100,20 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const sessionId = this.sessionState.sessionId;
             const acpRequest = this.buildPermissionsRequest(sessionId, params);
-            const response = await this.connection.request(acp.methods.client.session.requestPermission, acpRequest);
+            const response = await this.connection.request(
+                acp.methods.client.session.requestPermission,
+                acpRequest,
+                this.requestOptions(),
+            );
             return this.convertPermissionsResponse(params, response);
         } catch (error) {
             logger.error("Error requesting permissions", error);
             return this.rejectPermissionsResponse();
         }
+    }
+
+    private requestOptions(): acp.SendRequestOptions | undefined {
+        return this.cancellationSignal ? {cancellationSignal: this.cancellationSignal} : undefined;
     }
 
     private buildCommandPermissionRequest(

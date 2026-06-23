@@ -69,6 +69,7 @@ function buildToolApprovalOptions(persistOptions: Set<PersistValue>): acp.Permis
 export class CodexElicitationHandler implements ElicitationHandler {
     private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
+    private readonly cancellationSignal: AbortSignal | undefined;
     // In Rust, the MCP elicitation handler receives ElicitationRequestEvent directly from the MCP
     // protocol layer, where id is set to "mcp_tool_call_approval_<call_id>" — the call ID is extracted
     // by stripping that prefix.
@@ -86,9 +87,10 @@ export class CodexElicitationHandler implements ElicitationHandler {
     // (threadId, serverName).
     private readonly pendingMcpApprovals = new Map<string, string>();
 
-    constructor(connection: AcpClientConnection, sessionState: SessionState) {
+    constructor(connection: AcpClientConnection, sessionState: SessionState, cancellationSignal?: AbortSignal) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.cancellationSignal = cancellationSignal;
     }
 
     handleNotification(notification: ServerNotification): void {
@@ -112,7 +114,11 @@ export class CodexElicitationHandler implements ElicitationHandler {
     ): Promise<McpServerElicitationRequestResponse> {
         try {
             const { request, correlatedCallId } = this.buildPermissionRequest(params);
-            const response = await this.connection.request(acp.methods.client.session.requestPermission, request);
+            const response = await this.connection.request(
+                acp.methods.client.session.requestPermission,
+                request,
+                this.requestOptions(),
+            );
             if (correlatedCallId !== undefined && response.outcome.outcome !== "cancelled") {
                 const optionId = response.outcome.optionId;
                 if (optionId !== McpApprovalOptionId.Decline) {
@@ -127,6 +133,10 @@ export class CodexElicitationHandler implements ElicitationHandler {
             logger.error("Error handling MCP elicitation request", error);
             return { action: "cancel", content: null, _meta: null };
         }
+    }
+
+    private requestOptions(): acp.SendRequestOptions | undefined {
+        return this.cancellationSignal ? {cancellationSignal: this.cancellationSignal} : undefined;
     }
 
     private buildPermissionRequest(

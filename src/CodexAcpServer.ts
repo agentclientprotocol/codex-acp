@@ -100,6 +100,10 @@ interface PendingTurnStart {
 interface ActivePrompt {
     completion: Promise<void>;
     closeSignal: Promise<null>;
+    cancelSignal: Promise<null>;
+    signal: AbortSignal;
+    currentTurn: { threadId: string, turnId: string } | null;
+    requestCancel: () => void;
     requestClose: () => void;
     complete: () => void;
 }
@@ -1116,17 +1120,33 @@ export class CodexAcpServer {
         const closeSignal = new Promise<null>((resolve) => {
             resolveCloseSignal = resolve;
         });
+        let resolveCancelSignal: (value: null) => void = () => {};
+        const cancelSignal = new Promise<null>((resolve) => {
+            resolveCancelSignal = resolve;
+        });
+        const abortController = new AbortController();
 
         let completed = false;
         let closeRequested = false;
         const activePrompt: ActivePrompt = {
             completion,
             closeSignal,
+            cancelSignal,
+            signal: abortController.signal,
+            currentTurn: null,
+            requestCancel: () => {
+                if (abortController.signal.aborted) {
+                    return;
+                }
+                abortController.abort();
+                resolveCancelSignal(null);
+            },
             requestClose: () => {
                 if (closeRequested) {
                     return;
                 }
                 closeRequested = true;
+                activePrompt.requestCancel();
                 resolveCloseSignal(null);
             },
             complete: () => {
@@ -1145,6 +1165,48 @@ export class CodexAcpServer {
         return activePrompt;
     }
 
+    private cancelBeforeTurnStarted(activePrompt: ActivePrompt): Promise<null> {
+        return activePrompt.cancelSignal.then(() => {
+            if (activePrompt.currentTurn === null) {
+                return null;
+            }
+            return new Promise<null>(() => {});
+        });
+    }
+
+    private observePromptRequestCancellation(
+        signal: AbortSignal | undefined,
+        sessionState: SessionState,
+        activePrompt: ActivePrompt,
+    ): () => void {
+        if (!signal) {
+            return () => {};
+        }
+
+        const onAbort = () => {
+            if (this.activePrompts.get(sessionState.sessionId) !== activePrompt) {
+                return;
+            }
+            logger.log("Prompt request cancelled", {sessionId: sessionState.sessionId});
+            activePrompt.requestCancel();
+            const turn = activePrompt.currentTurn;
+            if (!turn) {
+                return;
+            }
+            void this.interruptPromptTurn(turn, "Cancel").catch((err) => {
+                logger.error("Prompt request cancellation failed to interrupt turn", err);
+            });
+        };
+
+        if (signal.aborted) {
+            onAbort();
+            return () => {};
+        }
+
+        signal.addEventListener("abort", onAbort, {once: true});
+        return () => signal.removeEventListener("abort", onAbort);
+    }
+
     private createPendingTurnStart(): PendingTurnStart {
         let resolve: (turnId: string | null) => void = () => {};
         const promise = new Promise<string | null>((innerResolve) => {
@@ -1153,26 +1215,39 @@ export class CodexAcpServer {
         return {promise, resolve};
     }
 
-    private interruptLateStartedTurn(sessionId: string, turnId: string): void {
+    private async interruptPromptTurn(
+        turn: { threadId: string, turnId: string },
+        requestName: "Cancel" | "Close",
+    ): Promise<void> {
         this.codexAcpClient.markTurnStale({
-            threadId: sessionId,
-            turnId,
+            threadId: turn.threadId,
+            turnId: turn.turnId,
         });
-        void this.runWithProcessCheck(() => this.codexAcpClient.turnInterrupt({
-            threadId: sessionId,
-            turnId,
-        })).catch((err) => {
-            logger.error(`Close - late turnInterrupt failed`, err);
-        }).finally(() => {
-            this.codexAcpClient.resolveTurnInterrupted({
-                threadId: sessionId,
-                turnId,
+        try {
+            await this.runWithProcessCheck(() => this.codexAcpClient.turnInterrupt({
+                threadId: turn.threadId,
+                turnId: turn.turnId,
+            }));
+            logger.log(`${requestName} - turnInterrupt succeeded`, {
+                sessionId: turn.threadId,
+                currentTurnId: turn.turnId,
             });
-        });
+        } catch (err) {
+            logger.error(`${requestName} - turnInterrupt failed`, err);
+        } finally {
+            this.codexAcpClient.resolveTurnInterrupted({
+                threadId: turn.threadId,
+                turnId: turn.turnId,
+            });
+        }
     }
 
-    private promptIsClosedOrStale(sessionId: string, activePrompt: ActivePrompt): boolean {
-        return this.activePrompts.get(sessionId) !== activePrompt || this.sessionIsClosing(sessionId);
+    private interruptLateStartedTurn(turn: { threadId: string, turnId: string }): void {
+        void this.interruptPromptTurn(turn, "Close");
+    }
+
+    private promptShouldStop(sessionId: string, activePrompt: ActivePrompt): boolean {
+        return activePrompt.signal.aborted || this.activePrompts.get(sessionId) !== activePrompt || this.sessionIsClosing(sessionId);
     }
 
     private async interruptSessionTurn(
@@ -1242,7 +1317,7 @@ export class CodexAcpServer {
         return turnId;
     }
 
-    async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
+    async prompt(params: acp.PromptRequest, signal?: AbortSignal): Promise<acp.PromptResponse> {
         logger.log("Prompt received", {
             sessionId: params.sessionId,
             prompt: params.prompt,
@@ -1252,11 +1327,12 @@ export class CodexAcpServer {
         sessionState.lastTokenUsage = null;
         const activePrompt = this.trackActivePrompt(params.sessionId);
         let pendingTurnStart: PendingTurnStart | null = null;
+        const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
 
         try {
             const eventHandler = new CodexEventHandler(this.connection, sessionState);
-            const approvalHandler = new CodexApprovalHandler(this.connection, sessionState);
-            const elicitationHandler = new CodexElicitationHandler(this.connection, sessionState);
+            const approvalHandler = new CodexApprovalHandler(this.connection, sessionState, activePrompt.signal);
+            const elicitationHandler = new CodexElicitationHandler(this.connection, sessionState, activePrompt.signal);
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 (event) => {
                     elicitationHandler.handleNotification(event);
@@ -1265,28 +1341,40 @@ export class CodexAcpServer {
                 approvalHandler,
                 elicitationHandler);
 
-            const commandResult = await this.availableCommands.tryHandleCommand(params.prompt, sessionState);
+            if (activePrompt.signal.aborted) {
+                return this.cancelledPromptResponse(sessionState);
+            }
+
+            const commandPromise = this.availableCommands.tryHandleCommand(params.prompt, sessionState, {
+                onTurnStarted: (turnId, threadId) => {
+                    const turn = {threadId, turnId};
+                    activePrompt.currentTurn = turn;
+                    if (this.promptShouldStop(params.sessionId, activePrompt)) {
+                        this.interruptLateStartedTurn(turn);
+                        return;
+                    }
+                    sessionState.currentTurnId = turnId;
+                },
+            });
+            void commandPromise.catch((err) => {
+                if (this.activePrompts.get(params.sessionId) !== activePrompt) {
+                    logger.error(`Command for cancelled prompt ${params.sessionId} failed after prompt returned`, err);
+                }
+            });
+            const commandResult = await Promise.race([
+                commandPromise,
+                activePrompt.closeSignal,
+                this.cancelBeforeTurnStarted(activePrompt),
+            ]);
+            if (commandResult === null) {
+                return this.cancelledPromptResponse(sessionState);
+            }
             if (commandResult.handled) {
                 logger.log("Prompt handled by a command");
                 await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                 if (commandResult.turnCompleted?.turn.status === "interrupted") {
-                    if (!this.sessionIsClosing(params.sessionId) && this.sessions.has(params.sessionId)) {
-                        await this.connection.notify(acp.methods.client.session.update, {
-                            sessionId: params.sessionId,
-                            update: {
-                                sessionUpdate: "agent_message_chunk",
-                                content: {
-                                    type: "text",
-                                    text: "*Conversation interrupted*"
-                                }
-                            }
-                        });
-                    }
-                    return {
-                        stopReason: "cancelled",
-                        usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                        _meta: this.buildQuotaMeta(sessionState),
-                    };
+                    await this.notifyConversationInterrupted(params.sessionId);
+                    return this.cancelledPromptResponse(sessionState);
                 }
                 const error = eventHandler.getFailure();
                 if (error) {
@@ -1301,11 +1389,7 @@ export class CodexAcpServer {
             }
 
             if (this.sessionIsClosing(params.sessionId)) {
-                return {
-                    stopReason: "cancelled",
-                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                    _meta: this.buildQuotaMeta(sessionState),
-                };
+                return this.cancelledPromptResponse(sessionState);
             }
 
             const modelId = ModelId.fromString(sessionState.currentModelId);
@@ -1340,54 +1424,37 @@ export class CodexAcpServer {
                     sessionState.cwd,
                     sessionState.additionalDirectories,
                     (turnId) => {
-                        if (this.promptIsClosedOrStale(params.sessionId, activePrompt)) {
-                            this.interruptLateStartedTurn(params.sessionId, turnId);
+                        const turn = {threadId: params.sessionId, turnId};
+                        activePrompt.currentTurn = turn;
+                        if (this.promptShouldStop(params.sessionId, activePrompt)) {
+                            this.interruptLateStartedTurn(turn);
                             return;
                         }
                         sessionState.currentTurnId = turnId;
                         pendingTurnStart?.resolve(turnId);
                     },
-                    () => this.promptIsClosedOrStale(params.sessionId, activePrompt),
+                    () => this.promptShouldStop(params.sessionId, activePrompt),
                 ));
             void sendPromptPromise.catch((err) => {
                 if (this.activePrompts.get(params.sessionId) !== activePrompt) {
-                    logger.error(`Prompt for closed session ${params.sessionId} failed after close`, err);
+                    logger.error(`Prompt for cancelled session ${params.sessionId} failed after prompt returned`, err);
                 }
             });
             const turnCompleted = await Promise.race([
                 sendPromptPromise,
                 activePrompt.closeSignal,
+                this.cancelBeforeTurnStarted(activePrompt),
             ]);
 
             if (turnCompleted === null) {
-                return {
-                    stopReason: "cancelled",
-                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                    _meta: this.buildQuotaMeta(sessionState),
-                };
+                return this.cancelledPromptResponse(sessionState);
             }
 
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
 
-            // Check if turn was interrupted (cancelled)
             if (turnCompleted.turn.status === "interrupted") {
-                if (!this.sessionIsClosing(params.sessionId) && this.sessions.has(params.sessionId)) {
-                    await this.connection.notify(acp.methods.client.session.update, {
-                        sessionId: params.sessionId,
-                        update: {
-                            sessionUpdate: "agent_message_chunk",
-                            content: {
-                                type: "text",
-                                text: "*Conversation interrupted*"
-                            }
-                        }
-                    });
-                }
-                return {
-                    stopReason: "cancelled",
-                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                    _meta: this.buildQuotaMeta(sessionState),
-                };
+                await this.notifyConversationInterrupted(params.sessionId);
+                return this.cancelledPromptResponse(sessionState);
             }
 
             const error = eventHandler.getFailure();
@@ -1406,6 +1473,7 @@ export class CodexAcpServer {
             throw err;
         } finally {
             logger.log("Prompt completed", {sessionId: params.sessionId});
+            disposePromptRequestCancellation();
             sessionState.currentTurnId = null;
             if (pendingTurnStart !== null && this.pendingTurnStarts.get(params.sessionId) === pendingTurnStart) {
                 this.pendingTurnStarts.delete(params.sessionId);
@@ -1413,6 +1481,30 @@ export class CodexAcpServer {
             pendingTurnStart?.resolve(null);
             activePrompt.complete();
         }
+    }
+
+    private cancelledPromptResponse(sessionState: SessionState): acp.PromptResponse {
+        return {
+            stopReason: "cancelled",
+            usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+            _meta: this.buildQuotaMeta(sessionState),
+        };
+    }
+
+    private async notifyConversationInterrupted(sessionId: string): Promise<void> {
+        if (this.sessionIsClosing(sessionId) || !this.sessions.has(sessionId)) {
+            return;
+        }
+        await this.connection.notify(acp.methods.client.session.update, {
+            sessionId,
+            update: {
+                sessionUpdate: "agent_message_chunk",
+                content: {
+                    type: "text",
+                    text: "*Conversation interrupted*"
+                }
+            }
+        });
     }
 
     private buildQuotaMeta(sessionState: SessionState): { quota: QuotaMeta } {

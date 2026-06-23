@@ -309,7 +309,7 @@ export class CodexAcpClient {
     async runReview(
         sessionId: string,
         target: ReviewTarget,
-        onTurnStarted?: (turnId: string) => void,
+        onTurnStarted?: (turnId: string, threadId: string) => void,
     ): Promise<TurnCompletedNotification> {
         return await this.codexClient.runReview({
             threadId: sessionId,
