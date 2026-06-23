@@ -76,7 +76,7 @@ function startAcpServer() {
         stderr = (stderr + data.toString()).slice(-maxStderrTailChars);
     });
 
-    process.stdin.on("close", (chunk: Buffer) => {
+    process.stdin.on("close", () => {
         codexConnection.process.stdin.end();
         // Kill the codex process if it doesn't exit naturally
         setTimeout(() => {
