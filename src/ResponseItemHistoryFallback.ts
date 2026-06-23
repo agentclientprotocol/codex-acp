@@ -975,8 +975,7 @@ function sedFileArguments(args: string[]): string[] {
 }
 
 function looksLikeSedRangeScript(arg: string): boolean {
-    return /^(\d+|\$)?(,(\d+|\$))?[pd]$/.test(arg)
-        || /^(\d+|\$)?(,(\d+|\$))?p$/.test(arg);
+    return /^(\d+|\$)?(,(\d+|\$))?[pd]$/.test(arg);
 }
 
 function headTailFileArguments(args: string[]): string[] {
