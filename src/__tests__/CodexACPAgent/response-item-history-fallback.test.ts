@@ -19,6 +19,18 @@ describe("ResponseItemHistoryFallback", () => {
         ]);
     });
 
+    it("does not recover function calls when all parsed tool call ids already exist", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            functionCall("call-existing-a", "rg \"ExistingA\" src"),
+            functionCallOutput("call-existing-a", "Chunk ID: existing-a\nProcess exited with code 0\nOutput:\nsrc/a.ts\n"),
+            functionCall("call-existing-b", "rg \"ExistingB\" src"),
+            functionCallOutput("call-existing-b", "Chunk ID: existing-b\nProcess exited with code 0\nOutput:\nsrc/b.ts\n"),
+        ]), "terminal_output", new Set(["call-existing-a", "call-existing-b"]));
+
+        expect(toolCallIds(updates)).toEqual([]);
+        expect(toolCallUpdateStatuses(updates)).toEqual([]);
+    });
+
     it("does not duplicate adjacent reasoning from event and response item records", () => {
         const updates = parseResponseItemHistoryFallback(jsonl([
             {
@@ -51,6 +63,17 @@ describe("ResponseItemHistoryFallback", () => {
 
         expect(toolCallUpdateStatuses(updates)).toEqual([
             { toolCallId: "call-read-failed", status: "failed" },
+        ]);
+    });
+
+    it("marks exec command outputs without exit footers completed when they do not report errors", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            functionCall("call-read-ok", "cat existing.txt"),
+            functionCallOutput("call-read-ok", "existing file contents\n"),
+        ]), "terminal_output");
+
+        expect(toolCallUpdateStatuses(updates)).toEqual([
+            { toolCallId: "call-read-ok", status: "completed" },
         ]);
     });
 });
