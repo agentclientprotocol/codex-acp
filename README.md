@@ -40,17 +40,20 @@ CODEX_PATH=/path/to/codex npx -y @agentclientprotocol/codex-acp
 
 The adapter advertises ACP auth methods during initialization. Clients can authenticate with:
 
-- ChatGPT login.
-- OpenAI API key.
+- ChatGPT login. Set `NO_BROWSER=1` to hide this method in remote or browserless environments.
+- API key via `CODEX_API_KEY` or `OPENAI_API_KEY`.
 - A custom OpenAI-compatible gateway, when the client opts in to the gateway auth capability.
 
 ## Runtime options
 
+- `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
+- `OPENAI_API_KEY` - fallback API key used when the API-key auth method is selected.
 - `CODEX_PATH` - run a specific Codex executable instead of the bundled package dependency.
 - `CODEX_CONFIG` - JSON object merged into the Codex session config.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
+- `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
 
 ## Development

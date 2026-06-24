@@ -1,4 +1,4 @@
-import {isCodexAuthRequest} from "./CodexAuthMethod";
+import {CODEX_API_KEY_ENV_VAR, isCodexAuthRequest, OPENAI_API_KEY_ENV_VAR} from "./CodexAuthMethod";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
@@ -84,15 +84,8 @@ export class CodexAcpClient {
 
         switch (authRequest.methodId) {
             case "api-key": {
-                if (!authRequest._meta || !authRequest._meta["api-key"]) throw RequestError.invalidRequest();
-                const loginCompletedPromise = this.awaitNextLoginCompleted();
-                await this.codexClient.accountLogin({
-                    type: "apiKey",
-                    apiKey: authRequest._meta["api-key"].apiKey
-                });
-                this.gatewayConfig = null;
-                const result = await loginCompletedPromise;
-                return result.success;
+                const apiKey = authRequest._meta?.["api-key"]?.apiKey ?? this.readApiKeyFromEnv();
+                return await this.authenticateWithApiKey(apiKey);
             }
             case "chat-gpt": {
                 const loginCompletedPromise = this.awaitNextLoginCompleted();
@@ -137,6 +130,30 @@ export class CodexAcpClient {
         // Reset the gateway config to null if another authentication method was used
         this.gatewayConfig = null;
         return false;
+    }
+
+    private async authenticateWithApiKey(apiKey: string): Promise<Boolean> {
+        const loginCompletedPromise = this.awaitNextLoginCompleted();
+        await this.codexClient.accountLogin({
+            type: "apiKey",
+            apiKey,
+        });
+        this.gatewayConfig = null;
+        const result = await loginCompletedPromise;
+        return result.success;
+    }
+
+    private readApiKeyFromEnv(): string {
+        for (const envVar of [CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR]) {
+            const value = process.env[envVar]?.trim();
+            if (value) {
+                return value;
+            }
+        }
+        throw RequestError.internalError(
+            {envVars: [CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR]},
+            `${CODEX_API_KEY_ENV_VAR} or ${OPENAI_API_KEY_ENV_VAR} is not set`
+        );
     }
 
 

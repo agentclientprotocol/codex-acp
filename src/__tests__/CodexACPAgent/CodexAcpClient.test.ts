@@ -1,7 +1,7 @@
 // noinspection ES6RedundantAwait
 
-import {beforeEach, describe, expect, it, vi} from 'vitest';
-import type {CodexAuthRequest} from "../../CodexAuthMethod";
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR, type CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
     createCodexMockTestFixture,
@@ -23,6 +23,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     beforeEach(() => {
         fixture = createTestFixture();
         vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
     });
 
     const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "supportedReasoningEfforts", "reasoningEffort", "model", "readOnlyAccess", "approvalsReviewer"];
@@ -112,6 +116,74 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await keyFixture.getCodexAcpAgent().logout({});
         const logoutResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
         expect(logoutResponse).toEqual({type: "unauthenticated"});
+    });
+
+    it('should authenticate with CODEX_API_KEY from the environment', async () => {
+        const envFixture = createTestFixture();
+        const codexAcpAgent = envFixture.getCodexAcpAgent();
+        vi.stubEnv(CODEX_API_KEY_ENV_VAR, "CODEX_ENV_TOKEN");
+        vi.stubEnv(OPENAI_API_KEY_ENV_VAR, "OPENAI_ENV_TOKEN");
+
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        await envFixture.getCodexAcpClient().logout();
+        envFixture.clearCodexConnectionDump();
+
+        await codexAcpAgent.authenticate({methodId: "api-key"});
+
+        const transportEvents = envFixture.getCodexConnectionEvents([]);
+        const loginRequest = transportEvents.find(event =>
+            event.eventType === "request" &&
+            "method" in event &&
+            event.method === "account/login/start"
+        );
+        expect(loginRequest).toEqual({
+            eventType: "request",
+            method: "account/login/start",
+            params: {
+                type: "apiKey",
+                apiKey: "CODEX_ENV_TOKEN",
+            }
+        });
+        await expect(codexAcpAgent.extMethod("authentication/status", {})).resolves.toEqual({type: "api-key"});
+    });
+
+    it('should fall back to OPENAI_API_KEY from the environment', async () => {
+        const envFixture = createTestFixture();
+        const codexAcpAgent = envFixture.getCodexAcpAgent();
+        vi.stubEnv(CODEX_API_KEY_ENV_VAR, "");
+        vi.stubEnv(OPENAI_API_KEY_ENV_VAR, "OPENAI_ENV_TOKEN");
+
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        await envFixture.getCodexAcpClient().logout();
+        envFixture.clearCodexConnectionDump();
+
+        await codexAcpAgent.authenticate({methodId: "api-key"});
+
+        const transportEvents = envFixture.getCodexConnectionEvents([]);
+        const loginRequest = transportEvents.find(event =>
+            event.eventType === "request" &&
+            "method" in event &&
+            event.method === "account/login/start"
+        );
+        expect(loginRequest).toEqual({
+            eventType: "request",
+            method: "account/login/start",
+            params: {
+                type: "apiKey",
+                apiKey: "OPENAI_ENV_TOKEN",
+            }
+        });
+        await expect(codexAcpAgent.extMethod("authentication/status", {})).resolves.toEqual({type: "api-key"});
+    });
+
+    it('should report a clear error when the selected API key env var is missing', async () => {
+        const envFixture = createTestFixture();
+        const codexAcpAgent = envFixture.getCodexAcpAgent();
+        vi.stubEnv(CODEX_API_KEY_ENV_VAR, "");
+        vi.stubEnv(OPENAI_API_KEY_ENV_VAR, "");
+
+        await expect(codexAcpAgent.authenticate({methodId: "api-key"}))
+            .rejects.toThrow(`${CODEX_API_KEY_ENV_VAR} or ${OPENAI_API_KEY_ENV_VAR} is not set`);
     });
 
     it('should authenticate with a gateway', async () => {

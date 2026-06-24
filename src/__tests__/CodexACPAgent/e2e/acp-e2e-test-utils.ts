@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {describe, expect} from "vitest";
 import {AgentMode} from "../../../AgentMode";
+import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR} from "../../../CodexAuthMethod";
 import {createSpawnedAgentFixture, type SpawnedAgentFixture,} from "./spawned-agent-fixture";
 
 export {
@@ -140,9 +141,9 @@ async function createSpawnedFixture(
 }
 
 export function requireLiveApiKey(): string {
-    const apiKey = process.env["CODEX_API_KEY"] ?? process.env["OPENAI_API_KEY"];
+    const apiKey = process.env[CODEX_API_KEY_ENV_VAR] ?? process.env[OPENAI_API_KEY_ENV_VAR];
     if (!apiKey) {
-        throw new Error("Live integration test requires CODEX_API_KEY or OPENAI_API_KEY.");
+        throw new Error(`Live integration test requires ${CODEX_API_KEY_ENV_VAR} or ${OPENAI_API_KEY_ENV_VAR}.`);
     }
     return apiKey;
 }
