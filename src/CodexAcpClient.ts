@@ -703,8 +703,7 @@ function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
             case "text":
                 return {type: "text", text: block.text, text_elements: []};
             case "image": {
-                const dataUrl = `data:${block.mimeType};base64,${block.data}`;
-                const url = isSupportedImageUrl(block.uri) ? block.uri : dataUrl;
+                const url = isSupportedImageUrl(block.uri) ? block.uri : imageDataUrl(block);
                 return {type: "image", url};
             }
             case "resource_link":
@@ -730,12 +729,24 @@ function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
     }).filter((block): block is UserInput => block !== null);
 }
 
+function imageDataUrl(block: acp.ContentBlock & { type: "image" }): string {
+    return `data:${block.mimeType};base64,${block.data}`;
+}
+
 function isImageMimeType(mimeType: string | null | undefined): mimeType is string {
     return mimeType?.startsWith("image/") ?? false;
 }
 
 function isSupportedImageUrl(uri: string | null | undefined): uri is string {
-    return typeof uri === "string" && /^(https?:|data:)/i.test(uri);
+    if (!uri) {
+        return false;
+    }
+    try {
+        const protocol = new URL(uri).protocol;
+        return protocol === "http:" || protocol === "https:" || protocol === "data:";
+    } catch {
+        return false;
+    }
 }
 
 function formatUriAsLink(name: string | null | undefined, uri: string): string {
