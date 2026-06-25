@@ -1419,6 +1419,54 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(fixture.getAcpConnectionDump(["sessionId"])).toMatchFileSnapshot("data/command-logout.json");
     });
 
+    it('clears active session auth state when logout command signs out', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const model = createTestModel();
+        const currentModelId = ModelId.create(model.id, model.defaultReasoningEffort).toString();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({
+            account: { type: "apiKey" },
+            requiresOpenaiAuth: false,
+        });
+        vi.spyOn(codexAcpClient, "newSession")
+            .mockResolvedValueOnce({
+                sessionId: "session-1",
+                currentModelId,
+                models: [model],
+                additionalDirectories: [],
+            })
+            .mockResolvedValueOnce({
+                sessionId: "session-2",
+                currentModelId,
+                models: [model],
+                additionalDirectories: [],
+            });
+        const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
+
+        const session1 = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        const session2 = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        expect(codexAcpAgent.getSessionState(session1.sessionId).authConfigured).toBe(true);
+        expect(codexAcpAgent.getSessionState(session2.sessionId).authConfigured).toBe(true);
+
+        await codexAcpAgent.prompt({
+            sessionId: session1.sessionId,
+            prompt: [{ type: "text", text: "/logout" }],
+        });
+
+        expect(logoutSpy).toHaveBeenCalledOnce();
+        expect(codexAcpAgent.getSessionState(session1.sessionId)).toMatchObject({
+            account: null,
+            authConfigured: false,
+        });
+        expect(codexAcpAgent.getSessionState(session2.sessionId)).toMatchObject({
+            account: null,
+            authConfigured: false,
+        });
+    });
+
     it('handles skills command', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});

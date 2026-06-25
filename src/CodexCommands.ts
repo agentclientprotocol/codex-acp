@@ -21,19 +21,24 @@ export type CommandHandleOptions = {
     onTurnStarted?: (turnId: string, threadId: string) => void;
 };
 
+export type LogoutHandler = () => void;
+
 export class CodexCommands {
     private readonly connection: AcpClientConnection;
     private readonly codexAcpClient: CodexAcpClient;
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
+    private readonly onLogout: LogoutHandler;
 
     constructor(
         connection: AcpClientConnection,
         codexAcpClient: CodexAcpClient,
-        runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>
+        runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>,
+        onLogout: LogoutHandler = () => {}
     ) {
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
         this.runWithProcessCheck = runWithProcessCheck;
+        this.onLogout = onLogout;
     }
 
     async publish(sessionId: string): Promise<void> {
@@ -198,6 +203,7 @@ export class CodexCommands {
             }
             case "logout": {
                 await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+                this.onLogout();
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 await session.update({
                     sessionUpdate: "agent_message_chunk",

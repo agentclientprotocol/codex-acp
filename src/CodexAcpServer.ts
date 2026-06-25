@@ -162,7 +162,8 @@ export class CodexAcpServer {
         this.availableCommands = new CodexCommands(
             connection,
             codexAcpClient,
-            (operation) => this.runWithProcessCheck(operation)
+            (operation) => this.runWithProcessCheck(operation),
+            () => this.markSessionsLoggedOut()
         );
     }
 
