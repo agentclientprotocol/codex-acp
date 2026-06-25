@@ -1213,6 +1213,54 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(turnStartSpy).not.toHaveBeenCalled();
     });
 
+    it('waits for goal slash command turn completion', async () => {
+        const { mockFixture } = setupPromptFixture();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")
+            .mockImplementation(async () => {
+                mockFixture.sendServerNotification({
+                    method: "turn/started",
+                    params: {
+                        threadId: "session-id",
+                        turn: createTurn("goal-turn-id", "inProgress"),
+                    },
+                });
+                return { goal: createThreadGoal() };
+            });
+        let completeGoal: (value: TurnCompletedNotification) => void = () => {};
+        const goalCompletedPromise = new Promise<TurnCompletedNotification>((resolve) => {
+            completeGoal = resolve;
+        });
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReturnValue(goalCompletedPromise);
+
+        let promptResolved = false;
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/goal Ship the migration and keep tests green" }],
+        }).then((response) => {
+            promptResolved = true;
+            return response;
+        });
+
+        await vi.waitFor(() => {
+            expect(mockFixture.getCodexAppServerClient().awaitTurnCompleted).toHaveBeenCalledWith(
+                "session-id",
+                "goal-turn-id",
+            );
+        });
+        await Promise.resolve();
+        expect(promptResolved).toBe(false);
+
+        completeGoal({
+            threadId: "session-id",
+            turn: createTurn("goal-turn-id", "completed"),
+        });
+        await expect(promptPromise).resolves.toEqual(expect.objectContaining({
+            stopReason: "end_turn",
+        }));
+        expect(promptResolved).toBe(true);
+    });
+
     it('reports missing goal slash command input', async () => {
         const { mockFixture } = setupPromptFixture();
         const goalSetSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")

@@ -342,6 +342,10 @@ export class CodexAcpClient {
         await this.codexClient.threadGoalClear({threadId: sessionId});
     }
 
+    async awaitTurnCompleted(params: { threadId: string, turnId: string }): Promise<TurnCompletedNotification> {
+        return await this.codexClient.awaitTurnCompleted(params.threadId, params.turnId);
+    }
+
     async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
         return await this.codexClient.awaitMcpServerStartup(serverNames, afterVersion);
     }

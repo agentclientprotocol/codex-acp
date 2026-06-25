@@ -14,6 +14,7 @@ import type {
     ReasoningEffortOption,
     Thread,
     ThreadItem,
+    TurnCompletedNotification,
     UserInput
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
@@ -1249,6 +1250,30 @@ export class CodexAcpServer {
         return turnId;
     }
 
+    private async awaitCurrentCommandTurnCompletion(
+        sessionState: SessionState,
+        activePrompt: ActivePrompt,
+    ): Promise<TurnCompletedNotification | null | undefined> {
+        const turnId = sessionState.currentTurnId;
+        if (!turnId) {
+            return undefined;
+        }
+
+        const turnCompleted = await Promise.race([
+            this.runWithProcessCheck(() => this.codexAcpClient.awaitTurnCompleted({
+                threadId: sessionState.sessionId,
+                turnId,
+            })),
+            activePrompt.closeSignal,
+        ]);
+        if (turnCompleted === null) {
+            return null;
+        }
+
+        await this.codexAcpClient.waitForSessionNotifications(sessionState.sessionId);
+        return turnCompleted;
+    }
+
     async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
         logger.log("Prompt received", {
             sessionId: params.sessionId,
@@ -1276,7 +1301,18 @@ export class CodexAcpServer {
             if (commandResult.handled) {
                 logger.log("Prompt handled by a command");
                 await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-                if (commandResult.turnCompleted?.turn.status === "interrupted") {
+                let turnCompleted: TurnCompletedNotification | null | undefined = commandResult.turnCompleted;
+                if (!turnCompleted && commandResult.waitForCurrentTurnCompletion) {
+                    turnCompleted = await this.awaitCurrentCommandTurnCompletion(sessionState, activePrompt);
+                    if (turnCompleted === null) {
+                        return {
+                            stopReason: "cancelled",
+                            usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                            _meta: this.buildQuotaMeta(sessionState),
+                        };
+                    }
+                }
+                if (turnCompleted?.turn.status === "interrupted") {
                     if (!this.sessionIsClosing(params.sessionId) && this.sessions.has(params.sessionId)) {
                         await this.connection.notify(acp.methods.client.session.update, {
                             sessionId: params.sessionId,

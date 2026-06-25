@@ -15,7 +15,7 @@ type ParsedSlashCommand = {
 
 export type CommandHandleResult =
     | { handled: false }
-    | { handled: true, turnCompleted?: TurnCompletedNotification };
+    | { handled: true, turnCompleted?: TurnCompletedNotification, waitForCurrentTurnCompletion?: boolean };
 
 export class CodexCommands {
     private readonly connection: AcpClientConnection;
@@ -157,8 +157,7 @@ export class CodexCommands {
                 return { handled: true };
             }
             case "goal": {
-                await this.runGoalCommand(sessionId, command.rest);
-                return { handled: true };
+                return await this.runGoalCommand(sessionId, command.rest);
             }
             case "review": {
                 const target = this.buildReviewTarget(command.rest);
@@ -260,23 +259,23 @@ export class CodexCommands {
         ));
     }
 
-    private async runGoalCommand(sessionId: string, rest: string): Promise<void> {
+    private async runGoalCommand(sessionId: string, rest: string): Promise<CommandHandleResult> {
         const argument = rest.trim();
         if (argument.length === 0) {
             await this.sendCommandUsageMessage("goal", "[<objective>|clear|edit|pause|resume]", sessionId);
-            return;
+            return { handled: true };
         }
 
         switch (argument.toLowerCase()) {
             case "pause":
                 await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionId, "paused"));
-                return;
+                return { handled: true };
             case "resume":
                 await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionId, "active"));
-                return;
+                return { handled: true, waitForCurrentTurnCompletion: true };
             case "clear":
                 await this.runWithProcessCheck(() => this.codexAcpClient.clearGoal(sessionId));
-                return;
+                return { handled: true };
         }
 
         if (argument.length > 4000) {
@@ -288,10 +287,11 @@ export class CodexCommands {
                     text: 'Command "/goal" requires goal text of at most 4000 characters.'
                 }
             });
-            return;
+            return { handled: true };
         }
 
         await this.runWithProcessCheck(() => this.codexAcpClient.setGoal(sessionId, argument));
+        return { handled: true, waitForCurrentTurnCompletion: true };
     }
 
     private buildReviewTarget(instructions: string): ReviewTarget {
