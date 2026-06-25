@@ -3,7 +3,8 @@ import type {
     FuzzyFileSearchSessionUpdatedNotification,
     ServerNotification
 } from "./app-server";
-import type {SessionState} from "./CodexAcpServer";
+import type {SessionState, ThreadGoalSnapshot} from "./CodexAcpServer";
+import * as acp from "@agentclientprotocol/sdk";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
@@ -266,9 +267,15 @@ export class CodexEventHandler {
         };
     }
 
-    private createThreadGoalUpdatedEvent(event: ThreadGoalUpdatedNotification): UpdateSessionEvent {
+    private createThreadGoalUpdatedEvent(event: ThreadGoalUpdatedNotification): UpdateSessionEvent | null {
+        const goalSnapshot = this.createThreadGoalSnapshot(event);
+        if (this.sameThreadGoalSnapshot(this.sessionState.currentGoal, goalSnapshot)) {
+            return null;
+        }
+        this.sessionState.currentGoal = goalSnapshot;
+
         const status = this.formatThreadGoalStatus(event.goal.status);
-        const objective = event.goal.objective.trim();
+        const objective = goalSnapshot.objective;
         const text = objective.includes("\n")
             ? `Goal updated (${status}):\n${objective}`
             : `Goal updated (${status}): ${objective}`;
@@ -298,7 +305,12 @@ export class CodexEventHandler {
         }
     }
 
-    private createThreadGoalClearedEvent(_event: ThreadGoalClearedNotification): UpdateSessionEvent {
+    private createThreadGoalClearedEvent(_event: ThreadGoalClearedNotification): UpdateSessionEvent | null {
+        if (this.sessionState.currentGoal === null) {
+            return null;
+        }
+        this.sessionState.currentGoal = null;
+
         return {
             sessionUpdate: "agent_message_chunk",
             content: {
@@ -306,6 +318,25 @@ export class CodexEventHandler {
                 text: "Goal cleared.",
             },
         };
+    }
+
+    private createThreadGoalSnapshot(event: ThreadGoalUpdatedNotification): ThreadGoalSnapshot {
+        return {
+            objective: event.goal.objective.trim(),
+            status: event.goal.status,
+            tokenBudget: event.goal.tokenBudget,
+        };
+    }
+
+    private sameThreadGoalSnapshot(
+        left: ThreadGoalSnapshot | null | undefined,
+        right: ThreadGoalSnapshot
+    ): boolean {
+        return left !== null
+            && left !== undefined
+            && left.objective === right.objective
+            && left.status === right.status
+            && left.tokenBudget === right.tokenBudget;
     }
 
     private createReasoningDeltaEvent(

@@ -66,6 +66,12 @@ import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
 import {resolveTerminalOutputMode, type TerminalOutputMode} from "./TerminalOutputMode";
 
+export interface ThreadGoalSnapshot {
+    objective: string;
+    status: string;
+    tokenBudget: number | null;
+}
+
 export interface SessionState {
     sessionId: string,
     currentModelId: string,
@@ -85,6 +91,7 @@ export interface SessionState {
     currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
     terminalOutputMode: TerminalOutputMode;
+    currentGoal?: ThreadGoalSnapshot | null;
 }
 
 interface PendingMcpStartupSession {

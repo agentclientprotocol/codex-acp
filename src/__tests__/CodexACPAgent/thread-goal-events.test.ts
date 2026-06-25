@@ -18,12 +18,6 @@ describe("CodexEventHandler - thread goal events", () => {
         vi.clearAllMocks();
     });
 
-    const sessionState: SessionState = createTestSessionState({
-        sessionId,
-        currentModelId: "model-id[effort]",
-        agentMode: AgentMode.DEFAULT_AGENT_MODE,
-    });
-
     it("should send thread goal updates as agent messages", async () => {
         const goalUpdatedNotification: ServerNotification = {
             method: "thread/goal/updated",
@@ -43,7 +37,7 @@ describe("CodexEventHandler - thread goal events", () => {
             },
         };
 
-        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [goalUpdatedNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, createSessionState(), [goalUpdatedNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             "data/thread-goal-updated.json"
@@ -69,7 +63,7 @@ describe("CodexEventHandler - thread goal events", () => {
             },
         };
 
-        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [goalUpdatedNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, createSessionState(), [goalUpdatedNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             "data/thread-goal-updated-multiline.json"
@@ -84,10 +78,77 @@ describe("CodexEventHandler - thread goal events", () => {
             },
         };
 
-        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [goalClearedNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, createSessionState(), [goalClearedNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             "data/thread-goal-cleared.json"
         );
     });
+
+    it("should suppress duplicate thread goal updates", async () => {
+        const goalUpdatedNotification: ServerNotification = {
+            method: "thread/goal/updated",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                goal: {
+                    threadId: sessionId,
+                    objective: "Ship the goal update",
+                    status: "active",
+                    tokenBudget: null,
+                    tokensUsed: 42,
+                    timeUsedSeconds: 12,
+                    createdAt: 1710000000,
+                    updatedAt: 1710000012,
+                },
+            },
+        };
+        const duplicateGoalUpdatedNotification: ServerNotification = {
+            method: "thread/goal/updated",
+            params: {
+                ...goalUpdatedNotification.params,
+                goal: {
+                    ...goalUpdatedNotification.params.goal,
+                    tokensUsed: 84,
+                    timeUsedSeconds: 24,
+                    updatedAt: 1710000024,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, createSessionState(), [
+            goalUpdatedNotification,
+            duplicateGoalUpdatedNotification,
+        ]);
+
+        const events = mockFixture.getAcpConnectionEvents([]);
+        expect(events).toHaveLength(1);
+        expect(events[0]!.args[0].update.content.text).toBe("Goal updated (active): Ship the goal update");
+    });
+
+    it("should suppress duplicate thread goal cleared notifications", async () => {
+        const goalClearedNotification: ServerNotification = {
+            method: "thread/goal/cleared",
+            params: {
+                threadId: sessionId,
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, createSessionState(), [
+            goalClearedNotification,
+            goalClearedNotification,
+        ]);
+
+        const events = mockFixture.getAcpConnectionEvents([]);
+        expect(events).toHaveLength(1);
+        expect(events[0]!.args[0].update.content.text).toBe("Goal cleared.");
+    });
+
+    function createSessionState(): SessionState {
+        return createTestSessionState({
+            sessionId,
+            currentModelId: "model-id[effort]",
+            agentMode: AgentMode.DEFAULT_AGENT_MODE,
+        });
+    }
 });
