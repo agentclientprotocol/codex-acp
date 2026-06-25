@@ -357,6 +357,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         modelContextWindow: null,
         rateLimits: null,
         account: null,
+        authConfigured: overrides?.account !== undefined ? overrides.account !== null : false,
         cwd: "/test/cwd",
         additionalDirectories: [],
         sessionId: "session-id",

@@ -79,12 +79,18 @@ export interface SessionState {
     modelContextWindow: number | null;
     rateLimits: RateLimitsMap | null;
     account: Account | null;
+    authConfigured: boolean;
     cwd: string;
     additionalDirectories: string[];
     fastModeEnabled: boolean;
     currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
     terminalOutputMode: TerminalOutputMode;
+}
+
+interface ActiveAuthState {
+    account: Account | null;
+    authConfigured: boolean;
 }
 
 interface PendingMcpStartupSession {
@@ -346,9 +352,9 @@ export class CodexAcpServer {
         }
 
         const {sessionId, currentModelId, models} = sessionMetadata;
-        let account: Account | null;
+        let authState: ActiveAuthState;
         try {
-            account = await this.getActiveAccount();
+            authState = await this.getActiveAuthState();
         } catch (err) {
             if (resumeSubscribed && requestedSessionGeneration !== null) {
                 await this.cleanupStaleSessionOpen(sessionId, requestedSessionGeneration);
@@ -375,7 +381,8 @@ export class CodexAcpServer {
             totalTokenUsage: null,
             modelContextWindow: null,
             rateLimits: null,
-            account: account,
+            account: authState.account,
+            authConfigured: authState.authConfigured,
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
@@ -401,12 +408,18 @@ export class CodexAcpServer {
         return [sessionId, sessionModelState, sessionModeState];
     }
 
-    private async getActiveAccount(){
+    private async getActiveAuthState(): Promise<ActiveAuthState> {
         if (this.codexAcpClient.getModelProvider()) {
-            return null
+            return {
+                account: null,
+                authConfigured: true,
+            };
         }
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
-        return accountResponse.account;
+        return {
+            account: accountResponse.account,
+            authConfigured: accountResponse.account !== null || !accountResponse.requiresOpenaiAuth,
+        };
     }
 
     async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
@@ -572,7 +585,16 @@ export class CodexAcpServer {
     async logout(_params: acp.LogoutRequest): Promise<void> {
         logger.log("Logout request received");
         await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+        this.markSessionsLoggedOut();
         logger.log("Logout request completed");
+    }
+
+    private markSessionsLoggedOut(): void {
+        const authConfigured = this.codexAcpClient.getModelProvider() !== null;
+        for (const sessionState of this.sessions.values()) {
+            sessionState.account = null;
+            sessionState.authConfigured = authConfigured;
+        }
     }
 
     async setSessionMode(
@@ -798,9 +820,9 @@ export class CodexAcpServer {
         }
 
         const {sessionId, currentModelId, models, thread} = sessionMetadata;
-        let account: Account | null;
+        let authState: ActiveAuthState;
         try {
-            account = await this.getActiveAccount();
+            authState = await this.getActiveAuthState();
         } catch (err) {
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
@@ -826,7 +848,8 @@ export class CodexAcpServer {
             totalTokenUsage: null,
             modelContextWindow: null,
             rateLimits: null,
-            account: account,
+            account: authState.account,
+            authConfigured: authState.authConfigured,
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
