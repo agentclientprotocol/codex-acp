@@ -307,6 +307,12 @@ export class CodexAppServerClient {
 
         try {
             await this.threadGoalSet(params);
+            if (goalTurnId === null) {
+                const threadResponse = await this.threadRead({ threadId: params.threadId });
+                if (goalTurnId === null && threadResponse.thread.status.type !== "active") {
+                    resolveNoGoalTurnStarted();
+                }
+            }
             const turnId = goalTurnId ?? await Promise.race([goalTurnStarted, noGoalTurnStarted]);
             if (turnId === null) {
                 return null;

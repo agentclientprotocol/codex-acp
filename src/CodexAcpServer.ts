@@ -1342,6 +1342,13 @@ export class CodexAcpServer {
         sessionState.lastTokenUsage = null;
         const activePrompt = this.trackActivePrompt(params.sessionId);
         let pendingTurnStart: PendingTurnStart | null = null;
+        const ensurePendingTurnStart = (): PendingTurnStart => {
+            if (pendingTurnStart === null) {
+                pendingTurnStart = this.createPendingTurnStart();
+                this.pendingTurnStarts.set(params.sessionId, pendingTurnStart);
+            }
+            return pendingTurnStart;
+        };
         const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
 
         try {
@@ -1361,6 +1368,9 @@ export class CodexAcpServer {
             }
 
             const commandPromise = this.availableCommands.tryHandleCommand(params.prompt, sessionState, {
+                onTurnStartPending: () => {
+                    ensurePendingTurnStart();
+                },
                 onTurnStarted: (turnId, threadId) => {
                     const turn = {threadId, turnId};
                     activePrompt.currentTurn = turn;
@@ -1369,6 +1379,7 @@ export class CodexAcpServer {
                         return;
                     }
                     sessionState.currentTurnId = turnId;
+                    pendingTurnStart?.resolve(turnId);
                 },
             });
             void commandPromise.catch((err) => {
@@ -1427,8 +1438,7 @@ export class CodexAcpServer {
                 sessionState.fastModeEnabled,
                 sessionState.currentModelSupportsFast,
             );
-            pendingTurnStart = this.createPendingTurnStart();
-            this.pendingTurnStarts.set(params.sessionId, pendingTurnStart);
+            ensurePendingTurnStart();
             const sendPromptPromise = this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(
                     params,
@@ -1490,10 +1500,11 @@ export class CodexAcpServer {
             logger.log("Prompt completed", {sessionId: params.sessionId});
             disposePromptRequestCancellation();
             sessionState.currentTurnId = null;
-            if (pendingTurnStart !== null && this.pendingTurnStarts.get(params.sessionId) === pendingTurnStart) {
+            const registeredPendingTurnStart = this.pendingTurnStarts.get(params.sessionId);
+            if (registeredPendingTurnStart !== undefined) {
                 this.pendingTurnStarts.delete(params.sessionId);
+                registeredPendingTurnStart.resolve(null);
             }
-            pendingTurnStart?.resolve(null);
             activePrompt.complete();
         }
     }

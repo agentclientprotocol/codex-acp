@@ -18,6 +18,7 @@ export type CommandHandleResult =
     | { handled: true, turnCompleted?: TurnCompletedNotification };
 
 export type CommandHandleOptions = {
+    onTurnStartPending?: () => void;
     onTurnStarted?: (turnId: string, threadId: string) => void;
 };
 
@@ -262,6 +263,7 @@ export class CodexCommands {
         target: ReviewTarget,
         options: CommandHandleOptions,
     ): Promise<TurnCompletedNotification> {
+        options.onTurnStartPending?.();
         return await this.runWithProcessCheck(() => this.codexAcpClient.runReview(
             sessionState.sessionId,
             target,
@@ -288,6 +290,7 @@ export class CodexCommands {
                 await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionId, "paused"));
                 return { handled: true };
             case "resume":
+                options.onTurnStartPending?.();
                 return this.createGoalCommandResult(await this.runWithProcessCheck(() => this.codexAcpClient.resumeGoal(
                     sessionId,
                     (turnId) => {
@@ -311,6 +314,7 @@ export class CodexCommands {
             return { handled: true };
         }
 
+        options.onTurnStartPending?.();
         return this.createGoalCommandResult(await this.runWithProcessCheck(() => this.codexAcpClient.setGoal(
             sessionId,
             argument,
