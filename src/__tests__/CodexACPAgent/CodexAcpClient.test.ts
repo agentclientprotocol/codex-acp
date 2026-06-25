@@ -13,7 +13,7 @@ import {
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
-import type {Model, ReviewStartResponse, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
+import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 
@@ -1172,6 +1172,68 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(mockFixture.getAcpConnectionDump([])).toContain("Context compacted");
     });
 
+    it('handles goal slash commands through Codex app server', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture();
+        const goalSetSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")
+            .mockResolvedValue({ goal: createThreadGoal() });
+        const goalClearSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalClear")
+            .mockResolvedValue({ cleared: true });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/goal Ship the migration and keep tests green" }],
+        });
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/goal pause" }],
+        });
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/goal resume" }],
+        });
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/goal clear" }],
+        });
+
+        expect(goalSetSpy).toHaveBeenNthCalledWith(1, {
+            threadId: "session-id",
+            objective: "Ship the migration and keep tests green",
+            status: "active",
+        });
+        expect(goalSetSpy).toHaveBeenNthCalledWith(2, {
+            threadId: "session-id",
+            status: "paused",
+        });
+        expect(goalSetSpy).toHaveBeenNthCalledWith(3, {
+            threadId: "session-id",
+            status: "active",
+        });
+        expect(goalClearSpy).toHaveBeenCalledWith({ threadId: "session-id" });
+        expect(turnStartSpy).not.toHaveBeenCalled();
+    });
+
+    it('reports missing goal slash command input', async () => {
+        const { mockFixture } = setupPromptFixture();
+        const goalSetSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")
+            .mockResolvedValue({ goal: createThreadGoal() });
+        const goalClearSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalClear")
+            .mockResolvedValue({ cleared: true });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/goal" }],
+        });
+
+        expect(goalSetSpy).not.toHaveBeenCalled();
+        expect(goalClearSpy).not.toHaveBeenCalled();
+        const [event] = mockFixture.getAcpConnectionEvents([]);
+        expect(event).toBeDefined();
+        expect(event!.args[0].update.content.text).toBe(
+            'Command "/goal" requires [<objective>|clear|edit|pause|resume].'
+        );
+    });
+
     it('reports missing review slash command input', async () => {
         const { mockFixture } = setupPromptFixture();
         const reviewStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "reviewStart")
@@ -1404,6 +1466,20 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 completedAt: null,
                 durationMs: null,
             }
+        };
+    }
+
+    function createThreadGoal(overrides?: Partial<ThreadGoal>): ThreadGoal {
+        return {
+            threadId: "session-id",
+            objective: "Ship the migration and keep tests green",
+            status: "active",
+            tokenBudget: null,
+            tokensUsed: 0,
+            timeUsedSeconds: 0,
+            createdAt: 1710000000,
+            updatedAt: 1710000000,
+            ...overrides,
         };
     }
 

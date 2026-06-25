@@ -48,6 +48,13 @@
             "input": null
           },
           {
+            "name": "goal",
+            "description": "Set, pause, resume, or clear a task goal.",
+            "input": {
+              "hint": "[<objective>|clear|edit|pause|resume]"
+            }
+          },
+          {
             "name": "logout",
             "description": "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
             "input": null

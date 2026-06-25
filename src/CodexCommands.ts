@@ -113,6 +113,11 @@ export class CodexCommands {
                 input: null
             },
             {
+                name: "goal",
+                description: "Set, pause, resume, or clear a task goal.",
+                input: { hint: "[<objective>|clear|edit|pause|resume]" }
+            },
+            {
                 name: "logout",
                 description: "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
                 input: null
@@ -149,6 +154,10 @@ export class CodexCommands {
         switch (commandName) {
             case "compact": {
                 await this.runWithProcessCheck(() => this.codexAcpClient.runCompact(sessionId));
+                return { handled: true };
+            }
+            case "goal": {
+                await this.runGoalCommand(sessionId, command.rest);
                 return { handled: true };
             }
             case "review": {
@@ -249,6 +258,40 @@ export class CodexCommands {
                 sessionState.currentTurnId = turnId;
             },
         ));
+    }
+
+    private async runGoalCommand(sessionId: string, rest: string): Promise<void> {
+        const argument = rest.trim();
+        if (argument.length === 0) {
+            await this.sendCommandUsageMessage("goal", "[<objective>|clear|edit|pause|resume]", sessionId);
+            return;
+        }
+
+        switch (argument.toLowerCase()) {
+            case "pause":
+                await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionId, "paused"));
+                return;
+            case "resume":
+                await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionId, "active"));
+                return;
+            case "clear":
+                await this.runWithProcessCheck(() => this.codexAcpClient.clearGoal(sessionId));
+                return;
+        }
+
+        if (argument.length > 4000) {
+            const session = new ACPSessionConnection(this.connection, sessionId);
+            await session.update({
+                sessionUpdate: "agent_message_chunk",
+                content: {
+                    type: "text",
+                    text: 'Command "/goal" requires goal text of at most 4000 characters.'
+                }
+            });
+            return;
+        }
+
+        await this.runWithProcessCheck(() => this.codexAcpClient.setGoal(sessionId, argument));
     }
 
     private buildReviewTarget(instructions: string): ReviewTarget {

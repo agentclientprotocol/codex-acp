@@ -33,6 +33,7 @@ import type {
     SkillsListResponse,
     SandboxPolicy,
     Thread,
+    ThreadGoalStatus,
     ThreadSourceKind,
     TurnCompletedNotification,
     UserInput,
@@ -320,6 +321,25 @@ export class CodexAcpClient {
 
     async runCompact(sessionId: string): Promise<void> {
         await this.codexClient.runCompact({threadId: sessionId});
+    }
+
+    async setGoal(sessionId: string, objective: string): Promise<void> {
+        await this.codexClient.threadGoalSet({
+            threadId: sessionId,
+            objective,
+            status: "active",
+        });
+    }
+
+    async setGoalStatus(sessionId: string, status: ThreadGoalStatus): Promise<void> {
+        await this.codexClient.threadGoalSet({
+            threadId: sessionId,
+            status,
+        });
+    }
+
+    async clearGoal(sessionId: string): Promise<void> {
+        await this.codexClient.threadGoalClear({threadId: sessionId});
     }
 
     async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
