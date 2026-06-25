@@ -4,7 +4,6 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {SessionState, ThreadGoalSnapshot} from "./CodexAcpServer";
-import * as acp from "@agentclientprotocol/sdk";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
