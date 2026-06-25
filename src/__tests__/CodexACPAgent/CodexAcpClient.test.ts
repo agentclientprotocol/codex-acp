@@ -1536,6 +1536,52 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    it('suppresses the first routed goal notification after cancellation marks the turn stale', async () => {
+        const { mockFixture } = setupPromptFixture();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const threadGoalSetSpy = vi.spyOn(codexAppServerClient, "threadGoalSet")
+            .mockResolvedValue({ goal: createThreadGoal() });
+        const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt")
+            .mockResolvedValue(undefined);
+        const controller = new AbortController();
+
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/goal Ship the migration and keep tests green" }],
+        }, controller.signal);
+
+        await vi.waitFor(() => {
+            expect(threadGoalSetSpy).toHaveBeenCalledWith({
+                threadId: "session-id",
+                objective: "Ship the migration and keep tests green",
+                status: "active",
+            });
+        });
+
+        controller.abort();
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+        mockFixture.clearAcpConnectionDump();
+
+        mockFixture.sendServerNotification({
+            method: "item/agentMessage/delta",
+            params: {
+                threadId: "session-id",
+                turnId: "goal-turn-id",
+                itemId: "goal-message-id",
+                delta: "leaked goal output",
+            },
+        });
+
+        await vi.waitFor(() => {
+            expect(turnInterruptSpy).toHaveBeenCalledWith({
+                threadId: "session-id",
+                turnId: "goal-turn-id",
+            });
+        });
+        await flushAsyncWork();
+        expect(mockFixture.getAcpConnectionDump([])).not.toContain("leaked goal output");
+    });
+
     it('does not hang when goal set starts no continuation turn', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();

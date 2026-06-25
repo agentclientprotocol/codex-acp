@@ -144,17 +144,13 @@ export class CodexAppServerClient {
                 this.recordCompactionCompleted(serverNotification);
             }
             const routing = extractTurnRouting(serverNotification);
-            const staleTurnNotification = this.isStaleTurn(routing.threadId, routing.turnId);
-            if (staleTurnNotification) {
-                if (isTurnCompletedNotification(serverNotification) && routing.threadId !== null && routing.turnId !== null) {
-                    this.clearStaleTurn(routing.threadId, routing.turnId);
-                }
-                for (const callback of this.codexEventHandlers) {
-                    callback({ eventType: "notification", ...serverNotification });
-                }
+            if (this.handleStaleTurnNotification(serverNotification, routing)) {
                 return;
             }
             this.recordTurnRouting(routing);
+            if (this.handleStaleTurnNotification(serverNotification, routing)) {
+                return;
+            }
             this.notify(serverNotification);
             for (const callback of this.codexEventHandlers) {
                 callback({ eventType: "notification", ...serverNotification });
@@ -552,6 +548,22 @@ export class CodexAppServerClient {
         for (const capture of captures) {
             capture(routing.turnId);
         }
+    }
+
+    private handleStaleTurnNotification(
+        notification: ServerNotification,
+        routing: { threadId: string | null, turnId: string | null },
+    ): boolean {
+        if (!this.isStaleTurn(routing.threadId, routing.turnId)) {
+            return false;
+        }
+        if (isTurnCompletedNotification(notification) && routing.threadId !== null && routing.turnId !== null) {
+            this.clearStaleTurn(routing.threadId, routing.turnId);
+        }
+        for (const callback of this.codexEventHandlers) {
+            callback({ eventType: "notification", ...notification });
+        }
+        return true;
     }
 
     private isStaleTurn(threadId: string | null, turnId: string | null): boolean {
