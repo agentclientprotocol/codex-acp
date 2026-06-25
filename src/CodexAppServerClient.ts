@@ -119,6 +119,7 @@ export class CodexAppServerClient {
     private readonly pendingTurnCompletionResolvers = new Map<string, Map<string, (event: TurnCompletedNotification) => void>>();
     private readonly pendingCompactionCompletionResolvers = new Map<string, Set<(event: CompactionCompletedNotification) => void>>();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
+    private readonly turnRoutingCaptures = new Map<string, Set<(turnId: string) => void>>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
 
     constructor(connection: MessageConnection) {
@@ -151,6 +152,7 @@ export class CodexAppServerClient {
                 }
                 return;
             }
+            this.recordTurnRouting(routing);
             this.notify(serverNotification);
             for (const callback of this.codexEventHandlers) {
                 callback({ eventType: "notification", ...serverNotification });
@@ -263,6 +265,47 @@ export class CodexAppServerClient {
             return await this.awaitTurnCompleted(reviewStarted.reviewThreadId, reviewStarted.turn.id);
         } finally {
             releaseCapture();
+        }
+    }
+
+    async runGoalSet(params: ThreadGoalSetParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
+        const capturedCompletions: Array<TurnCompletedNotification> = [];
+        const releaseCompletionCapture = this.captureTurnCompletions(params.threadId, (event) => {
+            capturedCompletions.push(event);
+        });
+        let goalTurnId: string | null = null;
+        let resolveGoalTurnStarted: () => void = () => {};
+        const goalTurnStarted = new Promise<void>((resolve) => {
+            resolveGoalTurnStarted = resolve;
+        });
+        const releaseRoutingCapture = this.captureTurnRoutings(params.threadId, (turnId) => {
+            if (goalTurnId !== null) {
+                return;
+            }
+            goalTurnId = turnId;
+            onTurnStarted?.(turnId);
+            resolveGoalTurnStarted();
+        });
+
+        try {
+            await this.threadGoalSet(params);
+            if (goalTurnId === null) {
+                await goalTurnStarted;
+            }
+            const turnId = goalTurnId;
+            if (turnId === null) {
+                throw new Error("Goal command did not start a turn");
+            }
+            const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnId);
+            releaseCompletionCapture();
+            releaseRoutingCapture();
+            if (earlyCompletion) {
+                return earlyCompletion;
+            }
+            return await this.awaitTurnCompleted(params.threadId, turnId);
+        } finally {
+            releaseCompletionCapture();
+            releaseRoutingCapture();
         }
     }
 
@@ -478,6 +521,19 @@ export class CodexAppServerClient {
         }
     }
 
+    private recordTurnRouting(routing: { threadId: string | null, turnId: string | null }): void {
+        if (routing.threadId === null || routing.turnId === null) {
+            return;
+        }
+        const captures = this.turnRoutingCaptures.get(routing.threadId);
+        if (!captures) {
+            return;
+        }
+        for (const capture of captures) {
+            capture(routing.turnId);
+        }
+    }
+
     private isStaleTurn(threadId: string | null, turnId: string | null): boolean {
         if (threadId === null || turnId === null) {
             return false;
@@ -519,6 +575,23 @@ export class CodexAppServerClient {
             captures.delete(capture);
             if (captures.size === 0) {
                 this.turnCompletionCaptures.delete(threadId);
+            }
+        };
+    }
+
+    private captureTurnRoutings(threadId: string, capture: (turnId: string) => void): () => void {
+        const captures = this.turnRoutingCaptures.get(threadId) ?? new Set<(turnId: string) => void>();
+        captures.add(capture);
+        this.turnRoutingCaptures.set(threadId, captures);
+        let released = false;
+        return () => {
+            if (released) {
+                return;
+            }
+            released = true;
+            captures.delete(capture);
+            if (captures.size === 0) {
+                this.turnRoutingCaptures.delete(threadId);
             }
         };
     }

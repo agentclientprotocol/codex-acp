@@ -323,12 +323,16 @@ export class CodexAcpClient {
         await this.codexClient.runCompact({threadId: sessionId});
     }
 
-    async setGoal(sessionId: string, objective: string): Promise<void> {
-        await this.codexClient.threadGoalSet({
+    async setGoal(
+        sessionId: string,
+        objective: string,
+        onTurnStarted?: (turnId: string) => void,
+    ): Promise<TurnCompletedNotification> {
+        return await this.codexClient.runGoalSet({
             threadId: sessionId,
             objective,
             status: "active",
-        });
+        }, onTurnStarted);
     }
 
     async setGoalStatus(sessionId: string, status: ThreadGoalStatus): Promise<void> {
@@ -338,12 +342,18 @@ export class CodexAcpClient {
         });
     }
 
-    async clearGoal(sessionId: string): Promise<void> {
-        await this.codexClient.threadGoalClear({threadId: sessionId});
+    async resumeGoal(
+        sessionId: string,
+        onTurnStarted?: (turnId: string) => void,
+    ): Promise<TurnCompletedNotification> {
+        return await this.codexClient.runGoalSet({
+            threadId: sessionId,
+            status: "active",
+        }, onTurnStarted);
     }
 
-    async awaitTurnCompleted(params: { threadId: string, turnId: string }): Promise<TurnCompletedNotification> {
-        return await this.codexClient.awaitTurnCompleted(params.threadId, params.turnId);
+    async clearGoal(sessionId: string): Promise<void> {
+        await this.codexClient.threadGoalClear({threadId: sessionId});
     }
 
     async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {

@@ -1174,7 +1174,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
     it('handles goal slash commands through Codex app server', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture();
-        const goalSetSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")
+        const goalRunSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "runGoalSet")
+            .mockResolvedValue({
+                threadId: "session-id",
+                turn: createTurn("goal-turn-id", "completed"),
+            });
+        const goalStatusSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")
             .mockResolvedValue({ goal: createThreadGoal() });
         const goalClearSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalClear")
             .mockResolvedValue({ cleared: true });
@@ -1196,19 +1201,19 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             prompt: [{ type: "text", text: "/goal clear" }],
         });
 
-        expect(goalSetSpy).toHaveBeenNthCalledWith(1, {
+        expect(goalRunSpy).toHaveBeenNthCalledWith(1, {
             threadId: "session-id",
             objective: "Ship the migration and keep tests green",
             status: "active",
-        });
-        expect(goalSetSpy).toHaveBeenNthCalledWith(2, {
+        }, expect.any(Function));
+        expect(goalStatusSpy).toHaveBeenCalledWith({
             threadId: "session-id",
             status: "paused",
         });
-        expect(goalSetSpy).toHaveBeenNthCalledWith(3, {
+        expect(goalRunSpy).toHaveBeenNthCalledWith(2, {
             threadId: "session-id",
             status: "active",
-        });
+        }, expect.any(Function));
         expect(goalClearSpy).toHaveBeenCalledWith({ threadId: "session-id" });
         expect(turnStartSpy).not.toHaveBeenCalled();
     });
@@ -1216,16 +1221,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     it('waits for goal slash command turn completion', async () => {
         const { mockFixture } = setupPromptFixture();
         vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")
-            .mockImplementation(async () => {
-                mockFixture.sendServerNotification({
-                    method: "turn/started",
-                    params: {
-                        threadId: "session-id",
-                        turn: createTurn("goal-turn-id", "inProgress"),
-                    },
-                });
-                return { goal: createThreadGoal() };
-            });
+            .mockResolvedValue({ goal: createThreadGoal() });
         let completeGoal: (value: TurnCompletedNotification) => void = () => {};
         const goalCompletedPromise = new Promise<TurnCompletedNotification>((resolve) => {
             completeGoal = resolve;
@@ -1242,6 +1238,48 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             return response;
         });
 
+        await vi.waitFor(() => {
+            expect(mockFixture.getCodexAppServerClient().threadGoalSet).toHaveBeenCalledWith({
+                threadId: "session-id",
+                objective: "Ship the migration and keep tests green",
+                status: "active",
+            });
+        });
+        await Promise.resolve();
+        expect(promptResolved).toBe(false);
+        expect(mockFixture.getCodexAppServerClient().awaitTurnCompleted).not.toHaveBeenCalled();
+
+        mockFixture.sendServerNotification({
+            method: "thread/goal/updated",
+            params: {
+                threadId: "session-id",
+                turnId: null,
+                goal: createThreadGoal(),
+            },
+        });
+        mockFixture.sendServerNotification({
+            method: "thread/status/changed",
+            params: {
+                threadId: "session-id",
+                status: {
+                    type: "active",
+                    activeFlags: [],
+                },
+            },
+        });
+        await Promise.resolve();
+        expect(promptResolved).toBe(false);
+        expect(mockFixture.getCodexAppServerClient().awaitTurnCompleted).not.toHaveBeenCalled();
+
+        mockFixture.sendServerNotification({
+            method: "item/agentMessage/delta",
+            params: {
+                threadId: "session-id",
+                turnId: "goal-turn-id",
+                itemId: "goal-message-id",
+                delta: "I",
+            },
+        });
         await vi.waitFor(() => {
             expect(mockFixture.getCodexAppServerClient().awaitTurnCompleted).toHaveBeenCalledWith(
                 "session-id",
