@@ -26,6 +26,8 @@ import type {
     SkillsExtraRootsSetParams,
     SkillsListParams,
     SkillsListResponse,
+    ThreadStatus,
+    ThreadStatusChangedNotification,
     ThreadArchiveParams,
     ThreadArchiveResponse,
     ThreadCompactStartParams,
@@ -105,8 +107,6 @@ const McpServerElicitationRequest = new RequestType<
     void
 >('mcpServer/elicitation/request');
 
-const GOAL_TURN_START_GRACE_MS = 1_000;
-
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
  * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
@@ -122,6 +122,7 @@ export class CodexAppServerClient {
     private readonly pendingCompactionCompletionResolvers = new Map<string, Set<(event: CompactionCompletedNotification) => void>>();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
     private readonly turnRoutingCaptures = new Map<string, Set<(turnId: string) => void>>();
+    private readonly threadStatusCaptures = new Map<string, Set<(status: ThreadStatus) => void>>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
 
     constructor(connection: MessageConnection) {
@@ -142,6 +143,9 @@ export class CodexAppServerClient {
             }
             if (isCompactionCompletedNotification(serverNotification)) {
                 this.recordCompactionCompleted(serverNotification);
+            }
+            if (isThreadStatusChangedNotification(serverNotification)) {
+                this.recordThreadStatusChanged(serverNotification.params);
             }
             const routing = extractTurnRouting(serverNotification);
             if (this.handleStaleTurnNotification(serverNotification, routing)) {
@@ -272,7 +276,6 @@ export class CodexAppServerClient {
     async runGoalSet(
         params: ThreadGoalSetParams,
         onTurnStarted?: (turnId: string) => void,
-        turnStartGraceMs = GOAL_TURN_START_GRACE_MS,
     ): Promise<TurnCompletedNotification | null> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCompletionCapture = this.captureTurnCompletions(params.threadId, (event) => {
@@ -283,6 +286,10 @@ export class CodexAppServerClient {
         const goalTurnStarted = new Promise<string>((resolve) => {
             resolveGoalTurnStarted = resolve;
         });
+        let resolveNoGoalTurnStarted: () => void = () => {};
+        const noGoalTurnStarted = new Promise<null>((resolve) => {
+            resolveNoGoalTurnStarted = () => resolve(null);
+        });
         const releaseRoutingCapture = this.captureTurnRoutings(params.threadId, (turnId) => {
             if (goalTurnId !== null) {
                 return;
@@ -291,16 +298,23 @@ export class CodexAppServerClient {
             onTurnStarted?.(turnId);
             resolveGoalTurnStarted(turnId);
         });
+        const releaseStatusCapture = this.captureThreadStatuses(params.threadId, (status) => {
+            if (goalTurnId !== null || status.type === "active") {
+                return;
+            }
+            resolveNoGoalTurnStarted();
+        });
 
         try {
             await this.threadGoalSet(params);
-            const turnId = goalTurnId ?? await this.waitForGoalTurnStarted(goalTurnStarted, turnStartGraceMs);
+            const turnId = goalTurnId ?? await Promise.race([goalTurnStarted, noGoalTurnStarted]);
             if (turnId === null) {
                 return null;
             }
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnId);
             releaseCompletionCapture();
             releaseRoutingCapture();
+            releaseStatusCapture();
             if (earlyCompletion) {
                 return earlyCompletion;
             }
@@ -308,20 +322,7 @@ export class CodexAppServerClient {
         } finally {
             releaseCompletionCapture();
             releaseRoutingCapture();
-        }
-    }
-
-    private async waitForGoalTurnStarted(goalTurnStarted: Promise<string>, timeoutMs: number): Promise<string | null> {
-        let timeout: ReturnType<typeof setTimeout> | null = null;
-        const timeoutPromise = new Promise<null>((resolve) => {
-            timeout = setTimeout(() => resolve(null), timeoutMs);
-        });
-        try {
-            return await Promise.race([goalTurnStarted, timeoutPromise]);
-        } finally {
-            if (timeout !== null) {
-                clearTimeout(timeout);
-            }
+            releaseStatusCapture();
         }
     }
 
@@ -537,6 +538,16 @@ export class CodexAppServerClient {
         }
     }
 
+    private recordThreadStatusChanged(event: ThreadStatusChangedNotification): void {
+        const captures = this.threadStatusCaptures.get(event.threadId);
+        if (!captures) {
+            return;
+        }
+        for (const capture of captures) {
+            capture(event.status);
+        }
+    }
+
     private recordTurnRouting(routing: { threadId: string | null, turnId: string | null }): void {
         if (routing.threadId === null || routing.turnId === null) {
             return;
@@ -624,6 +635,23 @@ export class CodexAppServerClient {
             captures.delete(capture);
             if (captures.size === 0) {
                 this.turnRoutingCaptures.delete(threadId);
+            }
+        };
+    }
+
+    private captureThreadStatuses(threadId: string, capture: (status: ThreadStatus) => void): () => void {
+        const captures = this.threadStatusCaptures.get(threadId) ?? new Set<(status: ThreadStatus) => void>();
+        captures.add(capture);
+        this.threadStatusCaptures.set(threadId, captures);
+        let released = false;
+        return () => {
+            if (released) {
+                return;
+            }
+            released = true;
+            captures.delete(capture);
+            if (captures.size === 0) {
+                this.threadStatusCaptures.delete(threadId);
             }
         };
     }
@@ -730,6 +758,13 @@ function isTurnCompletedNotification(notification: ServerNotification): notifica
     params: TurnCompletedNotification;
 } {
     return notification.method === "turn/completed";
+}
+
+function isThreadStatusChangedNotification(notification: ServerNotification): notification is {
+    method: "thread/status/changed";
+    params: ThreadStatusChangedNotification;
+} {
+    return notification.method === "thread/status/changed";
 }
 
 function isCompactionCompletedNotification(notification: ServerNotification): notification is CompactionCompletedNotification {
