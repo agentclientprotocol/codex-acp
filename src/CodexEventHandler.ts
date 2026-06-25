@@ -283,7 +283,7 @@ export class CodexEventHandler {
             sessionUpdate: "agent_message_chunk",
             content: {
                 type: "text",
-                text: `${text}\n\n`,
+                text: `\n\n${text}\n\n`,
             },
         };
     }
@@ -315,7 +315,7 @@ export class CodexEventHandler {
             sessionUpdate: "agent_message_chunk",
             content: {
                 type: "text",
-                text: "Goal cleared.\n\n",
+                text: "\n\nGoal cleared.\n\n",
             },
         };
     }

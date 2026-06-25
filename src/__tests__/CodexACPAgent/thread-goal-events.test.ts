@@ -123,7 +123,44 @@ describe("CodexEventHandler - thread goal events", () => {
 
         const events = mockFixture.getAcpConnectionEvents([]);
         expect(events).toHaveLength(1);
-        expect(events[0]!.args[0].update.content.text).toBe("Goal updated (active): Ship the goal update\n\n");
+        expect(events[0]!.args[0].update.content.text).toBe("\n\nGoal updated (active): Ship the goal update\n\n");
+    });
+
+    it("should separate completed goal updates from preceding agent text", async () => {
+        const goalCompletedNotification: ServerNotification = {
+            method: "thread/goal/updated",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                goal: {
+                    threadId: sessionId,
+                    objective: "tell me a joke",
+                    status: "complete",
+                    tokenBudget: null,
+                    tokensUsed: 42,
+                    timeUsedSeconds: 12,
+                    createdAt: 1710000000,
+                    updatedAt: 1710000012,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, createSessionState(), [
+            {
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    itemId: "message-1",
+                    delta: "Because they kept losing interest in `any`.",
+                },
+            },
+            goalCompletedNotification,
+        ]);
+
+        const events = mockFixture.getAcpConnectionEvents([]);
+        expect(events).toHaveLength(2);
+        expect(events[1]!.args[0].update.content.text).toBe("\n\nGoal updated (complete): tell me a joke\n\n");
     });
 
     it("should suppress duplicate thread goal cleared notifications", async () => {
@@ -141,7 +178,7 @@ describe("CodexEventHandler - thread goal events", () => {
 
         const events = mockFixture.getAcpConnectionEvents([]);
         expect(events).toHaveLength(1);
-        expect(events[0]!.args[0].update.content.text).toBe("Goal cleared.\n\n");
+        expect(events[0]!.args[0].update.content.text).toBe("\n\nGoal cleared.\n\n");
     });
 
     function createSessionState(): SessionState {

@@ -7,7 +7,7 @@
         "sessionUpdate": "agent_message_chunk",
         "content": {
           "type": "text",
-          "text": "Goal updated (active): Ship the goal update\n\n"
+          "text": "\n\nGoal updated (active): Ship the goal update\n\n"
         }
       }
     }
