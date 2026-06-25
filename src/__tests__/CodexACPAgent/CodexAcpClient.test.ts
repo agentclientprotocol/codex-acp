@@ -1427,10 +1427,20 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const currentModelId = ModelId.create(model.id, model.defaultReasoningEffort).toString();
 
         vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
-        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({
-            account: { type: "apiKey" },
-            requiresOpenaiAuth: false,
-        });
+        vi.spyOn(codexAcpClient, "getModelProvider").mockReturnValue("openai");
+        const getAccountSpy = vi.spyOn(codexAcpClient, "getAccount")
+            .mockResolvedValueOnce({
+                account: { type: "apiKey" },
+                requiresOpenaiAuth: false,
+            })
+            .mockResolvedValueOnce({
+                account: { type: "apiKey" },
+                requiresOpenaiAuth: false,
+            })
+            .mockResolvedValueOnce({
+                account: null,
+                requiresOpenaiAuth: true,
+            });
         vi.spyOn(codexAcpClient, "newSession")
             .mockResolvedValueOnce({
                 sessionId: "session-1",
@@ -1457,6 +1467,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         expect(logoutSpy).toHaveBeenCalledOnce();
+        expect(getAccountSpy).toHaveBeenCalledTimes(3);
         expect(codexAcpAgent.getSessionState(session1.sessionId)).toMatchObject({
             account: null,
             authConfigured: false,

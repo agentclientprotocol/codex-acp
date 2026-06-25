@@ -21,7 +21,7 @@ export type CommandHandleOptions = {
     onTurnStarted?: (turnId: string, threadId: string) => void;
 };
 
-export type LogoutHandler = () => void;
+export type LogoutHandler = () => void | Promise<void>;
 
 export class CodexCommands {
     private readonly connection: AcpClientConnection;
@@ -203,7 +203,7 @@ export class CodexCommands {
             }
             case "logout": {
                 await this.runWithProcessCheck(() => this.codexAcpClient.logout());
-                this.onLogout();
+                await this.onLogout();
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 await session.update({
                     sessionUpdate: "agent_message_chunk",

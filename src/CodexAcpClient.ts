@@ -217,6 +217,10 @@ export class CodexAcpClient {
         return response.requiresOpenaiAuth && !response.account;
     }
 
+    hasGatewayAuth(): boolean {
+        return this.gatewayConfig !== null;
+    }
+
     async getAccount(): Promise<GetAccountResponse> {
         return this.codexClient.accountRead({refreshToken: false});
     }

@@ -163,7 +163,7 @@ export class CodexAcpServer {
             connection,
             codexAcpClient,
             (operation) => this.runWithProcessCheck(operation),
-            () => this.markSessionsLoggedOut()
+            () => this.refreshSessionsAuthState()
         );
     }
 
@@ -410,7 +410,7 @@ export class CodexAcpServer {
     }
 
     private async getActiveAuthState(): Promise<ActiveAuthState> {
-        if (this.codexAcpClient.getModelProvider()) {
+        if (this.codexAcpClient.hasGatewayAuth()) {
             return {
                 account: null,
                 authConfigured: true,
@@ -586,15 +586,15 @@ export class CodexAcpServer {
     async logout(_params: acp.LogoutRequest): Promise<void> {
         logger.log("Logout request received");
         await this.runWithProcessCheck(() => this.codexAcpClient.logout());
-        this.markSessionsLoggedOut();
+        await this.refreshSessionsAuthState();
         logger.log("Logout request completed");
     }
 
-    private markSessionsLoggedOut(): void {
-        const authConfigured = this.codexAcpClient.getModelProvider() !== null;
+    private async refreshSessionsAuthState(): Promise<void> {
+        const authState = await this.getActiveAuthState();
         for (const sessionState of this.sessions.values()) {
-            sessionState.account = null;
-            sessionState.authConfigured = authConfigured;
+            sessionState.account = authState.account;
+            sessionState.authConfigured = authState.authConfigured;
         }
     }
 
