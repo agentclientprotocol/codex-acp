@@ -1299,6 +1299,47 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(promptResolved).toBe(true);
     });
 
+    it('does not hang when goal set starts no continuation turn', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const threadGoalSetSpy = vi.spyOn(codexAppServerClient, "threadGoalSet")
+            .mockResolvedValue({ goal: createThreadGoal() });
+        const awaitTurnCompletedSpy = vi.spyOn(codexAppServerClient, "awaitTurnCompleted");
+
+        const result = await codexAppServerClient.runGoalSet({
+            threadId: "session-id",
+            objective: "Ship the migration and keep tests green",
+            status: "active",
+        }, undefined, 0);
+
+        expect(result).toBeNull();
+        expect(threadGoalSetSpy).toHaveBeenCalledWith({
+            threadId: "session-id",
+            objective: "Ship the migration and keep tests green",
+            status: "active",
+        });
+        expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+    });
+
+    it('completes goal slash command when app server starts no continuation turn', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture();
+        const goalRunSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "runGoalSet")
+            .mockResolvedValue(null);
+
+        const response = await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/goal Ship the migration and keep tests green" }],
+        });
+
+        expect(response.stopReason).toBe("end_turn");
+        expect(goalRunSpy).toHaveBeenCalledWith({
+            threadId: "session-id",
+            objective: "Ship the migration and keep tests green",
+            status: "active",
+        }, expect.any(Function));
+        expect(turnStartSpy).not.toHaveBeenCalled();
+    });
+
     it('reports missing goal slash command input', async () => {
         const { mockFixture } = setupPromptFixture();
         const goalSetSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")

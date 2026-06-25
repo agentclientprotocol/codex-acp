@@ -105,6 +105,8 @@ const McpServerElicitationRequest = new RequestType<
     void
 >('mcpServer/elicitation/request');
 
+const GOAL_TURN_START_GRACE_MS = 1_000;
+
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
  * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
@@ -268,14 +270,18 @@ export class CodexAppServerClient {
         }
     }
 
-    async runGoalSet(params: ThreadGoalSetParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
+    async runGoalSet(
+        params: ThreadGoalSetParams,
+        onTurnStarted?: (turnId: string) => void,
+        turnStartGraceMs = GOAL_TURN_START_GRACE_MS,
+    ): Promise<TurnCompletedNotification | null> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCompletionCapture = this.captureTurnCompletions(params.threadId, (event) => {
             capturedCompletions.push(event);
         });
         let goalTurnId: string | null = null;
-        let resolveGoalTurnStarted: () => void = () => {};
-        const goalTurnStarted = new Promise<void>((resolve) => {
+        let resolveGoalTurnStarted: (turnId: string) => void = () => {};
+        const goalTurnStarted = new Promise<string>((resolve) => {
             resolveGoalTurnStarted = resolve;
         });
         const releaseRoutingCapture = this.captureTurnRoutings(params.threadId, (turnId) => {
@@ -284,17 +290,14 @@ export class CodexAppServerClient {
             }
             goalTurnId = turnId;
             onTurnStarted?.(turnId);
-            resolveGoalTurnStarted();
+            resolveGoalTurnStarted(turnId);
         });
 
         try {
             await this.threadGoalSet(params);
-            if (goalTurnId === null) {
-                await goalTurnStarted;
-            }
-            const turnId = goalTurnId;
+            const turnId = goalTurnId ?? await this.waitForGoalTurnStarted(goalTurnStarted, turnStartGraceMs);
             if (turnId === null) {
-                throw new Error("Goal command did not start a turn");
+                return null;
             }
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnId);
             releaseCompletionCapture();
@@ -306,6 +309,20 @@ export class CodexAppServerClient {
         } finally {
             releaseCompletionCapture();
             releaseRoutingCapture();
+        }
+    }
+
+    private async waitForGoalTurnStarted(goalTurnStarted: Promise<string>, timeoutMs: number): Promise<string | null> {
+        let timeout: ReturnType<typeof setTimeout> | null = null;
+        const timeoutPromise = new Promise<null>((resolve) => {
+            timeout = setTimeout(() => resolve(null), timeoutMs);
+        });
+        try {
+            return await Promise.race([goalTurnStarted, timeoutPromise]);
+        } finally {
+            if (timeout !== null) {
+                clearTimeout(timeout);
+            }
         }
     }
 

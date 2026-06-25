@@ -327,7 +327,7 @@ export class CodexAcpClient {
         sessionId: string,
         objective: string,
         onTurnStarted?: (turnId: string) => void,
-    ): Promise<TurnCompletedNotification> {
+    ): Promise<TurnCompletedNotification | null> {
         return await this.codexClient.runGoalSet({
             threadId: sessionId,
             objective,
@@ -345,7 +345,7 @@ export class CodexAcpClient {
     async resumeGoal(
         sessionId: string,
         onTurnStarted?: (turnId: string) => void,
-    ): Promise<TurnCompletedNotification> {
+    ): Promise<TurnCompletedNotification | null> {
         return await this.codexClient.runGoalSet({
             threadId: sessionId,
             status: "active",

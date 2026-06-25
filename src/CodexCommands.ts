@@ -272,15 +272,12 @@ export class CodexCommands {
                 await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionId, "paused"));
                 return { handled: true };
             case "resume":
-                return {
-                    handled: true,
-                    turnCompleted: await this.runWithProcessCheck(() => this.codexAcpClient.resumeGoal(
-                        sessionId,
-                        (turnId) => {
-                            sessionState.currentTurnId = turnId;
-                        },
-                    )),
-                };
+                return this.createGoalCommandResult(await this.runWithProcessCheck(() => this.codexAcpClient.resumeGoal(
+                    sessionId,
+                    (turnId) => {
+                        sessionState.currentTurnId = turnId;
+                    },
+                )));
             case "clear":
                 await this.runWithProcessCheck(() => this.codexAcpClient.clearGoal(sessionId));
                 return { handled: true };
@@ -298,15 +295,22 @@ export class CodexCommands {
             return { handled: true };
         }
 
+        return this.createGoalCommandResult(await this.runWithProcessCheck(() => this.codexAcpClient.setGoal(
+            sessionId,
+            argument,
+            (turnId) => {
+                sessionState.currentTurnId = turnId;
+            },
+        )));
+    }
+
+    private createGoalCommandResult(turnCompleted: TurnCompletedNotification | null): CommandHandleResult {
+        if (turnCompleted === null) {
+            return { handled: true };
+        }
         return {
             handled: true,
-            turnCompleted: await this.runWithProcessCheck(() => this.codexAcpClient.setGoal(
-                sessionId,
-                argument,
-                (turnId) => {
-                    sessionState.currentTurnId = turnId;
-                },
-            )),
+            turnCompleted,
         };
     }
 
