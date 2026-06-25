@@ -115,7 +115,7 @@ export class CodexCommands {
             {
                 name: "goal",
                 description: "Set, pause, resume, or clear a task goal.",
-                input: { hint: "[<objective>|clear|edit|pause|resume]" }
+                input: { hint: "[<objective>|clear|pause|resume]" }
             },
             {
                 name: "logout",
@@ -263,7 +263,7 @@ export class CodexCommands {
         const sessionId = sessionState.sessionId;
         const argument = rest.trim();
         if (argument.length === 0) {
-            await this.sendCommandUsageMessage("goal", "[<objective>|clear|edit|pause|resume]", sessionId);
+            await this.sendCommandUsageMessage("goal", "[<objective>|clear|pause|resume]", sessionId);
             return { handled: true };
         }
 

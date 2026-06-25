@@ -51,7 +51,7 @@
             "name": "goal",
             "description": "Set, pause, resume, or clear a task goal.",
             "input": {
-              "hint": "[<objective>|clear|edit|pause|resume]"
+              "hint": "[<objective>|clear|pause|resume]"
             }
           },
           {

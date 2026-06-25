@@ -1316,7 +1316,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const [event] = mockFixture.getAcpConnectionEvents([]);
         expect(event).toBeDefined();
         expect(event!.args[0].update.content.text).toBe(
-            'Command "/goal" requires [<objective>|clear|edit|pause|resume].'
+            'Command "/goal" requires [<objective>|clear|pause|resume].'
         );
     });
 
