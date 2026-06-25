@@ -7,7 +7,7 @@
         "sessionUpdate": "agent_message_chunk",
         "content": {
           "type": "text",
-          "text": "Goal updated (budget limited):\nFirst task\nSecond task"
+          "text": "Goal updated (budget limited):\nFirst task\nSecond task\n\n"
         }
       }
     }

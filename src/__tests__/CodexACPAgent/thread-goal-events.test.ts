@@ -123,7 +123,7 @@ describe("CodexEventHandler - thread goal events", () => {
 
         const events = mockFixture.getAcpConnectionEvents([]);
         expect(events).toHaveLength(1);
-        expect(events[0]!.args[0].update.content.text).toBe("Goal updated (active): Ship the goal update");
+        expect(events[0]!.args[0].update.content.text).toBe("Goal updated (active): Ship the goal update\n\n");
     });
 
     it("should suppress duplicate thread goal cleared notifications", async () => {
@@ -141,7 +141,7 @@ describe("CodexEventHandler - thread goal events", () => {
 
         const events = mockFixture.getAcpConnectionEvents([]);
         expect(events).toHaveLength(1);
-        expect(events[0]!.args[0].update.content.text).toBe("Goal cleared.");
+        expect(events[0]!.args[0].update.content.text).toBe("Goal cleared.\n\n");
     });
 
     function createSessionState(): SessionState {
