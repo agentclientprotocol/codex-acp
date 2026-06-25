@@ -250,7 +250,10 @@ export class CodexAppServerClient {
         }
     }
 
-    async runReview(params: ReviewStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
+    async runReview(
+        params: ReviewStartParams,
+        onTurnStarted?: (turnId: string, threadId: string) => void,
+    ): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
             capturedCompletions.push(event);
@@ -258,7 +261,7 @@ export class CodexAppServerClient {
 
         try {
             const reviewStarted = await this.reviewStart(params);
-            onTurnStarted?.(reviewStarted.turn.id);
+            onTurnStarted?.(reviewStarted.turn.id, reviewStarted.reviewThreadId);
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === reviewStarted.turn.id);
             releaseCapture();
             if (earlyCompletion) {

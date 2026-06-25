@@ -17,6 +17,10 @@ export type CommandHandleResult =
     | { handled: false }
     | { handled: true, turnCompleted?: TurnCompletedNotification };
 
+export type CommandHandleOptions = {
+    onTurnStarted?: (turnId: string, threadId: string) => void;
+};
+
 export class CodexCommands {
     private readonly connection: AcpClientConnection;
     private readonly codexAcpClient: CodexAcpClient;
@@ -144,7 +148,11 @@ export class CodexCommands {
         };
     }
 
-    async tryHandleCommand(prompt: acp.ContentBlock[], sessionState: SessionState): Promise<CommandHandleResult> {
+    async tryHandleCommand(
+        prompt: acp.ContentBlock[],
+        sessionState: SessionState,
+        options: CommandHandleOptions = {},
+    ): Promise<CommandHandleResult> {
         const command = this.parseCommand(prompt);
         if (command === null) return { handled: false };
         const commandName = command.name;
@@ -161,7 +169,7 @@ export class CodexCommands {
             }
             case "review": {
                 const target = this.buildReviewTarget(command.rest);
-                const turnCompleted = await this.runReviewCommand(sessionState, target);
+                const turnCompleted = await this.runReviewCommand(sessionState, target, options);
                 return { handled: true, turnCompleted };
             }
             case "review-branch": {
@@ -172,7 +180,7 @@ export class CodexCommands {
                 const turnCompleted = await this.runReviewCommand(sessionState, {
                     type: "baseBranch",
                     branch: command.rest,
-                });
+                }, options);
                 return { handled: true, turnCompleted };
             }
             case "review-commit": {
@@ -184,7 +192,7 @@ export class CodexCommands {
                     type: "commit",
                     sha: command.rest,
                     title: null,
-                });
+                }, options);
                 return { handled: true, turnCompleted };
             }
             case "status": {
@@ -249,12 +257,20 @@ export class CodexCommands {
         }
     }
 
-    private async runReviewCommand(sessionState: SessionState, target: ReviewTarget): Promise<TurnCompletedNotification> {
+    private async runReviewCommand(
+        sessionState: SessionState,
+        target: ReviewTarget,
+        options: CommandHandleOptions,
+    ): Promise<TurnCompletedNotification> {
         return await this.runWithProcessCheck(() => this.codexAcpClient.runReview(
             sessionState.sessionId,
             target,
-            (turnId) => {
-                sessionState.currentTurnId = turnId;
+            (turnId, threadId) => {
+                if (options.onTurnStarted) {
+                    options.onTurnStarted(turnId, threadId);
+                } else {
+                    sessionState.currentTurnId = turnId;
+                }
             },
         ));
     }

@@ -693,7 +693,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         return onServerNotification;
     }
 
-    function createTurn(id: string, status: "inProgress" | "completed") {
+    function createTurn(id: string, status: "inProgress" | "completed" | "interrupted") {
         return {
             id,
             items: [],
@@ -718,6 +718,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
     async function flushAsyncWork(): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    function deferred<T>(): {promise: Promise<T>, resolve: (value: T) => void} {
+        let resolve: (value: T) => void = () => {};
+        const promise = new Promise<T>((innerResolve) => {
+            resolve = innerResolve;
+        });
+        return {promise, resolve};
     }
 
     it('should map events from dump', async () => {
@@ -924,6 +932,150 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         })).resolves.toMatchObject({stopReason: "end_turn"});
     });
 
+    it('cancels an active prompt when the ACP prompt request is cancelled', async () => {
+        const { mockFixture, sessionState } = setupPromptFixture();
+        const turnCompleted = deferred<TurnCompletedNotification>();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReturnValue(turnCompleted.promise);
+        const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt")
+            .mockImplementation(async ({threadId, turnId}) => {
+                turnCompleted.resolve({
+                    threadId,
+                    turn: createTurn(turnId, "interrupted"),
+                });
+            });
+        const controller = new AbortController();
+
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "long running prompt" }],
+        }, controller.signal);
+
+        await vi.waitFor(() => {
+            expect(sessionState.currentTurnId).toBe("turn-id");
+        });
+
+        controller.abort();
+
+        await vi.waitFor(() => {
+            expect(turnInterruptSpy).toHaveBeenCalledWith({
+                threadId: "session-id",
+                turnId: "turn-id",
+            });
+        });
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+    });
+
+    it('returns success when a cancelled ACP prompt request completes before interruption wins', async () => {
+        const { mockFixture, sessionState } = setupPromptFixture();
+        const turnCompleted = deferred<TurnCompletedNotification>();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReturnValue(turnCompleted.promise);
+        const turnInterrupt = deferred<void>();
+        const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt")
+            .mockReturnValue(turnInterrupt.promise);
+        const controller = new AbortController();
+
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "long running prompt" }],
+        }, controller.signal);
+
+        await vi.waitFor(() => {
+            expect(sessionState.currentTurnId).toBe("turn-id");
+        });
+
+        controller.abort();
+        await vi.waitFor(() => {
+            expect(turnInterruptSpy).toHaveBeenCalledWith({
+                threadId: "session-id",
+                turnId: "turn-id",
+            });
+        });
+
+        mockFixture.sendServerNotification({
+            method: "item/agentMessage/delta",
+            params: {
+                threadId: "session-id",
+                turnId: "turn-id",
+                itemId: "tail-item",
+                delta: "tail output",
+            },
+        });
+        turnCompleted.resolve({
+            threadId: "session-id",
+            turn: createTurn("turn-id", "completed"),
+        });
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
+        expect(mockFixture.getAcpConnectionDump([])).toContain("tail output");
+        turnInterrupt.resolve(undefined);
+    });
+
+    it('interrupts a late-started turn after the ACP prompt request is cancelled', async () => {
+        const { mockFixture } = setupPromptFixture();
+        const turnStart = deferred<{turn: ReturnType<typeof createTurn>}>();
+        const turnStartCalled = deferred<void>();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart")
+            .mockImplementation(async () => {
+                turnStartCalled.resolve();
+                return await turnStart.promise;
+            });
+        const turnCompleted = deferred<TurnCompletedNotification>();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReturnValue(turnCompleted.promise);
+        const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt")
+            .mockImplementation(async ({threadId, turnId}) => {
+                turnCompleted.resolve({
+                    threadId,
+                    turn: createTurn(turnId, "interrupted"),
+                });
+            });
+        const controller = new AbortController();
+
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "long running prompt" }],
+        }, controller.signal);
+
+        await turnStartCalled.promise;
+        controller.abort();
+
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+        expect(turnInterruptSpy).not.toHaveBeenCalled();
+
+        turnStart.resolve({turn: createTurn("late-turn-id", "inProgress")});
+        await vi.waitFor(() => {
+            expect(turnInterruptSpy).toHaveBeenCalledWith({
+                threadId: "session-id",
+                turnId: "late-turn-id",
+            });
+        });
+    });
+
+    it('returns cancelled when the ACP prompt request is cancelled during startup work', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture();
+        const skillsRefresh = deferred<{data: []}>();
+        const listSkillsSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "listSkills")
+            .mockReturnValue(skillsRefresh.promise);
+        const controller = new AbortController();
+
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "long running prompt" }],
+        }, controller.signal);
+
+        await vi.waitFor(() => {
+            expect(listSkillsSpy).toHaveBeenCalled();
+        });
+
+        controller.abort();
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+
+        skillsRefresh.resolve({data: []});
+        await flushAsyncWork();
+        expect(turnStartSpy).not.toHaveBeenCalled();
+    });
+
     it('should send attachments as prompt items', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
@@ -1122,6 +1274,46 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             stopReason: "end_turn",
         }));
         expect(promptResolved).toBe(true);
+    });
+
+    it('interrupts a late-started review slash command after the ACP prompt request is cancelled', async () => {
+        const { mockFixture } = setupPromptFixture();
+        const reviewStart = deferred<ReviewStartResponse>();
+        const reviewStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "reviewStart")
+            .mockReturnValue(reviewStart.promise);
+        const reviewCompleted = deferred<TurnCompletedNotification>();
+        const awaitTurnCompletedSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReturnValue(reviewCompleted.promise);
+        const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt")
+            .mockImplementation(async ({threadId, turnId}) => {
+                reviewCompleted.resolve({
+                    threadId,
+                    turn: createTurn(turnId, "interrupted"),
+                });
+            });
+        const controller = new AbortController();
+
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/review" }],
+        }, controller.signal);
+
+        await vi.waitFor(() => {
+            expect(reviewStartSpy).toHaveBeenCalled();
+        });
+
+        controller.abort();
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+
+        reviewStart.resolve(createReviewStartResponse("review-thread-id", "review-turn-id"));
+
+        await vi.waitFor(() => {
+            expect(turnInterruptSpy).toHaveBeenCalledWith({
+                threadId: "review-thread-id",
+                turnId: "review-turn-id",
+            });
+        });
+        expect(awaitTurnCompletedSpy).toHaveBeenCalledWith("review-thread-id", "review-turn-id");
     });
 
     it('returns cancelled when review slash command is interrupted', async () => {
@@ -1360,6 +1552,30 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             'Command "/goal" requires [<objective>|clear|pause|resume].'
         );
     });
+    it('returns cancelled promptly when non-interruptible slash command startup is cancelled', async () => {
+        const { mockFixture } = setupPromptFixture();
+        const compactStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadCompactStart")
+            .mockResolvedValue({});
+        const controller = new AbortController();
+
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/compact" }],
+        }, controller.signal);
+
+        await vi.waitFor(() => {
+            expect(compactStartSpy).toHaveBeenCalledWith({ threadId: "session-id" });
+        });
+
+        controller.abort();
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+
+        mockFixture.sendServerNotification({
+            method: "thread/compacted",
+            params: { threadId: "session-id", turnId: "compact-turn-id" },
+        });
+        await flushAsyncWork();
+    });
 
     it('reports missing review slash command input', async () => {
         const { mockFixture } = setupPromptFixture();
@@ -1564,11 +1780,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         return { mockFixture, sessionState, turnStartSpy };
     }
 
-    function createReviewStartResponse(): ReviewStartResponse {
+    function createReviewStartResponse(
+        reviewThreadId: string = "session-id",
+        turnId: string = "review-turn-id",
+    ): ReviewStartResponse {
         return {
-            reviewThreadId: "session-id",
+            reviewThreadId,
             turn: {
-                id: "review-turn-id",
+                id: turnId,
                 items: [],
                 itemsView: "notLoaded",
                 status: "inProgress",
