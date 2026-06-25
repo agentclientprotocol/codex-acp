@@ -26,6 +26,8 @@ import type {
     SkillsExtraRootsSetParams,
     SkillsListParams,
     SkillsListResponse,
+    ThreadGoal,
+    ThreadGoalUpdatedNotification,
     ThreadStatus,
     ThreadStatusChangedNotification,
     ThreadArchiveParams,
@@ -123,6 +125,7 @@ export class CodexAppServerClient {
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
     private readonly turnRoutingCaptures = new Map<string, Set<(turnId: string) => void>>();
     private readonly threadStatusCaptures = new Map<string, Set<(status: ThreadStatus) => void>>();
+    private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
 
     constructor(connection: MessageConnection) {
@@ -146,6 +149,9 @@ export class CodexAppServerClient {
             }
             if (isThreadStatusChangedNotification(serverNotification)) {
                 this.recordThreadStatusChanged(serverNotification.params);
+            }
+            if (isThreadGoalUpdatedNotification(serverNotification)) {
+                this.recordThreadGoalUpdated(serverNotification.params);
             }
             const routing = extractTurnRouting(serverNotification);
             if (this.handleStaleTurnNotification(serverNotification, routing)) {
@@ -290,6 +296,13 @@ export class CodexAppServerClient {
         const noGoalTurnStarted = new Promise<null>((resolve) => {
             resolveNoGoalTurnStarted = () => resolve(null);
         });
+        let acceptNoGoalTurnStatus = false;
+        let expectedGoal: ThreadGoal | null = null;
+        let resolveGoalUpdated: () => void = () => {};
+        const goalUpdated = new Promise<void>((resolve) => {
+            resolveGoalUpdated = resolve;
+        });
+        const capturedGoalUpdates: Array<ThreadGoalUpdatedNotification> = [];
         const releaseRoutingCapture = this.captureTurnRoutings(params.threadId, (turnId) => {
             if (goalTurnId !== null) {
                 return;
@@ -299,28 +312,48 @@ export class CodexAppServerClient {
             resolveGoalTurnStarted(turnId);
         });
         const releaseStatusCapture = this.captureThreadStatuses(params.threadId, (status) => {
-            if (goalTurnId !== null || status.type === "active") {
+            if (!acceptNoGoalTurnStatus || goalTurnId !== null || status.type === "active") {
                 return;
             }
             resolveNoGoalTurnStarted();
         });
+        const releaseGoalUpdateCapture = this.captureThreadGoalUpdates(params.threadId, (event) => {
+            capturedGoalUpdates.push(event);
+            if (expectedGoal !== null && goalsMatch(event.goal, expectedGoal)) {
+                resolveGoalUpdated();
+            }
+        });
 
         try {
-            await this.threadGoalSet(params);
+            const goalSetResponse = await this.threadGoalSet(params);
+            expectedGoal = goalSetResponse.goal;
+            if (capturedGoalUpdates.some(event => goalsMatch(event.goal, expectedGoal!))) {
+                resolveGoalUpdated();
+            }
             if (goalTurnId === null) {
                 const threadResponse = await this.threadRead({ threadId: params.threadId });
                 if (goalTurnId === null && threadResponse.thread.status.type !== "active") {
-                    resolveNoGoalTurnStarted();
+                    await goalUpdated;
+                    if (goalTurnId === null) {
+                        resolveNoGoalTurnStarted();
+                    }
+                } else {
+                    acceptNoGoalTurnStatus = true;
                 }
             }
-            const turnId = goalTurnId ?? await Promise.race([goalTurnStarted, noGoalTurnStarted]);
+            let turnId = goalTurnId ?? await Promise.race([goalTurnStarted, noGoalTurnStarted]);
             if (turnId === null) {
-                return null;
+                await goalUpdated;
+                turnId = goalTurnId;
+                if (turnId === null) {
+                    return null;
+                }
             }
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnId);
             releaseCompletionCapture();
             releaseRoutingCapture();
             releaseStatusCapture();
+            releaseGoalUpdateCapture();
             if (earlyCompletion) {
                 return earlyCompletion;
             }
@@ -329,6 +362,7 @@ export class CodexAppServerClient {
             releaseCompletionCapture();
             releaseRoutingCapture();
             releaseStatusCapture();
+            releaseGoalUpdateCapture();
         }
     }
 
@@ -554,6 +588,16 @@ export class CodexAppServerClient {
         }
     }
 
+    private recordThreadGoalUpdated(event: ThreadGoalUpdatedNotification): void {
+        const captures = this.threadGoalUpdateCaptures.get(event.threadId);
+        if (!captures) {
+            return;
+        }
+        for (const capture of captures) {
+            capture(event);
+        }
+    }
+
     private recordTurnRouting(routing: { threadId: string | null, turnId: string | null }): void {
         if (routing.threadId === null || routing.turnId === null) {
             return;
@@ -658,6 +702,23 @@ export class CodexAppServerClient {
             captures.delete(capture);
             if (captures.size === 0) {
                 this.threadStatusCaptures.delete(threadId);
+            }
+        };
+    }
+
+    private captureThreadGoalUpdates(threadId: string, capture: (event: ThreadGoalUpdatedNotification) => void): () => void {
+        const captures = this.threadGoalUpdateCaptures.get(threadId) ?? new Set<(event: ThreadGoalUpdatedNotification) => void>();
+        captures.add(capture);
+        this.threadGoalUpdateCaptures.set(threadId, captures);
+        let released = false;
+        return () => {
+            if (released) {
+                return;
+            }
+            released = true;
+            captures.delete(capture);
+            if (captures.size === 0) {
+                this.threadGoalUpdateCaptures.delete(threadId);
             }
         };
     }
@@ -773,11 +834,26 @@ function isThreadStatusChangedNotification(notification: ServerNotification): no
     return notification.method === "thread/status/changed";
 }
 
+function isThreadGoalUpdatedNotification(notification: ServerNotification): notification is {
+    method: "thread/goal/updated";
+    params: ThreadGoalUpdatedNotification;
+} {
+    return notification.method === "thread/goal/updated";
+}
+
 function isCompactionCompletedNotification(notification: ServerNotification): notification is CompactionCompletedNotification {
     if (notification.method === "thread/compacted") {
         return true;
     }
     return notification.method === "item/completed" && notification.params.item.type === "contextCompaction";
+}
+
+function goalsMatch(left: ThreadGoal, right: ThreadGoal): boolean {
+    return left.threadId === right.threadId
+        && left.objective === right.objective
+        && left.status === right.status
+        && left.tokenBudget === right.tokenBudget
+        && left.updatedAt === right.updatedAt;
 }
 
 function extractThreadId(notification: ServerNotification): string | null {
