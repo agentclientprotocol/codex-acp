@@ -165,7 +165,7 @@ export class CodexCommands {
                 return { handled: true };
             }
             case "goal": {
-                return await this.runGoalCommand(sessionState, command.rest);
+                return await this.runGoalCommand(sessionState, command.rest, options);
             }
             case "review": {
                 const target = this.buildReviewTarget(command.rest);
@@ -266,16 +266,16 @@ export class CodexCommands {
             sessionState.sessionId,
             target,
             (turnId, threadId) => {
-                if (options.onTurnStarted) {
-                    options.onTurnStarted(turnId, threadId);
-                } else {
-                    sessionState.currentTurnId = turnId;
-                }
+                this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
             },
         ));
     }
 
-    private async runGoalCommand(sessionState: SessionState, rest: string): Promise<CommandHandleResult> {
+    private async runGoalCommand(
+        sessionState: SessionState,
+        rest: string,
+        options: CommandHandleOptions,
+    ): Promise<CommandHandleResult> {
         const sessionId = sessionState.sessionId;
         const argument = rest.trim();
         if (argument.length === 0) {
@@ -291,7 +291,7 @@ export class CodexCommands {
                 return this.createGoalCommandResult(await this.runWithProcessCheck(() => this.codexAcpClient.resumeGoal(
                     sessionId,
                     (turnId) => {
-                        sessionState.currentTurnId = turnId;
+                        this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
                     },
                 )));
             case "clear":
@@ -315,9 +315,22 @@ export class CodexCommands {
             sessionId,
             argument,
             (turnId) => {
-                sessionState.currentTurnId = turnId;
+                this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
             },
         )));
+    }
+
+    private handleCommandTurnStarted(
+        sessionState: SessionState,
+        options: CommandHandleOptions,
+        turnId: string,
+        threadId: string,
+    ): void {
+        if (options.onTurnStarted) {
+            options.onTurnStarted(turnId, threadId);
+        } else {
+            sessionState.currentTurnId = turnId;
+        }
     }
 
     private createGoalCommandResult(turnCompleted: TurnCompletedNotification | null): CommandHandleResult {
