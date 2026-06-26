@@ -86,11 +86,6 @@ export type McpStartupResult = {
     cancelled: Array<string>;
 };
 
-type ServerNotificationItemType = Extract<
-    ServerNotification,
-    { params: { item: { type: unknown } } }
->["params"]["item"]["type"];
-
 const CommandExecutionApprovalRequest = new RequestType<
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
@@ -116,45 +111,6 @@ const McpServerElicitationRequest = new RequestType<
 >('mcpServer/elicitation/request');
 
 const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
-const VISIBLE_TURN_ACTIVITY_METHODS: ReadonlySet<ServerNotification["method"]> = new Set([
-    "error",
-    "turn/plan/updated",
-    "item/autoApprovalReview/started",
-    "item/autoApprovalReview/completed",
-    "item/agentMessage/delta",
-    "item/commandExecution/outputDelta",
-    "item/commandExecution/terminalInteraction",
-    "item/mcpToolCall/progress",
-    "item/reasoning/summaryTextDelta",
-    "item/reasoning/summaryPartAdded",
-    "item/reasoning/textDelta",
-    "model/rerouted",
-    "warning",
-    "configWarning",
-    "fuzzyFileSearch/sessionUpdated",
-    "fuzzyFileSearch/sessionCompleted",
-]);
-const VISIBLE_STARTED_ITEM_TYPES: ReadonlySet<ServerNotificationItemType> = new Set([
-    "fileChange",
-    "commandExecution",
-    "mcpToolCall",
-    "dynamicToolCall",
-    "webSearch",
-    "imageView",
-    "imageGeneration",
-    "collabAgentToolCall",
-]);
-const VISIBLE_COMPLETED_ITEM_TYPES: ReadonlySet<ServerNotificationItemType> = new Set([
-    "fileChange",
-    "commandExecution",
-    "mcpToolCall",
-    "dynamicToolCall",
-    "webSearch",
-    "imageView",
-    "imageGeneration",
-    "collabAgentToolCall",
-    "contextCompaction",
-]);
 
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
@@ -171,7 +127,6 @@ export class CodexAppServerClient {
     private readonly pendingCompactionCompletionResolvers = new Map<string, Set<(event: CompactionCompletedNotification) => void>>();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
     private readonly turnRoutingCaptures = new Map<string, Set<(turnId: string) => void>>();
-    private readonly turnActivityCaptures = new Map<string, Set<(turnId: string) => void>>();
     private readonly threadStatusCaptures = new Map<string, Set<(status: ThreadStatus) => void>>();
     private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
@@ -213,7 +168,6 @@ export class CodexAppServerClient {
             if (this.handleStaleTurnNotification(serverNotification, routing)) {
                 return;
             }
-            this.recordVisibleTurnActivity(serverNotification, routing);
             this.notify(serverNotification);
             for (const callback of this.codexEventHandlers) {
                 callback({ eventType: "notification", ...serverNotification });
@@ -357,10 +311,6 @@ export class CodexAppServerClient {
         const matchingGoalUpdateHandled = new Promise<null>((resolve) => {
             resolveGoalUpdateHandled = () => resolve(null);
         });
-        let resolveGoalTurnActivity: () => void = () => {};
-        const goalTurnActivity = new Promise<null>((resolve) => {
-            resolveGoalTurnActivity = () => resolve(null);
-        });
         let goalUpdateHandled = false;
         let expectedGoal: ThreadGoal | null = null;
         const noGoalTurnStarted = this.createNoGoalTurnStartedPromise(runtimeEffectsGraceMs);
@@ -372,12 +322,6 @@ export class CodexAppServerClient {
             goalTurnId = turnId;
             onTurnStarted?.(turnId);
             resolveGoalTurnStarted(turnId);
-        });
-        const releaseActivityCapture = this.captureTurnActivities(params.threadId, (turnId) => {
-            if (!goalUpdateHandled || goalTurnId !== turnId) {
-                return;
-            }
-            resolveGoalTurnActivity();
         });
         const releaseGoalUpdateCapture = this.captureThreadGoalUpdates(params.threadId, (event) => {
             capturedGoalUpdates.push(event);
@@ -412,20 +356,17 @@ export class CodexAppServerClient {
             releaseStatusCapture();
             releaseGoalUpdateCapture();
             if (turnId === null) {
-                releaseActivityCapture();
                 return null;
             }
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnId);
             if (earlyCompletion) {
-                releaseActivityCapture();
                 return earlyCompletion;
             }
-            return await Promise.race([goalTurnCompleted, goalTurnActivity]);
+            return await goalTurnCompleted;
         } finally {
             noGoalTurnStarted.release();
             releaseCompletionCapture();
             releaseRoutingCapture();
-            releaseActivityCapture();
             releaseStatusCapture();
             releaseGoalUpdateCapture();
         }
@@ -779,22 +720,6 @@ export class CodexAppServerClient {
         }
     }
 
-    private recordVisibleTurnActivity(
-        notification: ServerNotification,
-        routing: { threadId: string | null, turnId: string | null },
-    ): void {
-        if (routing.threadId === null || routing.turnId === null || !isVisibleTurnActivityNotification(notification)) {
-            return;
-        }
-        const captures = this.turnActivityCaptures.get(routing.threadId);
-        if (!captures) {
-            return;
-        }
-        for (const capture of captures) {
-            capture(routing.turnId);
-        }
-    }
-
     private handleStaleTurnNotification(
         notification: ServerNotification,
         routing: { threadId: string | null, turnId: string | null },
@@ -869,23 +794,6 @@ export class CodexAppServerClient {
             captures.delete(capture);
             if (captures.size === 0) {
                 this.turnRoutingCaptures.delete(threadId);
-            }
-        };
-    }
-
-    private captureTurnActivities(threadId: string, capture: (turnId: string) => void): () => void {
-        const captures = this.turnActivityCaptures.get(threadId) ?? new Set<(turnId: string) => void>();
-        captures.add(capture);
-        this.turnActivityCaptures.set(threadId, captures);
-        let released = false;
-        return () => {
-            if (released) {
-                return;
-            }
-            released = true;
-            captures.delete(capture);
-            if (captures.size === 0) {
-                this.turnActivityCaptures.delete(threadId);
             }
         };
     }
@@ -1079,31 +987,6 @@ function goalsMatch(left: ThreadGoal, right: ThreadGoal): boolean {
         && left.status === right.status
         && left.tokenBudget === right.tokenBudget
         && left.updatedAt === right.updatedAt;
-}
-
-function isVisibleTurnActivityNotification(notification: ServerNotification): boolean {
-    if (notification.method === "item/started") {
-        return isVisibleStartedItemType(notification.params.item.type);
-    }
-    if (notification.method === "item/completed") {
-        const item = notification.params.item;
-        if (item.type === "reasoning") {
-            return item.summary.length > 0 || item.content.length > 0;
-        }
-        if (item.type === "exitedReviewMode") {
-            return item.review.trim().length > 0;
-        }
-        return isVisibleCompletedItemType(item.type);
-    }
-    return VISIBLE_TURN_ACTIVITY_METHODS.has(notification.method);
-}
-
-function isVisibleStartedItemType(itemType: ServerNotificationItemType): boolean {
-    return VISIBLE_STARTED_ITEM_TYPES.has(itemType);
-}
-
-function isVisibleCompletedItemType(itemType: ServerNotificationItemType): boolean {
-    return VISIBLE_COMPLETED_ITEM_TYPES.has(itemType);
 }
 
 function extractThreadId(notification: ServerNotification): string | null {

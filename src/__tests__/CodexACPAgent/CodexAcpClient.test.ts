@@ -1575,6 +1575,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 delta: "I",
             },
         });
+        await Promise.resolve();
+        expect(promptResolved).toBe(false);
+
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
+
         await vi.waitFor(() => {
             expect(promptResolved).toBe(true);
         });
@@ -1677,12 +1682,100 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 delta: "late goal output",
             },
         });
+        await flushAsyncWork();
+        expect(promptResolved).toBe(false);
+
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
 
         await expect(promptPromise).resolves.toEqual(expect.objectContaining({
             stopReason: "end_turn",
         }));
         expect(promptResolved).toBe(true);
         expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+    });
+
+    it('waits for goal turn completion after the goal completes before streamed output finishes', async () => {
+        const { mockFixture } = setupPromptFixture();
+        const goal = createThreadGoal({updatedAt: 1710000160});
+        const completedGoal = createThreadGoal({
+            status: "complete",
+            updatedAt: 1710000170,
+            tokensUsed: 42,
+            timeUsedSeconds: 8,
+        });
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")
+            .mockResolvedValue({ goal });
+        let promptResolved = false;
+
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/goal tell me a joke" }],
+        }).then((response) => {
+            promptResolved = true;
+            return response;
+        });
+
+        await vi.waitFor(() => {
+            expect(mockFixture.getCodexAppServerClient().threadGoalSet).toHaveBeenCalledWith({
+                threadId: "session-id",
+                objective: "tell me a joke",
+                status: "active",
+            });
+        });
+
+        mockFixture.sendServerNotification({
+            method: "thread/goal/updated",
+            params: {
+                threadId: "session-id",
+                turnId: null,
+                goal,
+            },
+        });
+        mockFixture.sendServerNotification({
+            method: "thread/status/changed",
+            params: {
+                threadId: "session-id",
+                status: {
+                    type: "active",
+                    activeFlags: [],
+                },
+            },
+        });
+        mockFixture.sendServerNotification({
+            method: "thread/goal/updated",
+            params: {
+                threadId: "session-id",
+                turnId: "goal-turn-id",
+                goal: completedGoal,
+            },
+        });
+        mockFixture.sendServerNotification({
+            method: "item/agentMessage/delta",
+            params: {
+                threadId: "session-id",
+                turnId: "goal-turn-id",
+                itemId: "goal-message-id",
+                delta: "Why",
+            },
+        });
+        await flushAsyncWork();
+        expect(promptResolved).toBe(false);
+
+        mockFixture.sendServerNotification({
+            method: "item/agentMessage/delta",
+            params: {
+                threadId: "session-id",
+                turnId: "goal-turn-id",
+                itemId: "goal-message-id",
+                delta: " did the test wait?",
+            },
+        });
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
+
+        await expect(promptPromise).resolves.toEqual(expect.objectContaining({
+            stopReason: "end_turn",
+        }));
+        expect(promptResolved).toBe(true);
     });
 
     it('does not start the no-turn grace period before the goal update is handled', async () => {
@@ -1746,7 +1839,18 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             });
 
             await vi.advanceTimersByTimeAsync(0);
-            await expect(resultPromise).resolves.toBeNull();
+            await Promise.resolve();
+            expect(resultSettled).toBe(false);
+
+            mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
+            await vi.advanceTimersByTimeAsync(0);
+            await expect(resultPromise).resolves.toMatchObject({
+                threadId: "session-id",
+                turn: {
+                    id: "goal-turn-id",
+                    status: "completed",
+                },
+            });
             expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
         } finally {
             vi.useRealTimers();
@@ -1804,7 +1908,17 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             },
         });
 
-        await expect(resultPromise).resolves.toBeNull();
+        await flushAsyncWork();
+        expect(resultSettled).toBe(false);
+
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
+        await expect(resultPromise).resolves.toMatchObject({
+            threadId: "session-id",
+            turn: {
+                id: "goal-turn-id",
+                status: "completed",
+            },
+        });
         expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
     });
 
@@ -1874,14 +1988,25 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             });
 
             await vi.advanceTimersByTimeAsync(0);
-            await expect(resultPromise).resolves.toBeNull();
+            await Promise.resolve();
+            expect(resultSettled).toBe(false);
+
+            mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
+            await vi.advanceTimersByTimeAsync(0);
+            await expect(resultPromise).resolves.toMatchObject({
+                threadId: "session-id",
+                turn: {
+                    id: "goal-turn-id",
+                    status: "completed",
+                },
+            });
             expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
         } finally {
             vi.useRealTimers();
         }
     });
 
-    it('keeps goal set pending after turn start until visible turn activity routes', async () => {
+    it('keeps goal set pending after turn start until turn completion routes', async () => {
         vi.useFakeTimers();
         try {
             const mockFixture = createCodexMockTestFixture();
@@ -1946,7 +2071,18 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             });
 
             await vi.advanceTimersByTimeAsync(0);
-            await expect(resultPromise).resolves.toBeNull();
+            await Promise.resolve();
+            expect(resultSettled).toBe(false);
+
+            mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
+            await vi.advanceTimersByTimeAsync(0);
+            await expect(resultPromise).resolves.toMatchObject({
+                threadId: "session-id",
+                turn: {
+                    id: "goal-turn-id",
+                    status: "completed",
+                },
+            });
             expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
         } finally {
             vi.useRealTimers();
@@ -2354,7 +2490,17 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             await Promise.resolve();
             await Promise.resolve();
             await vi.advanceTimersByTimeAsync(0);
-            await expect(resultPromise).resolves.toBeNull();
+            expect(resultSettled).toBe(false);
+
+            mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
+            await vi.advanceTimersByTimeAsync(0);
+            await expect(resultPromise).resolves.toMatchObject({
+                threadId: "session-id",
+                turn: {
+                    id: "goal-turn-id",
+                    status: "completed",
+                },
+            });
             expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
         } finally {
             vi.useRealTimers();
