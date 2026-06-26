@@ -1508,18 +1508,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(turnStartSpy).not.toHaveBeenCalled();
     });
 
-    it('waits for goal slash command turn completion', async () => {
+    it('waits for goal slash command turn routing', async () => {
         const { mockFixture } = setupPromptFixture();
+        const goal = createThreadGoal();
         vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")
-            .mockResolvedValue({ goal: createThreadGoal() });
-        vi.spyOn(mockFixture.getCodexAppServerClient(), "threadRead")
-            .mockResolvedValue(createThreadReadResponse("active"));
-        let completeGoal: (value: TurnCompletedNotification) => void = () => {};
-        const goalCompletedPromise = new Promise<TurnCompletedNotification>((resolve) => {
-            completeGoal = resolve;
-        });
-        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
-            .mockReturnValue(goalCompletedPromise);
+            .mockResolvedValue({ goal });
+        const awaitTurnCompletedSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted");
 
         let promptResolved = false;
         const promptPromise = mockFixture.getCodexAcpAgent().prompt({
@@ -1546,7 +1540,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             params: {
                 threadId: "session-id",
                 turnId: null,
-                goal: createThreadGoal(),
+                goal,
             },
         });
         mockFixture.sendServerNotification({
@@ -1573,31 +1567,19 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             },
         });
         await vi.waitFor(() => {
-            expect(mockFixture.getCodexAppServerClient().awaitTurnCompleted).toHaveBeenCalledWith(
-                "session-id",
-                "goal-turn-id",
-            );
-        });
-        await Promise.resolve();
-        expect(promptResolved).toBe(false);
-
-        completeGoal({
-            threadId: "session-id",
-            turn: createTurn("goal-turn-id", "completed"),
+            expect(promptResolved).toBe(true);
         });
         await expect(promptPromise).resolves.toEqual(expect.objectContaining({
             stopReason: "end_turn",
         }));
-        expect(promptResolved).toBe(true);
+        expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
     });
 
-    it('does not complete no-turn goal slash command before the goal update notification is handled', async () => {
+    it('does not complete no-turn goal slash command before the goal update and runtime grace are handled', async () => {
         const { mockFixture } = setupPromptFixture();
         const goal = createThreadGoal({updatedAt: 1710000100});
         const threadGoalSetSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")
             .mockResolvedValue({ goal });
-        vi.spyOn(mockFixture.getCodexAppServerClient(), "threadRead")
-            .mockResolvedValue(createThreadReadResponse("idle"));
         let promptResolved = false;
 
         const promptPromise = mockFixture.getCodexAcpAgent().prompt({
@@ -1627,31 +1609,159 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             },
         });
 
+        await flushAsyncWork();
+        expect(promptResolved).toBe(false);
+
         await expect(promptPromise).resolves.toEqual(expect.objectContaining({
             stopReason: "end_turn",
         }));
         expect(mockFixture.getAcpConnectionDump([])).toContain("Goal updated (active): Ship the migration and keep tests green");
     });
 
-    it('ignores stale idle status while goal set is in flight when thread later reads active', async () => {
+    it('completes goal slash command when a turn routes after the goal update', async () => {
+        const { mockFixture } = setupPromptFixture();
+        const goal = createThreadGoal({updatedAt: 1710000150});
+        const threadGoalSetSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadGoalSet")
+            .mockResolvedValue({ goal });
+        const awaitTurnCompletedSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockResolvedValue({
+                threadId: "session-id",
+                turn: createTurn("goal-turn-id", "completed"),
+            });
+        let promptResolved = false;
+
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/goal Ship the migration and keep tests green" }],
+        }).then((response) => {
+            promptResolved = true;
+            return response;
+        });
+
+        await vi.waitFor(() => {
+            expect(threadGoalSetSpy).toHaveBeenCalledWith({
+                threadId: "session-id",
+                objective: "Ship the migration and keep tests green",
+                status: "active",
+            });
+        });
+
+        mockFixture.sendServerNotification({
+            method: "thread/goal/updated",
+            params: {
+                threadId: "session-id",
+                turnId: null,
+                goal,
+            },
+        });
+
+        await flushAsyncWork();
+        expect(promptResolved).toBe(false);
+        expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+
+        mockFixture.sendServerNotification({
+            method: "item/agentMessage/delta",
+            params: {
+                threadId: "session-id",
+                turnId: "goal-turn-id",
+                itemId: "goal-message-id",
+                delta: "late goal output",
+            },
+        });
+
+        await expect(promptPromise).resolves.toEqual(expect.objectContaining({
+            stopReason: "end_turn",
+        }));
+        expect(promptResolved).toBe(true);
+        expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not start the no-turn grace period before the goal update is handled', async () => {
+        vi.useFakeTimers();
+        try {
+            const mockFixture = createCodexMockTestFixture();
+            const codexAppServerClient = mockFixture.getCodexAppServerClient();
+            const goal = createThreadGoal({updatedAt: 1710000200});
+            const threadGoalSet = deferred<{goal: ThreadGoal}>();
+            const threadGoalSetSpy = vi.spyOn(codexAppServerClient, "threadGoalSet")
+                .mockReturnValue(threadGoalSet.promise);
+            const awaitTurnCompletedSpy = vi.spyOn(codexAppServerClient, "awaitTurnCompleted")
+                .mockResolvedValue({
+                    threadId: "session-id",
+                    turn: createTurn("goal-turn-id", "completed"),
+                });
+            let resultSettled = false;
+
+            const resultPromise = codexAppServerClient.runGoalSet({
+                threadId: "session-id",
+                objective: "Ship the migration and keep tests green",
+                status: "active",
+            }, undefined, undefined, 0).finally(() => {
+                resultSettled = true;
+            });
+
+            await vi.waitFor(() => {
+                expect(threadGoalSetSpy).toHaveBeenCalledWith({
+                    threadId: "session-id",
+                    objective: "Ship the migration and keep tests green",
+                    status: "active",
+                });
+            });
+
+            threadGoalSet.resolve({goal});
+            await vi.advanceTimersByTimeAsync(10_000);
+            await Promise.resolve();
+            expect(resultSettled).toBe(false);
+            expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+
+            mockFixture.sendServerNotification({
+                method: "thread/goal/updated",
+                params: {
+                    threadId: "session-id",
+                    turnId: null,
+                    goal,
+                },
+            });
+            await Promise.resolve();
+            expect(resultSettled).toBe(false);
+            expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+
+            mockFixture.sendServerNotification({
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: "session-id",
+                    turnId: "goal-turn-id",
+                    itemId: "goal-message-id",
+                    delta: "late goal output",
+                },
+            });
+
+            await vi.advanceTimersByTimeAsync(0);
+            await expect(resultPromise).resolves.toBeNull();
+            expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('completes goal set when a turn routes after the goal update', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
         const goal = createThreadGoal({updatedAt: 1710000200});
-        const threadGoalSet = deferred<{goal: ThreadGoal}>();
         const threadGoalSetSpy = vi.spyOn(codexAppServerClient, "threadGoalSet")
-            .mockReturnValue(threadGoalSet.promise);
-        vi.spyOn(codexAppServerClient, "threadRead")
-            .mockResolvedValue(createThreadReadResponse("active"));
-        const goalCompleted = deferred<TurnCompletedNotification>();
+            .mockResolvedValue({goal});
         const awaitTurnCompletedSpy = vi.spyOn(codexAppServerClient, "awaitTurnCompleted")
-            .mockReturnValue(goalCompleted.promise);
+            .mockResolvedValue({
+                threadId: "session-id",
+                turn: createTurn("goal-turn-id", "completed"),
+            });
         let resultSettled = false;
 
         const resultPromise = codexAppServerClient.runGoalSet({
             threadId: "session-id",
             objective: "Ship the migration and keep tests green",
             status: "active",
-        }).finally(() => {
+        }, undefined, undefined, 0).finally(() => {
             resultSettled = true;
         });
 
@@ -1664,13 +1774,13 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         mockFixture.sendServerNotification({
-            method: "thread/status/changed",
+            method: "thread/goal/updated",
             params: {
                 threadId: "session-id",
-                status: { type: "idle" },
+                turnId: null,
+                goal,
             },
         });
-        threadGoalSet.resolve({goal});
         await flushAsyncWork();
         expect(resultSettled).toBe(false);
         expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
@@ -1685,16 +1795,144 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             },
         });
 
-        await vi.waitFor(() => {
-            expect(awaitTurnCompletedSpy).toHaveBeenCalledWith("session-id", "goal-turn-id");
-        });
-        goalCompleted.resolve({
-            threadId: "session-id",
-            turn: createTurn("goal-turn-id", "completed"),
-        });
-        await expect(resultPromise).resolves.toMatchObject({
-            turn: createTurn("goal-turn-id", "completed"),
-        });
+        await expect(resultPromise).resolves.toBeNull();
+        expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+    });
+
+    it('keeps goal set pending while the thread is active before a turn routes', async () => {
+        vi.useFakeTimers();
+        try {
+            const mockFixture = createCodexMockTestFixture();
+            const codexAppServerClient = mockFixture.getCodexAppServerClient();
+            const goal = createThreadGoal({updatedAt: 1710000225});
+            const threadGoalSetSpy = vi.spyOn(codexAppServerClient, "threadGoalSet")
+                .mockResolvedValue({goal});
+            const awaitTurnCompletedSpy = vi.spyOn(codexAppServerClient, "awaitTurnCompleted")
+                .mockResolvedValue({
+                    threadId: "session-id",
+                    turn: createTurn("goal-turn-id", "completed"),
+                });
+            let resultSettled = false;
+
+            const resultPromise = codexAppServerClient.runGoalSet({
+                threadId: "session-id",
+                objective: "Ship the migration and keep tests green",
+                status: "active",
+            }, undefined, undefined, 0).finally(() => {
+                resultSettled = true;
+            });
+
+            await vi.waitFor(() => {
+                expect(threadGoalSetSpy).toHaveBeenCalledWith({
+                    threadId: "session-id",
+                    objective: "Ship the migration and keep tests green",
+                    status: "active",
+                });
+            });
+
+            mockFixture.sendServerNotification({
+                method: "thread/goal/updated",
+                params: {
+                    threadId: "session-id",
+                    turnId: null,
+                    goal,
+                },
+            });
+            mockFixture.sendServerNotification({
+                method: "thread/status/changed",
+                params: {
+                    threadId: "session-id",
+                    status: {
+                        type: "active",
+                        activeFlags: [],
+                    },
+                },
+            });
+
+            await vi.advanceTimersByTimeAsync(10_000);
+            await Promise.resolve();
+            expect(resultSettled).toBe(false);
+            expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+
+            mockFixture.sendServerNotification({
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: "session-id",
+                    turnId: "goal-turn-id",
+                    itemId: "goal-message-id",
+                    delta: "late goal output",
+                },
+            });
+
+            await vi.advanceTimersByTimeAsync(0);
+            await expect(resultPromise).resolves.toBeNull();
+            expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('completes goal set when active thread returns idle without routing a turn', async () => {
+        vi.useFakeTimers();
+        try {
+            const mockFixture = createCodexMockTestFixture();
+            const codexAppServerClient = mockFixture.getCodexAppServerClient();
+            const goal = createThreadGoal({updatedAt: 1710000250});
+            const threadGoalSetSpy = vi.spyOn(codexAppServerClient, "threadGoalSet")
+                .mockResolvedValue({goal});
+            let resultSettled = false;
+
+            const resultPromise = codexAppServerClient.runGoalSet({
+                threadId: "session-id",
+                objective: "Ship the migration and keep tests green",
+                status: "active",
+            }, undefined, undefined, 0).finally(() => {
+                resultSettled = true;
+            });
+
+            await vi.waitFor(() => {
+                expect(threadGoalSetSpy).toHaveBeenCalledWith({
+                    threadId: "session-id",
+                    objective: "Ship the migration and keep tests green",
+                    status: "active",
+                });
+            });
+
+            mockFixture.sendServerNotification({
+                method: "thread/goal/updated",
+                params: {
+                    threadId: "session-id",
+                    turnId: null,
+                    goal,
+                },
+            });
+            mockFixture.sendServerNotification({
+                method: "thread/status/changed",
+                params: {
+                    threadId: "session-id",
+                    status: {
+                        type: "active",
+                        activeFlags: [],
+                    },
+                },
+            });
+
+            await vi.advanceTimersByTimeAsync(10_000);
+            await Promise.resolve();
+            expect(resultSettled).toBe(false);
+
+            mockFixture.sendServerNotification({
+                method: "thread/status/changed",
+                params: {
+                    threadId: "session-id",
+                    status: { type: "idle" },
+                },
+            });
+
+            await expect(resultPromise).resolves.toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('interrupts a late-started goal slash command after the ACP prompt request is cancelled', async () => {
@@ -1747,19 +1985,17 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         // @ts-expect-error - registering local session state for the ACP cancel path
         mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const goal = createThreadGoal();
         const threadGoalSetSpy = vi.spyOn(codexAppServerClient, "threadGoalSet")
-            .mockResolvedValue({ goal: createThreadGoal() });
-        const threadRead = deferred<ReturnType<typeof createThreadReadResponse>>();
-        vi.spyOn(codexAppServerClient, "threadRead")
-            .mockReturnValue(threadRead.promise);
-        const goalCompleted = deferred<TurnCompletedNotification>();
-        vi.spyOn(codexAppServerClient, "awaitTurnCompleted")
-            .mockReturnValue(goalCompleted.promise);
+            .mockResolvedValue({ goal });
         const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt")
             .mockImplementation(async ({threadId, turnId}) => {
-                goalCompleted.resolve({
-                    threadId,
-                    turn: createTurn(turnId, "interrupted"),
+                mockFixture.sendServerNotification({
+                    method: "turn/completed",
+                    params: {
+                        threadId,
+                        turn: createTurn(turnId, "interrupted"),
+                    },
                 });
             });
         let cancelResolved = false;
@@ -1784,7 +2020,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await flushAsyncWork();
         expect(cancelResolved).toBe(false);
 
-        threadRead.resolve(createThreadReadResponse("active"));
+        mockFixture.sendServerNotification({
+            method: "thread/goal/updated",
+            params: {
+                threadId: "session-id",
+                turnId: null,
+                goal,
+            },
+        });
 
         mockFixture.sendServerNotification({
             method: "item/agentMessage/delta",
@@ -1809,10 +2052,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     it('suppresses the first routed goal notification after cancellation marks the turn stale', async () => {
         const { mockFixture } = setupPromptFixture();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const goal = createThreadGoal();
         const threadGoalSetSpy = vi.spyOn(codexAppServerClient, "threadGoalSet")
-            .mockResolvedValue({ goal: createThreadGoal() });
-        vi.spyOn(codexAppServerClient, "threadRead")
-            .mockResolvedValue(createThreadReadResponse("active"));
+            .mockResolvedValue({ goal });
         const turnInterruptSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "turnInterrupt")
             .mockResolvedValue(undefined);
         const controller = new AbortController();
@@ -1833,6 +2075,15 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         controller.abort();
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
         mockFixture.clearAcpConnectionDump();
+
+        mockFixture.sendServerNotification({
+            method: "thread/goal/updated",
+            params: {
+                threadId: "session-id",
+                turnId: null,
+                goal,
+            },
+        });
 
         mockFixture.sendServerNotification({
             method: "item/agentMessage/delta",
@@ -1860,8 +2111,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const goal = createThreadGoal({updatedAt: 1710000300});
         const threadGoalSetSpy = vi.spyOn(codexAppServerClient, "threadGoalSet")
             .mockResolvedValue({ goal });
-        const threadReadSpy = vi.spyOn(codexAppServerClient, "threadRead")
-            .mockResolvedValue(createThreadReadResponse("idle"));
         const awaitTurnCompletedSpy = vi.spyOn(codexAppServerClient, "awaitTurnCompleted");
         let resultSettled = false;
 
@@ -1869,12 +2118,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             threadId: "session-id",
             objective: "Ship the migration and keep tests green",
             status: "active",
-        }).finally(() => {
+        }, undefined, 0).finally(() => {
             resultSettled = true;
         });
 
         await vi.waitFor(() => {
-            expect(threadReadSpy).toHaveBeenCalledWith({threadId: "session-id"});
+            expect(threadGoalSetSpy).toHaveBeenCalledWith({
+                threadId: "session-id",
+                objective: "Ship the migration and keep tests green",
+                status: "active",
+            });
         });
         await flushAsyncWork();
         expect(resultSettled).toBe(false);
@@ -1889,11 +2142,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         await expect(resultPromise).resolves.toBeNull();
-        expect(threadGoalSetSpy).toHaveBeenCalledWith({
-            threadId: "session-id",
-            objective: "Ship the migration and keep tests green",
-            status: "active",
-        });
         expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
     });
 
@@ -1902,25 +2150,37 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         try {
             const mockFixture = createCodexMockTestFixture();
             const codexAppServerClient = mockFixture.getCodexAppServerClient();
+            const goal = createThreadGoal({updatedAt: 1710000400});
             vi.spyOn(codexAppServerClient, "threadGoalSet")
-                .mockResolvedValue({ goal: createThreadGoal() });
-            vi.spyOn(codexAppServerClient, "threadRead")
-                .mockResolvedValue(createThreadReadResponse("active"));
-            const goalCompleted = deferred<TurnCompletedNotification>();
+                .mockResolvedValue({ goal });
             const awaitTurnCompletedSpy = vi.spyOn(codexAppServerClient, "awaitTurnCompleted")
-                .mockReturnValue(goalCompleted.promise);
+                .mockResolvedValue({
+                    threadId: "session-id",
+                    turn: createTurn("goal-turn-id", "completed"),
+                });
             let resultSettled = false;
 
             const resultPromise = codexAppServerClient.runGoalSet({
                 threadId: "session-id",
                 objective: "Ship the migration and keep tests green",
                 status: "active",
-            }).finally(() => {
+            }, undefined, undefined, 0).finally(() => {
                 resultSettled = true;
             });
 
             await Promise.resolve();
             await vi.advanceTimersByTimeAsync(10_000);
+            await Promise.resolve();
+            expect(resultSettled).toBe(false);
+
+            mockFixture.sendServerNotification({
+                method: "thread/goal/updated",
+                params: {
+                    threadId: "session-id",
+                    turnId: null,
+                    goal,
+                },
+            });
             await Promise.resolve();
             expect(resultSettled).toBe(false);
 
@@ -1936,15 +2196,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
             await Promise.resolve();
             await Promise.resolve();
-            expect(awaitTurnCompletedSpy).toHaveBeenCalledWith("session-id", "goal-turn-id");
-
-            goalCompleted.resolve({
-                threadId: "session-id",
-                turn: createTurn("goal-turn-id", "completed"),
-            });
-            await expect(resultPromise).resolves.toMatchObject({
-                turn: createTurn("goal-turn-id", "completed"),
-            });
+            await vi.advanceTimersByTimeAsync(0);
+            await expect(resultPromise).resolves.toBeNull();
+            expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
         } finally {
             vi.useRealTimers();
         }

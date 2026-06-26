@@ -109,6 +109,9 @@ const McpServerElicitationRequest = new RequestType<
     void
 >('mcpServer/elicitation/request');
 
+const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
+const GOAL_TURN_COMPLETION_GRACE_MS = 250;
+
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
  * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
@@ -282,88 +285,178 @@ export class CodexAppServerClient {
     async runGoalSet(
         params: ThreadGoalSetParams,
         onTurnStarted?: (turnId: string) => void,
+        runtimeEffectsGraceMs = GOAL_RUNTIME_EFFECTS_GRACE_MS,
+        turnCompletionGraceMs = GOAL_TURN_COMPLETION_GRACE_MS,
     ): Promise<TurnCompletedNotification | null> {
+        let goalTurnId: string | null = null;
         const capturedCompletions: Array<TurnCompletedNotification> = [];
+        let resolveGoalTurnCompleted: (event: TurnCompletedNotification) => void = () => {};
+        const goalTurnCompleted = new Promise<TurnCompletedNotification>((resolve) => {
+            resolveGoalTurnCompleted = resolve;
+        });
         const releaseCompletionCapture = this.captureTurnCompletions(params.threadId, (event) => {
             capturedCompletions.push(event);
+            if (goalTurnId === event.turn.id) {
+                resolveGoalTurnCompleted(event);
+            }
         });
-        let goalTurnId: string | null = null;
         let resolveGoalTurnStarted: (turnId: string) => void = () => {};
         const goalTurnStarted = new Promise<string>((resolve) => {
             resolveGoalTurnStarted = resolve;
         });
-        let resolveNoGoalTurnStarted: () => void = () => {};
-        const noGoalTurnStarted = new Promise<null>((resolve) => {
-            resolveNoGoalTurnStarted = () => resolve(null);
-        });
-        let acceptNoGoalTurnStatus = false;
+        let goalUpdateHandled = false;
         let expectedGoal: ThreadGoal | null = null;
-        let resolveGoalUpdated: () => void = () => {};
-        const goalUpdated = new Promise<void>((resolve) => {
-            resolveGoalUpdated = resolve;
-        });
+        const noGoalTurnStarted = this.createNoGoalTurnStartedPromise(runtimeEffectsGraceMs);
         const capturedGoalUpdates: Array<ThreadGoalUpdatedNotification> = [];
         const releaseRoutingCapture = this.captureTurnRoutings(params.threadId, (turnId) => {
-            if (goalTurnId !== null) {
+            if (!goalUpdateHandled || goalTurnId !== null) {
                 return;
             }
             goalTurnId = turnId;
             onTurnStarted?.(turnId);
             resolveGoalTurnStarted(turnId);
         });
-        const releaseStatusCapture = this.captureThreadStatuses(params.threadId, (status) => {
-            if (!acceptNoGoalTurnStatus || goalTurnId !== null || status.type === "active") {
-                return;
-            }
-            resolveNoGoalTurnStarted();
-        });
         const releaseGoalUpdateCapture = this.captureThreadGoalUpdates(params.threadId, (event) => {
             capturedGoalUpdates.push(event);
             if (expectedGoal !== null && goalsMatch(event.goal, expectedGoal)) {
-                resolveGoalUpdated();
+                goalUpdateHandled = true;
+                noGoalTurnStarted.goalUpdated();
             }
+        });
+        const releaseStatusCapture = this.captureThreadStatuses(params.threadId, (status) => {
+            if (!goalUpdateHandled || goalTurnId !== null) {
+                return;
+            }
+            noGoalTurnStarted.threadStatusChanged(status);
         });
 
         try {
             const goalSetResponse = await this.threadGoalSet(params);
             expectedGoal = goalSetResponse.goal;
             if (capturedGoalUpdates.some(event => goalsMatch(event.goal, expectedGoal!))) {
-                resolveGoalUpdated();
+                goalUpdateHandled = true;
+                noGoalTurnStarted.goalUpdated();
             }
-            if (goalTurnId === null) {
-                const threadResponse = await this.threadRead({ threadId: params.threadId });
-                if (goalTurnId === null && threadResponse.thread.status.type !== "active") {
-                    await goalUpdated;
-                    if (goalTurnId === null) {
-                        resolveNoGoalTurnStarted();
-                    }
-                } else {
-                    acceptNoGoalTurnStatus = true;
-                }
-            }
-            let turnId = goalTurnId ?? await Promise.race([goalTurnStarted, noGoalTurnStarted]);
-            if (turnId === null) {
-                await goalUpdated;
-                turnId = goalTurnId;
-                if (turnId === null) {
-                    return null;
-                }
-            }
-            const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnId);
-            releaseCompletionCapture();
+            const turnId = goalTurnId ?? await Promise.race([goalTurnStarted, noGoalTurnStarted.promise]);
+            noGoalTurnStarted.release();
             releaseRoutingCapture();
             releaseStatusCapture();
             releaseGoalUpdateCapture();
+            if (turnId === null) {
+                return null;
+            }
+            const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnId);
             if (earlyCompletion) {
                 return earlyCompletion;
             }
-            return await this.awaitTurnCompleted(params.threadId, turnId);
+            const completionGrace = this.createGoalTurnCompletionGracePromise(turnCompletionGraceMs);
+            try {
+                return await Promise.race([goalTurnCompleted, completionGrace.promise]);
+            } finally {
+                completionGrace.release();
+            }
         } finally {
+            noGoalTurnStarted.release();
             releaseCompletionCapture();
             releaseRoutingCapture();
             releaseStatusCapture();
             releaseGoalUpdateCapture();
         }
+    }
+
+    private createNoGoalTurnStartedPromise(
+        runtimeEffectsGraceMs: number,
+    ): {
+        promise: Promise<null>,
+        release: () => void,
+        goalUpdated: () => void,
+        threadStatusChanged: (status: ThreadStatus) => void,
+    } {
+        let released = false;
+        let resolved = false;
+        let goalUpdated = false;
+        let activeAfterGoalUpdate = false;
+        let timeout: ReturnType<typeof setTimeout> | null = null;
+        let resolveNoGoalTurnStarted: () => void = () => {};
+        const clearTimer = () => {
+            if (timeout !== null) {
+                clearTimeout(timeout);
+                timeout = null;
+            }
+        };
+        const resolveNoTurn = () => {
+            if (released || resolved) {
+                return;
+            }
+            resolved = true;
+            clearTimer();
+            resolveNoGoalTurnStarted();
+        };
+        const scheduleNoTurnTimer = () => {
+            if (released || resolved || !goalUpdated || activeAfterGoalUpdate || timeout !== null) {
+                return;
+            }
+            timeout = setTimeout(resolveNoTurn, runtimeEffectsGraceMs);
+        };
+        const release = () => {
+            if (released) {
+                return;
+            }
+            released = true;
+            clearTimer();
+        };
+        const promise = new Promise<null>((resolve) => {
+            resolveNoGoalTurnStarted = () => {
+                resolve(null);
+            };
+        });
+        const handleGoalUpdated = () => {
+            goalUpdated = true;
+            scheduleNoTurnTimer();
+        };
+        const handleThreadStatusChanged = (status: ThreadStatus) => {
+            if (!goalUpdated || released || resolved) {
+                return;
+            }
+            if (status.type === "active") {
+                activeAfterGoalUpdate = true;
+                clearTimer();
+                return;
+            }
+            if (activeAfterGoalUpdate) {
+                resolveNoTurn();
+            }
+        };
+        return {
+            promise,
+            release,
+            goalUpdated: handleGoalUpdated,
+            threadStatusChanged: handleThreadStatusChanged,
+        };
+    }
+
+    private createGoalTurnCompletionGracePromise(
+        turnCompletionGraceMs: number,
+    ): { promise: Promise<null>, release: () => void } {
+        let released = false;
+        let timeout: ReturnType<typeof setTimeout> | null = null;
+        const release = () => {
+            if (released) {
+                return;
+            }
+            released = true;
+            if (timeout !== null) {
+                clearTimeout(timeout);
+            }
+        };
+        const promise = new Promise<null>((resolve) => {
+            const resolveNoGoalTurnCompleted = () => {
+                timeout = null;
+                resolve(null);
+            };
+            timeout = setTimeout(resolveNoGoalTurnCompleted, turnCompletionGraceMs);
+        });
+        return {promise, release};
     }
 
     async runCompact(params: ThreadCompactStartParams): Promise<CompactionCompletedNotification> {
