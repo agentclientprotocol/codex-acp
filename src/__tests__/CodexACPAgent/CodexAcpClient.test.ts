@@ -186,6 +186,22 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             .rejects.toThrow(`${CODEX_API_KEY_ENV_VAR} or ${OPENAI_API_KEY_ENV_VAR} is not set`);
     });
 
+    it('should not start ChatGPT login when already authenticated', async () => {
+        const chatGptFixture = createCodexMockTestFixture();
+        const codexAppServerClient = chatGptFixture.getCodexAppServerClient();
+        const accountReadSpy = vi.spyOn(codexAppServerClient, "accountRead").mockResolvedValue({
+            account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
+            requiresOpenaiAuth: false,
+        });
+        const accountLoginSpy = vi.spyOn(codexAppServerClient, "accountLogin");
+
+        await expect(chatGptFixture.getCodexAcpAgent().authenticate({methodId: "chat-gpt"}))
+            .resolves.toEqual({});
+
+        expect(accountReadSpy).toHaveBeenCalledWith({refreshToken: true});
+        expect(accountLoginSpy).not.toHaveBeenCalled();
+    });
+
     it('should authenticate with a gateway', async () => {
         const gatewayFixture = createTestFixture();
         const codexAcpAgent = gatewayFixture.getCodexAcpAgent();

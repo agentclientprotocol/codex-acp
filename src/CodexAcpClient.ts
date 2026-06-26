@@ -88,6 +88,11 @@ export class CodexAcpClient {
                 return await this.authenticateWithApiKey(apiKey);
             }
             case "chat-gpt": {
+                const accountResponse = await this.codexClient.accountRead({refreshToken: true});
+                if (accountResponse.account?.type === "chatgpt") {
+                    this.gatewayConfig = null;
+                    return true;
+                }
                 const loginCompletedPromise = this.awaitNextLoginCompleted();
                 const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
                 if (loginResponse.type == "chatgpt") {
