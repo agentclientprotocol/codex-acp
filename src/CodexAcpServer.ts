@@ -410,7 +410,11 @@ export class CodexAcpServer {
     }
 
     private async getActiveAuthState(): Promise<ActiveAuthState> {
-        if (this.codexAcpClient.hasGatewayAuth()) {
+        const modelProvider = this.codexAcpClient.getModelProvider();
+        if (
+            this.codexAcpClient.hasGatewayAuth() ||
+            (modelProvider !== null && modelProvider !== "openai")
+        ) {
             return {
                 account: null,
                 authConfigured: true,

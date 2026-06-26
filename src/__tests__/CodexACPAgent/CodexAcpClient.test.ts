@@ -1496,6 +1496,47 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    it('keeps custom provider sessions auth configured without account state', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const model = createTestModel();
+        const currentModelId = ModelId.create(model.id, model.defaultReasoningEffort).toString();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getModelProvider").mockReturnValue("custom-provider");
+        const getAccountSpy = vi.spyOn(codexAcpClient, "getAccount")
+            .mockResolvedValue({
+                account: null,
+                requiresOpenaiAuth: true,
+            });
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "custom-provider-session",
+            currentModelId,
+            models: [model],
+            additionalDirectories: [],
+        });
+        const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
+
+        const session = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
+            account: null,
+            authConfigured: true,
+        });
+
+        await codexAcpAgent.prompt({
+            sessionId: session.sessionId,
+            prompt: [{ type: "text", text: "/logout" }],
+        });
+
+        expect(logoutSpy).toHaveBeenCalledOnce();
+        expect(getAccountSpy).not.toHaveBeenCalled();
+        expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
+            account: null,
+            authConfigured: true,
+        });
+    });
+
     it('handles skills command', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
