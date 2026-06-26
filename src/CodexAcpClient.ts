@@ -343,7 +343,7 @@ export class CodexAcpClient {
     }
 
     async setGoalStatus(sessionId: string, status: ThreadGoalStatus): Promise<void> {
-        await this.codexClient.threadGoalSet({
+        await this.codexClient.runGoalSet({
             threadId: sessionId,
             status,
         });
@@ -360,7 +360,7 @@ export class CodexAcpClient {
     }
 
     async clearGoal(sessionId: string): Promise<void> {
-        await this.codexClient.threadGoalClear({threadId: sessionId});
+        await this.codexClient.runGoalClear({threadId: sessionId});
     }
 
     async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
