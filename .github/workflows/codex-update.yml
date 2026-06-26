@@ -2,7 +2,7 @@ name: Codex Update
 
 on:
   schedule:
-    - cron: '0 5 * * *' 
+    - cron: "0 5 * * *"
   workflow_dispatch:
 
 permissions:
@@ -10,9 +10,9 @@ permissions:
   packages: read
 
 env:
-  CODEX_PACKAGE: '@openai/codex'
-  CODEX_UPDATE_LABEL: 'codex-update'
-  GITHUB_BOT_USERNAME: 'github-actions[bot]'
+  CODEX_PACKAGE: "@openai/codex"
+  CODEX_UPDATE_LABEL: "codex-update"
+  GITHUB_BOT_USERNAME: "github-actions[bot]"
 
 jobs:
   check:
@@ -22,7 +22,7 @@ jobs:
       version: ${{ steps.check.outputs.version }}
       branch: ${{ steps.check.outputs.branch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -58,13 +58,13 @@ jobs:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
       - name: Generate GitHub token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         id: generate-token
         with:
           app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
           private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ steps.generate-token.outputs.token }}
 
@@ -83,7 +83,7 @@ jobs:
 
       - name: Finalize update with Codex
         id: codex-finalize
-        uses: openai/codex-action@v1
+        uses: openai/codex-action@10cb888d2ed3b99867f7e7ccff174a861a75aeb6
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           codex-version: ${{ env.VERSION }}
@@ -91,12 +91,12 @@ jobs:
           codex-args: >-
             -c sandbox_workspace_write.writable_roots=["${{ github.workspace }}/.git"]
           prompt: >
-            Finalize the update using codex-update-compat skill. 
-            Commit the changes, the message should mention that types or/and tests after the update were fixed. 
+            Finalize the update using codex-update-compat skill.
+            Commit the changes, the message should mention that types or/and tests after the update were fixed.
             When creating the final message do not mention:
             * Validation run details.
             * Commits.
-            * Hyperlinks. 
+            * Hyperlinks.
             Mention only previously failed tests with failure reasons, also what you changed and why.
 
       - name: Push branch updates
@@ -143,4 +143,3 @@ jobs:
             gh pr close "$pr_number" \
               --comment "Closing obsolete update PR"
           done
- 

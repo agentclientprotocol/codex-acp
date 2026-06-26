@@ -1,4 +1,4 @@
-import {isCodexAuthRequest} from "./CodexAuthMethod";
+import {CODEX_API_KEY_ENV_VAR, isCodexAuthRequest, OPENAI_API_KEY_ENV_VAR} from "./CodexAuthMethod";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
@@ -28,8 +28,10 @@ import type {
     GetAccountResponse,
     ListMcpServerStatusResponse,
     Model,
+    ReviewTarget,
     SkillsListParams,
     SkillsListResponse,
+    SandboxPolicy,
     Thread,
     ThreadSourceKind,
     TurnCompletedNotification,
@@ -50,6 +52,7 @@ export class CodexAcpClient {
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
+    private skillExtraRoots: string[] = [];
 
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
@@ -81,15 +84,8 @@ export class CodexAcpClient {
 
         switch (authRequest.methodId) {
             case "api-key": {
-                if (!authRequest._meta || !authRequest._meta["api-key"]) throw RequestError.invalidRequest();
-                const loginCompletedPromise = this.awaitNextLoginCompleted();
-                await this.codexClient.accountLogin({
-                    type: "apiKey",
-                    apiKey: authRequest._meta["api-key"].apiKey
-                });
-                this.gatewayConfig = null;
-                const result = await loginCompletedPromise;
-                return result.success;
+                const apiKey = authRequest._meta?.["api-key"]?.apiKey ?? this.readApiKeyFromEnv();
+                return await this.authenticateWithApiKey(apiKey);
             }
             case "chat-gpt": {
                 const loginCompletedPromise = this.awaitNextLoginCompleted();
@@ -104,7 +100,7 @@ export class CodexAcpClient {
             case "gateway":
                 if (!authRequest._meta) throw RequestError.invalidRequest();
 
-                const gatewaySettings = authRequest._meta["gateway"]
+                const gatewaySettings = authRequest._meta["gateway"];
                 if (!gatewaySettings) throw RequestError.invalidRequest();
 
                 const baseUrl = gatewaySettings.baseUrl;
@@ -124,7 +120,7 @@ export class CodexAcpClient {
                         http_headers: headers,
                         wire_api: "responses"
                     }
-                }
+                };
 
                 // Early return: model provider information will be sent to Codex later during the session creation
                 return true;
@@ -134,6 +130,30 @@ export class CodexAcpClient {
         // Reset the gateway config to null if another authentication method was used
         this.gatewayConfig = null;
         return false;
+    }
+
+    private async authenticateWithApiKey(apiKey: string): Promise<Boolean> {
+        const loginCompletedPromise = this.awaitNextLoginCompleted();
+        await this.codexClient.accountLogin({
+            type: "apiKey",
+            apiKey,
+        });
+        this.gatewayConfig = null;
+        const result = await loginCompletedPromise;
+        return result.success;
+    }
+
+    private readApiKeyFromEnv(): string {
+        for (const envVar of [CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR]) {
+            const value = process.env[envVar]?.trim();
+            if (value) {
+                return value;
+            }
+        }
+        throw RequestError.internalError(
+            {envVars: [CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR]},
+            `${CODEX_API_KEY_ENV_VAR} or ${OPENAI_API_KEY_ENV_VAR} is not set`
+        );
     }
 
 
@@ -159,7 +179,7 @@ export class CodexAcpClient {
             case "chatgpt":
                 return {
                     type: "chat-gpt",
-                    email: account.email,
+                    email: account.email ?? "",
                 };
             case "amazonBedrock":
                 return {
@@ -175,7 +195,7 @@ export class CodexAcpClient {
             return sessionModelProvider;
         }
         const settingsModelProvider = await this.codexClient.configRead({includeLayers: false});
-        return settingsModelProvider.config.model_provider;
+        return settingsModelProvider?.config?.model_provider ?? null;
     }
 
     async logout(): Promise<void> {
@@ -197,17 +217,22 @@ export class CodexAcpClient {
         return response.requiresOpenaiAuth && !response.account;
     }
 
+    hasGatewayAuth(): boolean {
+        return this.gatewayConfig !== null;
+    }
+
     async getAccount(): Promise<GetAccountResponse> {
         return this.codexClient.accountRead({refreshToken: false});
     }
 
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
-        await this.refreshSkills(request.cwd, request._meta);
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadResume({
-            config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: this.getResumeModelProvider(),
+            modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         onSubscribed?.();
@@ -217,34 +242,46 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            additionalDirectories,
         }
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        await this.refreshSkills(request.cwd, additionalDirectories);
+
         const response = await this.codexClient.threadResume({
-            config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: this.getResumeModelProvider(),
+            modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         onSubscribed?.();
+        const historyResponse = await this.codexClient.threadRead({
+            threadId: response.thread.id,
+            includeTurns: true,
+        });
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
-            thread: response.thread,
+            thread: historyResponse.thread,
+            additionalDirectories,
         };
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
-        await this.refreshSkills(request.cwd, request._meta);
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadStart({
-            config: await this.createSessionConfig(request.cwd, request.mcpServers),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });
@@ -258,7 +295,9 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
+            modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            additionalDirectories,
         };
     }
 
@@ -274,6 +313,22 @@ export class CodexAcpClient {
         await this.codexClient.threadArchive({threadId: sessionId});
     }
 
+    async runReview(
+        sessionId: string,
+        target: ReviewTarget,
+        onTurnStarted?: (turnId: string, threadId: string) => void,
+    ): Promise<TurnCompletedNotification> {
+        return await this.codexClient.runReview({
+            threadId: sessionId,
+            target,
+            delivery: "inline",
+        }, onTurnStarted);
+    }
+
+    async runCompact(sessionId: string): Promise<void> {
+        await this.codexClient.runCompact({threadId: sessionId});
+    }
+
     async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
         return await this.codexClient.awaitMcpServerStartup(serverNames, afterVersion);
     }
@@ -282,34 +337,40 @@ export class CodexAcpClient {
         return this.codexClient.getMcpServerStartupVersion();
     }
 
-    private async createSessionConfig(projectPath: string, mcpServers: Array<McpServer>): Promise<JsonObject> {
+    private async createSessionConfig(
+        projectPath: string,
+        additionalDirectories: string[],
+        mcpServers: Array<McpServer>
+    ): Promise<JsonObject> {
+        const sessionRoots = [projectPath, ...additionalDirectories];
         const mergedConfig = {
             ...mergeGatewayConfig(this.config, this.gatewayConfig),
-            projects: {
-                [projectPath]: {
-                    trust_level: "trusted",
-                }
-            },
+            projects: Object.fromEntries(sessionRoots.map(root => [root, {
+                trust_level: "trusted",
+            }])),
         };
+        const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
         if (mcpServers.length === 0) {
-            return mergedConfig;
+            return configWithWorkspaceRoots;
         }
 
-        // Deduplicates new servers against existing config to prevent Codex from deep-merging
-        // incompatible field types (e.g., mixing url and stdio schemas).
-        const existingNames = await this.getConfigMcpServerNames(projectPath);
         const requestedServers = mcpServers.map(mcp => ({
             name: sanitizeMcpServerName(mcp.name),
             server: mcp,
         }));
-        const uniqueServers = requestedServers.filter(mcp => !existingNames.has(mcp.name));
-        if (uniqueServers.length === 0) {
-            return mergedConfig;
+        let serversToConfigure = requestedServers;
+        if (shouldDeduplicateMcpConflicts()) {
+            // Prevents Codex from deep-merging incompatible field types, such as url and stdio schemas.
+            const existingNames = await this.getConfigMcpServerNames(projectPath);
+            serversToConfigure = requestedServers.filter(mcp => !existingNames.has(mcp.name));
+        }
+        if (serversToConfigure.length === 0) {
+            return configWithWorkspaceRoots;
         }
 
         return {
-            ...mergedConfig,
-            "mcp_servers": Object.fromEntries(uniqueServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+            ...configWithWorkspaceRoots,
+            "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
         };
     }
 
@@ -326,23 +387,27 @@ export class CodexAcpClient {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
     }
 
-    private getResumeModelProvider(): string {
-        // Passing `null` forces codex to use the persisted provider for resumed session instead of default one
-        // Explicit fallback to "openai" fixes error `Model provider not found` at least for ChatGPT authentication
-        return this.getModelProvider() ?? "openai";
+    private async getResumeModelProvider(): Promise<string> {
+        // Prefer an explicit/gateway provider, then the provider persisted in Codex config.
+        // Keep OpenAI as the final fallback for ChatGPT-authenticated sessions without a configured provider.
+        return (await this.getCurrentModelProvider()) ?? "openai";
     }
 
-    private async refreshSkills(cwd: string, meta?: Record<string, unknown> | null): Promise<void> {
+    private async refreshSkills(
+        cwd: string,
+        additionalRoots: string[]
+    ): Promise<void> {
         if (!cwd) {
             return;
         }
 
-        const additionalRoots = readAdditionalRoots(meta).map(root => path.join(root, ".agents", "skills"));
-        if (additionalRoots.length > 0) {
-            await this.codexClient.skillsExtraRootsSet({ extraRoots: additionalRoots });
+        const skillExtraRoots = additionalRoots.map(root => path.join(root, ".agents", "skills"));
+        if (!arraysEqual(this.skillExtraRoots, skillExtraRoots)) {
+            await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
+            this.skillExtraRoots = skillExtraRoots;
         }
         await this.codexClient.listSkills({
-            cwds: [cwd],
+            cwds: [cwd, ...additionalRoots],
             forceReload: true,
         });
     }
@@ -420,6 +485,10 @@ export class CodexAcpClient {
                 await this.waitForSessionNotifications(sessionId);
                 return await approvalHandler.handleFileChange(params);
             },
+            handlePermissionsRequest: async (params) => {
+                await this.waitForSessionNotifications(sessionId);
+                return await approvalHandler.handlePermissionsRequest(params);
+            },
         });
         this.codexClient.onElicitationRequest(sessionId, {
             handleElicitation: async (params) => {
@@ -463,13 +532,13 @@ export class CodexAcpClient {
         serviceTier: ServiceTier | null,
         disableSummary: boolean,
         cwd: string,
+        additionalDirectories: string[],
         onTurnStarted?: (turnId: string) => void,
         shouldCancel?: () => boolean,
     ): Promise<TurnCompletedNotification | null> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
-
-        await this.refreshSkills(cwd, request._meta);
+        await this.refreshSkills(cwd, additionalDirectories);
         if (shouldCancel?.()) {
             return null;
         }
@@ -477,8 +546,8 @@ export class CodexAcpClient {
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
-            sandboxPolicy: agentMode.sandboxPolicy,
-            summary: disableSummary ? "none" : null,
+            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,
@@ -550,11 +619,6 @@ export class CodexAcpClient {
             "vscode",
             "exec",
             "appServer",
-            "subAgent",
-            "subAgentReview",
-            "subAgentCompact",
-            "subAgentThreadSpawn",
-            "subAgentOther",
             "unknown",
         ];
         const requestedCwd = request.cwd?.trim() ?? null;
@@ -575,26 +639,23 @@ export class CodexAcpClient {
             sourceKinds: sourceKinds,
         });
 
+        const mapThreadToSession = (thread: Thread) => ({
+            sessionId: thread.id,
+            cwd: thread.cwd,
+            title: (thread.name ?? thread.preview) || null,
+            updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
+        });
+
         if (listResponse.data.length === 0) {
             const diagnostics = await this.runSessionListDiagnostics();
             logger.log("Session list diagnostics", diagnostics);
         }
 
-        let sessions = listResponse.data.map((thread) => ({
-            sessionId: thread.id,
-            cwd: thread.cwd,
-            title: (thread.name ?? thread.preview) || null,
-            updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
-        }));
+        let sessions = listResponse.data.map(mapThreadToSession);
         if (requestedCwd) {
             const filtered = listResponse.data
                 .filter(filterByCwd)
-                .map((thread) => ({
-                    sessionId: thread.id,
-                    cwd: thread.cwd,
-                    title: (thread.name ?? thread.preview) || null,
-                    updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
-                }));
+                .map(mapThreadToSession);
             if (filtered.length > 0 || path.isAbsolute(requestedCwd)) {
                 sessions = filtered;
             } else {
@@ -659,7 +720,9 @@ export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
     models: Model[],
+    modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,
+    additionalDirectories: string[],
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
@@ -672,7 +735,7 @@ function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
             case "text":
                 return {type: "text", text: block.text, text_elements: []};
             case "image": {
-                const url = block.uri ?? `data:${block.mimeType};base64,${block.data}`;
+                const url = isSupportedImageUrl(block.uri) ? block.uri : imageDataUrl(block);
                 return {type: "image", url};
             }
             case "resource_link":
@@ -684,12 +747,38 @@ function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
                     const context = `<context ref="${resource.uri}">\n${resource.text}\n</context>`;
                     return {type: "text", text: `${link}\n${context}`, text_elements: []};
                 }
-                return null;
+                if (isImageMimeType(resource.mimeType)) {
+                    return {type: "image", url: `data:${resource.mimeType};base64,${resource.blob}`};
+                }
+                const link = formatUriAsLink(null, resource.uri);
+                const mimeType = resource.mimeType ?? "application/octet-stream";
+                const context = `<context ref="${resource.uri}" mimeType="${mimeType}" encoding="base64">\n${resource.blob}\n</context>`;
+                return {type: "text", text: `${link}\n${context}`, text_elements: []};
             }
             case "audio":
                 return null;
         }
     }).filter((block): block is UserInput => block !== null);
+}
+
+function imageDataUrl(block: acp.ContentBlock & { type: "image" }): string {
+    return `data:${block.mimeType};base64,${block.data}`;
+}
+
+function isImageMimeType(mimeType: string | null | undefined): mimeType is string {
+    return mimeType?.startsWith("image/") ?? false;
+}
+
+function isSupportedImageUrl(uri: string | null | undefined): uri is string {
+    if (!uri) {
+        return false;
+    }
+    try {
+        const protocol = new URL(uri).protocol;
+        return protocol === "http:" || protocol === "https:" || protocol === "data:";
+    } catch {
+        return false;
+    }
 }
 
 function formatUriAsLink(name: string | null | undefined, uri: string): string {
@@ -704,6 +793,11 @@ function formatUriAsLink(name: string | null | undefined, uri: string): string {
     return uri;
 }
 
+function shouldDeduplicateMcpConflicts(): boolean {
+    const disabledByEnv = process.env["DISABLE_MCP_CONFIG_FILTERING"] === "true";
+    return !disabledByEnv;
+}
+
 interface GatewayConfig {
     modelProvider: string;
     config: {
@@ -714,16 +808,93 @@ interface GatewayConfig {
     }
 }
 
-function readAdditionalRoots(meta: Record<string, unknown> | null | undefined): string[] {
+function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[] | undefined {
     const rawRoots = meta?.["additionalRoots"];
     if (!Array.isArray(rawRoots)) {
+        return undefined;
+    }
+
+    return uniqueStrings(rawRoots
+        .filter((value): value is string => typeof value === "string")
+        .map(value => value.trim())
+        .filter(value => value.length > 0));
+}
+
+function readAdditionalDirectories(cwd: string, additionalDirectories?: string[],  meta?: Record<string, unknown> | null): string[] {
+    const rawDirectories = additionalDirectories ?? readMetaAdditionalRoots(meta);
+    if (!rawDirectories) {
         return [];
     }
 
-    return Array.from(new Set(rawRoots
-        .filter((value): value is string => typeof value === "string")
-        .map(value => value.trim())
-        .filter(value => value.length > 0)));
+    const directories: string[] = [];
+    const seen = new Set<string>([cwd]);
+    for (const directory of rawDirectories) {
+        if (typeof directory !== "string") {
+            throw RequestError.invalidParams(undefined, "additionalDirectories entries must be strings");
+        }
+        if (directory.length === 0) {
+            throw RequestError.invalidParams(undefined, "additionalDirectories entries must not be empty");
+        }
+        if (!path.isAbsolute(directory)) {
+            throw RequestError.invalidParams(undefined, "additionalDirectories entries must be absolute paths");
+        }
+        if (!seen.has(directory)) {
+            seen.add(directory);
+            directories.push(directory);
+        }
+    }
+
+    return directories;
+}
+
+function mergeSandboxWorkspaceWriteRoots(config: JsonObject, roots: string[]): JsonObject {
+    if (roots.length === 0) {
+        return config;
+    }
+
+    const existingSandboxConfig = isJsonObject(config["sandbox_workspace_write"])
+        ? config["sandbox_workspace_write"]
+        : {};
+    const existingWritableRoots = Array.isArray(existingSandboxConfig["writable_roots"])
+        ? existingSandboxConfig["writable_roots"].filter((value): value is string => typeof value === "string")
+        : [];
+
+    return {
+        ...config,
+        sandbox_workspace_write: {
+            ...existingSandboxConfig,
+            writable_roots: uniqueStrings([...existingWritableRoots, ...roots]),
+        },
+    };
+}
+
+function addAdditionalDirectoriesToSandboxPolicy(
+    sandboxPolicy: SandboxPolicy,
+    additionalDirectories: string[]
+): SandboxPolicy {
+    if (additionalDirectories.length === 0 || sandboxPolicy.type !== "workspaceWrite") {
+        return sandboxPolicy;
+    }
+
+    return {
+        ...sandboxPolicy,
+        writableRoots: uniqueStrings([...sandboxPolicy.writableRoots, ...additionalDirectories]),
+    };
+}
+
+function uniqueStrings(values: string[]): string[] {
+    return Array.from(new Set(values));
+}
+
+function arraysEqual(left: string[], right: string[]): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+    return left.every((value, index) => value === right[index]);
+}
+
+function isJsonObject(value: JsonValue | undefined): value is JsonObject {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function mergeGatewayConfig(config: JsonObject, gatewayConfig: GatewayConfig | null): JsonObject {

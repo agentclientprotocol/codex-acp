@@ -35,6 +35,7 @@ url = "https://example.com/mcp"
     });
 
     afterEach(() => {
+        vi.unstubAllEnvs();
         removeDirectoryWithRetry(codexHome);
     });
 
@@ -65,5 +66,25 @@ url = "https://example.com/mcp"
         const transportDump = fixture.getAcpConnectionDump([]);
         expect(transportDump).contain("Configured MCP servers:");
         expect(transportDump).contain("- shared-mcp");
+    });
+
+    it('should not filter the conflicting ACP MCP when config filtering is disabled', async () => {
+        vi.stubEnv("DISABLE_MCP_CONFIG_FILTERING", "true");
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+
+        const conflictingMcp: McpServerStdio = {
+            name: "shared-mcp",
+            command: "./node_modules/.bin/mcp-hello-world",
+            args: ["example"],
+            env: [{name: "example", value: "example"}],
+        };
+
+        await expect(codexAcpAgent.newSession({
+            cwd: "",
+            mcpServers: [conflictingMcp],
+        })).rejects.toThrow("url is not supported for stdio");
     });
 });

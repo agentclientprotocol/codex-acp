@@ -10,13 +10,6 @@
         "rawOutput": {
           "formatted_output": "cat: nonexistent.txt: No such file or directory",
           "exit_code": 1
-        },
-        "_meta": {
-          "terminal_exit": {
-            "exit_code": 1,
-            "signal": null,
-            "terminal_id": "command-456"
-          }
         }
       }
     }

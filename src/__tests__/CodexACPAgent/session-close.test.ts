@@ -458,6 +458,7 @@ async function createSession(options: {
         currentModelId: "model-id[medium]",
         models: [model],
         currentServiceTier: null,
+        additionalDirectories: [],
     });
 
     options.configure?.({fixture, codexAcpAgent, codexAcpClient});
@@ -503,6 +504,7 @@ function createSessionMetadata(): SessionMetadata {
         currentModelId: "model-id[medium]",
         models: [createTestModel()],
         currentServiceTier: null,
+        additionalDirectories: [],
     };
 }
 

@@ -1,0 +1,49 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "web-search-1",
+        "kind": "search",
+        "title": "Web search: agent client protocol",
+        "status": "in_progress",
+        "rawInput": {
+          "type": "webSearch",
+          "id": "web-search-1",
+          "query": "agent client protocol",
+          "action": {
+            "type": "search",
+            "query": "agent client protocol",
+            "queries": null
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "web-search-1",
+        "title": "Web search: agent client protocol",
+        "status": "completed",
+        "rawInput": {
+          "type": "webSearch",
+          "id": "web-search-1",
+          "query": "agent client protocol",
+          "action": {
+            "type": "search",
+            "query": "agent client protocol",
+            "queries": null
+          }
+        }
+      }
+    }
+  ]
+}

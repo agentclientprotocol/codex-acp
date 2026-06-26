@@ -15,7 +15,7 @@ export interface CodexConnection {
 export function startCodexConnection(codexPath?: string, env?: NodeJS.ProcessEnv): CodexConnection {
     const spawnEnv = env ?? process.env;
 
-    let codex: ChildProcessWithoutNullStreams
+    let codex: ChildProcessWithoutNullStreams;
     if (codexPath) {
         codex = process.platform === 'win32'
             ? spawn(`"${codexPath}" app-server`, { shell: true, env: spawnEnv })

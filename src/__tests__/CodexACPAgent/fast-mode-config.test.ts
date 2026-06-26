@@ -33,6 +33,7 @@ describe("Fast mode session config", () => {
             currentModelId: "fast-model[medium]",
             models: [fastModel],
             currentServiceTier,
+            additionalDirectories: [],
         });
 
         await codexAcpAgent.initialize({

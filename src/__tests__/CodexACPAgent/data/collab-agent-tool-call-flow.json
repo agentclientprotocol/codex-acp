@@ -1,0 +1,57 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-spawn-weather",
+        "kind": "other",
+        "title": "spawnAgent",
+        "status": "in_progress",
+        "rawInput": {
+          "prompt": "Find the current weather in Paris.",
+          "senderThreadId": "thread-main",
+          "receiverThreadIds": [
+            "thread-paris"
+          ],
+          "agentsStates": {
+            "thread-paris": {
+              "status": "running",
+              "message": "Checking weather"
+            }
+          },
+          "status": "inProgress"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-spawn-weather",
+        "title": "spawnAgent",
+        "status": "completed",
+        "rawInput": {
+          "prompt": "Find the current weather in Paris.",
+          "senderThreadId": "thread-main",
+          "receiverThreadIds": [
+            "thread-paris"
+          ],
+          "agentsStates": {
+            "thread-paris": {
+              "status": "completed",
+              "message": null
+            }
+          },
+          "status": "completed"
+        }
+      }
+    }
+  ]
+}

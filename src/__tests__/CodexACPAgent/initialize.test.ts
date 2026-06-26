@@ -51,6 +51,7 @@ describe('CodexACPAgent - initialize', () => {
                     list: {},
                     close: {},
                     delete: {},
+                    additionalDirectories: {},
                 },
                 mcpCapabilities: {
                     acp: false,
@@ -81,5 +82,31 @@ describe('CodexACPAgent - initialize', () => {
                 id: "gateway",
             })
         ]));
+    });
+
+    it('should advertise API key auth with the legacy metadata method', () => {
+        expect(getCodexAuthMethods()).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: "api-key",
+                _meta: {
+                    "api-key": {
+                        provider: "openai",
+                    },
+                },
+            }),
+        ]));
+        expect(getCodexAuthMethods()).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({type: "env_var"}),
+            expect.objectContaining({id: "codex-api-key"}),
+            expect.objectContaining({id: "openai-api-key"}),
+        ]));
+    });
+
+    it('should not advertise ChatGPT auth when browser auth is disabled', () => {
+        const methodIds = getCodexAuthMethods(undefined, {NO_BROWSER: "1"} as NodeJS.ProcessEnv)
+            .map((method) => method.id);
+
+        expect(methodIds).not.toContain("chat-gpt");
+        expect(methodIds).toEqual(expect.arrayContaining(["api-key"]));
     });
 });

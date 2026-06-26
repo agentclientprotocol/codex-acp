@@ -1,6 +1,18 @@
 
 import type {AuthenticateRequest, AuthMethod, ClientCapabilities} from "@agentclientprotocol/sdk";
 
+export const CODEX_API_KEY_ENV_VAR = "CODEX_API_KEY";
+export const OPENAI_API_KEY_ENV_VAR = "OPENAI_API_KEY";
+
+interface ApiKeyAuthRequest extends AuthenticateRequest {
+    methodId: "api-key";
+    _meta?: {
+        "api-key"?: {
+            apiKey: string;
+        }
+    } | null;
+}
+
 const ApiKeyAuthMethod: AuthMethod = {
     id: "api-key",
     name: "API Key",
@@ -10,15 +22,6 @@ const ApiKeyAuthMethod: AuthMethod = {
             provider: "openai"
         }
     }
-}
-
-interface ApiKeyAuthRequest extends AuthenticateRequest {
-    methodId: "api-key";
-    _meta: {
-        "api-key": {
-            apiKey: string;
-        }
-    };
 }
 
 const ChatGptAuthMethod: AuthMethod = {
@@ -54,8 +57,11 @@ export interface GatewayAuthRequest extends AuthenticateRequest {
     };
 }
 
-export function getCodexAuthMethods(clientCapabilities?: ClientCapabilities | null): AuthMethod[] {
-    const authMethods: AuthMethod[] = [ApiKeyAuthMethod, ChatGptAuthMethod];
+export function getCodexAuthMethods(clientCapabilities?: ClientCapabilities | null, env: NodeJS.ProcessEnv = process.env): AuthMethod[] {
+    const authMethods: AuthMethod[] = [ApiKeyAuthMethod];
+    if (!env["NO_BROWSER"]) {
+        authMethods.push(ChatGptAuthMethod);
+    }
     const supportsGatewayAuth = clientCapabilities?.auth?._meta?.["gateway"] === true;
     if (supportsGatewayAuth) {
         authMethods.push(GatewayAuthMethod);

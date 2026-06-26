@@ -1,0 +1,33 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "view-image-1",
+        "kind": "read",
+        "title": "View Image /tmp/codex/input.png",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "resource_link",
+              "name": "/tmp/codex/input.png",
+              "uri": "/tmp/codex/input.png"
+            }
+          }
+        ],
+        "locations": [
+          {
+            "path": "/tmp/codex/input.png"
+          }
+        ],
+        "rawInput": {
+          "path": "/tmp/codex/input.png"
+        }
+      }
+    }
+  ]
+}

@@ -22,6 +22,32 @@
             "input": null
           },
           {
+            "name": "review",
+            "description": "Review uncommitted changes, or review with custom instructions.",
+            "input": {
+              "hint": "optional review instructions"
+            }
+          },
+          {
+            "name": "review-branch",
+            "description": "Review changes relative to a base branch.",
+            "input": {
+              "hint": "branch name"
+            }
+          },
+          {
+            "name": "review-commit",
+            "description": "Review a specific commit.",
+            "input": {
+              "hint": "commit sha"
+            }
+          },
+          {
+            "name": "compact",
+            "description": "Summarize conversation to avoid hitting the context limit.",
+            "input": null
+          },
+          {
             "name": "logout",
             "description": "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
             "input": null
@@ -128,6 +154,34 @@
     {
       "sessionId": "session-1",
       "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "item-cmd-1",
+        "status": "completed",
+        "rawOutput": {
+          "formatted_output": "Added.txt\nREADME.md\n",
+          "exit_code": 0
+        },
+        "_meta": {
+          "terminal_output_delta": {
+            "data": "Added.txt\nREADME.md\n",
+            "terminal_id": "item-cmd-1"
+          },
+          "terminal_exit": {
+            "exit_code": 0,
+            "signal": null,
+            "terminal_id": "item-cmd-1"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-file-1",
         "title": "Editing files",
@@ -186,6 +240,78 @@
           "arguments": {
             "includeDisabled": false
           }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "item-image-view-1",
+        "kind": "read",
+        "title": "View Image /test/project/input.png",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "resource_link",
+              "name": "/test/project/input.png",
+              "uri": "/test/project/input.png"
+            }
+          }
+        ],
+        "locations": [
+          {
+            "path": "/test/project/input.png"
+          }
+        ],
+        "rawInput": {
+          "path": "/test/project/input.png"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "item-image-generation-1",
+        "kind": "other",
+        "title": "Image generation",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Revised prompt: A tiny blue square"
+            }
+          },
+          {
+            "type": "content",
+            "content": {
+              "type": "image",
+              "data": "iVBORw0KGgo=",
+              "mimeType": "image/png",
+              "uri": "/test/project/generated-blue-square.png"
+            }
+          }
+        ],
+        "rawOutput": {
+          "status": "completed",
+          "revisedPrompt": "A tiny blue square",
+          "result": "iVBORw0KGgo=",
+          "savedPath": "/test/project/generated-blue-square.png"
         }
       }
     }

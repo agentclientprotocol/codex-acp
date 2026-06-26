@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { CommandExecutionRequestApprovalParams, FileChangeRequestApprovalParams } from '../../app-server/v2';
+import type {
+    CommandExecutionRequestApprovalParams,
+    FileChangeRequestApprovalParams,
+    PermissionsRequestApprovalParams,
+} from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { SessionState } from '../../CodexAcpServer';
 import {AgentMode} from "../../AgentMode";
+import {ApprovalOptionId} from "../../ApprovalOptionId";
 
 describe('Approval Events', () => {
     let fixture: CodexMockTestFixture;
@@ -68,6 +73,7 @@ describe('Approval Events', () => {
                     itemId: `item-${optionId}`,
                     reason: 'Test command',
                     startedAtMs: 0,
+                    environmentId: null,
                     proposedExecpolicyAmendment: null,
                 };
 
@@ -93,6 +99,7 @@ describe('Approval Events', () => {
                 threadId: sessionId,
                 turnId: 'turn-1',
                 startedAtMs: 0,
+                environmentId: null,
                 itemId: 'item-cancelled',
                 reason: null,
                 proposedExecpolicyAmendment: null,
@@ -109,11 +116,104 @@ describe('Approval Events', () => {
             await promptPromise;
         });
 
+        it('should map execpolicy amendment approval to the exact app-server decision', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: ApprovalOptionId.AcceptWithExecpolicyAmendment }
+            });
+
+            const proposedExecpolicyAmendment = ['npm', 'install'];
+            const params: CommandExecutionRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-execpolicy-amendment',
+                startedAtMs: 0,
+                environmentId: null,
+                reason: 'Installing dependencies',
+                command: 'npm install',
+                cwd: '/home/user/project',
+                proposedExecpolicyAmendment,
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                params
+            );
+
+            expect(response).toEqual({
+                decision: {
+                    acceptWithExecpolicyAmendment: {
+                        execpolicy_amendment: proposedExecpolicyAmendment,
+                    },
+                },
+            });
+
+            const requestEvent = fixture.getAcpConnectionEvents([])[0];
+            expect(requestEvent).toBeDefined();
+            const request = requestEvent!.args[0];
+            expect(request.options).toContainEqual(
+                expect.objectContaining({
+                    optionId: ApprovalOptionId.AcceptWithExecpolicyAmendment,
+                    kind: 'allow_always',
+                })
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should map network policy amendment approval to the exact app-server decision', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            const optionId = `${ApprovalOptionId.ApplyNetworkPolicyAmendment}:0`;
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId }
+            });
+
+            const networkPolicyAmendment = { host: 'registry.npmjs.org', action: 'allow' as const };
+            const params: CommandExecutionRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-network-policy-amendment',
+                startedAtMs: 0,
+                environmentId: null,
+                reason: 'Needs network access',
+                networkApprovalContext: { host: 'registry.npmjs.org', protocol: 'https' },
+                proposedNetworkPolicyAmendments: [networkPolicyAmendment],
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                params
+            );
+
+            expect(response).toEqual({
+                decision: {
+                    applyNetworkPolicyAmendment: {
+                        network_policy_amendment: networkPolicyAmendment,
+                    },
+                },
+            });
+
+            const requestEvent = fixture.getAcpConnectionEvents([])[0];
+            expect(requestEvent).toBeDefined();
+            const request = requestEvent!.args[0];
+            expect(request.options).toContainEqual(
+                expect.objectContaining({
+                    optionId,
+                    kind: 'allow_always',
+                })
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+
         it('should return cancel when no handler registered', async () => {
             const params: CommandExecutionRequestApprovalParams = {
                 threadId: 'non-existent-session',
                 turnId: 'turn-1',
                 startedAtMs: 0,
+                environmentId: null,
                 itemId: 'item-no-handler',
                 reason: null,
                 proposedExecpolicyAmendment: null,
@@ -137,6 +237,7 @@ describe('Approval Events', () => {
                 threadId: sessionId,
                 turnId: 'turn-1',
                 startedAtMs: 0,
+                environmentId: null,
                 itemId: 'item-snapshot',
                 reason: 'Running npm install',
                 proposedExecpolicyAmendment: null,
@@ -165,6 +266,7 @@ describe('Approval Events', () => {
                 threadId: sessionId,
                 turnId: 'turn-1',
                 startedAtMs: 0,
+                environmentId: null,
                 itemId: 'item-with-command',
                 reason: 'Installing dependencies',
                 command: 'npm install',
@@ -203,6 +305,7 @@ describe('Approval Events', () => {
                 threadId: sessionId,
                 turnId: 'turn-1',
                 startedAtMs: 0,
+                environmentId: null,
                 itemId: 'item-shell-prefix',
                 reason: 'Installing dependencies',
                 command,
@@ -228,7 +331,7 @@ describe('Approval Events', () => {
         const fileChangeApprovalCases = [
             { optionId: 'allow_once', expectedDecision: 'accept', description: 'allow once' },
             { optionId: 'allow_always', expectedDecision: 'acceptForSession', description: 'allow for session' },
-            { optionId: 'reject_once', expectedDecision: 'cancel', description: 'reject' },
+            { optionId: 'reject_once', expectedDecision: 'decline', description: 'reject' },
         ] as const;
 
         it.each(fileChangeApprovalCases)(
@@ -326,6 +429,164 @@ describe('Approval Events', () => {
 
             await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
                 'data/approval-file-change.json'
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+    });
+
+    describe('Permissions approval', () => {
+        const requestedPermissions = {
+            network: { enabled: true },
+            fileSystem: {
+                read: ['/home/user/project'],
+                write: ['/home/user/project/tmp'],
+                entries: [],
+            },
+        };
+
+        const permissionApprovalCases = [
+            {
+                optionId: ApprovalOptionId.AllowPermissionsForTurn,
+                expectedResponse: {
+                    permissions: requestedPermissions,
+                    scope: 'turn',
+                    strictAutoReview: false,
+                },
+                description: 'allow for turn',
+            },
+            {
+                optionId: ApprovalOptionId.AllowPermissionsForSession,
+                expectedResponse: {
+                    permissions: requestedPermissions,
+                    scope: 'session',
+                    strictAutoReview: false,
+                },
+                description: 'allow for session',
+            },
+            {
+                optionId: ApprovalOptionId.RejectPermissions,
+                expectedResponse: {
+                    permissions: {},
+                    scope: 'turn',
+                    strictAutoReview: true,
+                },
+                description: 'reject',
+            },
+        ] as const;
+
+        it.each(permissionApprovalCases)(
+            'should map $optionId to app-server permissions response ($description)',
+            async ({ optionId, expectedResponse }) => {
+                const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+                fixture.setPermissionResponse({
+                    outcome: { outcome: 'selected', optionId }
+                });
+
+                const params: PermissionsRequestApprovalParams = {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    itemId: `permissions-${optionId}`,
+                    environmentId: null,
+                    startedAtMs: 0,
+                    cwd: '/home/user/project',
+                    reason: 'Need extra access',
+                    permissions: requestedPermissions,
+                };
+
+                const response = await fixture.sendServerRequest(
+                    'item/permissions/requestApproval',
+                    params
+                );
+
+                expect(response).toEqual(expectedResponse);
+
+                completeTurn();
+                await promptPromise;
+            }
+        );
+
+        it('should map cancelled permission dialog to strict auto-review with no grants', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'cancelled' }
+            });
+
+            const params: PermissionsRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'permissions-cancelled',
+                environmentId: null,
+                startedAtMs: 0,
+                cwd: '/home/user/project',
+                reason: 'Need extra access',
+                permissions: requestedPermissions,
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/permissions/requestApproval',
+                params
+            );
+
+            expect(response).toEqual({
+                permissions: {},
+                scope: 'turn',
+                strictAutoReview: true,
+            });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should return strict auto-review with no grants when no handler registered', async () => {
+            const params: PermissionsRequestApprovalParams = {
+                threadId: 'non-existent-session',
+                turnId: 'turn-1',
+                itemId: 'permissions-no-handler',
+                environmentId: null,
+                startedAtMs: 0,
+                cwd: '/home/user/project',
+                reason: 'Need extra access',
+                permissions: requestedPermissions,
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/permissions/requestApproval',
+                params
+            );
+
+            expect(response).toEqual({
+                permissions: {},
+                scope: 'turn',
+                strictAutoReview: true,
+            });
+        });
+
+        it('should convert to ACP permission request format', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: ApprovalOptionId.AllowPermissionsForSession }
+            });
+
+            const params: PermissionsRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'permissions-snapshot',
+                environmentId: null,
+                startedAtMs: 0,
+                cwd: '/home/user/project',
+                reason: 'Need extra access',
+                permissions: requestedPermissions,
+            };
+
+            await fixture.sendServerRequest(
+                'item/permissions/requestApproval',
+                params
+            );
+
+            await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+                'data/approval-permissions-request.json'
             );
 
             completeTurn();

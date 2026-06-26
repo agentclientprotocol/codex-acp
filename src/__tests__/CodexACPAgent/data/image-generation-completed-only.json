@@ -1,0 +1,30 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "image-generation-completed-only",
+        "kind": "other",
+        "title": "Image generation",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "image",
+              "data": "iVBORw0KGgo=",
+              "mimeType": "image/png"
+            }
+          }
+        ],
+        "rawOutput": {
+          "status": "completed",
+          "revisedPrompt": null,
+          "result": "iVBORw0KGgo="
+        }
+      }
+    }
+  ]
+}
