@@ -694,6 +694,10 @@ export class CodexAcpServer {
     private applyModelChange(sessionState: SessionState, value: string): void {
         const model = sessionState.availableModels.find(m => m.id === value);
         if (!model) {
+            const currentModel = ModelId.fromString(sessionState.currentModelId).model;
+            if (value === currentModel) {
+                return;
+            }
             throw RequestError.invalidParams();
         }
         const currentEffort = ModelId.fromString(sessionState.currentModelId).effort;
@@ -763,12 +767,17 @@ export class CodexAcpServer {
 
     private createSessionConfigOptions(sessionState: SessionState): Array<acp.SessionConfigOption> {
         const currentModelId = ModelId.fromString(sessionState.currentModelId);
-        return [
+        const configOptions = [
             sessionState.agentMode.toConfigOption(),
             createModelConfigOption(sessionState.availableModels, currentModelId.model),
-            createReasoningEffortConfigOption(sessionState.supportedReasoningEfforts, currentModelId.effort),
-            createFastModeConfigOption(sessionState.fastModeEnabled),
         ];
+        if (sessionState.supportedReasoningEfforts.length > 0) {
+            configOptions.push(
+                createReasoningEffortConfigOption(sessionState.supportedReasoningEfforts, currentModelId.effort),
+            );
+        }
+        configOptions.push(createFastModeConfigOption(sessionState.fastModeEnabled));
+        return configOptions;
     }
 
     private createSessionConfigOptionsResponse(sessionState: SessionState): {

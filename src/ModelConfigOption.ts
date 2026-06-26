@@ -14,6 +14,19 @@ export function findSupportedEffort(
 }
 
 export function createModelConfigOption(availableModels: Array<Model>, currentBaseModelId: string): SessionConfigOption {
+    const options: Array<{ value: string; name: string; description: string | null }> = availableModels.map(model => ({
+        value: model.id,
+        name: model.displayName,
+        description: model.description,
+    }));
+    if (!availableModels.some(model => model.id === currentBaseModelId)) {
+        options.unshift({
+            value: currentBaseModelId,
+            name: currentBaseModelId,
+            description: null,
+        });
+    }
+
     return {
         id: MODEL_CONFIG_ID,
         name: "Model",
@@ -21,11 +34,7 @@ export function createModelConfigOption(availableModels: Array<Model>, currentBa
         category: "model",
         type: "select",
         currentValue: currentBaseModelId,
-        options: availableModels.map(model => ({
-            value: model.id,
-            name: model.displayName,
-            description: model.description,
-        })),
+        options,
     };
 }
 
