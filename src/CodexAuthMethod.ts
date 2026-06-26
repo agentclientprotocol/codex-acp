@@ -59,7 +59,8 @@ export interface GatewayAuthRequest extends AuthenticateRequest {
 
 export function getCodexAuthMethods(clientCapabilities?: ClientCapabilities | null, env: NodeJS.ProcessEnv = process.env): AuthMethod[] {
     const authMethods: AuthMethod[] = [ApiKeyAuthMethod];
-    if (!env["NO_BROWSER"]) {
+    // ChatGPT login requires a browser or URL elicitation support for device code auth
+    if (!env["NO_BROWSER"] || clientCapabilities?.elicitation?.url) {
         authMethods.push(ChatGptAuthMethod);
     }
     const supportsGatewayAuth = clientCapabilities?.auth?._meta?.["gateway"] === true;

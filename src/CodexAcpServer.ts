@@ -604,7 +604,7 @@ export class CodexAcpServer {
         _params: acp.AuthenticateRequest,
     ): Promise<acp.AuthenticateResponse> {
         logger.log("Authenticate request received");
-        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params));
+        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(this.connection, _params));
         if (!isAuthenticated) {
             logger.log("Authenticate request failed");
             throw RequestError.invalidParams();

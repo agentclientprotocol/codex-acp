@@ -202,6 +202,67 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(accountLoginSpy).not.toHaveBeenCalled();
     });
 
+
+    it('should request ACP URL elicitation for device code auth', async () => {
+        const deviceCodeFixture = createCodexMockTestFixture();
+        vi.spyOn(deviceCodeFixture.getCodexAppServerClient(), "accountRead").mockResolvedValue({
+            account: null,
+            requiresOpenaiAuth: true,
+        });
+        deviceCodeFixture.setElicitationResponse({action: "accept"});
+        deviceCodeFixture.setAccountLoginResponse({
+            type: "chatgptDeviceCode",
+            loginId: "login-id",
+            verificationUrl: "https://openai.example/device",
+            userCode: "ABCD-EFGH",
+        });
+        vi.stubEnv("NO_BROWSER", "1");
+
+        const authPromise = deviceCodeFixture.getCodexAcpAgent().authenticate({methodId: "chat-gpt"});
+
+        await vi.waitFor(() => {
+            expect(deviceCodeFixture.getCodexAppServerClient().accountLogin)
+                .toHaveBeenCalledWith({type: "chatgptDeviceCode"});
+        });
+
+        await vi.waitFor(() => {
+            const elicitationEvent = deviceCodeFixture.getAcpConnectionEvents([])
+                .find(event => event.method === "elicitationCreate");
+            expect(elicitationEvent?.args[0]).toEqual(expect.objectContaining({
+                mode: "url",
+                requestId: null,
+                elicitationId: expect.stringMatching(/^chatgpt-login-/),
+                url: "https://openai.example/device",
+                message: expect.stringContaining("ABCD-EFGH"),
+            }));
+        });
+
+        deviceCodeFixture.sendAccountLoginCompleted({loginId: "login-id", success: true, error: null});
+
+        await expect(authPromise).resolves.toEqual({});
+    });
+
+    it('should fail device code auth when ACP URL elicitation is not accepted', async () => {
+        const deviceCodeFixture = createCodexMockTestFixture();
+        vi.spyOn(deviceCodeFixture.getCodexAppServerClient(), "accountRead").mockResolvedValue({
+            account: null,
+            requiresOpenaiAuth: true,
+        });
+        deviceCodeFixture.setElicitationResponse({action: "cancel"});
+        deviceCodeFixture.setAccountLoginResponse({
+            type: "chatgptDeviceCode",
+            loginId: "login-id",
+            verificationUrl: "https://openai.example/device",
+            userCode: "ABCD-EFGH",
+        });
+        vi.stubEnv("NO_BROWSER", "1");
+
+        await expect(deviceCodeFixture.getCodexAcpAgent().authenticate({methodId: "chat-gpt"}))
+            .rejects.toThrow("Authentication required");
+        expect(deviceCodeFixture.getCodexAppServerClient().accountLogin)
+            .toHaveBeenCalledWith({type: "chatgptDeviceCode"});
+    });
+
     it('should authenticate with a gateway', async () => {
         const gatewayFixture = createTestFixture();
         const codexAcpAgent = gatewayFixture.getCodexAcpAgent();
@@ -2697,7 +2758,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.authenticate({methodId: "api-key"});
 
-        expect(authenticateSpy).toHaveBeenCalledWith({methodId: "api-key"});
+        expect(authenticateSpy).toHaveBeenCalledWith(expect.anything(), {methodId: "api-key"});
         expect(getAccountSpy).toHaveBeenCalledTimes(4);
         expect(codexAcpAgent.getSessionState(session1.sessionId)).toMatchObject({
             account: { type: "apiKey" },
@@ -2752,7 +2813,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         };
         await codexAcpAgent.authenticate(gatewayAuthRequest);
 
-        expect(authenticateSpy).toHaveBeenCalledWith(gatewayAuthRequest);
+        expect(authenticateSpy).toHaveBeenCalledWith(expect.anything(), gatewayAuthRequest);
         expect(getAccountSpy).toHaveBeenCalledTimes(1);
         expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
             account: { type: "apiKey" },
