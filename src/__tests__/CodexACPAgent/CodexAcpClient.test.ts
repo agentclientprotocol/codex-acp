@@ -1496,6 +1496,58 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    it('does not overwrite OpenAI session auth state when gateway auth succeeds', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const model = createTestModel();
+        const currentModelId = ModelId.create(model.id, model.defaultReasoningEffort).toString();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getModelProvider").mockReturnValue(null);
+        const getAccountSpy = vi.spyOn(codexAcpClient, "getAccount")
+            .mockResolvedValue({
+                account: { type: "apiKey" },
+                requiresOpenaiAuth: false,
+            });
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "openai-session",
+            currentModelId,
+            models: [model],
+            modelProvider: "openai",
+            additionalDirectories: [],
+        });
+        const authenticateSpy = vi.spyOn(codexAcpClient, "authenticate").mockResolvedValue(true);
+
+        const session = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
+            account: { type: "apiKey" },
+            authConfigured: true,
+            authProvider: "openai",
+        });
+
+        const gatewayAuthRequest: CodexAuthRequest = {
+            methodId: "gateway",
+            _meta: {
+                "gateway": {
+                    baseUrl: "https://www.example.com",
+                    headers: {
+                        "Custom-Auth-Header": "TOKEN",
+                    },
+                },
+            },
+        };
+        await codexAcpAgent.authenticate(gatewayAuthRequest);
+
+        expect(authenticateSpy).toHaveBeenCalledWith(gatewayAuthRequest);
+        expect(getAccountSpy).toHaveBeenCalledTimes(1);
+        expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
+            account: { type: "apiKey" },
+            authConfigured: true,
+            authProvider: "openai",
+        });
+    });
+
     it('keeps custom provider sessions auth configured without account state', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
