@@ -619,9 +619,15 @@ export class CodexEventHandler {
     }
 
     private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent> {
-        const error = params.error.codexErrorInfo
-        if (error == "unauthorized" || error == "usageLimitExceeded" || this.getHttpStatusCode(error) == 401) {
-            this.failure = RequestError.authRequired();
+        const error = params.error.codexErrorInfo;
+        if (error === "usageLimitExceeded") {
+            this.failure = RequestError.internalError(
+                this.createTurnErrorData(params.error),
+            );
+        } else if (this.isAuthenticationRequiredError(error)) {
+            this.failure = this.sessionState.authConfigured
+                ? RequestError.internalError(this.createTurnErrorData(params.error))
+                : RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message);
         }
         return {
             sessionUpdate: "agent_message_chunk",
@@ -630,6 +636,10 @@ export class CodexEventHandler {
                 text: `${params.error.message}\n\n`
             }
         }
+    }
+
+    private isAuthenticationRequiredError(error: CodexErrorInfo | null): boolean {
+        return error === "unauthorized" || this.getHttpStatusCode(error) === 401;
     }
 
     private getHttpStatusCode(error: CodexErrorInfo | null): number | null {
@@ -645,6 +655,27 @@ export class CodexEventHandler {
             }
         }
         return null;
+    }
+
+    private createTurnErrorData(error: ErrorNotification["error"]): {
+        message: string;
+        codexErrorInfo?: CodexErrorInfo;
+        additionalDetails?: string;
+    } {
+        const data: {
+            message: string;
+            codexErrorInfo?: CodexErrorInfo;
+            additionalDetails?: string;
+        } = {
+            message: error.additionalDetails ?? error.message,
+        };
+        if (error.codexErrorInfo !== null) {
+            data.codexErrorInfo = error.codexErrorInfo;
+        }
+        if (error.additionalDetails !== null) {
+            data.additionalDetails = error.additionalDetails;
+        }
+        return data;
     }
 
     private handleTokenUsageUpdated(params: ThreadTokenUsageUpdatedNotification): void {

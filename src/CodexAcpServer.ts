@@ -3,7 +3,7 @@ import {RequestError, type SessionId, type SessionModeState} from "@agentclientp
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
-import {type CodexAuthRequest, getCodexAuthMethods} from "./CodexAuthMethod";
+import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
 import type {McpStartupResult} from "./CodexAppServerClient";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -86,6 +86,8 @@ export interface SessionState {
     modelContextWindow: number | null;
     rateLimits: RateLimitsMap | null;
     account: Account | null;
+    authConfigured: boolean;
+    authProvider: string | null;
     cwd: string;
     additionalDirectories: string[];
     fastModeEnabled: boolean;
@@ -93,6 +95,11 @@ export interface SessionState {
     sessionMcpServers?: Array<string>;
     terminalOutputMode: TerminalOutputMode;
     currentGoal?: ThreadGoalSnapshot | null;
+}
+
+interface ActiveAuthState {
+    account: Account | null;
+    authConfigured: boolean;
 }
 
 interface PendingMcpStartupSession {
@@ -164,7 +171,8 @@ export class CodexAcpServer {
         this.availableCommands = new CodexCommands(
             connection,
             codexAcpClient,
-            (operation) => this.runWithProcessCheck(operation)
+            (operation) => this.runWithProcessCheck(operation),
+            () => this.refreshSessionsAuthState(null)
         );
     }
 
@@ -255,6 +263,7 @@ export class CodexAcpServer {
     async handleError(e: Error){
         if (e.message.includes("log out") || e.message.includes("cloud requirements")) {
             await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+            await this.refreshSessionsAuthState(null);
             throw RequestError.internalError(`${(e.message)}\n\nYou have been logged out. Please try again.`);
         }
     }
@@ -354,9 +363,10 @@ export class CodexAcpServer {
         }
 
         const {sessionId, currentModelId, models} = sessionMetadata;
-        let account: Account | null;
+        const authProvider = sessionMetadata.modelProvider ?? this.codexAcpClient.getModelProvider();
+        let authState: ActiveAuthState;
         try {
-            account = await this.getActiveAccount();
+            authState = await this.getAuthStateForProvider(authProvider);
         } catch (err) {
             if (resumeSubscribed && requestedSessionGeneration !== null) {
                 await this.cleanupStaleSessionOpen(sessionId, requestedSessionGeneration);
@@ -383,7 +393,9 @@ export class CodexAcpServer {
             totalTokenUsage: null,
             modelContextWindow: null,
             rateLimits: null,
-            account: account,
+            account: authState.account,
+            authConfigured: authState.authConfigured,
+            authProvider: authProvider,
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
@@ -409,12 +421,36 @@ export class CodexAcpServer {
         return [sessionId, sessionModelState, sessionModeState];
     }
 
-    private async getActiveAccount(){
-        if (this.codexAcpClient.getModelProvider()) {
-            return null
+    private async getAuthStateForProvider(authProvider: string | null): Promise<ActiveAuthState> {
+        if (!this.authProviderUsesOpenAiAccount(authProvider)) {
+            return {
+                account: null,
+                authConfigured: true,
+            };
         }
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
-        return accountResponse.account;
+        return {
+            account: accountResponse.account,
+            authConfigured: accountResponse.account !== null || !accountResponse.requiresOpenaiAuth,
+        };
+    }
+
+    private authProviderUsesOpenAiAccount(authProvider: string | null): boolean {
+        return authProvider === null || authProvider === "openai";
+    }
+
+    private authProvidersMatch(a: string | null, b: string | null): boolean {
+        if (this.authProviderUsesOpenAiAccount(a) && this.authProviderUsesOpenAiAccount(b)) {
+            return true;
+        }
+        return a === b;
+    }
+
+    private getAuthProviderForAuthenticateRequest(request: acp.AuthenticateRequest): string | null {
+        if (isCodexAuthRequest(request) && request.methodId === "gateway") {
+            return "custom-gateway";
+        }
+        return null;
     }
 
     async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
@@ -573,6 +609,7 @@ export class CodexAcpServer {
             logger.log("Authenticate request failed");
             throw RequestError.invalidParams();
         }
+        await this.refreshSessionsAuthState(this.getAuthProviderForAuthenticateRequest(_params));
         logger.log("Authenticate request completed");
         return { };
     }
@@ -580,7 +617,22 @@ export class CodexAcpServer {
     async logout(_params: acp.LogoutRequest): Promise<void> {
         logger.log("Logout request received");
         await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+        await this.refreshSessionsAuthState(null);
         logger.log("Logout request completed");
+    }
+
+    private async refreshSessionsAuthState(authProvider: string | null): Promise<void> {
+        if (this.sessions.size === 0) return;
+
+        const sessionsToRefresh = [...this.sessions.values()]
+            .filter(sessionState => this.authProvidersMatch(sessionState.authProvider, authProvider));
+        if (sessionsToRefresh.length === 0) return;
+
+        const authState = await this.getAuthStateForProvider(authProvider);
+        for (const sessionState of sessionsToRefresh) {
+            sessionState.account = authState.account;
+            sessionState.authConfigured = authState.authConfigured;
+        }
     }
 
     async setSessionMode(
@@ -806,9 +858,10 @@ export class CodexAcpServer {
         }
 
         const {sessionId, currentModelId, models, thread} = sessionMetadata;
-        let account: Account | null;
+        const authProvider = sessionMetadata.modelProvider ?? this.codexAcpClient.getModelProvider();
+        let authState: ActiveAuthState;
         try {
-            account = await this.getActiveAccount();
+            authState = await this.getAuthStateForProvider(authProvider);
         } catch (err) {
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
@@ -834,7 +887,9 @@ export class CodexAcpServer {
             totalTokenUsage: null,
             modelContextWindow: null,
             rateLimits: null,
-            account: account,
+            account: authState.account,
+            authConfigured: authState.authConfigured,
+            authProvider: authProvider,
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",

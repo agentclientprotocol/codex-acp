@@ -437,6 +437,104 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    it('uses configured model provider when resuming sessions without an explicit provider', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+            config: {
+                model_provider: "azure",
+            },
+        } as any);
+        const threadResumeSpy = vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+        });
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        await codexAcpClient.resumeSession({
+            sessionId: "resume-id",
+            cwd: "/workspace",
+        });
+        await codexAcpClient.loadSession({
+            sessionId: "load-id",
+            cwd: "/workspace",
+            mcpServers: [],
+        });
+
+        expect(threadResumeSpy.mock.calls[0]![0].modelProvider).toBe("azure");
+        expect(threadResumeSpy.mock.calls[1]![0].modelProvider).toBe("azure");
+    });
+
+    it('tracks configured model provider auth state for resumed and loaded sessions', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        const getAccountSpy = vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({
+            account: null,
+            requiresOpenaiAuth: true,
+        });
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+            config: {
+                model_provider: "azure",
+            },
+        } as any);
+        const threadResumeSpy = vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            modelProvider: "azure",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+            thread: {id: "thread-id", turns: []} as any,
+        });
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        await codexAcpAgent.resumeSession({
+            sessionId: "resume-id",
+            cwd: "/workspace",
+        });
+        await codexAcpAgent.loadSession({
+            sessionId: "load-id",
+            cwd: "/workspace",
+            mcpServers: [],
+        });
+
+        expect(threadResumeSpy.mock.calls[0]![0].modelProvider).toBe("azure");
+        expect(threadResumeSpy.mock.calls[1]![0].modelProvider).toBe("azure");
+        expect(getAccountSpy).not.toHaveBeenCalled();
+        expect(codexAcpAgent.getSessionState("resume-id")).toMatchObject({
+            account: null,
+            authConfigured: true,
+            authProvider: "azure",
+        });
+        expect(codexAcpAgent.getSessionState("load-id")).toMatchObject({
+            account: null,
+            authConfigured: true,
+            authProvider: "azure",
+        });
+    });
+
     it('rejects malformed ACP additional directories', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
@@ -1944,6 +2042,176 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const prompt: acp.ContentBlock[] = [{ type: "text", text: "/logout " }];
         await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: prompt });
         await expect(fixture.getAcpConnectionDump(["sessionId"])).toMatchFileSnapshot("data/command-logout.json");
+    });
+
+    it('clears active session auth state when logout command signs out', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const model = createTestModel();
+        const currentModelId = ModelId.create(model.id, model.defaultReasoningEffort).toString();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getModelProvider").mockReturnValue("openai");
+        const getAccountSpy = vi.spyOn(codexAcpClient, "getAccount")
+            .mockResolvedValueOnce({
+                account: { type: "apiKey" },
+                requiresOpenaiAuth: false,
+            })
+            .mockResolvedValueOnce({
+                account: { type: "apiKey" },
+                requiresOpenaiAuth: false,
+            })
+            .mockResolvedValueOnce({
+                account: null,
+                requiresOpenaiAuth: true,
+            })
+            .mockResolvedValueOnce({
+                account: { type: "apiKey" },
+                requiresOpenaiAuth: false,
+            });
+        vi.spyOn(codexAcpClient, "newSession")
+            .mockResolvedValueOnce({
+                sessionId: "session-1",
+                currentModelId,
+                models: [model],
+                additionalDirectories: [],
+            })
+            .mockResolvedValueOnce({
+                sessionId: "session-2",
+                currentModelId,
+                models: [model],
+                additionalDirectories: [],
+            });
+        const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
+        const authenticateSpy = vi.spyOn(codexAcpClient, "authenticate").mockResolvedValue(true);
+
+        const session1 = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        const session2 = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        expect(codexAcpAgent.getSessionState(session1.sessionId).authConfigured).toBe(true);
+        expect(codexAcpAgent.getSessionState(session2.sessionId).authConfigured).toBe(true);
+
+        await codexAcpAgent.prompt({
+            sessionId: session1.sessionId,
+            prompt: [{ type: "text", text: "/logout" }],
+        });
+
+        expect(logoutSpy).toHaveBeenCalledOnce();
+        expect(getAccountSpy).toHaveBeenCalledTimes(3);
+        expect(codexAcpAgent.getSessionState(session1.sessionId)).toMatchObject({
+            account: null,
+            authConfigured: false,
+        });
+        expect(codexAcpAgent.getSessionState(session2.sessionId)).toMatchObject({
+            account: null,
+            authConfigured: false,
+        });
+
+        await codexAcpAgent.authenticate({methodId: "api-key"});
+
+        expect(authenticateSpy).toHaveBeenCalledWith({methodId: "api-key"});
+        expect(getAccountSpy).toHaveBeenCalledTimes(4);
+        expect(codexAcpAgent.getSessionState(session1.sessionId)).toMatchObject({
+            account: { type: "apiKey" },
+            authConfigured: true,
+        });
+        expect(codexAcpAgent.getSessionState(session2.sessionId)).toMatchObject({
+            account: { type: "apiKey" },
+            authConfigured: true,
+        });
+    });
+
+    it('does not overwrite OpenAI session auth state when gateway auth succeeds', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const model = createTestModel();
+        const currentModelId = ModelId.create(model.id, model.defaultReasoningEffort).toString();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getModelProvider").mockReturnValue(null);
+        const getAccountSpy = vi.spyOn(codexAcpClient, "getAccount")
+            .mockResolvedValue({
+                account: { type: "apiKey" },
+                requiresOpenaiAuth: false,
+            });
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "openai-session",
+            currentModelId,
+            models: [model],
+            modelProvider: "openai",
+            additionalDirectories: [],
+        });
+        const authenticateSpy = vi.spyOn(codexAcpClient, "authenticate").mockResolvedValue(true);
+
+        const session = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
+            account: { type: "apiKey" },
+            authConfigured: true,
+            authProvider: "openai",
+        });
+
+        const gatewayAuthRequest: CodexAuthRequest = {
+            methodId: "gateway",
+            _meta: {
+                "gateway": {
+                    baseUrl: "https://www.example.com",
+                    headers: {
+                        "Custom-Auth-Header": "TOKEN",
+                    },
+                },
+            },
+        };
+        await codexAcpAgent.authenticate(gatewayAuthRequest);
+
+        expect(authenticateSpy).toHaveBeenCalledWith(gatewayAuthRequest);
+        expect(getAccountSpy).toHaveBeenCalledTimes(1);
+        expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
+            account: { type: "apiKey" },
+            authConfigured: true,
+            authProvider: "openai",
+        });
+    });
+
+    it('keeps custom provider sessions auth configured without account state', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const model = createTestModel();
+        const currentModelId = ModelId.create(model.id, model.defaultReasoningEffort).toString();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getModelProvider").mockReturnValue("custom-provider");
+        const getAccountSpy = vi.spyOn(codexAcpClient, "getAccount")
+            .mockResolvedValue({
+                account: null,
+                requiresOpenaiAuth: true,
+            });
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "custom-provider-session",
+            currentModelId,
+            models: [model],
+            additionalDirectories: [],
+        });
+        const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
+
+        const session = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
+            account: null,
+            authConfigured: true,
+        });
+
+        await codexAcpAgent.prompt({
+            sessionId: session.sessionId,
+            prompt: [{ type: "text", text: "/logout" }],
+        });
+
+        expect(logoutSpy).toHaveBeenCalledOnce();
+        expect(getAccountSpy).not.toHaveBeenCalled();
+        expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
+            account: null,
+            authConfigured: true,
+        });
     });
 
     it('handles skills command', async () => {

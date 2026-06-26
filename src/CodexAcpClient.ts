@@ -196,7 +196,7 @@ export class CodexAcpClient {
             return sessionModelProvider;
         }
         const settingsModelProvider = await this.codexClient.configRead({includeLayers: false});
-        return settingsModelProvider.config.model_provider ?? null;
+        return settingsModelProvider?.config?.model_provider ?? null;
     }
 
     async logout(): Promise<void> {
@@ -218,6 +218,10 @@ export class CodexAcpClient {
         return response.requiresOpenaiAuth && !response.account;
     }
 
+    hasGatewayAuth(): boolean {
+        return this.gatewayConfig !== null;
+    }
+
     async getAccount(): Promise<GetAccountResponse> {
         return this.codexClient.accountRead({refreshToken: false});
     }
@@ -229,7 +233,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: this.getResumeModelProvider(),
+            modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         onSubscribed?.();
@@ -239,6 +243,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
         }
@@ -251,7 +256,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: this.getResumeModelProvider(),
+            modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         onSubscribed?.();
@@ -265,6 +270,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             thread: historyResponse.thread,
             additionalDirectories,
@@ -290,6 +296,7 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
+            modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
         };
@@ -414,10 +421,10 @@ export class CodexAcpClient {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
     }
 
-    private getResumeModelProvider(): string {
-        // Passing `null` forces codex to use the persisted provider for resumed session instead of default one
-        // Explicit fallback to "openai" fixes error `Model provider not found` at least for ChatGPT authentication
-        return this.getModelProvider() ?? "openai";
+    private async getResumeModelProvider(): Promise<string> {
+        // Prefer an explicit/gateway provider, then the provider persisted in Codex config.
+        // Keep OpenAI as the final fallback for ChatGPT-authenticated sessions without a configured provider.
+        return (await this.getCurrentModelProvider()) ?? "openai";
     }
 
     private async refreshSkills(
@@ -732,6 +739,7 @@ export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
     models: Model[],
+    modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,
     additionalDirectories: string[],
 }
