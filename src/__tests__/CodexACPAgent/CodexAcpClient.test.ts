@@ -2993,17 +2993,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         };
     }
 
-    function createThreadReadResponse(status: "active" | "idle") {
-        return {
-            thread: {
-                id: "session-id",
-                status: status === "active"
-                    ? { type: "active", activeFlags: [] }
-                    : { type: "idle" },
-            } as any,
-        };
-    }
-
     it ('should disable reasoning.summary if key authorization is used', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({ account: { type: "apiKey" } });
 
