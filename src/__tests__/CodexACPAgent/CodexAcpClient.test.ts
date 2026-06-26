@@ -1440,6 +1440,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             .mockResolvedValueOnce({
                 account: null,
                 requiresOpenaiAuth: true,
+            })
+            .mockResolvedValueOnce({
+                account: { type: "apiKey" },
+                requiresOpenaiAuth: false,
             });
         vi.spyOn(codexAcpClient, "newSession")
             .mockResolvedValueOnce({
@@ -1455,6 +1459,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 additionalDirectories: [],
             });
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
+        const authenticateSpy = vi.spyOn(codexAcpClient, "authenticate").mockResolvedValue(true);
 
         const session1 = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
         const session2 = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
@@ -1475,6 +1480,19 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(codexAcpAgent.getSessionState(session2.sessionId)).toMatchObject({
             account: null,
             authConfigured: false,
+        });
+
+        await codexAcpAgent.authenticate({methodId: "api-key"});
+
+        expect(authenticateSpy).toHaveBeenCalledWith({methodId: "api-key"});
+        expect(getAccountSpy).toHaveBeenCalledTimes(4);
+        expect(codexAcpAgent.getSessionState(session1.sessionId)).toMatchObject({
+            account: { type: "apiKey" },
+            authConfigured: true,
+        });
+        expect(codexAcpAgent.getSessionState(session2.sessionId)).toMatchObject({
+            account: { type: "apiKey" },
+            authConfigured: true,
         });
     });
 

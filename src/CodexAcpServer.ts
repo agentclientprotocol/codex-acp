@@ -579,6 +579,7 @@ export class CodexAcpServer {
             logger.log("Authenticate request failed");
             throw RequestError.invalidParams();
         }
+        await this.refreshSessionsAuthState();
         logger.log("Authenticate request completed");
         return { };
     }
@@ -591,6 +592,8 @@ export class CodexAcpServer {
     }
 
     private async refreshSessionsAuthState(): Promise<void> {
+        if (this.sessions.size === 0) return;
+
         const authState = await this.getActiveAuthState();
         for (const sessionState of this.sessions.values()) {
             sessionState.account = authState.account;
