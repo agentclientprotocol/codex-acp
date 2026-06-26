@@ -593,11 +593,10 @@ export class CodexEventHandler {
         if (error === "usageLimitExceeded") {
             this.failure = RequestError.internalError(
                 this.createTurnErrorData(params.error),
-                params.error.message,
             );
         } else if (this.isAuthenticationRequiredError(error)) {
             this.failure = this.sessionState.authConfigured
-                ? RequestError.internalError(this.createTurnErrorData(params.error), params.error.message)
+                ? RequestError.internalError(this.createTurnErrorData(params.error))
                 : RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message);
         }
         return {
@@ -638,7 +637,7 @@ export class CodexEventHandler {
             codexErrorInfo?: CodexErrorInfo;
             additionalDetails?: string;
         } = {
-            message: error.message,
+            message: error.additionalDetails ?? error.message,
         };
         if (error.codexErrorInfo !== null) {
             data.codexErrorInfo = error.codexErrorInfo;

@@ -45,16 +45,16 @@ const configuredAuthFailureCases: Array<{
         turnError: {
             message: "Provider returned 401",
             codexErrorInfo: {
-                responseStreamConnectionFailed: {
+                responseStreamDisconnected: {
                     httpStatusCode: 401,
                 },
             },
             additionalDetails: "HTTP status 401",
         },
         expectedData: {
-            message: "Provider returned 401",
+            message: "HTTP status 401",
             codexErrorInfo: {
-                responseStreamConnectionFailed: {
+                responseStreamDisconnected: {
                     httpStatusCode: 401,
                 },
             },
@@ -96,6 +96,7 @@ describe("CodexEventHandler - auth error events", () => {
 
             expect(error).toMatchObject({
                 code: -32603,
+                message: "Internal error",
                 data: expectedData,
             });
             expect(error).not.toMatchObject({
