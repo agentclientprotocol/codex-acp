@@ -1250,7 +1250,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue({ data: [] });
 
         // @ts-expect-error - exercising private helper
-        await codexAcpAgent.availableCommands.publish("session-id");
+        await codexAcpAgent.availableCommands.publish(createTestSessionState({
+            sessionId: "session-id",
+            cwd: "/workspace",
+        }));
+
+        expect(mockFixture.getCodexAcpClient().listSkills).toHaveBeenCalledWith({
+            cwds: ["/workspace"],
+        });
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-build-in.json");
     });
@@ -1275,7 +1282,15 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         // @ts-expect-error - exercising private helper
-        await codexAcpAgent.availableCommands.publish("session-id");
+        await codexAcpAgent.availableCommands.publish(createTestSessionState({
+            sessionId: "session-id",
+            cwd: "/workspace",
+            additionalDirectories: ["/workspace/extra"],
+        }));
+
+        expect(mockFixture.getCodexAcpClient().listSkills).toHaveBeenCalledWith({
+            cwds: ["/workspace", "/workspace/extra"],
+        });
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-skills.json");
     });

@@ -2,7 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import type {AvailableCommand} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
 import type {CodexAcpClient} from "./CodexAcpClient";
-import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, TurnCompletedNotification} from "./app-server/v2";
+import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, SkillsListParams, TurnCompletedNotification} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
@@ -41,22 +41,28 @@ export class CodexCommands {
         this.onLogout = onLogout;
     }
 
-    async publish(sessionId: string): Promise<void> {
+    async publish(sessionState: SessionState): Promise<void> {
         try {
-            const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills());
+            const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
             const availableCommands = this.buildAvailableCommands(skillsResponse?.data ?? []);
             if (availableCommands.length === 0) {
                 return;
             }
 
-            const session = new ACPSessionConnection(this.connection, sessionId);
+            const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
             await session.update({
                 sessionUpdate: "available_commands_update",
                 availableCommands
             });
         } catch (err) {
-            logger.error(`Failed to publish available commands for session ${sessionId}`, err);
+            logger.error(`Failed to publish available commands for session ${sessionState.sessionId}`, err);
         }
+    }
+
+    private createSkillsListParams(sessionState: SessionState): SkillsListParams {
+        return {
+            cwds: [sessionState.cwd, ...sessionState.additionalDirectories],
+        };
     }
 
     private buildAvailableCommands(skillsEntries: SkillsListEntry[]): AvailableCommand[] {
@@ -212,7 +218,7 @@ export class CodexCommands {
                 return { handled: true };
             }
             case "skills": {
-                const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills());
+                const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
                 const skills = (response?.data ?? []).flatMap(entry => entry.skills);
                 const lines = skills.map(skill => {
                     const description = skill.shortDescription ?? skill.description ?? "";

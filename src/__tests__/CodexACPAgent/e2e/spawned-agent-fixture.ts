@@ -25,6 +25,7 @@ export interface SpawnedAgentFixture {
     restart(): Promise<SpawnedAgentFixture>;
     writeSkill(skill: TestSkill, rootDir?: string): void;
     setPermissionResponder(responder: PermissionResponder): void;
+    expectAvailableCommand(sessionId: string, commandName: string, timeoutMs?: number): Promise<void>;
     expectPromptText(
         sessionId: string,
         promptText: string,
@@ -103,6 +104,7 @@ class RuntimePaths {
 
 class RecordingClient implements acp.Client {
     private readonly textBySessionId = new Map<string, string>();
+    private readonly availableCommandsBySessionId = new Map<string, acp.AvailableCommand[]>();
     private readonly permissionRequestsBySessionId = new Map<string, acp.RequestPermissionRequest[]>();
     private permissionResponder: PermissionResponder = () => ({
         outcome: {outcome: "cancelled"},
@@ -123,6 +125,11 @@ class RecordingClient implements acp.Client {
     }
 
     async sessionUpdate(params: acp.SessionNotification): Promise<void> {
+        if (params.update.sessionUpdate === "available_commands_update") {
+            this.availableCommandsBySessionId.set(params.sessionId, params.update.availableCommands);
+            return;
+        }
+
         if (params.update.sessionUpdate !== "agent_message_chunk" || params.update.content.type !== "text") {
             return;
         }
@@ -133,6 +140,10 @@ class RecordingClient implements acp.Client {
 
     readText(sessionId: string): string {
         return this.textBySessionId.get(sessionId) ?? "";
+    }
+
+    readAvailableCommands(sessionId: string): acp.AvailableCommand[] {
+        return this.availableCommandsBySessionId.get(sessionId) ?? [];
     }
 
     readPermissionRequests(
@@ -202,6 +213,13 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
 
     setPermissionResponder(responder: PermissionResponder): void {
         this.client.setPermissionResponder(responder);
+    }
+
+    async expectAvailableCommand(sessionId: string, commandName: string, timeoutMs = 30_000): Promise<void> {
+        await vi.waitFor(() => {
+            const commandNames = this.client.readAvailableCommands(sessionId).map(command => command.name);
+            expect(commandNames).toContain(commandName);
+        }, {timeout: timeoutMs});
     }
 
     async expectPromptText(
