@@ -61,7 +61,7 @@
     "vitest": "^4.0.10"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^1.0.0",
+    "@agentclientprotocol/sdk": "^1.1.0",
     "@openai/codex": "^0.142.4",
     "diff": "^8.0.3",
     "open": "^11.0.0",
