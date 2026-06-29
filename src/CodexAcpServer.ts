@@ -784,7 +784,9 @@ export class CodexAcpServer {
                 createReasoningEffortConfigOption(sessionState.supportedReasoningEfforts, currentModelId.effort),
             );
         }
-        configOptions.push(createFastModeConfigOption(sessionState.fastModeEnabled));
+        if (sessionState.currentModelSupportsFast) {
+            configOptions.push(createFastModeConfigOption(sessionState.fastModeEnabled));
+        }
         return configOptions;
     }
 
