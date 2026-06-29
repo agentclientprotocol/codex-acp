@@ -78,11 +78,12 @@ describe("ACP session delete", () => {
             expect(codexAcpClient.deleteSession).toHaveBeenCalledWith(sessionId);
         });
 
-        await expect(codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        })).rejects.toThrow("Invalid request");
+        await expect(
+            codexAcpAgent.resumeSession(
+                {sessionId, cwd: "/test/cwd", mcpServers: []},
+                0,
+            ),
+        ).rejects.toThrow("Invalid request");
         expect(resumeSessionSpy).not.toHaveBeenCalled();
 
         archive.resolve(undefined);
@@ -100,11 +101,12 @@ describe("ACP session delete", () => {
             expect(codexAcpClient.deleteSession).toHaveBeenCalledWith(sessionId);
         });
 
-        await expect(codexAcpAgent.loadSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        })).rejects.toThrow("Invalid request");
+        await expect(
+            codexAcpAgent.loadSession(
+                {sessionId, cwd: "/test/cwd", mcpServers: []},
+                0,
+            ),
+        ).rejects.toThrow("Invalid request");
         expect(loadSessionSpy).not.toHaveBeenCalled();
 
         archive.resolve(undefined);
@@ -132,7 +134,7 @@ async function createSession(): Promise<{
         additionalDirectories: [],
     });
 
-    await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
+    await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []}, 0);
     fixture.clearCodexConnectionDump();
     fixture.clearAcpConnectionDump();
 

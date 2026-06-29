@@ -82,6 +82,7 @@ export class CodexAcpClient {
     async authenticate(
         connection: AcpClientConnection,
         authRequest: acp.AuthenticateRequest,
+        requestId: acp.JsonRpcId,
         env: NodeJS.ProcessEnv = process.env,
     ): Promise<Boolean> {
         if (!isCodexAuthRequest(authRequest)) {
@@ -100,7 +101,7 @@ export class CodexAcpClient {
                     return true;
                 }
                 if (env["NO_BROWSER"]) {
-                    return await this.authenticateWithChatGptDeviceCode(connection);
+                    return await this.authenticateWithChatGptDeviceCode(connection, requestId);
                 } else {
                     return await this.authenticateWithChatGptBrowser();
                 }
@@ -151,7 +152,7 @@ export class CodexAcpClient {
         return result.success;
     }
 
-    private async authenticateWithChatGptDeviceCode(connection: AcpClientConnection): Promise<Boolean> {
+    private async authenticateWithChatGptDeviceCode(connection: AcpClientConnection, requestId: acp.JsonRpcId): Promise<Boolean> {
         const loginCompletedPromise = this.awaitNextLoginCompleted();
         const loginResponse = await this.codexClient.accountLogin({type: "chatgptDeviceCode"});
         if (loginResponse.type == "chatgptDeviceCode") {
@@ -159,6 +160,7 @@ export class CodexAcpClient {
             const userCode = loginResponse.userCode;
 
             await this.requestDeviceCodeAuth(connection, {
+                requestId,
                 elicitationId: `chatgpt-login-${crypto.randomUUID()}`,
                 url,
                 message: `Follow these steps to sign in with ChatGPT using device code authorization:\n\
@@ -174,15 +176,13 @@ export class CodexAcpClient {
 
     private async requestDeviceCodeAuth(
         client: AcpClientConnection,
-        request: { elicitationId: string; url: string; message: string },
+        request: { requestId: acp.JsonRpcId, elicitationId: string; url: string; message: string },
     ): Promise<void> {
         const response = await client.request(
             acp.methods.client.elicitation.create,
             {
                 mode: "url",
-                // This should be the authenticate requestId, but this is not exposed by the ACP SDK.
-                // The elicitation still works, but won't be tied to the authenticate request.
-                requestId: null,
+                requestId: request.requestId,
                 elicitationId: request.elicitationId,
                 url: request.url,
                 message: request.message,
