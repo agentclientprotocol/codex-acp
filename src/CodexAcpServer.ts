@@ -41,8 +41,11 @@ import {
     type LegacySessionModelState,
     type LegacySetSessionModelRequest,
     type LegacySetSessionModelResponse,
+    type SetSessionTitleRequest,
+    type SetSessionTitleResponse,
     isExtMethodRequest,
     LEGACY_SET_SESSION_MODEL_METHOD,
+    SET_SESSION_TITLE_METHOD,
 } from "./AcpExtensions";
 import {
     createCollabAgentToolCallUpdate,
@@ -183,6 +186,14 @@ export class CodexAcpServer {
         this.clientInfo = _params.clientInfo ?? null;
         this.terminalOutputMode = resolveTerminalOutputMode(_params.clientCapabilities);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
+        const sessionCapabilities = {
+            resume: { },
+            list: { },
+            close: { },
+            delete: { },
+            additionalDirectories: {},
+            setTitle: {},
+        };
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
             agentInfo: {
@@ -199,13 +210,7 @@ export class CodexAcpServer {
                     embeddedContext: true,
                     image: true
                 },
-                sessionCapabilities: {
-                    resume: { },
-                    list: { },
-                    close: { },
-                    delete: { },
-                    additionalDirectories: {},
-                },
+                sessionCapabilities,
                 mcpCapabilities: {
                     acp: false,
                     http: true,
@@ -230,6 +235,8 @@ export class CodexAcpServer {
             }
             case LEGACY_SET_SESSION_MODEL_METHOD:
                 return await this.unstable_setSessionModel(this.parseLegacySetSessionModelParams(methodRequest.params));
+            case SET_SESSION_TITLE_METHOD:
+                return await this.setSessionTitle(this.parseSetSessionTitleParams(methodRequest.params));
         }
     }
 
@@ -684,6 +691,16 @@ export class CodexAcpServer {
         };
     }
 
+    async setSessionTitle(params: SetSessionTitleRequest): Promise<SetSessionTitleResponse> {
+        logger.log("Set session title requested", {
+            sessionId: params.sessionId,
+            titleLength: params.title.length,
+        });
+        await this.checkAuthorization();
+        await this.runWithProcessCheck(() => this.codexAcpClient.setSessionTitle(params.sessionId, params.title));
+        return {};
+    }
+
     private applyFastModeChange(sessionState: SessionState, value: string): void {
         if (value !== FAST_MODE_ON && value !== FAST_MODE_OFF) {
             throw RequestError.invalidParams();
@@ -770,6 +787,18 @@ export class CodexAcpServer {
         return {
             sessionId: sessionId,
             modelId: modelId,
+        };
+    }
+
+    private parseSetSessionTitleParams(params: Record<string, unknown>): SetSessionTitleRequest {
+        const sessionId = params["sessionId"];
+        const title = params["title"];
+        if (typeof sessionId !== "string" || typeof title !== "string") {
+            throw RequestError.invalidParams();
+        }
+        return {
+            sessionId: sessionId,
+            title: title,
         };
     }
 

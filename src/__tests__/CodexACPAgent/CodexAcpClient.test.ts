@@ -16,6 +16,7 @@ import {AgentMode} from "../../AgentMode";
 import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
+import {SET_SESSION_TITLE_METHOD} from "../../AcpExtensions";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -1304,6 +1305,26 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.prompt({ sessionId: "session-id", prompt: [{ type: "text", text: "/status" }] });
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-status.json");
+    });
+
+    it('handles rename slash command through Codex app server', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture();
+        const threadSetNameSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName")
+            .mockResolvedValue({});
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/rename Quarterly review" }],
+        });
+
+        expect(threadSetNameSpy).toHaveBeenCalledWith({
+            threadId: "session-id",
+            name: "Quarterly review",
+        });
+        expect(turnStartSpy).not.toHaveBeenCalled();
+        const [event] = mockFixture.getAcpConnectionEvents([]);
+        expect(event).toBeDefined();
+        expect(event!.args[0].update.content.text).toBe('Renamed session to "Quarterly review".');
     });
 
     it('passes skill slash commands through to Codex', async () => {
@@ -2616,6 +2637,39 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const [event] = mockFixture.getAcpConnectionEvents([]);
         expect(event).toBeDefined();
         expect(event!.args[0].update.content.text).toBe('Command "/review-branch" requires branch name.');
+    });
+
+    it('reports missing rename slash command input', async () => {
+        const { mockFixture } = setupPromptFixture();
+        const threadSetNameSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName")
+            .mockResolvedValue({});
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "/rename" }],
+        });
+
+        expect(threadSetNameSpy).not.toHaveBeenCalled();
+        const [event] = mockFixture.getAcpConnectionEvents([]);
+        expect(event).toBeDefined();
+        expect(event!.args[0].update.content.text).toBe('Command "/rename" requires new session title.');
+    });
+
+    it('handles session setTitle extension through Codex app server', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        vi.spyOn(mockFixture.getCodexAcpClient(), "authRequired").mockResolvedValue(false);
+        const threadSetNameSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadSetName")
+            .mockResolvedValue({});
+
+        await expect(mockFixture.getCodexAcpAgent().extMethod(SET_SESSION_TITLE_METHOD, {
+            sessionId: "thread-id",
+            title: "Renamed from client",
+        })).resolves.toEqual({});
+
+        expect(threadSetNameSpy).toHaveBeenCalledWith({
+            threadId: "thread-id",
+            name: "Renamed from client",
+        });
     });
 
     it('handles logout command', async () => {

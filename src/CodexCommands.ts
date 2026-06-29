@@ -109,6 +109,11 @@ export class CodexCommands {
                 input: null
             },
             {
+                name: "rename",
+                description: "Rename this session.",
+                input: { hint: "new session title" }
+            },
+            {
                 name: "review",
                 description: "Review uncommitted changes, or review with custom instructions.",
                 input: { hint: "optional review instructions" }
@@ -213,6 +218,19 @@ export class CodexCommands {
                 await session.update({
                     sessionUpdate: "agent_message_chunk",
                     content: { type: "text", text: message }
+                });
+                return { handled: true };
+            }
+            case "rename": {
+                if (command.rest.length === 0) {
+                    await this.sendCommandUsageMessage(commandName, "new session title", sessionId);
+                    return { handled: true };
+                }
+                await this.runWithProcessCheck(() => this.codexAcpClient.setSessionTitle(sessionId, command.rest));
+                const session = new ACPSessionConnection(this.connection, sessionId);
+                await session.update({
+                    sessionUpdate: "agent_message_chunk",
+                    content: { type: "text", text: `Renamed session to ${JSON.stringify(command.rest)}.` }
                 });
                 return { handled: true };
             }
