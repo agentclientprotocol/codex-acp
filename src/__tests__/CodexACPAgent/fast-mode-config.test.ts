@@ -12,6 +12,7 @@ import {
     FAST_MODE_OFF,
     FAST_MODE_ON,
 } from "../../FastModeConfig";
+import {MODEL_CONFIG_ID} from "../../ModelConfigOption";
 
 describe("Fast mode session config", () => {
     const booleanConfigCapabilities: acp.ClientCapabilities = {
@@ -34,13 +35,14 @@ describe("Fast mode session config", () => {
             id: "fast-model",
             additionalSpeedTiers: ["fast"],
         });
+        const slowModel = createTestModel({id: "slow-model"});
 
         vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId: "session-id",
             currentModelId: "fast-model[medium]",
-            models: [fastModel],
+            models: [fastModel, slowModel],
             currentServiceTier,
             additionalDirectories: [],
         });
@@ -238,6 +240,24 @@ describe("Fast mode session config", () => {
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
             serviceTier: null,
         }));
+    });
+
+    it("removes the Fast mode config option when switching to a non-fast model via session_config", async () => {
+        const {codexAcpAgent} = await createSession("fast");
+
+        const fastResponse = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODEL_CONFIG_ID,
+            value: "fast-model",
+        });
+        expect(fastResponse.configOptions?.some(o => o.id === FAST_MODE_CONFIG_ID)).toBe(true);
+
+        const slowResponse = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODEL_CONFIG_ID,
+            value: "slow-model",
+        });
+        expect(slowResponse.configOptions?.some(o => o.id === FAST_MODE_CONFIG_ID)).toBe(false);
     });
 
     it("keeps Fast mode selected across model switches but stops applying it for non-fast models", async () => {

@@ -128,4 +128,21 @@ describeE2E("E2E tests", () => {
             expect(text).toContain("- session-root-skill: Session root skill");
         });
     });
+
+    it("lists repo skills from the session cwd", async () => {
+        fixture = await createAuthenticatedFixture();
+        fixture.writeSkill({
+            name: "workspace-skill",
+            description: "Workspace skill",
+            body: "This skill exists only in the session workspace.",
+        }, path.join(fixture.workspaceDir, ".agents", "skills"));
+
+        const session = await fixture.createSession();
+
+        await fixture.expectAvailableCommand(session.sessionId, "$workspace-skill");
+        await fixture.expectPromptText(session.sessionId, "/skills", (text) => {
+            expect(text).toContain("Available skills:");
+            expect(text).toContain("- workspace-skill: Workspace skill");
+        });
+    });
 });

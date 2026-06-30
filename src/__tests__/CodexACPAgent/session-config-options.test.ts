@@ -19,6 +19,7 @@ function buildModels(): {fast: Model; slow: Model} {
         description: "Frontier",
         supportedReasoningEfforts: [lowEffort, mediumEffort, highEffort],
         defaultReasoningEffort: "medium",
+        additionalSpeedTiers: ["fast"],
     });
     const slow = createTestModel({
         id: "slow-model",
@@ -95,7 +96,7 @@ describe("Session config options", () => {
         const {codexAcpAgent, response} = await createSession("custom-model[high]", [fast, slow]);
 
         const ids = response.configOptions?.map(o => o.id);
-        expect(ids).toEqual([MODE_CONFIG_ID, MODEL_CONFIG_ID, "fast-mode"]);
+        expect(ids).toEqual([MODE_CONFIG_ID, MODEL_CONFIG_ID]);
 
         const modelOption = response.configOptions?.find(o => o.id === MODEL_CONFIG_ID);
         expect(modelOption).toMatchObject({
