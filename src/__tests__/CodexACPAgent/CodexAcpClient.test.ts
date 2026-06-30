@@ -40,7 +40,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         authFixture.clearCodexConnectionDump();
 
         await expect(
-            codexAcpAgent.newSession({cwd: "", mcpServers: []})
+            codexAcpAgent.newSession({cwd: "", mcpServers: []}, 0)
         ).rejects.toThrow("Authentication required");
 
         const transportDump = authFixture.getCodexConnectionDump(ignoredFields);
@@ -61,8 +61,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         keyFixture.clearCodexConnectionDump();
 
         const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}};
-        await codexAcpAgent.authenticate(authRequest);
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        await codexAcpAgent.authenticate(authRequest, 0);
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []}, 1);
         expect(newSessionResponse.sessionId).toBeDefined();
 
         const transportEvents = keyFixture.getCodexConnectionEvents([...ignoredFields, "upgrade"]);
@@ -128,7 +128,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await envFixture.getCodexAcpClient().logout();
         envFixture.clearCodexConnectionDump();
 
-        await codexAcpAgent.authenticate({methodId: "api-key"});
+        await codexAcpAgent.authenticate({methodId: "api-key"}, 0);
 
         const transportEvents = envFixture.getCodexConnectionEvents([]);
         const loginRequest = transportEvents.find(event =>
@@ -157,7 +157,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await envFixture.getCodexAcpClient().logout();
         envFixture.clearCodexConnectionDump();
 
-        await codexAcpAgent.authenticate({methodId: "api-key"});
+        await codexAcpAgent.authenticate({methodId: "api-key"}, 0);
 
         const transportEvents = envFixture.getCodexConnectionEvents([]);
         const loginRequest = transportEvents.find(event =>
@@ -182,7 +182,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.stubEnv(CODEX_API_KEY_ENV_VAR, "");
         vi.stubEnv(OPENAI_API_KEY_ENV_VAR, "");
 
-        await expect(codexAcpAgent.authenticate({methodId: "api-key"}))
+        await expect(codexAcpAgent.authenticate({methodId: "api-key"}, 0))
             .rejects.toThrow(`${CODEX_API_KEY_ENV_VAR} or ${OPENAI_API_KEY_ENV_VAR} is not set`);
     });
 
@@ -195,11 +195,75 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         const accountLoginSpy = vi.spyOn(codexAppServerClient, "accountLogin");
 
-        await expect(chatGptFixture.getCodexAcpAgent().authenticate({methodId: "chat-gpt"}))
+        await expect(chatGptFixture.getCodexAcpAgent().authenticate({methodId: "chat-gpt"}, 0))
             .resolves.toEqual({});
 
         expect(accountReadSpy).toHaveBeenCalledWith({refreshToken: true});
         expect(accountLoginSpy).not.toHaveBeenCalled();
+    });
+
+
+    it('should request ACP URL elicitation for device code auth', async () => {
+        const deviceCodeFixture = createCodexMockTestFixture();
+        vi.spyOn(deviceCodeFixture.getCodexAppServerClient(), "accountRead").mockResolvedValue({
+            account: null,
+            requiresOpenaiAuth: true,
+        });
+        deviceCodeFixture.setElicitationResponse({action: "accept"});
+        deviceCodeFixture.setAccountLoginResponse({
+            type: "chatgptDeviceCode",
+            loginId: "login-id",
+            verificationUrl: "https://openai.example/device",
+            userCode: "ABCD-EFGH",
+        });
+        vi.stubEnv("NO_BROWSER", "1");
+
+        const authRequestId = 0;
+        const authPromise = deviceCodeFixture
+            .getCodexAcpAgent()
+            .authenticate({ methodId: "chat-gpt" }, authRequestId);
+
+        await vi.waitFor(() => {
+            expect(deviceCodeFixture.getCodexAppServerClient().accountLogin)
+                .toHaveBeenCalledWith({type: "chatgptDeviceCode"});
+        });
+
+        await vi.waitFor(() => {
+            const elicitationEvent = deviceCodeFixture.getAcpConnectionEvents([])
+                .find(event => event.method === "elicitationCreate");
+            expect(elicitationEvent?.args[0]).toEqual(expect.objectContaining({
+                mode: "url",
+                requestId: authRequestId,
+                elicitationId: expect.stringMatching(/^chatgpt-login-/),
+                url: "https://openai.example/device",
+                message: expect.stringContaining("ABCD-EFGH"),
+            }));
+        });
+
+        deviceCodeFixture.sendAccountLoginCompleted({loginId: "login-id", success: true, error: null});
+
+        await expect(authPromise).resolves.toEqual({});
+    });
+
+    it('should fail device code auth when ACP URL elicitation is not accepted', async () => {
+        const deviceCodeFixture = createCodexMockTestFixture();
+        vi.spyOn(deviceCodeFixture.getCodexAppServerClient(), "accountRead").mockResolvedValue({
+            account: null,
+            requiresOpenaiAuth: true,
+        });
+        deviceCodeFixture.setElicitationResponse({action: "cancel"});
+        deviceCodeFixture.setAccountLoginResponse({
+            type: "chatgptDeviceCode",
+            loginId: "login-id",
+            verificationUrl: "https://openai.example/device",
+            userCode: "ABCD-EFGH",
+        });
+        vi.stubEnv("NO_BROWSER", "1");
+
+        await expect(deviceCodeFixture.getCodexAcpAgent().authenticate({methodId: "chat-gpt"}, 0))
+            .rejects.toThrow("Authentication required");
+        expect(deviceCodeFixture.getCodexAppServerClient().accountLogin)
+            .toHaveBeenCalledWith({type: "chatgptDeviceCode"});
     });
 
     it('should authenticate with a gateway', async () => {
@@ -230,13 +294,13 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             }
         };
 
-        await codexAcpAgent.authenticate(authRequest);
+        await codexAcpAgent.authenticate(authRequest, 0);
         expect(await gatewayFixture.getCodexAcpClient().authRequired()).toBe(false);
 
         const authenticatedResponse = await gatewayFixture.getCodexAcpAgent().extMethod("authentication/status", {});
         expect(authenticatedResponse).toEqual({type: "gateway", name: "custom-gateway"});
 
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []}, 1);
         expect(newSessionResponse.sessionId).toBeDefined();
     });
 
@@ -256,11 +320,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         await authFixture.getCodexAcpClient().logout();
 
-        await codexAcpAgent.authenticate({
-            methodId: "api-key",
-            _meta: { "api-key": { apiKey: "TOKEN" } }
-        });
-        const apiKeySession = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        await codexAcpAgent.authenticate(
+            {methodId: "api-key", _meta: {"api-key": {apiKey: "TOKEN"}}},
+            0,
+        );
+        const apiKeySession = await codexAcpAgent.newSession({cwd: "", mcpServers: []}, 0);
         authFixture.clearAcpConnectionDump();
 
         await codexAcpAgent.prompt({
@@ -271,18 +335,21 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const apiKeyStatusDump = authFixture.getAcpConnectionDump([]);
         expect(apiKeyStatusDump).toContain("**Account:** API key configured");
 
-        await codexAcpAgent.authenticate({
-            methodId: "gateway",
-            _meta: {
-                "gateway": {
-                    baseUrl: "https://www.example.com",
-                    headers: {
-                        "Custom-Auth-Header": "TOKEN"
+        await codexAcpAgent.authenticate(
+            {
+                methodId: "gateway",
+                _meta: {
+                    "gateway": {
+                        baseUrl: "https://www.example.com",
+                        headers: {
+                            "Custom-Auth-Header": "TOKEN"
+                        }
                     }
                 }
-            }
-        });
-        const gatewaySession = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+            },
+            0,
+        );
+        const gatewaySession = await codexAcpAgent.newSession({cwd: "", mcpServers: []}, 0);
         authFixture.clearAcpConnectionDump();
 
         await codexAcpAgent.prompt({
@@ -526,15 +593,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             nextCursor: null,
         });
 
-        await codexAcpAgent.resumeSession({
-            sessionId: "resume-id",
-            cwd: "/workspace",
-        });
-        await codexAcpAgent.loadSession({
-            sessionId: "load-id",
-            cwd: "/workspace",
-            mcpServers: [],
-        });
+        await codexAcpAgent.resumeSession(
+            {sessionId: "resume-id", cwd: "/workspace"},
+            0,
+        );
+        await codexAcpAgent.loadSession(
+            {sessionId: "load-id", cwd: "/workspace", mcpServers: []},
+            1,
+        );
 
         expect(threadResumeSpy.mock.calls[0]![0].modelProvider).toBe("azure");
         expect(threadResumeSpy.mock.calls[1]![0].modelProvider).toBe("azure");
@@ -700,10 +766,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             env: [],
         } as unknown as acp.McpServerStdio;
 
-        const session = await codexAcpAgent.newSession({
-            cwd: "/workspace",
-            mcpServers: [mcpServer]
-        });
+        const session = await codexAcpAgent.newSession(
+            {cwd: "/workspace", mcpServers: [mcpServer]},
+            0,
+        );
 
         mockFixture.sendServerNotification({
             method: "mcpServer/startupStatus/updated",
@@ -1239,7 +1305,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         fixture.clearCodexConnectionDump();
 
         await expect(
-            fixture.getCodexAcpAgent().resumeSession({cwd: "", sessionId: sessionId})
+            fixture.getCodexAcpAgent().resumeSession({cwd: "", sessionId: sessionId}, 0)
         ).rejects.toThrow("invalid session id");
     });
 
@@ -2624,7 +2690,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
 
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []}, 0);
 
         fixture.clearAcpConnectionDump();
         const prompt: acp.ContentBlock[] = [{ type: "text", text: "/logout " }];
@@ -2674,8 +2740,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
         const authenticateSpy = vi.spyOn(codexAcpClient, "authenticate").mockResolvedValue(true);
 
-        const session1 = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
-        const session2 = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        const session1 = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []}, 0);
+        const session2 = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []}, 0);
         expect(codexAcpAgent.getSessionState(session1.sessionId).authConfigured).toBe(true);
         expect(codexAcpAgent.getSessionState(session2.sessionId).authConfigured).toBe(true);
 
@@ -2695,9 +2761,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             authConfigured: false,
         });
 
-        await codexAcpAgent.authenticate({methodId: "api-key"});
+        const authRequestId = 0;
+        await codexAcpAgent.authenticate({methodId: "api-key"}, authRequestId);
 
-        expect(authenticateSpy).toHaveBeenCalledWith({methodId: "api-key"});
+        expect(authenticateSpy).toHaveBeenCalledWith(expect.anything(), {methodId: "api-key"}, authRequestId);
         expect(getAccountSpy).toHaveBeenCalledTimes(4);
         expect(codexAcpAgent.getSessionState(session1.sessionId)).toMatchObject({
             account: { type: "apiKey" },
@@ -2732,7 +2799,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         const authenticateSpy = vi.spyOn(codexAcpClient, "authenticate").mockResolvedValue(true);
 
-        const session = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        const session = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []}, 0);
         expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
             account: { type: "apiKey" },
             authConfigured: true,
@@ -2750,9 +2817,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 },
             },
         };
-        await codexAcpAgent.authenticate(gatewayAuthRequest);
+        const gatewayAuthRequestId = 0;
+        await codexAcpAgent.authenticate(gatewayAuthRequest, gatewayAuthRequestId);
 
-        expect(authenticateSpy).toHaveBeenCalledWith(gatewayAuthRequest);
+        expect(authenticateSpy).toHaveBeenCalledWith(expect.anything(), gatewayAuthRequest, gatewayAuthRequestId);
         expect(getAccountSpy).toHaveBeenCalledTimes(1);
         expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
             account: { type: "apiKey" },
@@ -2783,7 +2851,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
 
-        const session = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        const session = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []}, 0);
         expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
             account: null,
             authConfigured: true,
@@ -2818,7 +2886,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             }]
         });
 
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []}, 0);
 
         fixture.clearAcpConnectionDump();
         const prompt: acp.ContentBlock[] = [{ type: "text", text: "/skills " }];
@@ -2854,7 +2922,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             nextCursor: null
         });
 
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []}, 0);
 
         fixture.clearAcpConnectionDump();
         const prompt: acp.ContentBlock[] = [{ type: "text", text: "/mcp " }];
@@ -2868,7 +2936,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
 
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []});
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: []}, 0);
         const prompt: acp.ContentBlock[] = [
             { type: "text", text: "/status " },
             {

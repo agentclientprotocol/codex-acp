@@ -10,7 +10,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
-- `NO_BROWSER` - hide browser-based ChatGPT auth when set.
+- `NO_BROWSER` - use device code auth instead of browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
 
 ### Quick start

@@ -12,7 +12,12 @@ import fs from "node:fs";
 import os from "node:os";
 import {AgentMode} from "../AgentMode";
 import {expect, vi} from "vitest";
-import type {Model, ReasoningEffortOption} from "../app-server/v2";
+import type {
+    AccountLoginCompletedNotification,
+    LoginAccountResponse,
+    Model,
+    ReasoningEffortOption
+} from "../app-server/v2";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -41,6 +46,9 @@ export function createSmartMock<T extends object>(
 function normalizeAcpConnectionEvent(event: MethodCallEvent): MethodCallEvent {
     if (event.method === "request" && event.args[0] === acp.methods.client.session.requestPermission) {
         return {method: "requestPermission", args: [event.args[1]]};
+    }
+    if (event.method === "request" && event.args[0] === acp.methods.client.elicitation.create) {
+        return {method: "elicitationCreate", args: [event.args[1]]};
     }
     if (event.method === "notify" && event.args[0] === acp.methods.client.session.update) {
         return {method: "sessionUpdate", args: [event.args[1]]};
@@ -238,6 +246,9 @@ export interface CodexMockTestFixture extends TestFixture {
     sendServerNotification(notification: ServerNotification | Record<string, unknown>): void,
     sendServerRequest<T>(method: string, params: unknown): Promise<T>,
     setPermissionResponse(response: RequestPermissionResponse): void,
+    setElicitationResponse(response: acp.CreateElicitationResponse): void,
+    setAccountLoginResponse(response: LoginAccountResponse): void,
+    sendAccountLoginCompleted(notification: AccountLoginCompletedNotification): void,
 }
 
 /**
@@ -250,10 +261,14 @@ export interface CodexMockTestFixture extends TestFixture {
 export function createCodexMockTestFixture(): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
+    const loginCompletedHandlers = new Set<(notification: AccountLoginCompletedNotification) => void>();
 
     // State for controlling permission responses
     const permissionState: { response: RequestPermissionResponse } = {
         response: { outcome: { outcome: 'cancelled' } }
+    };
+    const elicitationState: { response: acp.CreateElicitationResponse } = {
+        response: { action: 'cancel' }
     };
 
     const mockCodexConnection = {
@@ -261,7 +276,15 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
         onUnhandledNotification: (handler: (notification: any) => void) => {
             unhandledNotificationHandler = handler;
         },
-        onNotification: () => {},
+        onNotification: (method: string, handler: (notification: AccountLoginCompletedNotification) => void) => {
+            if (method === "account/login/completed") {
+                loginCompletedHandlers.add(handler);
+                return {
+                    dispose: () => loginCompletedHandlers.delete(handler),
+                };
+            }
+            return { dispose: () => {} };
+        },
         onRequest: (type: { method: string }, handler: (params: unknown) => Promise<unknown>) => {
             requestHandlers.set(type.method, handler);
         },
@@ -276,9 +299,13 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
         if (args[0] === acp.methods.client.session.requestPermission) {
             return permissionState.response;
         }
+        if (args[0] === acp.methods.client.elicitation.create) {
+            return elicitationState.response;
+        }
         return { mock: "Mocked return" };
     });
     returnValues.set('requestPermission', () => permissionState.response);
+    returnValues.set('elicitationCreate', () => elicitationState.response);
 
     const acpConnection = createSmartMock<AcpClientConnection>((event) => {
         const normalizedEvent = normalizeAcpConnectionEvent(event);
@@ -312,6 +339,17 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
         },
         setPermissionResponse(response: RequestPermissionResponse): void {
             permissionState.response = response;
+        },
+        setElicitationResponse(response: acp.CreateElicitationResponse): void {
+            elicitationState.response = response;
+        },
+        setAccountLoginResponse(response: LoginAccountResponse): void {
+            vi.spyOn(baseFixture.getCodexAppServerClient(), "accountLogin").mockResolvedValue(response);
+        },
+        sendAccountLoginCompleted(notification: AccountLoginCompletedNotification): void {
+            for (const handler of loginCompletedHandlers) {
+                handler(notification);
+            }
         },
     };
 }

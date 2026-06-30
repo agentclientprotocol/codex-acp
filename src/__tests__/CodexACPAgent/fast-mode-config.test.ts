@@ -43,7 +43,7 @@ describe("Fast mode session config", () => {
             clientInfo,
         });
 
-        const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
+        const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []}, 0);
         return {fixture, codexAcpAgent, codexAcpClient, response};
     }
 
