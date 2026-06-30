@@ -5,6 +5,7 @@
       "sessionId": "id",
       "update": {
         "sessionUpdate": "agent_message_chunk",
+        "messageId": "string",
         "content": {
           "type": "text",
           "text": "He"
@@ -20,6 +21,7 @@
       "sessionId": "id",
       "update": {
         "sessionUpdate": "agent_message_chunk",
+        "messageId": "string",
         "content": {
           "type": "text",
           "text": "ll"
@@ -35,6 +37,7 @@
       "sessionId": "id",
       "update": {
         "sessionUpdate": "agent_message_chunk",
+        "messageId": "string",
         "content": {
           "type": "text",
           "text": "o!"

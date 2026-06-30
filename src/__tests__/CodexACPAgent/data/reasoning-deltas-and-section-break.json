@@ -5,6 +5,7 @@
       "sessionId": "test-session-id",
       "update": {
         "sessionUpdate": "agent_thought_chunk",
+        "messageId": "reasoning-1",
         "content": {
           "type": "text",
           "text": "First thought"
@@ -20,6 +21,7 @@
       "sessionId": "test-session-id",
       "update": {
         "sessionUpdate": "agent_thought_chunk",
+        "messageId": "reasoning-1",
         "content": {
           "type": "text",
           "text": "\n\n"
@@ -35,6 +37,7 @@
       "sessionId": "test-session-id",
       "update": {
         "sessionUpdate": "agent_thought_chunk",
+        "messageId": "reasoning-1",
         "content": {
           "type": "text",
           "text": "Raw reasoning detail"

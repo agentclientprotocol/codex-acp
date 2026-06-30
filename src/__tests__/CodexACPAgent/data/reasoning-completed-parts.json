@@ -5,6 +5,7 @@
       "sessionId": "test-session-id",
       "update": {
         "sessionUpdate": "agent_thought_chunk",
+        "messageId": "reasoning-2",
         "content": {
           "type": "text",
           "text": "First summary\n\nSecond summary"

@@ -55,6 +55,10 @@ import {
 } from "./CodexToolCallMapper";
 import { stripShellPrefix } from "./CommandUtils";
 import {createTerminalOutputMeta, type TerminalOutputMode} from "./TerminalOutputMode";
+import {
+    createAgentTextMessageChunk,
+    createAgentTextThoughtChunk,
+} from "./ContentChunks";
 
 export { stripShellPrefix };
 
@@ -226,44 +230,20 @@ export class CodexEventHandler {
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: event.delta
-            }
-        }
+        return createAgentTextMessageChunk(event.delta, event.itemId);
     }
 
     private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
         const detailsText = event.details ? `\n\n${event.details}` : "";
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: `Config warning: ${event.summary}${detailsText}\n\n`
-            }
-        }
+        return createAgentTextMessageChunk(`Config warning: ${event.summary}${detailsText}\n\n`);
     }
 
     private createWarningEvent(event: WarningNotification): UpdateSessionEvent {
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: `Warning: ${event.message}\n\n`
-            }
-        };
+        return createAgentTextMessageChunk(`Warning: ${event.message}\n\n`);
     }
 
     private createModelReroutedEvent(event: ModelReroutedNotification): UpdateSessionEvent {
-        return {
-            sessionUpdate: "agent_thought_chunk",
-            content: {
-                type: "text",
-                text: `Model rerouted from ${event.fromModel} to ${event.toModel} (${event.reason}).\n\n`
-            }
-        };
+        return createAgentTextThoughtChunk(`Model rerouted from ${event.fromModel} to ${event.toModel} (${event.reason}).\n\n`);
     }
 
     private createThreadGoalUpdatedEvent(event: ThreadGoalUpdatedNotification): UpdateSessionEvent | null {
@@ -278,13 +258,7 @@ export class CodexEventHandler {
         const text = objective.includes("\n")
             ? `Goal updated (${status}):\n${objective}`
             : `Goal updated (${status}): ${objective}`;
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: `\n\n${text}\n\n`,
-            },
-        };
+        return createAgentTextMessageChunk(`\n\n${text}\n\n`);
     }
 
     private formatThreadGoalStatus(status: ThreadGoalUpdatedNotification["goal"]["status"]): string {
@@ -310,13 +284,7 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = null;
 
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: "\n\nGoal cleared.\n\n",
-            },
-        };
+        return createAgentTextMessageChunk("\n\nGoal cleared.\n\n");
     }
 
     private createThreadGoalSnapshot(event: ThreadGoalUpdatedNotification): ThreadGoalSnapshot {
@@ -342,22 +310,16 @@ export class CodexEventHandler {
         event: ReasoningSummaryTextDeltaNotification | ReasoningTextDeltaNotification
     ): UpdateSessionEvent {
         this.seenReasoningDeltaItemIds.add(event.itemId);
-        return this.createAgentThoughtEvent(event.delta);
+        return this.createAgentThoughtEvent(event.delta, event.itemId);
     }
 
     private createReasoningSectionBreakEvent(event: ReasoningSummaryPartAddedNotification): UpdateSessionEvent {
         this.seenReasoningDeltaItemIds.add(event.itemId);
-        return this.createAgentThoughtEvent("\n\n");
+        return this.createAgentThoughtEvent("\n\n", event.itemId);
     }
 
-    private createAgentThoughtEvent(text: string): UpdateSessionEvent {
-        return {
-            sessionUpdate: "agent_thought_chunk",
-            content: {
-                type: "text",
-                text,
-            }
-        };
+    private createAgentThoughtEvent(text: string, messageId: string): UpdateSessionEvent {
+        return createAgentTextThoughtChunk(text, messageId);
     }
 
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
@@ -462,7 +424,7 @@ export class CodexEventHandler {
         if (text.length === 0) {
             return null;
         }
-        return this.createAgentThoughtEvent(text);
+        return this.createAgentThoughtEvent(text, item.id);
     }
 
     private createExitedReviewModeEvent(item: ThreadItem & { type: "exitedReviewMode" }): UpdateSessionEvent | null {
@@ -470,23 +432,11 @@ export class CodexEventHandler {
         if (text.length === 0) {
             return null;
         }
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text,
-            }
-        };
+        return createAgentTextMessageChunk(text);
     }
 
     private createContextCompactedEvent(): UpdateSessionEvent {
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: "*Context compacted to fit the model's context window.*\n\n"
-            }
-        };
+        return createAgentTextMessageChunk("*Context compacted to fit the model's context window.*\n\n");
     }
 
     private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
@@ -629,13 +579,7 @@ export class CodexEventHandler {
                 ? RequestError.internalError(this.createTurnErrorData(params.error))
                 : RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message);
         }
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: `${params.error.message}\n\n`
-            }
-        }
+        return createAgentTextMessageChunk(`${params.error.message}\n\n`);
     }
 
     private isAuthenticationRequiredError(error: CodexErrorInfo | null): boolean {

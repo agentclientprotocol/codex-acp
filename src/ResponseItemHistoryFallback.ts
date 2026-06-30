@@ -27,7 +27,7 @@ function historyFallbackUpdateKey(update: UpdateSessionEvent): string | null {
         case "user_message_chunk":
         case "agent_message_chunk":
         case "agent_thought_chunk":
-            return `${update.sessionUpdate}:${JSON.stringify(update.content)}`;
+            return `${update.sessionUpdate}:${update.messageId ?? ""}:${JSON.stringify(update.content)}`;
         case "tool_call":
             return `tool_call:${update.toolCallId}:start`;
         case "tool_call_update":

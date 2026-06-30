@@ -7,6 +7,7 @@ import type {SessionState} from "./CodexAcpServer";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
 import {logger} from "./Logger";
+import {createAgentTextMessageChunk} from "./ContentChunks";
 
 type ParsedSlashCommand = {
     name: string;
@@ -210,20 +211,14 @@ export class CodexCommands {
             case "status": {
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 const message = this.buildStatusMessage(sessionState);
-                await session.update({
-                    sessionUpdate: "agent_message_chunk",
-                    content: { type: "text", text: message }
-                });
+                await session.update(createAgentTextMessageChunk(message));
                 return { handled: true };
             }
             case "logout": {
                 await this.runWithProcessCheck(() => this.codexAcpClient.logout());
                 await this.onLogout();
                 const session = new ACPSessionConnection(this.connection, sessionId);
-                await session.update({
-                    sessionUpdate: "agent_message_chunk",
-                    content: { type: "text", text: "Logged out from Codex account." }
-                });
+                await session.update(createAgentTextMessageChunk("Logged out from Codex account."));
                 return { handled: true };
             }
             case "skills": {
@@ -237,10 +232,7 @@ export class CodexCommands {
                     ? ["Available skills:", ...lines].join("\n")
                     : "No skills configured.";
                 const session = new ACPSessionConnection(this.connection, sessionId);
-                await session.update({
-                    sessionUpdate: "agent_message_chunk",
-                    content: { type: "text", text }
-                });
+                await session.update(createAgentTextMessageChunk(text));
                 return { handled: true };
             }
             case "mcp": {
@@ -258,10 +250,7 @@ export class CodexCommands {
                     ? ["Configured MCP servers:", ...lines].join("\n")
                     : "No MCP servers configured.";
                 const session = new ACPSessionConnection(this.connection, sessionId);
-                await session.update({
-                    sessionUpdate: "agent_message_chunk",
-                    content: { type: "text", text }
-                });
+                await session.update(createAgentTextMessageChunk(text));
                 return { handled: true };
             }
             default:
@@ -316,13 +305,7 @@ export class CodexCommands {
 
         if (argument.length > 4000) {
             const session = new ACPSessionConnection(this.connection, sessionId);
-            await session.update({
-                sessionUpdate: "agent_message_chunk",
-                content: {
-                    type: "text",
-                    text: 'Command "/goal" requires goal text of at most 4000 characters.'
-                }
-            });
+            await session.update(createAgentTextMessageChunk('Command "/goal" requires goal text of at most 4000 characters.'));
             return { handled: true };
         }
 
@@ -371,13 +354,7 @@ export class CodexCommands {
 
     private async sendCommandUsageMessage(name: string, inputHint: string, sessionId: string): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
-        await session.update({
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: `Command "/${name}" requires ${inputHint}.`
-            }
-        });
+        await session.update(createAgentTextMessageChunk(`Command "/${name}" requires ${inputHint}.`));
     }
 
     private async sendUnknownCommandMessage(name: string, sessionId: string): Promise<void> {
@@ -390,10 +367,7 @@ export class CodexCommands {
             text.push(...lines);
         }
         const session = new ACPSessionConnection(this.connection, sessionId);
-        await session.update({
-            sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: text.join("\n") }
-        });
+        await session.update(createAgentTextMessageChunk(text.join("\n")));
     }
 
     private buildStatusMessage(sessionState: SessionState): string {

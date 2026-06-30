@@ -71,6 +71,7 @@
       "sessionId": "session-legacy",
       "update": {
         "sessionUpdate": "user_message_chunk",
+        "messageId": "item-user-1",
         "content": {
           "type": "text",
           "text": "List the files"
@@ -86,6 +87,7 @@
       "sessionId": "session-legacy",
       "update": {
         "sessionUpdate": "agent_thought_chunk",
+        "messageId": "item-reasoning-1",
         "content": {
           "type": "text",
           "text": "Need to inspect the directory."
@@ -245,6 +247,7 @@
       "sessionId": "session-legacy",
       "update": {
         "sessionUpdate": "agent_message_chunk",
+        "messageId": "item-agent-1",
         "content": {
           "type": "text",
           "text": "The directory contains README.md and src."
