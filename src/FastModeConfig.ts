@@ -4,6 +4,7 @@ import type {ServiceTier} from "./app-server";
 import type {Model} from "./app-server/v2";
 
 export const FAST_MODE_CONFIG_ID = "fast-mode";
+export const FAST_MODE_CATEGORY = "model_config";
 export const FAST_MODE_ON = "on";
 export const FAST_MODE_OFF = "off";
 
@@ -27,7 +28,7 @@ export function createFastModeConfigOption(fastModeEnabled: boolean, useBooleanC
             id: FAST_MODE_CONFIG_ID,
             name: "Fast mode",
             description: FAST_MODE_DESCRIPTION,
-            category: FAST_MODE_CONFIG_ID,
+            category: FAST_MODE_CATEGORY,
             type: "boolean",
             currentValue: fastModeEnabled,
         };
@@ -37,7 +38,7 @@ export function createFastModeConfigOption(fastModeEnabled: boolean, useBooleanC
         id: FAST_MODE_CONFIG_ID,
         name: "Fast mode",
         description: FAST_MODE_DESCRIPTION,
-        category: FAST_MODE_CONFIG_ID,
+        category: FAST_MODE_CATEGORY,
         type: "select",
         currentValue: fastModeEnabled ? FAST_MODE_ON : FAST_MODE_OFF,
         options: [
