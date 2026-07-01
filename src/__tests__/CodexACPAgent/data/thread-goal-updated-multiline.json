@@ -4,10 +4,15 @@
     {
       "sessionId": "test-session-id",
       "update": {
-        "sessionUpdate": "agent_message_chunk",
-        "content": {
-          "type": "text",
-          "text": "\n\nGoal updated (budget limited):\nFirst task\nSecond task\n\n"
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "codex": {
+            "goal": {
+              "objective": "First task\nSecond task",
+              "status": "budgetLimited",
+              "tokenBudget": 1000
+            }
+          }
         }
       }
     }

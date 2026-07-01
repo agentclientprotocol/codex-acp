@@ -13,6 +13,7 @@ import type {
     Model,
     ReasoningEffortOption,
     Thread,
+    ThreadGoalStatus,
     ThreadItem,
     TurnCompletedNotification,
     UserInput
@@ -69,7 +70,7 @@ import {resolveTerminalOutputMode, type TerminalOutputMode} from "./TerminalOutp
 
 export interface ThreadGoalSnapshot {
     objective: string;
-    status: string;
+    status: ThreadGoalStatus;
     tokenBudget: number | null;
 }
 

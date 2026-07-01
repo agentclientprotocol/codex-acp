@@ -4,10 +4,11 @@
     {
       "sessionId": "test-session-id",
       "update": {
-        "sessionUpdate": "agent_message_chunk",
-        "content": {
-          "type": "text",
-          "text": "\n\nGoal cleared.\n\n"
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "codex": {
+            "goal": null
+          }
         }
       }
     }
