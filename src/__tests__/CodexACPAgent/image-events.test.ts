@@ -45,7 +45,7 @@ describe("CodexEventHandler - image events", () => {
                     item: {
                         type: "imageGeneration",
                         id: "image-generation-1",
-                        status: "completed",
+                        status: "generating",
                         revisedPrompt: "A tiny blue square",
                         result: "iVBORw0KGgo=",
                         savedPath: "/tmp/codex/generated-blue-square.png",
@@ -71,7 +71,7 @@ describe("CodexEventHandler - image events", () => {
                 item: {
                     type: "imageGeneration",
                     id: "image-generation-completed-only",
-                    status: "completed",
+                    status: "generating",
                     revisedPrompt: null,
                     result: "iVBORw0KGgo=",
                 },

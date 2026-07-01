@@ -429,7 +429,7 @@ export class CodexEventHandler {
                 if (this.activeImageGenerationItems.delete(event.item.id)) {
                     return createImageGenerationCompleteUpdate(event.item);
                 }
-                return createImageGenerationUpdate(event.item);
+                return createImageGenerationUpdate(event.item, { terminalStatus: true });
             case "reasoning":
                 if (this.seenReasoningDeltaItemIds.delete(event.item.id)) {
                     return null;

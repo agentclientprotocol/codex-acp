@@ -20,7 +20,7 @@
           }
         ],
         "rawOutput": {
-          "status": "completed",
+          "status": "generating",
           "revisedPrompt": null,
           "result": "iVBORw0KGgo="
         }

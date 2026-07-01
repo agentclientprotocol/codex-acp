@@ -197,21 +197,24 @@ export function createImageGenerationCompleteUpdate(
     return {
         sessionUpdate: "tool_call_update",
         toolCallId: item.id,
-        status: imageGenerationToolStatus(item.status),
+        status: imageGenerationTerminalStatus(item.status),
         content: imageGenerationContent(item),
         rawOutput: imageGenerationRawOutput(item),
     };
 }
 
 export function createImageGenerationUpdate(
-    item: ThreadItem & { type: "imageGeneration" }
+    item: ThreadItem & { type: "imageGeneration" },
+    options?: { terminalStatus?: boolean },
 ): UpdateSessionEvent {
     return {
         sessionUpdate: "tool_call",
         toolCallId: item.id,
         kind: "other",
         title: "Image generation",
-        status: imageGenerationToolStatus(item.status),
+        status: options?.terminalStatus
+            ? imageGenerationTerminalStatus(item.status)
+            : imageGenerationToolStatus(item.status),
         content: imageGenerationContent(item),
         rawOutput: imageGenerationRawOutput(item),
     };
@@ -619,6 +622,20 @@ function imageGenerationToolStatus(status: string): AcpToolCallStatus {
             return "in_progress";
         case "failed":
             return "failed";
+        default:
+            return "completed";
+    }
+}
+
+function imageGenerationTerminalStatus(status: string): AcpToolCallStatus {
+    switch (status) {
+        case "failed":
+            return "failed";
+        case "completed":
+        case "generating":
+        case "in_progress":
+        case "inProgress":
+        case "incomplete":
         default:
             return "completed";
     }
