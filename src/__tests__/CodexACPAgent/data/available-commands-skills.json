@@ -22,6 +22,13 @@
             "input": null
           },
           {
+            "name": "rename",
+            "description": "Rename this session.",
+            "input": {
+              "hint": "new session title"
+            }
+          },
+          {
             "name": "review",
             "description": "Review uncommitted changes, or review with custom instructions.",
             "input": {
