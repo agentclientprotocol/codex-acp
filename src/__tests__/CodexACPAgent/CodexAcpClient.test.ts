@@ -1660,7 +1660,22 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(promptPromise).resolves.toEqual(expect.objectContaining({
             stopReason: "end_turn",
         }));
-        expect(mockFixture.getAcpConnectionDump([])).toContain("Goal updated (active): Ship the migration and keep tests green");
+        expect(mockFixture.getAcpConnectionEvents([])).toContainEqual(expect.objectContaining({
+            args: [expect.objectContaining({
+                update: {
+                    sessionUpdate: "session_info_update",
+                    _meta: {
+                        codex: {
+                            goal: {
+                                objective: "Ship the migration and keep tests green",
+                                status: "active",
+                                tokenBudget: null,
+                            },
+                        },
+                    },
+                },
+            })],
+        }));
     });
 
     it('completes goal slash command when a turn routes after the goal update', async () => {

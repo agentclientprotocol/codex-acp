@@ -4,10 +4,15 @@
     {
       "sessionId": "test-session-id",
       "update": {
-        "sessionUpdate": "agent_message_chunk",
-        "content": {
-          "type": "text",
-          "text": "\n\nGoal updated (active): Ship the goal update\n\n"
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "codex": {
+            "goal": {
+              "objective": "Ship the goal update",
+              "status": "active",
+              "tokenBudget": null
+            }
+          }
         }
       }
     }

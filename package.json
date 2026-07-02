@@ -53,17 +53,17 @@
   "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
-    "@types/node": "^24.10.1",
+    "@types/node": "^26.0.1",
     "esbuild": "^0.28.1",
     "mcp-hello-world": "^1.1.2",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.10"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^1.0.0",
-    "@openai/codex": "^0.142.4",
-    "diff": "^8.0.3",
+    "@agentclientprotocol/sdk": "^1.1.0",
+    "@openai/codex": "^0.142.5",
+    "diff": "^9.0.0",
     "open": "^11.0.0",
     "vscode-jsonrpc": "^8.2.1",
     "zod": "^4.0.0"

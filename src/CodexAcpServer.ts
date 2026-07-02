@@ -13,6 +13,7 @@ import type {
     Model,
     ReasoningEffortOption,
     Thread,
+    ThreadGoalStatus,
     ThreadItem,
     TurnCompletedNotification,
     UserInput
@@ -56,6 +57,7 @@ import {
     formatWebSearchTitle,
 } from "./CodexToolCallMapper";
 import {
+    clientSupportsBooleanConfigOptions,
     createFastModeConfigOption,
     FAST_MODE_CONFIG_ID,
     FAST_MODE_OFF,
@@ -74,7 +76,7 @@ import {
 
 export interface ThreadGoalSnapshot {
     objective: string;
-    status: string;
+    status: ThreadGoalStatus;
     tokenBudget: number | null;
 }
 
@@ -143,6 +145,7 @@ export class CodexAcpServer {
     private readonly availableCommands: CodexCommands;
     private clientInfo: acp.Implementation | null;
     private terminalOutputMode: TerminalOutputMode;
+    private booleanConfigOptionsSupported: boolean;
 
     private readonly sessions: Map<string, SessionState>;
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
@@ -173,6 +176,7 @@ export class CodexAcpServer {
         this.getRecentStderr = getRecentStderr ?? (() => "");
         this.clientInfo = null;
         this.terminalOutputMode = "terminal_output_delta";
+        this.booleanConfigOptionsSupported = false;
         this.availableCommands = new CodexCommands(
             connection,
             codexAcpClient,
@@ -187,6 +191,7 @@ export class CodexAcpServer {
         logger.log("Initialize request received");
         this.clientInfo = _params.clientInfo ?? null;
         this.terminalOutputMode = resolveTerminalOutputMode(_params.clientCapabilities);
+        this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
@@ -662,23 +667,18 @@ export class CodexAcpServer {
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
-        if (typeof params.value !== "string") {
-            throw RequestError.invalidParams();
-        }
-        const value = params.value;
-
         switch (params.configId) {
             case FAST_MODE_CONFIG_ID:
-                this.applyFastModeChange(sessionState, value);
+                this.applyFastModeChange(sessionState, params);
                 break;
             case MODE_CONFIG_ID:
-                this.applyModeChange(sessionState, value);
+                this.applyModeChange(sessionState, this.stringConfigValue(params));
                 break;
             case MODEL_CONFIG_ID:
-                this.applyModelChange(sessionState, value);
+                this.applyModelChange(sessionState, this.stringConfigValue(params));
                 break;
             case REASONING_EFFORT_CONFIG_ID:
-                this.applyReasoningEffortChange(sessionState, value);
+                this.applyReasoningEffortChange(sessionState, this.stringConfigValue(params));
                 break;
             default:
                 throw RequestError.invalidParams();
@@ -689,11 +689,23 @@ export class CodexAcpServer {
         };
     }
 
-    private applyFastModeChange(sessionState: SessionState, value: string): void {
+    private applyFastModeChange(sessionState: SessionState, params: acp.SetSessionConfigOptionRequest): void {
+        const value = params.value;
+        if (typeof value === "boolean") {
+            sessionState.fastModeEnabled = value;
+            return;
+        }
         if (value !== FAST_MODE_ON && value !== FAST_MODE_OFF) {
             throw RequestError.invalidParams();
         }
         sessionState.fastModeEnabled = value === FAST_MODE_ON;
+    }
+
+    private stringConfigValue(params: acp.SetSessionConfigOptionRequest): string {
+        if (typeof params.value !== "string") {
+            throw RequestError.invalidParams();
+        }
+        return params.value;
     }
 
     private applyModeChange(sessionState: SessionState, value: string): void {
@@ -789,9 +801,12 @@ export class CodexAcpServer {
                 createReasoningEffortConfigOption(sessionState.supportedReasoningEfforts, currentModelId.effort),
             );
         }
-        if (sessionState.currentModelSupportsFast) {
-            configOptions.push(createFastModeConfigOption(sessionState.fastModeEnabled));
-        }
+      if (sessionState.currentModelSupportsFast) {
+        configOptions.push(createFastModeConfigOption(
+          sessionState.fastModeEnabled,
+          this.booleanConfigOptionsSupported,
+        ));
+      }
         return configOptions;
     }
 

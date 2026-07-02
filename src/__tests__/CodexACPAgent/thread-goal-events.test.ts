@@ -18,7 +18,7 @@ describe("CodexEventHandler - thread goal events", () => {
         vi.clearAllMocks();
     });
 
-    it("should send thread goal updates as agent messages", async () => {
+    it("should send thread goal updates as session metadata", async () => {
         const goalUpdatedNotification: ServerNotification = {
             method: "thread/goal/updated",
             params: {
@@ -44,7 +44,7 @@ describe("CodexEventHandler - thread goal events", () => {
         );
     });
 
-    it("should format multiline thread goal updates", async () => {
+    it("should trim multiline thread goal objectives in session metadata", async () => {
         const goalUpdatedNotification: ServerNotification = {
             method: "thread/goal/updated",
             params: {
@@ -70,7 +70,7 @@ describe("CodexEventHandler - thread goal events", () => {
         );
     });
 
-    it("should send thread goal cleared as an agent message", async () => {
+    it("should send thread goal cleared as session metadata", async () => {
         const goalClearedNotification: ServerNotification = {
             method: "thread/goal/cleared",
             params: {
@@ -123,10 +123,21 @@ describe("CodexEventHandler - thread goal events", () => {
 
         const events = mockFixture.getAcpConnectionEvents([]);
         expect(events).toHaveLength(1);
-        expect(events[0]!.args[0].update.content.text).toBe("\n\nGoal updated (active): Ship the goal update\n\n");
+        expect(events[0]!.args[0].update).toEqual({
+            sessionUpdate: "session_info_update",
+            _meta: {
+                codex: {
+                    goal: {
+                        objective: "Ship the goal update",
+                        status: "active",
+                        tokenBudget: null,
+                    },
+                },
+            },
+        });
     });
 
-    it("should separate completed goal updates from preceding agent text", async () => {
+    it("should not append completed goal updates to preceding agent text", async () => {
         const goalCompletedNotification: ServerNotification = {
             method: "thread/goal/updated",
             params: {
@@ -160,7 +171,26 @@ describe("CodexEventHandler - thread goal events", () => {
 
         const events = mockFixture.getAcpConnectionEvents([]);
         expect(events).toHaveLength(2);
-        expect(events[1]!.args[0].update.content.text).toBe("\n\nGoal updated (complete): tell me a joke\n\n");
+        expect(events[0]!.args[0].update).toEqual({
+            sessionUpdate: "agent_message_chunk",
+            messageId: "message-1",
+            content: {
+                type: "text",
+                text: "Because they kept losing interest in `any`.",
+            },
+        });
+        expect(events[1]!.args[0].update).toEqual({
+            sessionUpdate: "session_info_update",
+            _meta: {
+                codex: {
+                    goal: {
+                        objective: "tell me a joke",
+                        status: "complete",
+                        tokenBudget: null,
+                    },
+                },
+            },
+        });
     });
 
     it("should suppress duplicate thread goal cleared notifications", async () => {
@@ -178,7 +208,14 @@ describe("CodexEventHandler - thread goal events", () => {
 
         const events = mockFixture.getAcpConnectionEvents([]);
         expect(events).toHaveLength(1);
-        expect(events[0]!.args[0].update.content.text).toBe("\n\nGoal cleared.\n\n");
+        expect(events[0]!.args[0].update).toEqual({
+            sessionUpdate: "session_info_update",
+            _meta: {
+                codex: {
+                    goal: null,
+                },
+            },
+        });
     });
 
     function createSessionState(): SessionState {

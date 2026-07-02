@@ -44,7 +44,7 @@
           }
         ],
         "rawOutput": {
-          "status": "completed",
+          "status": "generating",
           "revisedPrompt": "A tiny blue square",
           "result": "iVBORw0KGgo=",
           "savedPath": "/tmp/codex/generated-blue-square.png"

@@ -15,9 +15,18 @@ import {
 import {MODEL_CONFIG_ID} from "../../ModelConfigOption";
 
 describe("Fast mode session config", () => {
+    const booleanConfigCapabilities: acp.ClientCapabilities = {
+        session: {
+            configOptions: {
+                boolean: {},
+            },
+        },
+    };
+
     async function createSession(
         currentServiceTier: "fast" | "flex" | null = null,
-        clientInfo: acp.Implementation | null = null
+        clientInfo: acp.Implementation | null = null,
+        clientCapabilities?: acp.ClientCapabilities,
     ) {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -41,6 +50,7 @@ describe("Fast mode session config", () => {
         await codexAcpAgent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
             clientInfo,
+            ...(clientCapabilities ? {clientCapabilities} : {}),
         });
 
         const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
@@ -59,6 +69,31 @@ describe("Fast mode session config", () => {
 
     it("returns the Fast mode config option defaulted to Off for new sessions", async () => {
         const {response} = await createSession();
+
+        expect(response.configOptions).toContainEqual(createFastModeConfigOption(false));
+    });
+
+    it("returns the Fast mode config option as a boolean when the client supports it", async () => {
+        const {response} = await createSession(null, null, booleanConfigCapabilities);
+
+        expect(response.configOptions).toContainEqual(createFastModeConfigOption(false, true));
+        const option = response.configOptions?.find(option => option.id === FAST_MODE_CONFIG_ID);
+        expect(option).toMatchObject({
+            id: FAST_MODE_CONFIG_ID,
+            type: "boolean",
+            currentValue: false,
+        });
+        expect(option).not.toHaveProperty("options");
+    });
+
+    it("keeps the Fast mode select option when boolean support is explicitly absent", async () => {
+        const {response} = await createSession(null, null, {
+            session: {
+                configOptions: {
+                    boolean: null,
+                },
+            },
+        });
 
         expect(response.configOptions).toContainEqual(createFastModeConfigOption(false));
     });
@@ -136,6 +171,28 @@ describe("Fast mode session config", () => {
             value: FAST_MODE_OFF,
         });
         expect(offResponse.configOptions).toContainEqual(createFastModeConfigOption(false));
+        expect(codexAcpAgent.getSessionState("session-id").fastModeEnabled).toBe(false);
+    });
+
+    it("toggles Fast mode through boolean session config options", async () => {
+        const {codexAcpAgent} = await createSession(null, null, booleanConfigCapabilities);
+
+        const onResponse = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: FAST_MODE_CONFIG_ID,
+            type: "boolean",
+            value: true,
+        });
+        expect(onResponse.configOptions).toContainEqual(createFastModeConfigOption(true, true));
+        expect(codexAcpAgent.getSessionState("session-id").fastModeEnabled).toBe(true);
+
+        const offResponse = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: FAST_MODE_CONFIG_ID,
+            type: "boolean",
+            value: false,
+        });
+        expect(offResponse.configOptions).toContainEqual(createFastModeConfigOption(false, true));
         expect(codexAcpAgent.getSessionState("session-id").fastModeEnabled).toBe(false);
     });
 

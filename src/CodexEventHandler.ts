@@ -253,29 +253,9 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = goalSnapshot;
 
-        const status = this.formatThreadGoalStatus(event.goal.status);
-        const objective = goalSnapshot.objective;
-        const text = objective.includes("\n")
-            ? `Goal updated (${status}):\n${objective}`
-            : `Goal updated (${status}): ${objective}`;
-        return createAgentTextMessageChunk(`\n\n${text}\n\n`);
-    }
-
-    private formatThreadGoalStatus(status: ThreadGoalUpdatedNotification["goal"]["status"]): string {
-        switch (status) {
-            case "active":
-                return "active";
-            case "paused":
-                return "paused";
-            case "budgetLimited":
-                return "budget limited";
-            case "blocked":
-                return "blocked";
-            case "usageLimited":
-                return "usage limited";
-            case "complete":
-                return "complete";
-        }
+        return this.createCodexSessionInfoUpdate({
+            goal: goalSnapshot,
+        });
     }
 
     private createThreadGoalClearedEvent(_event: ThreadGoalClearedNotification): UpdateSessionEvent | null {
@@ -284,7 +264,9 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = null;
 
-        return createAgentTextMessageChunk("\n\nGoal cleared.\n\n");
+        return this.createCodexSessionInfoUpdate({
+            goal: null,
+        });
     }
 
     private createThreadGoalSnapshot(event: ThreadGoalUpdatedNotification): ThreadGoalSnapshot {
@@ -391,7 +373,7 @@ export class CodexEventHandler {
                 if (this.activeImageGenerationItems.delete(event.item.id)) {
                     return createImageGenerationCompleteUpdate(event.item);
                 }
-                return createImageGenerationUpdate(event.item);
+                return createImageGenerationUpdate(event.item, { terminalStatus: true });
             case "reasoning":
                 if (this.seenReasoningDeltaItemIds.delete(event.item.id)) {
                     return null;
