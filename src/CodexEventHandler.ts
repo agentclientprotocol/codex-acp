@@ -56,6 +56,7 @@ import {
 import { stripShellPrefix } from "./CommandUtils";
 import {createTerminalOutputMeta, type TerminalOutputMode} from "./TerminalOutputMode";
 import {
+    createCodexMessagePhaseMeta,
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
 } from "./ContentChunks";
@@ -74,6 +75,7 @@ export class CodexEventHandler {
     private readonly seenReasoningDeltaItemIds = new Set<string>();
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
+    private readonly agentMessagePhases = new Map<string, string | null>();
 
     constructor(connection: AcpClientConnection, sessionState: SessionState) {
         this.connection = connection;
@@ -230,7 +232,8 @@ export class CodexEventHandler {
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
-        return createAgentTextMessageChunk(event.delta, event.itemId);
+        const phase = this.agentMessagePhases.get(event.itemId) ?? null;
+        return createAgentTextMessageChunk(event.delta, event.itemId, createCodexMessagePhaseMeta(phase));
     }
 
     private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
@@ -331,11 +334,13 @@ export class CodexEventHandler {
                 return createImageGenerationStartUpdate(event.item);
             case "collabAgentToolCall":
                 return createCollabAgentToolCallUpdate(event.item);
+            case "agentMessage":
+                this.rememberAgentMessagePhase(event.item);
+                return null;
             case "subAgentActivity":
             case "sleep":
             case "userMessage":
             case "hookPrompt":
-            case "agentMessage":
             case "reasoning":
             case "enteredReviewMode":
             case "exitedReviewMode":
@@ -383,6 +388,9 @@ export class CodexEventHandler {
                 return createWebSearchCompleteUpdate(event.item);
             case "collabAgentToolCall":
                 return createCollabAgentToolCallCompleteUpdate(event.item);
+            case "agentMessage":
+                this.rememberAgentMessagePhase(event.item);
+                return null;
             case "exitedReviewMode":
                 return this.createExitedReviewModeEvent(event.item);
             case "contextCompaction":
@@ -392,12 +400,15 @@ export class CodexEventHandler {
             case "sleep":
             case "userMessage":
             case "hookPrompt":
-            case "agentMessage":
             case "enteredReviewMode":
             case "plan":
                 return null;
 
         }
+    }
+
+    private rememberAgentMessagePhase(item: ThreadItem & { type: "agentMessage" }): void {
+        this.agentMessagePhases.set(item.id, item.phase);
     }
 
     private createCompletedReasoningEvent(item: ThreadItem & { type: "reasoning" }): UpdateSessionEvent | null {
