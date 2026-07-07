@@ -22,7 +22,6 @@ import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
-import {createAppServerInitializeCapabilities} from "./ElicitationCapabilities";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
@@ -70,7 +69,7 @@ export class CodexAcpClient {
 
     async initialize(request: acp.InitializeRequest): Promise<void> {
         await this.codexClient.initialize({
-            capabilities: createAppServerInitializeCapabilities(request.clientCapabilities),
+            capabilities: null,
             clientInfo: {
                 name: request.clientInfo?.name ?? this.defaultClientInfo.name,
                 version: request.clientInfo?.version ?? this.defaultClientInfo.version,
@@ -534,10 +533,6 @@ export class CodexAcpClient {
             handleElicitation: async (params) => {
                 await this.waitForSessionNotifications(sessionId);
                 return await elicitationHandler.handleElicitation(params);
-            },
-            handleUserInput: async (params) => {
-                await this.waitForSessionNotifications(sessionId);
-                return await elicitationHandler.handleUserInput(params);
             },
         });
     }
