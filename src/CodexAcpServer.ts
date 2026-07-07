@@ -1447,8 +1447,8 @@ export class CodexAcpServer {
                 activePrompt.signal,
             );
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
-                (event) => {
-                    elicitationHandler.handleNotification(event);
+                async (event) => {
+                    await elicitationHandler.handleNotification(event);
                     return eventHandler.handleNotification(event);
                 },
                 approvalHandler,

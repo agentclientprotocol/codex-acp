@@ -561,6 +561,21 @@ describe('Elicitation Events', () => {
                 }],
             });
 
+            fixture.sendServerNotification({
+                method: 'serverRequest/resolved',
+                params: {
+                    threadId: sessionId,
+                    requestId: 'request-1',
+                },
+            });
+            await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+
+            const [, completeElicitationEvent] = fixture.getAcpConnectionEvents([]);
+            expect(completeElicitationEvent).toEqual({
+                method: 'completeElicitation',
+                args: [{ elicitationId: 'elicit-123' }],
+            });
+
             completeTurn();
             await promptPromise;
         });

@@ -285,6 +285,9 @@ export class CodexElicitationHandler implements ElicitationHandler {
     // call's elicitation before starting the next, so there is at most one pending approval per
     // (threadId, serverName).
     private readonly pendingMcpApprovals = new Map<string, string>();
+    // The app-server handler exposes URL elicitationId, while serverRequest/resolved only exposes
+    // threadId here, so accepted URL elicitations are completed at thread scope.
+    private readonly pendingUrlElicitations = new Map<string, Set<string>>();
 
     constructor(
         connection: AcpClientConnection,
@@ -298,7 +301,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
         this.cancellationSignal = cancellationSignal;
     }
 
-    handleNotification(notification: ServerNotification): void {
+    async handleNotification(notification: ServerNotification): Promise<void> {
         switch (notification.method) {
             case "item/started":
                 this.handleItemStarted(notification.params);
@@ -308,6 +311,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 return;
             case "serverRequest/resolved":
                 this.clearThread(notification.params.threadId);
+                await this.completeUrlElicitations(notification.params.threadId);
                 return;
             default:
                 return;
@@ -326,6 +330,9 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     this.requestOptions(),
                 );
                 const result = this.convertElicitationResponse(response, context);
+                if (params.mode === "url" && result.action === "accept") {
+                    this.trackUrlElicitation(params.threadId, params.elicitationId);
+                }
                 await this.publishAcceptedMcpToolApproval(context, result.action === "accept");
                 return result;
             }
@@ -703,6 +710,28 @@ export class CodexElicitationHandler implements ElicitationHandler {
             sessionId: this.sessionState.sessionId,
             update: { sessionUpdate: "tool_call_update", toolCallId: context.correlatedCallId, status: "in_progress" },
         });
+    }
+
+    private trackUrlElicitation(threadId: string, elicitationId: string): void {
+        const existing = this.pendingUrlElicitations.get(threadId);
+        if (existing) {
+            existing.add(elicitationId);
+            return;
+        }
+        this.pendingUrlElicitations.set(threadId, new Set([elicitationId]));
+    }
+
+    private async completeUrlElicitations(threadId: string): Promise<void> {
+        const elicitationIds = this.pendingUrlElicitations.get(threadId);
+        if (!elicitationIds) {
+            return;
+        }
+        this.pendingUrlElicitations.delete(threadId);
+        for (const elicitationId of elicitationIds) {
+            await this.connection.notify(acp.methods.client.elicitation.complete, {
+                elicitationId,
+            });
+        }
     }
 
     private handleItemStarted(event: ItemStartedNotification): void {

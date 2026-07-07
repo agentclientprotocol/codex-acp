@@ -45,6 +45,9 @@ function normalizeAcpConnectionEvent(event: MethodCallEvent): MethodCallEvent {
     if (event.method === "request" && event.args[0] === acp.methods.client.elicitation.create) {
         return {method: "createElicitation", args: [event.args[1]]};
     }
+    if (event.method === "notify" && event.args[0] === acp.methods.client.elicitation.complete) {
+        return {method: "completeElicitation", args: [event.args[1]]};
+    }
     if (event.method === "notify" && event.args[0] === acp.methods.client.session.update) {
         return {method: "sessionUpdate", args: [event.args[1]]};
     }
