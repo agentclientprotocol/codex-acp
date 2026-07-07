@@ -678,7 +678,7 @@ describe('Elicitation Events', () => {
                     message: 'Input requested',
                     requestedSchema: {
                         type: 'object',
-                        required: ['next_step', 'notes'],
+                        required: ['notes'],
                     },
                 }],
             });
@@ -686,10 +686,55 @@ describe('Elicitation Events', () => {
                 { const: 'Run tests', title: 'Run tests', description: 'Run the focused test suite.' },
                 { const: 'Stop', title: 'Stop', description: 'Stop and report current status.' },
             ]);
+            expect(elicitationEvent!.args[0].requestedSchema.properties.next_step__other).toMatchObject({
+                type: 'string',
+                title: 'Other',
+            });
             expect(elicitationEvent!.args[0].requestedSchema.properties.notes).toMatchObject({
                 type: 'string',
                 title: 'Notes',
                 description: 'Any extra instructions?',
+            });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should prefer free-form Other answers over fixed choices', async () => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+            });
+            fixture.setElicitationResponse({
+                action: 'accept',
+                content: {
+                    next_step: 'Run tests',
+                    next_step__other: 'Inspect flaky logs',
+                },
+            });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'request-user-input-1',
+                autoResolutionMs: null,
+                questions: [{
+                    id: 'next_step',
+                    header: 'Next step',
+                    question: 'What should I do next?',
+                    isOther: true,
+                    isSecret: false,
+                    options: [
+                        { label: 'Run tests', description: 'Run the focused test suite.' },
+                        { label: 'Stop', description: 'Stop and report current status.' },
+                    ],
+                }],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+            expect(response).toEqual({
+                answers: {
+                    next_step: { answers: ['Inspect flaky logs'] },
+                },
             });
 
             completeTurn();

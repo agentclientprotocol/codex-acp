@@ -34,6 +34,8 @@ type McpElicitationContext = {
     correlatedCallId: string | undefined;
 };
 
+const USER_INPUT_OTHER_FIELD_SUFFIX = "__other";
+
 /**
  * Parses the `persist` field from the elicitation request `_meta`.
  * Codex advertises which persistence options the client should show.
@@ -217,6 +219,33 @@ function elicitationResponseMeta(
     return Object.keys(meta).length === 0 ? null : meta;
 }
 
+function userInputOtherFieldId(questionId: string, questionIds: Set<string>): string {
+    const base = `${questionId}${USER_INPUT_OTHER_FIELD_SUFFIX}`;
+    if (!questionIds.has(base)) {
+        return base;
+    }
+
+    let index = 1;
+    while (questionIds.has(`${base}${index}`)) {
+        index += 1;
+    }
+    return `${base}${index}`;
+}
+
+function userInputResponseValue(
+    content: Record<string, acp.ElicitationContentValue>,
+    fieldId: string
+): acp.ElicitationContentValue | undefined {
+    const value = content[fieldId];
+    if (typeof value === "string" && value.trim() === "") {
+        return undefined;
+    }
+    if (Array.isArray(value) && value.length === 0) {
+        return undefined;
+    }
+    return value;
+}
+
 /**
  * Builds the ACP permission options for an MCP tool call approval elicitation.
  * Always includes "Allow Once"; adds session/always persist options when advertised.
@@ -333,7 +362,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
             if (response === null) {
                 return { answers: {} };
             }
-            return this.convertUserInputResponse(response);
+            return this.convertUserInputResponse(response, params);
         } catch (error) {
             logger.error("Error handling Codex user input request", error);
             return { answers: {} };
@@ -451,9 +480,12 @@ export class CodexElicitationHandler implements ElicitationHandler {
     private buildUserInputRequest(params: ToolRequestUserInputParams): acp.CreateElicitationRequest {
         const properties: Record<string, acp.ElicitationPropertySchema> = {};
         const required: string[] = [];
+        const questionIds = new Set(params.questions.map(question => question.id));
 
         for (const question of params.questions) {
-            required.push(question.id);
+            const options = question.options ?? [];
+            const hasOptions = options.length > 0;
+            const hasOtherAnswer = question.isOther && hasOptions;
             const base = {
                 title: question.header || question.id,
                 description: question.question,
@@ -464,11 +496,14 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     },
                 },
             };
-            properties[question.id] = question.options && question.options.length > 0
+            if (!hasOtherAnswer) {
+                required.push(question.id);
+            }
+            properties[question.id] = hasOptions
                 ? {
                     ...base,
                     type: "string",
-                    oneOf: question.options.map(option => ({
+                    oneOf: options.map(option => ({
                         const: option.label,
                         title: option.label,
                         description: option.description,
@@ -478,6 +513,20 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     ...base,
                     type: "string",
                 };
+            if (hasOtherAnswer) {
+                properties[userInputOtherFieldId(question.id, questionIds)] = {
+                    type: "string",
+                    title: "Other",
+                    description: "Type your own answer instead of choosing an option above.",
+                    _meta: {
+                        codex: {
+                            questionId: question.id,
+                            isOtherAnswer: true,
+                            isSecret: question.isSecret,
+                        },
+                    },
+                };
+            }
         }
 
         const firstQuestion = params.questions[0];
@@ -615,14 +664,26 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
     }
 
-    private convertUserInputResponse(response: acp.CreateElicitationResponse): ToolRequestUserInputResponse {
+    private convertUserInputResponse(
+        response: acp.CreateElicitationResponse,
+        params: ToolRequestUserInputParams
+    ): ToolRequestUserInputResponse {
         if (response.action !== "accept") {
             return { answers: {} };
         }
 
         const answers: ToolRequestUserInputResponse["answers"] = {};
-        for (const [id, value] of Object.entries(contentRecord(response.content))) {
-            answers[id] = {
+        const content = contentRecord(response.content);
+        const questionIds = new Set(params.questions.map(question => question.id));
+        for (const question of params.questions) {
+            const value = question.isOther && question.options != null && question.options.length > 0
+                ? userInputResponseValue(content, userInputOtherFieldId(question.id, questionIds))
+                    ?? userInputResponseValue(content, question.id)
+                : userInputResponseValue(content, question.id);
+            if (value === undefined) {
+                continue;
+            }
+            answers[question.id] = {
                 answers: Array.isArray(value)
                     ? value.map(String)
                     : [String(value)],
