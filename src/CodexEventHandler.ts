@@ -72,6 +72,7 @@ export class CodexEventHandler {
     private readonly activeImageGenerationItems = new Set<string>();
     private readonly emittedImageViewItems = new Set<string>();
     private readonly seenReasoningDeltaItemIds = new Set<string>();
+    private readonly seenAgentMessageDeltaItemIds = new Set<string>();
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
 
@@ -230,6 +231,7 @@ export class CodexEventHandler {
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
+        this.seenAgentMessageDeltaItemIds.add(event.itemId);
         return createAgentTextMessageChunk(event.delta, event.itemId);
     }
 
@@ -387,12 +389,21 @@ export class CodexEventHandler {
                 return this.createExitedReviewModeEvent(event.item);
             case "contextCompaction":
                 return this.createContextCompactedEvent();
+            case "agentMessage": {
+                if (this.seenAgentMessageDeltaItemIds.delete(event.item.id)) {
+                    return null;
+                }
+                const text = event.item.text;
+                if (text.length > 0) {
+                    return createAgentTextMessageChunk(text, event.item.id);
+                }
+                return null;
+            }
             //ignored types
             case "subAgentActivity":
             case "sleep":
             case "userMessage":
             case "hookPrompt":
-            case "agentMessage":
             case "enteredReviewMode":
             case "plan":
                 return null;
