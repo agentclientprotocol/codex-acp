@@ -84,31 +84,11 @@ describe('CodexACPAgent - initialize', () => {
         ]));
     });
 
-    it('should opt into app-server form elicitation only when the client supports ACP form elicitation', async () => {
+    it('should not opt into experimental app-server capabilities for ACP elicitation support', async () => {
         await agent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
             clientCapabilities: {
-                elicitation: {
-                    form: {},
-                },
-            },
-        });
-
-        expect(mockCodexConnection.sendRequest).toHaveBeenCalledWith("initialize", expect.objectContaining({
-            capabilities: {
-                experimentalApi: true,
-                requestAttestation: false,
-                mcpServerOpenaiFormElicitation: true,
-            },
-        }));
-
-        vi.clearAllMocks();
-        await agent.initialize({
-            protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: {
-                elicitation: {
-                    url: {},
-                },
+                elicitation: { form: {}, url: {} },
             },
         });
 
