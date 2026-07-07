@@ -2,15 +2,22 @@ import * as acp from "@agentclientprotocol/sdk";
 import type { SessionState } from "./CodexAcpServer";
 import type { ElicitationHandler } from "./CodexAppServerClient";
 import type { ServerNotification } from "./app-server";
+import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import type {
     ItemCompletedNotification,
     ItemStartedNotification,
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse,
+    ToolRequestUserInputParams,
+    ToolRequestUserInputResponse,
 } from "./app-server/v2";
 import { logger } from "./Logger";
 import { McpApprovalOptionId } from "./McpApprovalOptionId";
 import type {AcpClientConnection} from "./ACPSessionConnection";
+import {
+    clientSupportsFormElicitation,
+    clientSupportsUrlElicitation,
+} from "./ElicitationCapabilities";
 
 // Standard elicitation options (non-tool-call approval).
 const ELICITATION_OPTIONS: acp.PermissionOption[] = [
@@ -19,6 +26,13 @@ const ELICITATION_OPTIONS: acp.PermissionOption[] = [
 ];
 
 type PersistValue = "session" | "always";
+type ToolApprovalPersistValue = PersistValue | "once";
+
+type McpElicitationContext = {
+    isToolApproval: boolean;
+    persistOptions: Set<PersistValue>;
+    correlatedCallId: string | undefined;
+};
 
 /**
  * Parses the `persist` field from the elicitation request `_meta`.
@@ -48,6 +62,137 @@ function isMcpToolCallApproval(meta: unknown): boolean {
     );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeJsonValue(value: unknown): JsonValue {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        return value;
+    }
+    if (typeof value === "bigint") {
+        return Number(value);
+    }
+    if (Array.isArray(value)) {
+        return value.map(normalizeJsonValue);
+    }
+    if (typeof value === "object") {
+        return Object.fromEntries(
+            Object.entries(value)
+                .filter(([, nested]) => nested !== undefined)
+                .map(([key, nested]) => [key, normalizeJsonValue(nested)])
+        );
+    }
+    return String(value);
+}
+
+function normalizeElicitationSchema(value: unknown): acp.ElicitationSchema {
+    const normalized = normalizeElicitationSchemaValue(value);
+    if (!isRecord(normalized)) {
+        return { type: "object", properties: {} };
+    }
+
+    return {
+        ...normalized,
+        type: "object",
+    } as acp.ElicitationSchema;
+}
+
+function normalizeElicitationSchemaValue(value: unknown): unknown {
+    if (typeof value === "bigint") {
+        return Number(value);
+    }
+    if (Array.isArray(value)) {
+        return value.map(normalizeElicitationSchemaValue);
+    }
+    if (!isRecord(value)) {
+        return value;
+    }
+
+    const result: Record<string, unknown> = Object.fromEntries(
+        Object.entries(value)
+            .filter(([, nested]) => nested !== undefined)
+            .map(([key, nested]) => [key, normalizeElicitationSchemaValue(nested)])
+    );
+
+    if (
+        result["type"] === "string" &&
+        Array.isArray(result["enum"]) &&
+        Array.isArray(result["enumNames"]) &&
+        !Array.isArray(result["oneOf"])
+    ) {
+        const values = result["enum"];
+        const names = result["enumNames"];
+        result["oneOf"] = values.map((value, index) => ({
+            const: String(value),
+            title: String(names[index] ?? value),
+        }));
+        delete result["enum"];
+        delete result["enumNames"];
+    }
+
+    return result;
+}
+
+function metaRecord(meta: unknown): Record<string, unknown> | null {
+    return isRecord(meta) ? meta : null;
+}
+
+function persistChoiceOption(value: ToolApprovalPersistValue): acp.EnumOption {
+    switch (value) {
+        case "once":
+            return { const: "once", title: "Allow once" };
+        case "session":
+            return { const: "session", title: "Allow for this session" };
+        case "always":
+            return { const: "always", title: "Allow and don't ask again" };
+    }
+}
+
+function addPersistChoiceToSchema(
+    schema: acp.ElicitationSchema,
+    persistOptions: Set<PersistValue>
+): acp.ElicitationSchema {
+    if (persistOptions.size === 0) {
+        return schema;
+    }
+
+    const choices: ToolApprovalPersistValue[] = ["once"];
+    if (persistOptions.has("session")) choices.push("session");
+    if (persistOptions.has("always")) choices.push("always");
+
+    return {
+        ...schema,
+        properties: {
+            ...schema.properties,
+            persist: {
+                type: "string",
+                title: "Approval scope",
+                oneOf: choices.map(persistChoiceOption),
+                default: "once",
+            },
+        },
+        required: Array.from(new Set([...(schema.required ?? []), "persist"])),
+    };
+}
+
+function contentRecord(content: unknown): Record<string, acp.ElicitationContentValue> {
+    return isRecord(content) ? content as Record<string, acp.ElicitationContentValue> : {};
+}
+
+function jsonObjectOrNull(
+    content: Record<string, acp.ElicitationContentValue>
+): JsonValue | null {
+    const entries = Object.entries(content);
+    if (entries.length === 0) {
+        return null;
+    }
+    return Object.fromEntries(entries.map(([key, value]) => [key, normalizeJsonValue(value)]));
+}
+
 /**
  * Builds the ACP permission options for an MCP tool call approval elicitation.
  * Always includes "Allow Once"; adds session/always persist options when advertised.
@@ -69,6 +214,7 @@ function buildToolApprovalOptions(persistOptions: Set<PersistValue>): acp.Permis
 export class CodexElicitationHandler implements ElicitationHandler {
     private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
+    private readonly clientCapabilities: acp.ClientCapabilities | null;
     private readonly cancellationSignal: AbortSignal | undefined;
     // In Rust, the MCP elicitation handler receives ElicitationRequestEvent directly from the MCP
     // protocol layer, where id is set to "mcp_tool_call_approval_<call_id>" — the call ID is extracted
@@ -87,9 +233,15 @@ export class CodexElicitationHandler implements ElicitationHandler {
     // (threadId, serverName).
     private readonly pendingMcpApprovals = new Map<string, string>();
 
-    constructor(connection: AcpClientConnection, sessionState: SessionState, cancellationSignal?: AbortSignal) {
+    constructor(
+        connection: AcpClientConnection,
+        sessionState: SessionState,
+        clientCapabilities: acp.ClientCapabilities | null = null,
+        cancellationSignal?: AbortSignal
+    ) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.clientCapabilities = clientCapabilities;
         this.cancellationSignal = cancellationSignal;
     }
 
@@ -113,7 +265,19 @@ export class CodexElicitationHandler implements ElicitationHandler {
         params: McpServerElicitationRequestParams
     ): Promise<McpServerElicitationRequestResponse> {
         try {
-            const { request, correlatedCallId } = this.buildPermissionRequest(params);
+            const context = this.createMcpElicitationContext(params);
+            if (this.shouldUseAcpElicitation(params)) {
+                const response = await this.connection.request(
+                    acp.methods.client.elicitation.create,
+                    this.buildElicitationRequest(params, context),
+                    this.requestOptions(),
+                );
+                const result = this.convertElicitationResponse(response, context);
+                await this.publishAcceptedMcpToolApproval(context, result.action === "accept");
+                return result;
+            }
+
+            const { request, correlatedCallId } = this.buildPermissionRequest(params, context);
             const response = await this.connection.request(
                 acp.methods.client.session.requestPermission,
                 request,
@@ -128,10 +292,28 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     });
                 }
             }
-            return this.convertResponse(response);
+            return this.convertPermissionResponse(response);
         } catch (error) {
             logger.error("Error handling MCP elicitation request", error);
             return { action: "cancel", content: null, _meta: null };
+        }
+    }
+
+    async handleUserInput(params: ToolRequestUserInputParams): Promise<ToolRequestUserInputResponse> {
+        if (!clientSupportsFormElicitation(this.clientCapabilities)) {
+            return { answers: {} };
+        }
+
+        try {
+            const response = await this.connection.request(
+                acp.methods.client.elicitation.create,
+                this.buildUserInputRequest(params),
+                this.requestOptions(),
+            );
+            return this.convertUserInputResponse(response);
+        } catch (error) {
+            logger.error("Error handling Codex user input request", error);
+            return { answers: {} };
         }
     }
 
@@ -139,8 +321,117 @@ export class CodexElicitationHandler implements ElicitationHandler {
         return this.cancellationSignal ? {cancellationSignal: this.cancellationSignal} : undefined;
     }
 
+    private createMcpElicitationContext(params: McpServerElicitationRequestParams): McpElicitationContext {
+        const isToolApproval = isMcpToolCallApproval(params._meta);
+        const persistOptions = parsePersistOptions(params._meta);
+        const correlatedCallId = isToolApproval && (params.mode === "form" || params.mode === "openai/form")
+            ? this.popPendingApproval(params.threadId, params.serverName)
+            : undefined;
+        return { isToolApproval, persistOptions, correlatedCallId };
+    }
+
+    private shouldUseAcpElicitation(params: McpServerElicitationRequestParams): boolean {
+        switch (params.mode) {
+            case "form":
+            case "openai/form":
+                return clientSupportsFormElicitation(this.clientCapabilities);
+            case "url":
+                return clientSupportsUrlElicitation(this.clientCapabilities);
+        }
+    }
+
+    private buildElicitationRequest(
+        params: McpServerElicitationRequestParams,
+        context: McpElicitationContext
+    ): acp.CreateElicitationRequest {
+        const base = {
+            sessionId: this.sessionState.sessionId,
+            ...(context.correlatedCallId ? { toolCallId: context.correlatedCallId } : {}),
+            message: params.message,
+            _meta: metaRecord(params._meta),
+        };
+
+        switch (params.mode) {
+            case "form":
+            case "openai/form": {
+                const requestedSchema = context.isToolApproval
+                    ? addPersistChoiceToSchema(
+                        normalizeElicitationSchema(params.requestedSchema),
+                        context.persistOptions,
+                    )
+                    : normalizeElicitationSchema(params.requestedSchema);
+                return {
+                    ...base,
+                    mode: "form",
+                    requestedSchema,
+                };
+            }
+            case "url":
+                return {
+                    ...base,
+                    mode: "url",
+                    url: params.url,
+                    elicitationId: params.elicitationId,
+                };
+        }
+    }
+
+    private buildUserInputRequest(params: ToolRequestUserInputParams): acp.CreateElicitationRequest {
+        const properties: Record<string, acp.ElicitationPropertySchema> = {};
+        const required: string[] = [];
+
+        for (const question of params.questions) {
+            required.push(question.id);
+            const base = {
+                title: question.header || question.id,
+                description: question.question,
+                _meta: {
+                    codex: {
+                        isOther: question.isOther,
+                        isSecret: question.isSecret,
+                    },
+                },
+            };
+            properties[question.id] = question.options && question.options.length > 0
+                ? {
+                    ...base,
+                    type: "string",
+                    oneOf: question.options.map(option => ({
+                        const: option.label,
+                        title: option.label,
+                        description: option.description,
+                    })),
+                }
+                : {
+                    ...base,
+                    type: "string",
+                };
+        }
+
+        const firstQuestion = params.questions[0];
+        return {
+            sessionId: this.sessionState.sessionId,
+            toolCallId: params.itemId,
+            mode: "form",
+            message: params.questions.length === 1 && firstQuestion
+                ? firstQuestion.question
+                : "Input requested",
+            requestedSchema: {
+                type: "object",
+                properties,
+                required,
+            },
+            _meta: {
+                codex: {
+                    autoResolutionMs: params.autoResolutionMs,
+                },
+            },
+        };
+    }
+
     private buildPermissionRequest(
-        params: McpServerElicitationRequestParams
+        params: McpServerElicitationRequestParams,
+        context: McpElicitationContext
     ): { request: acp.RequestPermissionRequest; correlatedCallId: string | undefined } {
         const sessionId = this.sessionState.sessionId;
         const messageContent: acp.ToolCallContent = {
@@ -148,17 +439,12 @@ export class CodexElicitationHandler implements ElicitationHandler {
             content: { type: "text", text: params.message },
         };
 
-        const meta = params._meta;
-        const isToolApproval = isMcpToolCallApproval(meta);
-        const options = isToolApproval
-            ? buildToolApprovalOptions(parsePersistOptions(meta))
+        const options = context.isToolApproval
+            ? buildToolApprovalOptions(context.persistOptions)
             : ELICITATION_OPTIONS;
 
         if (params.mode === "form" || params.mode === "openai/form") {
-            const correlatedCallId = isToolApproval
-                ? this.popPendingApproval(params.threadId, params.serverName)
-                : undefined;
-            if (correlatedCallId !== undefined) {
+            if (context.correlatedCallId !== undefined) {
                 // The tool call item is already visible in the IDE conversation history because
                 // item/started was emitted before the elicitation request. Sending content or
                 // rawInput here would duplicate that information in the approval widget.
@@ -166,7 +452,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     request: {
                         sessionId,
                         toolCall: {
-                            toolCallId: correlatedCallId,
+                            toolCallId: context.correlatedCallId,
                             kind: "execute",
                             status: "pending",
                             // content: [messageContent],   — omitted: already rendered via item/started
@@ -175,7 +461,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                         _meta: { is_mcp_tool_approval: true },
                         options,
                     },
-                    correlatedCallId,
+                    correlatedCallId: context.correlatedCallId,
                 };
             }
             return {
@@ -183,12 +469,12 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     sessionId,
                     toolCall: {
                         toolCallId: `elicitation-${params.serverName}`,
-                        kind: isToolApproval ? "execute" : "other",
+                        kind: context.isToolApproval ? "execute" : "other",
                         status: "pending",
                         content: [messageContent],
                         rawInput: { serverName: params.serverName, schema: params.requestedSchema },
                     },
-                    ...(isToolApproval ? { _meta: { is_mcp_tool_approval: true } } : {}),
+                    ...(context.isToolApproval ? { _meta: { is_mcp_tool_approval: true } } : {}),
                     options,
                 },
                 correlatedCallId: undefined,
@@ -211,7 +497,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
     }
 
-    private convertResponse(
+    private convertPermissionResponse(
         response: acp.RequestPermissionResponse
     ): McpServerElicitationRequestResponse {
         if (response.outcome.outcome === "cancelled") {
@@ -229,6 +515,63 @@ export class CodexElicitationHandler implements ElicitationHandler {
             return { action: "accept", content: null, _meta: null };
         }
         return { action: "decline", content: null, _meta: null };
+    }
+
+    private convertElicitationResponse(
+        response: acp.CreateElicitationResponse,
+        context: McpElicitationContext
+    ): McpServerElicitationRequestResponse {
+        switch (response.action) {
+            case "accept": {
+                const content = contentRecord(response.content);
+                const persist = context.isToolApproval ? content["persist"] : undefined;
+                if (persist === "session" || persist === "always" || persist === "once") {
+                    delete content["persist"];
+                }
+                return {
+                    action: "accept",
+                    content: jsonObjectOrNull(content),
+                    _meta: persist === "session" || persist === "always"
+                        ? { persist }
+                        : null,
+                };
+            }
+            case "decline":
+                return { action: "decline", content: null, _meta: null };
+            case "cancel":
+                return { action: "cancel", content: null, _meta: null };
+            default:
+                return { action: "cancel", content: null, _meta: null };
+        }
+    }
+
+    private convertUserInputResponse(response: acp.CreateElicitationResponse): ToolRequestUserInputResponse {
+        if (response.action !== "accept") {
+            return { answers: {} };
+        }
+
+        const answers: ToolRequestUserInputResponse["answers"] = {};
+        for (const [id, value] of Object.entries(contentRecord(response.content))) {
+            answers[id] = {
+                answers: Array.isArray(value)
+                    ? value.map(String)
+                    : [String(value)],
+            };
+        }
+        return { answers };
+    }
+
+    private async publishAcceptedMcpToolApproval(
+        context: McpElicitationContext,
+        accepted: boolean
+    ): Promise<void> {
+        if (!accepted || context.correlatedCallId === undefined) {
+            return;
+        }
+        await this.connection.notify(acp.methods.client.session.update, {
+            sessionId: this.sessionState.sessionId,
+            update: { sessionUpdate: "tool_call_update", toolCallId: context.correlatedCallId, status: "in_progress" },
+        });
     }
 
     private handleItemStarted(event: ItemStartedNotification): void {
