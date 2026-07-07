@@ -1,0 +1,25 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "command-read-skill",
+        "status": "in_progress",
+        "kind": "read",
+        "title": "Read UI Accessibility skill",
+        "locations": [
+          {
+            "path": "/test/project/.agents/skills/ui-accessibility/SKILL.md"
+          }
+        ],
+        "rawInput": {
+          "type": "skill",
+          "name": "ui-accessibility",
+          "path": "/test/project/.agents/skills/ui-accessibility/SKILL.md"
+        }
+      }
+    }
+  ]
+}

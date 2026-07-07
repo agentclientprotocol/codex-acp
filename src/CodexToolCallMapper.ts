@@ -427,7 +427,23 @@ export function createCommandActionEvent(
 ): AcpToolCallEvent {
     const acpStatus = toAcpStatus(status);
     switch (commandAction.type) {
-        case "read":
+        case "read": {
+            const skillName = skillNameFromSkillPath(commandAction.path);
+            if (skillName) {
+                return {
+                    sessionUpdate: "tool_call",
+                    toolCallId: id,
+                    status: acpStatus,
+                    kind: "read",
+                    title: `Read ${formatSkillName(skillName)} skill`,
+                    locations: [{ path: commandAction.path }],
+                    rawInput: {
+                        type: "skill",
+                        name: skillName,
+                        path: commandAction.path,
+                    },
+                };
+            }
             return {
                 sessionUpdate: "tool_call",
                 toolCallId: id,
@@ -436,6 +452,7 @@ export function createCommandActionEvent(
                 title: `Read file '${commandAction.path}'`,
                 locations: [{ path: commandAction.path }],
             };
+        }
         case "search":
             return {
                 sessionUpdate: "tool_call",
@@ -469,6 +486,34 @@ export function createCommandActionEvent(
                 },
             }, id, cwd);
     }
+}
+
+function skillNameFromSkillPath(filePath: string): string | null {
+    const normalized = filePath.replace(/[\\/]+/g, "/");
+    const segments = normalized.split("/").filter(segment => segment.length > 0);
+    if (segments.at(-1) !== "SKILL.md") {
+        return null;
+    }
+
+    const skillDirectory = segments.at(-2);
+    if (!skillDirectory) {
+        return null;
+    }
+
+    const parent = segments.at(-3);
+    if (parent !== "skills") {
+        return null;
+    }
+
+    return skillDirectory;
+}
+
+function formatSkillName(skillName: string): string {
+    return skillName
+        .split(/[-_\s]+/g)
+        .filter(part => part.length > 0)
+        .map(part => part.length <= 3 ? part.toUpperCase() : `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+        .join(" ");
 }
 
 export function commandExecutionUsesTerminalOutput(item: CommandExecutionItem): boolean {

@@ -128,6 +128,43 @@ describe('CodexEventHandler - command action events', () => {
         );
     });
 
+    it('should render skill instruction reads as skill read tool calls', async () => {
+        const readSkillNotification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                startedAtMs: 0,
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-read-skill',
+                    command: "sed -n '1,240p' /test/project/.agents/skills/ui-accessibility/SKILL.md",
+                    cwd: '/test/project',
+                    processId: null,
+                    source: 'agent',
+                    status: 'inProgress',
+                    commandActions: [
+                        {
+                            type: 'read',
+                            command: "sed -n '1,240p' /test/project/.agents/skills/ui-accessibility/SKILL.md",
+                            name: 'SKILL.md',
+                            path: '/test/project/.agents/skills/ui-accessibility/SKILL.md',
+                        },
+                    ],
+                    aggregatedOutput: null,
+                    exitCode: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [readSkillNotification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/command-read-skill.json'
+        );
+    });
+
     it('should handle search command with query and path', async () => {
         const searchNotification: ServerNotification = {
             method: 'item/started',
