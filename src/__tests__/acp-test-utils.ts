@@ -241,7 +241,7 @@ export interface CodexMockTestFixture extends TestFixture {
     sendServerNotification(notification: ServerNotification | Record<string, unknown>): void,
     sendServerRequest<T>(method: string, params: unknown): Promise<T>,
     setPermissionResponse(response: RequestPermissionResponse): void,
-    setElicitationResponse(response: CreateElicitationResponse): void,
+    setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void,
 }
 
 /**
@@ -259,7 +259,7 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
     const permissionState: { response: RequestPermissionResponse } = {
         response: { outcome: { outcome: 'cancelled' } }
     };
-    const elicitationState: { response: CreateElicitationResponse } = {
+    const elicitationState: { response: CreateElicitationResponse | Promise<CreateElicitationResponse> } = {
         response: { action: 'cancel' }
     };
 
@@ -323,7 +323,7 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
         setPermissionResponse(response: RequestPermissionResponse): void {
             permissionState.response = response;
         },
-        setElicitationResponse(response: CreateElicitationResponse): void {
+        setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void {
             elicitationState.response = response;
         },
     };

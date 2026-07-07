@@ -66,6 +66,7 @@ describe('Elicitation Events', () => {
             fixture.setElicitationResponse({
                 action: 'accept',
                 content: { username: 'octocat' },
+                _meta: { source: 'client' },
             });
 
             const params: McpServerElicitationRequestParams = {
@@ -75,7 +76,7 @@ describe('Elicitation Events', () => {
             };
 
             const response = await fixture.sendServerRequest('mcpServer/elicitation/request', params);
-            expect(response).toEqual({ action: 'accept', content: { username: 'octocat' }, _meta: null });
+            expect(response).toEqual({ action: 'accept', content: { username: 'octocat' }, _meta: { source: 'client' } });
 
             const [elicitationEvent] = fixture.getAcpConnectionEvents([]);
             expect(elicitationEvent).toEqual({
@@ -225,6 +226,7 @@ describe('Elicitation Events', () => {
             fixture.setElicitationResponse({
                 action: 'accept',
                 content: { persist: 'always' },
+                _meta: { source: 'client' },
             });
 
             fixture.sendServerNotification({
@@ -260,7 +262,7 @@ describe('Elicitation Events', () => {
             };
 
             const response = await fixture.sendServerRequest('mcpServer/elicitation/request', params);
-            expect(response).toEqual({ action: 'accept', content: null, _meta: { persist: 'always' } });
+            expect(response).toEqual({ action: 'accept', content: null, _meta: { source: 'client', persist: 'always' } });
 
             const events = fixture.getAcpConnectionEvents(['_meta']);
             expect(events[0]).toMatchObject({
@@ -535,7 +537,7 @@ describe('Elicitation Events', () => {
             const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
                 elicitation: { url: {} },
             });
-            fixture.setElicitationResponse({ action: 'accept' });
+            fixture.setElicitationResponse({ action: 'accept', _meta: { source: 'client' } });
 
             const params: McpServerElicitationRequestParams = {
                 threadId: sessionId, turnId: 'turn-1', serverName: 'auth-server',
@@ -544,7 +546,7 @@ describe('Elicitation Events', () => {
             };
 
             const response = await fixture.sendServerRequest('mcpServer/elicitation/request', params);
-            expect(response).toEqual({ action: 'accept', content: null, _meta: null });
+            expect(response).toEqual({ action: 'accept', content: null, _meta: { source: 'client' } });
 
             const [elicitationEvent] = fixture.getAcpConnectionEvents([]);
             expect(elicitationEvent).toEqual({
@@ -688,6 +690,44 @@ describe('Elicitation Events', () => {
                 type: 'string',
                 title: 'Notes',
                 description: 'Any extra instructions?',
+            });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should auto-resolve request_user_input when the client does not answer in time', async () => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+            });
+            fixture.setElicitationResponse(new Promise(() => {}));
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'request-user-input-1',
+                autoResolutionMs: 1,
+                questions: [{
+                    id: 'next_step',
+                    header: 'Next step',
+                    question: 'What should I do next?',
+                    isOther: false,
+                    isSecret: false,
+                    options: null,
+                }],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+            expect(response).toEqual({ answers: {} });
+
+            const [elicitationEvent] = fixture.getAcpConnectionEvents(['_meta']);
+            expect(elicitationEvent).toMatchObject({
+                method: 'createElicitation',
+                args: [{
+                    sessionId,
+                    toolCallId: 'request-user-input-1',
+                    mode: 'form',
+                }],
             });
 
             completeTurn();

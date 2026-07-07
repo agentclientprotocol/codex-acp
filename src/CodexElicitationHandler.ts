@@ -89,6 +89,14 @@ function normalizeJsonValue(value: unknown): JsonValue {
     return String(value);
 }
 
+function normalizeJsonObject(value: Record<string, unknown>): Record<string, JsonValue> {
+    return Object.fromEntries(
+        Object.entries(value)
+            .filter(([, nested]) => nested !== undefined)
+            .map(([key, nested]) => [key, normalizeJsonValue(nested)])
+    );
+}
+
 function normalizeElicitationSchema(value: unknown): acp.ElicitationSchema {
     const normalized = normalizeElicitationSchemaValue(value);
     if (!isRecord(normalized)) {
@@ -191,6 +199,22 @@ function jsonObjectOrNull(
         return null;
     }
     return Object.fromEntries(entries.map(([key, value]) => [key, normalizeJsonValue(value)]));
+}
+
+function elicitationResponseMeta(
+    response: acp.CreateElicitationResponse,
+    context: McpElicitationContext,
+    persist: unknown = undefined
+): JsonValue | null {
+    const responseMeta = metaRecord(response._meta);
+    const meta = responseMeta ? normalizeJsonObject(responseMeta) : {};
+    if (context.isToolApproval) {
+        delete meta["persist"];
+    }
+    if (persist === "session" || persist === "always") {
+        meta["persist"] = persist;
+    }
+    return Object.keys(meta).length === 0 ? null : meta;
 }
 
 /**
@@ -305,11 +329,10 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
 
         try {
-            const response = await this.connection.request(
-                acp.methods.client.elicitation.create,
-                this.buildUserInputRequest(params),
-                this.requestOptions(),
-            );
+            const response = await this.requestUserInputElicitation(params);
+            if (response === null) {
+                return { answers: {} };
+            }
             return this.convertUserInputResponse(response);
         } catch (error) {
             logger.error("Error handling Codex user input request", error);
@@ -317,8 +340,57 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
     }
 
-    private requestOptions(): acp.SendRequestOptions | undefined {
-        return this.cancellationSignal ? {cancellationSignal: this.cancellationSignal} : undefined;
+    private requestOptions(cancellationSignal: AbortSignal | undefined = this.cancellationSignal): acp.SendRequestOptions | undefined {
+        return cancellationSignal ? {cancellationSignal} : undefined;
+    }
+
+    private async requestUserInputElicitation(
+        params: ToolRequestUserInputParams
+    ): Promise<acp.CreateElicitationResponse | null> {
+        const request = this.buildUserInputRequest(params);
+        if (params.autoResolutionMs === null) {
+            return await this.connection.request(
+                acp.methods.client.elicitation.create,
+                request,
+                this.requestOptions(),
+            );
+        }
+
+        const abortController = new AbortController();
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        let removeAbortListener: (() => void) | undefined;
+        const timeoutPromise = new Promise<null>((resolve) => {
+            const resolveWithoutInput = () => {
+                abortController.abort();
+                resolve(null);
+            };
+            timeout = setTimeout(resolveWithoutInput, Math.max(0, params.autoResolutionMs ?? 0));
+            if (this.cancellationSignal?.aborted) {
+                resolveWithoutInput();
+                return;
+            }
+            if (this.cancellationSignal) {
+                this.cancellationSignal.addEventListener("abort", resolveWithoutInput, { once: true });
+                removeAbortListener = () => {
+                    this.cancellationSignal?.removeEventListener("abort", resolveWithoutInput);
+                };
+            }
+        });
+        const requestPromise = Promise.resolve(this.connection.request(
+            acp.methods.client.elicitation.create,
+            request,
+            this.requestOptions(abortController.signal),
+        ));
+        void requestPromise.catch(() => {});
+
+        try {
+            return await Promise.race([requestPromise, timeoutPromise]);
+        } finally {
+            if (timeout) {
+                clearTimeout(timeout);
+            }
+            removeAbortListener?.();
+        }
     }
 
     private createMcpElicitationContext(params: McpServerElicitationRequestParams): McpElicitationContext {
@@ -531,15 +603,13 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 return {
                     action: "accept",
                     content: jsonObjectOrNull(content),
-                    _meta: persist === "session" || persist === "always"
-                        ? { persist }
-                        : null,
+                    _meta: elicitationResponseMeta(response, context, persist),
                 };
             }
             case "decline":
-                return { action: "decline", content: null, _meta: null };
+                return { action: "decline", content: null, _meta: elicitationResponseMeta(response, context) };
             case "cancel":
-                return { action: "cancel", content: null, _meta: null };
+                return { action: "cancel", content: null, _meta: elicitationResponseMeta(response, context) };
             default:
                 return { action: "cancel", content: null, _meta: null };
         }
