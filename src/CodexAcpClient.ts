@@ -42,6 +42,21 @@ import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
 
 /**
+ * Well-known provider id for the client-configurable custom LLM gateway.
+ * This is the only provider exposed through the ACP `providers/*` methods and
+ * the `gateway` auth method; it maps to a Codex `model_providers` entry.
+ */
+export const CUSTOM_GATEWAY_PROVIDER_ID = "custom-gateway";
+
+/**
+ * ACP `LlmProtocol` values Codex can route through the custom gateway, mapped to
+ * the Codex `wire_api`. Codex only supports the OpenAI Responses wire API here.
+ */
+const SUPPORTED_GATEWAY_PROTOCOLS: Record<string, GatewayConfig["config"]["wire_api"]> = {
+    openai: "responses",
+};
+
+/**
  * API for accessing the Codex App Server using ACP requests.
  * Converts ACP requests into corresponding app-server operations.
  */
@@ -109,24 +124,11 @@ export class CodexAcpClient {
                 const gatewaySettings = authRequest._meta["gateway"];
                 if (!gatewaySettings) throw RequestError.invalidRequest();
 
-                const baseUrl = gatewaySettings.baseUrl;
-                const providerName = typeof gatewaySettings.providerName === "string" && gatewaySettings.providerName.trim().length > 0
-                    ? gatewaySettings.providerName
-                    : "User-provided gateway";
-                const headers: Record<string, string> = {
-                    "X-Client-Feature-ID": "codex",
-                    ...gatewaySettings.headers
-                };
-
-                this.gatewayConfig = {
-                    modelProvider: "custom-gateway",
-                    config: {
-                        name: providerName,
-                        base_url: baseUrl,
-                        http_headers: headers,
-                        wire_api: "responses"
-                    }
-                };
+                this.applyGatewayConfig({
+                    baseUrl: gatewaySettings.baseUrl,
+                    headers: gatewaySettings.headers,
+                    providerName: gatewaySettings.providerName,
+                });
 
                 // Early return: model provider information will be sent to Codex later during the session creation
                 return true;
@@ -225,6 +227,98 @@ export class CodexAcpClient {
 
     hasGatewayAuth(): boolean {
         return this.gatewayConfig !== null;
+    }
+
+    /**
+     * Validates and stores custom gateway routing. Shared by the `gateway` auth
+     * method and the ACP `providers/set` method. Throws `invalid_params` for an
+     * unsupported protocol or a malformed base URL.
+     */
+    private applyGatewayConfig(params: {
+        baseUrl: string;
+        headers?: Record<string, string> | undefined;
+        providerName?: string | undefined;
+        apiType?: acp.LlmProtocol | undefined;
+    }): void {
+        const apiType = params.apiType ?? "openai";
+        const wireApi = SUPPORTED_GATEWAY_PROTOCOLS[apiType];
+        if (!wireApi) {
+            throw RequestError.invalidParams(
+                {apiType},
+                `Unsupported provider apiType "${apiType}"; supported: ${Object.keys(SUPPORTED_GATEWAY_PROTOCOLS).join(", ")}`,
+            );
+        }
+        if (typeof params.baseUrl !== "string" || params.baseUrl.trim().length === 0) {
+            throw RequestError.invalidParams(undefined, "baseUrl must be a non-empty string");
+        }
+        const providerName = typeof params.providerName === "string" && params.providerName.trim().length > 0
+            ? params.providerName
+            : "User-provided gateway";
+        const headers: Record<string, string> = {
+            "X-Client-Feature-ID": "codex",
+            ...params.headers,
+        };
+
+        this.gatewayConfig = {
+            modelProvider: CUSTOM_GATEWAY_PROVIDER_ID,
+            config: {
+                name: providerName,
+                base_url: params.baseUrl,
+                http_headers: headers,
+                wire_api: wireApi,
+            },
+        };
+    }
+
+    /**
+     * `providers/list`: returns the single client-configurable custom gateway
+     * provider. `current` carries only non-secret routing (never headers), and is
+     * `null` when the provider is not configured/disabled.
+     */
+    listProviders(): acp.ProviderInfo[] {
+        const gatewayConfig = this.gatewayConfig;
+        const current: acp.ProviderCurrentConfig | null = gatewayConfig
+            ? {
+                apiType: gatewayApiTypeFromConfig(gatewayConfig),
+                baseUrl: gatewayConfig.config.base_url,
+            }
+            : null;
+        return [
+            {
+                providerId: CUSTOM_GATEWAY_PROVIDER_ID,
+                supported: Object.keys(SUPPORTED_GATEWAY_PROTOCOLS),
+                required: false,
+                current,
+            },
+        ];
+    }
+
+    /**
+     * `providers/set`: replaces the full configuration for the custom gateway
+     * provider. Rejects unknown provider ids with `invalid_params`.
+     */
+    setProvider(request: acp.SetProviderRequest): void {
+        if (request.providerId !== CUSTOM_GATEWAY_PROVIDER_ID) {
+            throw RequestError.invalidParams(
+                {providerId: request.providerId},
+                `Unknown providerId "${request.providerId}"; only "${CUSTOM_GATEWAY_PROVIDER_ID}" is configurable`,
+            );
+        }
+        this.applyGatewayConfig({
+            apiType: request.apiType,
+            baseUrl: request.baseUrl,
+            headers: request.headers,
+        });
+    }
+
+    /**
+     * `providers/disable`: disables the custom gateway provider. Disabling an
+     * unknown provider id is idempotent success (RFD behavior §7).
+     */
+    disableProvider(request: acp.DisableProviderRequest): void {
+        if (request.providerId === CUSTOM_GATEWAY_PROVIDER_ID) {
+            this.gatewayConfig = null;
+        }
     }
 
     async getAccount(): Promise<GetAccountResponse> {
@@ -732,7 +826,7 @@ export class CodexAcpClient {
         const [allProviders, archivedAllProviders, customGateway] = await Promise.all([
             this.codexClient.threadList({}),
             this.codexClient.threadList({archived: true}),
-            this.codexClient.threadList({modelProviders: ["custom-gateway"]}),
+            this.codexClient.threadList({modelProviders: [CUSTOM_GATEWAY_PROVIDER_ID]}),
         ]);
 
         return {
@@ -934,6 +1028,12 @@ function arraysEqual(left: string[], right: string[]): boolean {
 
 function isJsonObject(value: JsonValue | undefined): value is JsonObject {
     return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function gatewayApiTypeFromConfig(gatewayConfig: GatewayConfig): acp.LlmProtocol {
+    const wireApi = gatewayConfig.config.wire_api;
+    const match = Object.entries(SUPPORTED_GATEWAY_PROTOCOLS).find(([, wire]) => wire === wireApi);
+    return match?.[0] ?? "openai";
 }
 
 function mergeGatewayConfig(config: JsonObject, gatewayConfig: GatewayConfig | null): JsonObject {
