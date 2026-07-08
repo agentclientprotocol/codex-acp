@@ -1,0 +1,32 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "msg-2",
+        "content": {
+          "type": "text",
+          "text": "Hel"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "msg-2",
+        "content": {
+          "type": "text",
+          "text": "lo!"
+        }
+      }
+    }
+  ]
+}
