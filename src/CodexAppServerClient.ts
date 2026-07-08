@@ -1,5 +1,6 @@
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import type {
+    CollaborationMode,
     ClientRequest,
     InitializeParams,
     InitializeResponse,
@@ -63,6 +64,8 @@ import type {
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
     ItemCompletedNotification,
+    ToolRequestUserInputParams,
+    ToolRequestUserInputResponse,
 } from "./app-server/v2";
 
 export interface ApprovalHandler {
@@ -75,6 +78,10 @@ export interface ElicitationHandler {
     handleElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
 }
 
+export interface UserInputHandler {
+    handleUserInput(params: ToolRequestUserInputParams): Promise<ToolRequestUserInputResponse>;
+}
+
 export type McpStartupFailure = {
     server: string;
     error: string;
@@ -84,6 +91,11 @@ export type McpStartupResult = {
     ready: Array<string>;
     failed: Array<McpStartupFailure>;
     cancelled: Array<string>;
+};
+
+export type ThreadSettingsUpdateParams = {
+    threadId: string;
+    collaborationMode?: CollaborationMode | null;
 };
 
 const CommandExecutionApprovalRequest = new RequestType<
@@ -104,6 +116,12 @@ const PermissionsApprovalRequest = new RequestType<
     void
 >('item/permissions/requestApproval');
 
+const ToolRequestUserInputRequest = new RequestType<
+    ToolRequestUserInputParams,
+    ToolRequestUserInputResponse,
+    void
+>('item/tool/requestUserInput');
+
 const McpServerElicitationRequest = new RequestType<
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse,
@@ -120,6 +138,7 @@ export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
     private elicitationHandlers = new Map<string, ElicitationHandler>();
+    private userInputHandlers = new Map<string, UserInputHandler>();
     private mcpServerStartupVersion = 0;
     private readonly mcpServerStartupStates = new Map<string, McpServerStartupSnapshot>();
     private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
@@ -207,6 +226,17 @@ export class CodexAppServerClient {
             return await handler.handlePermissionsRequest(params);
         });
 
+        this.connection.onRequest(ToolRequestUserInputRequest, async (params) => {
+            if (this.isStaleTurn(params.threadId, params.turnId)) {
+                return { answers: {} };
+            }
+            const handler = this.userInputHandlers.get(params.threadId);
+            if (!handler) {
+                throw new Error(`No request_user_input handler registered for thread ${params.threadId}`);
+            }
+            return await handler.handleUserInput(params);
+        });
+
         this.connection.onRequest(McpServerElicitationRequest, async (params) => {
             if (this.isStaleTurn(params.threadId, params.turnId)) {
                 return { action: "cancel", content: null, _meta: null };
@@ -227,10 +257,15 @@ export class CodexAppServerClient {
         this.elicitationHandlers.set(threadId, handler);
     }
 
+    onUserInputRequest(threadId: string, handler: UserInputHandler): void {
+        this.userInputHandlers.set(threadId, handler);
+    }
+
     clearThreadHandlers(threadId: string): void {
         this.notificationHandlers.delete(threadId);
         this.approvalHandlers.delete(threadId);
         this.elicitationHandlers.delete(threadId);
+        this.userInputHandlers.delete(threadId);
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
@@ -523,6 +558,13 @@ export class CodexAppServerClient {
 
     async threadGoalClear(params: ThreadGoalClearParams): Promise<ThreadGoalClearResponse> {
         return await this.sendRequest({ method: "thread/goal/clear", params: params });
+    }
+
+    async threadSettingsUpdate(params: ThreadSettingsUpdateParams): Promise<void> {
+        return await this.sendRequest({
+            method: "thread/settings/update",
+            params,
+        } as unknown as ClientRequest);
     }
 
     async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {

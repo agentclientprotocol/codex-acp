@@ -3,6 +3,7 @@ import {RequestError, type SessionId, type SessionModeState} from "@agentclientp
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
+import {CodexUserInputHandler} from "./CodexUserInputHandler";
 import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
 import type {McpStartupResult} from "./CodexAppServerClient";
@@ -656,7 +657,7 @@ export class CodexAcpServer {
         const sessionState = this.sessions.get(_params.sessionId);
         if (!sessionState) throw new Error(`Session ${_params.sessionId} not found`);
 
-        this.applyModeChange(sessionState, _params.modeId);
+        await this.applyModeChange(sessionState, _params.modeId);
         return {};
     }
 
@@ -673,7 +674,7 @@ export class CodexAcpServer {
                 this.applyFastModeChange(sessionState, params);
                 break;
             case MODE_CONFIG_ID:
-                this.applyModeChange(sessionState, this.stringConfigValue(params));
+                await this.applyModeChange(sessionState, this.stringConfigValue(params));
                 break;
             case MODEL_CONFIG_ID:
                 this.applyModelChange(sessionState, this.stringConfigValue(params));
@@ -709,10 +710,18 @@ export class CodexAcpServer {
         return params.value;
     }
 
-    private applyModeChange(sessionState: SessionState, value: string): void {
+    private async applyModeChange(sessionState: SessionState, value: string): Promise<void> {
         const newMode = AgentMode.find(value);
         if (!newMode) {
             throw RequestError.invalidParams();
+        }
+        const previousMode = sessionState.agentMode;
+        if (previousMode.collaborationMode !== newMode.collaborationMode) {
+            await this.codexAcpClient.setCollaborationMode(
+                sessionState.sessionId,
+                newMode.collaborationMode,
+                ModelId.fromString(sessionState.currentModelId),
+            );
         }
         sessionState.agentMode = newMode;
     }
@@ -1442,13 +1451,15 @@ export class CodexAcpServer {
             const eventHandler = new CodexEventHandler(this.connection, sessionState);
             const approvalHandler = new CodexApprovalHandler(this.connection, sessionState, activePrompt.signal);
             const elicitationHandler = new CodexElicitationHandler(this.connection, sessionState, activePrompt.signal);
+            const userInputHandler = new CodexUserInputHandler(this.connection, sessionState, activePrompt.signal);
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 (event) => {
                     elicitationHandler.handleNotification(event);
                     return eventHandler.handleNotification(event);
                 },
                 approvalHandler,
-                elicitationHandler);
+                elicitationHandler,
+                userInputHandler);
 
             if (activePrompt.signal.aborted) {
                 return this.cancelledPromptResponse(sessionState);

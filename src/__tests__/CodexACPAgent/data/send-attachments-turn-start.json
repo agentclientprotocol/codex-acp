@@ -57,7 +57,15 @@
     "summary": "auto",
     "effort": "effort",
     "model": "model",
-    "serviceTier": null
+    "serviceTier": null,
+    "collaborationMode": {
+      "mode": "default",
+      "settings": {
+        "model": "model",
+        "reasoning_effort": "effort",
+        "developer_instructions": null
+      }
+    }
   }
 }
 {

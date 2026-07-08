@@ -1,5 +1,6 @@
 import type {AskForApproval, SandboxMode, SandboxPolicy} from "./app-server/v2";
 import type {SessionConfigOption, SessionMode, SessionModeState} from "@agentclientprotocol/sdk";
+import type {ModeKind} from "./app-server";
 
 export const MODE_CONFIG_ID = "mode";
 
@@ -10,14 +11,24 @@ export class AgentMode {
     readonly approvalPolicy: AskForApproval;
     readonly sandboxPolicy: SandboxPolicy;
     readonly sandboxMode: SandboxMode;
+    readonly collaborationMode: ModeKind;
 
-    private constructor(id: string, name: string, description: string, approval: AskForApproval, sandbox: SandboxPolicy, sandboxMode: SandboxMode) {
+    private constructor(
+        id: string,
+        name: string,
+        description: string,
+        approval: AskForApproval,
+        sandbox: SandboxPolicy,
+        sandboxMode: SandboxMode,
+        collaborationMode: ModeKind = "default",
+    ) {
         this.id = id;
         this.name = name;
         this.description = description;
         this.approvalPolicy = approval;
         this.sandboxPolicy = sandbox;
         this.sandboxMode = sandboxMode; // same as sandboxPolicy, need to look for
+        this.collaborationMode = collaborationMode;
     }
 
     static readonly ReadOnly = new AgentMode(
@@ -53,6 +64,15 @@ export class AgentMode {
         {"type": "dangerFullAccess"},
         "danger-full-access"
     );
+    static readonly Plan = new AgentMode(
+        "plan",
+        "Plan",
+        "Codex collaborates in plan mode and asks before moving forward.",
+        AgentMode.Agent.approvalPolicy,
+        AgentMode.Agent.sandboxPolicy,
+        AgentMode.Agent.sandboxMode,
+        "plan",
+    );
 
     static DEFAULT_AGENT_MODE = AgentMode.Agent;
 
@@ -75,7 +95,7 @@ export class AgentMode {
         return {
             id: MODE_CONFIG_ID,
             name: "Mode",
-            description: "Approval and sandboxing preset for the session",
+            description: "Approval, sandboxing, and collaboration preset for the session",
             category: "mode",
             type: "select",
             currentValue: this.id,
@@ -88,7 +108,7 @@ export class AgentMode {
     }
 
     static all(): AgentMode[] {
-        return [AgentMode.ReadOnly, AgentMode.Agent, AgentMode.AgentFullAccess];
+        return [AgentMode.ReadOnly, AgentMode.Agent, AgentMode.AgentFullAccess, AgentMode.Plan];
     }
 
     static find(modeId: string): AgentMode | null {

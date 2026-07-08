@@ -149,6 +149,38 @@ describe("Session config options", () => {
         expect((modeOption as any).currentValue).toBe(AgentMode.ReadOnly.id);
     });
 
+    it("switches Codex collaboration mode when entering and leaving plan mode", async () => {
+        const {fast} = buildModels();
+        const {codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
+        const setCollaborationMode = vi
+            .spyOn(codexAcpClient, "setCollaborationMode")
+            .mockResolvedValue(undefined);
+
+        await codexAcpAgent.setSessionMode({
+            sessionId: "session-id",
+            modeId: AgentMode.Plan.id,
+        });
+
+        expect(setCollaborationMode).toHaveBeenLastCalledWith(
+            "session-id",
+            "plan",
+            expect.objectContaining({model: "fast-model", effort: "medium"}),
+        );
+        expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.Plan);
+
+        await codexAcpAgent.setSessionMode({
+            sessionId: "session-id",
+            modeId: AgentMode.Agent.id,
+        });
+
+        expect(setCollaborationMode).toHaveBeenLastCalledWith(
+            "session-id",
+            "default",
+            expect.objectContaining({model: "fast-model", effort: "medium"}),
+        );
+        expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.Agent);
+    });
+
     it("changes the model and keeps the current reasoning effort when supported", async () => {
         const {fast, slow} = buildModels();
         const {codexAcpAgent} = await createSession("fast-model[medium]", [fast, slow]);

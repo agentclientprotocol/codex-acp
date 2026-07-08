@@ -3,6 +3,7 @@ import type {
     CommandExecutionRequestApprovalParams,
     FileChangeRequestApprovalParams,
     PermissionsRequestApprovalParams,
+    ToolRequestUserInputParams,
 } from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { SessionState } from '../../CodexAcpServer';
@@ -51,6 +52,135 @@ describe('Approval Events', () => {
             })
         };
     }
+
+    describe('request_user_input approval bridge', () => {
+        it('maps a selected ACP permission option back to a Codex user input answer', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'approval:1' }
+            });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'request-user-input-1',
+                autoResolutionMs: 60000,
+                questions: [{
+                    id: 'approval',
+                    header: 'Approve app tool call?',
+                    question: 'Allow this action?',
+                    isOther: false,
+                    isSecret: false,
+                    options: [
+                        { label: 'Allow', description: 'Run the tool and continue.' },
+                        { label: 'Cancel', description: 'Cancel this tool call.' },
+                    ],
+                }],
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/tool/requestUserInput',
+                params
+            );
+
+            expect(response).toEqual({
+                answers: {
+                    approval: {
+                        answers: ['Cancel'],
+                    },
+                },
+            });
+
+            const requestEvent = fixture.getAcpConnectionEvents([])[0];
+            expect(requestEvent).toBeDefined();
+            const request = requestEvent!.args[0];
+            expect(request.toolCall).toMatchObject({
+                toolCallId: 'request-user-input-1',
+                kind: 'other',
+                status: 'pending',
+                title: 'Approve app tool call?',
+            });
+            expect(request.options).toEqual([
+                expect.objectContaining({ optionId: 'approval:0', name: 'Allow', kind: 'allow_once' }),
+                expect.objectContaining({ optionId: 'approval:1', name: 'Cancel', kind: 'reject_once' }),
+            ]);
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('accepts native Codex option questions that include an Other affordance', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'approval:0' }
+            });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'request-user-input-1',
+                autoResolutionMs: null,
+                questions: [{
+                    id: 'approval',
+                    header: 'Confirm',
+                    question: 'Proceed with the plan?',
+                    isOther: true,
+                    isSecret: false,
+                    options: [
+                        { label: 'Yes (Recommended)', description: 'Continue the current plan.' },
+                        { label: 'No', description: 'Stop and revisit the approach.' },
+                    ],
+                }],
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/tool/requestUserInput',
+                params
+            );
+
+            expect(response).toEqual({
+                answers: {
+                    approval: {
+                        answers: ['Yes (Recommended)'],
+                    },
+                },
+            });
+            expect(fixture.getAcpConnectionEvents([])[0]?.args[0].options).toEqual([
+                expect.objectContaining({ optionId: 'approval:0', name: 'Yes (Recommended)', kind: 'allow_once' }),
+                expect.objectContaining({ optionId: 'approval:1', name: 'No', kind: 'reject_once' }),
+            ]);
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('fails closed for request_user_input questions without selectable options', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'request-user-input-no-options',
+                autoResolutionMs: null,
+                questions: [{
+                    id: 'approval',
+                    header: 'Need input',
+                    question: 'Type a value',
+                    isOther: false,
+                    isSecret: false,
+                    options: null,
+                }],
+            };
+
+            await expect(fixture.sendServerRequest(
+                'item/tool/requestUserInput',
+                params
+            )).rejects.toThrow('options are required');
+            expect(fixture.getAcpConnectionEvents([])).toEqual([]);
+
+            completeTurn();
+            await promptPromise;
+        });
+    });
 
     describe('Command execution approval', () => {
         const commandApprovalCases = [

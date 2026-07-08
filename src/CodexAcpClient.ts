@@ -7,11 +7,14 @@ import type {
     CodexAppServerClient,
     ElicitationHandler,
     McpStartupResult,
+    UserInputHandler,
 } from "./CodexAppServerClient";
 import open from "open";
 import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
+    CollaborationMode,
+    ModeKind,
     ReasoningEffort,
     ServiceTier,
     ServerNotification
@@ -36,6 +39,7 @@ import type {
     ThreadGoalStatus,
     ThreadSourceKind,
     TurnCompletedNotification,
+    TurnStartParams,
     UserInput,
 } from "./app-server/v2";
 import packageJson from "../package.json";
@@ -69,7 +73,10 @@ export class CodexAcpClient {
 
     async initialize(request: acp.InitializeRequest): Promise<void> {
         await this.codexClient.initialize({
-            capabilities: null,
+            capabilities: {
+                experimentalApi: true,
+                requestAttestation: false,
+            },
             clientInfo: {
                 name: request.clientInfo?.name ?? this.defaultClientInfo.name,
                 version: request.clientInfo?.version ?? this.defaultClientInfo.version,
@@ -241,6 +248,7 @@ export class CodexAcpClient {
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
+        await this.syncInitialCollaborationMode(response.thread.id, response.model, response.reasoningEffort);
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
@@ -264,6 +272,7 @@ export class CodexAcpClient {
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
+        await this.syncInitialCollaborationMode(response.thread.id, response.model, response.reasoningEffort);
         onSubscribed?.();
         const historyResponse = await this.codexClient.threadRead({
             threadId: response.thread.id,
@@ -291,6 +300,7 @@ export class CodexAcpClient {
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });
+        await this.syncInitialCollaborationMode(response.thread.id, response.model, response.reasoningEffort);
 
         const codexModels = await this.fetchAvailableModels();
         if (codexModels.length === 0) {
@@ -413,6 +423,21 @@ export class CodexAcpClient {
         };
     }
 
+    private async syncInitialCollaborationMode(
+        threadId: string,
+        model: string,
+        reasoningEffort: ReasoningEffort | null,
+    ): Promise<void> {
+        const initialMode = AgentMode.getInitialAgentMode();
+        if (initialMode.collaborationMode !== "plan") {
+            return;
+        }
+        await this.codexClient.threadSettingsUpdate({
+            threadId,
+            collaborationMode: createCollaborationMode(initialMode.collaborationMode, model, reasoningEffort),
+        });
+    }
+
     private async getConfigMcpServerNames(projectPath: string): Promise<Set<string>> {
         const response = await this.codexClient.configRead({ includeLayers: true, cwd: projectPath });
         const mcpServers = response?.config?.["mcp_servers"];
@@ -510,7 +535,8 @@ export class CodexAcpClient {
         sessionId: string,
         eventHandler: (result: ServerNotification) => void | Promise<void>,
         approvalHandler: ApprovalHandler,
-        elicitationHandler: ElicitationHandler
+        elicitationHandler: ElicitationHandler,
+        userInputHandler?: UserInputHandler,
     ) {
         this.codexClient.onServerNotification(sessionId, (event) => {
             this.enqueueSessionNotification(sessionId, () => eventHandler(event));
@@ -535,6 +561,14 @@ export class CodexAcpClient {
                 return await elicitationHandler.handleElicitation(params);
             },
         });
+        if (userInputHandler) {
+            this.codexClient.onUserInputRequest(sessionId, {
+                handleUserInput: async (params) => {
+                    await this.waitForSessionNotifications(sessionId);
+                    return await userInputHandler.handleUserInput(params);
+                },
+            });
+        }
     }
 
     async waitForSessionNotifications(sessionId: string): Promise<void> {
@@ -581,7 +615,7 @@ export class CodexAcpClient {
         if (shouldCancel?.()) {
             return null;
         }
-        return await this.codexClient.runTurn({
+        const turnParams: TurnStartParams & { collaborationMode: CollaborationMode } = {
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
@@ -590,7 +624,20 @@ export class CodexAcpClient {
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,
-        }, onTurnStarted);
+            collaborationMode: createCollaborationMode(agentMode.collaborationMode, modelId.model, effort),
+        };
+        return await this.codexClient.runTurn(turnParams, onTurnStarted);
+    }
+
+    async setCollaborationMode(
+        threadId: string,
+        mode: ModeKind,
+        modelId: ModelId,
+    ): Promise<void> {
+        await this.codexClient.threadSettingsUpdate({
+            threadId,
+            collaborationMode: createCollaborationMode(mode, modelId.model, modelId.effort as ReasoningEffort | null),
+        });
     }
 
     resolveTurnInterrupted(params: { threadId: string, turnId: string }): void {
@@ -845,6 +892,21 @@ interface GatewayConfig {
         http_headers: Record<string, string>,
         wire_api: "responses"
     }
+}
+
+function createCollaborationMode(
+    mode: ModeKind,
+    model: string,
+    reasoningEffort: ReasoningEffort | null,
+): CollaborationMode {
+    return {
+        mode,
+        settings: {
+            model,
+            reasoning_effort: reasoningEffort,
+            developer_instructions: null,
+        },
+    };
 }
 
 function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[] | undefined {
