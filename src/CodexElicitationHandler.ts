@@ -485,26 +485,33 @@ export class CodexElicitationHandler implements ElicitationHandler {
         response: acp.CreateElicitationResponse,
         context: McpElicitationContext
     ): McpServerElicitationRequestResponse {
-        switch (response.action) {
-            case "accept": {
-                const content = contentRecord(response.content);
-                const persist = context.isToolApproval ? content["persist"] : undefined;
-                if (persist === "session" || persist === "always" || persist === "once") {
-                    delete content["persist"];
-                }
-                return {
-                    action: "accept",
-                    content: jsonObjectOrNull(content),
-                    _meta: elicitationResponseMeta(response, context, persist),
-                };
+        if (acp.CreateElicitationResponse.isAccept(response)) {
+            const content = contentRecord(response.content);
+            const persist = context.isToolApproval ? content["persist"] : undefined;
+            if (persist === "session" || persist === "always" || persist === "once") {
+                delete content["persist"];
             }
-            case "decline":
-                return { action: "decline", content: null, _meta: elicitationResponseMeta(response, context) };
-            case "cancel":
-                return { action: "cancel", content: null, _meta: elicitationResponseMeta(response, context) };
-            default:
-                return { action: "cancel", content: null, _meta: null };
+            return {
+                action: "accept",
+                content: jsonObjectOrNull(content),
+                _meta: elicitationResponseMeta(response, context, persist),
+            };
         }
+
+        if (acp.CreateElicitationResponse.isDecline(response)) {
+            return { action: "decline", content: null, _meta: elicitationResponseMeta(response, context) };
+        }
+
+        if (acp.CreateElicitationResponse.isCancel(response)) {
+            return { action: "cancel", content: null, _meta: elicitationResponseMeta(response, context) };
+        }
+
+        if (acp.CreateElicitationResponse.isCustom(response)) {
+            return { action: "cancel", content: null, _meta: null };
+        }
+
+        // Malformed known variants match none of the SDK guards.
+        return { action: "cancel", content: null, _meta: null };
     }
 
     private async publishAcceptedMcpToolApproval(

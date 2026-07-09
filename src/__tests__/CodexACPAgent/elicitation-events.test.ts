@@ -138,6 +138,50 @@ describe('Elicitation Events', () => {
             await promptPromise;
         });
 
+        it('should map custom ACP elicitation actions to cancel', async () => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+            });
+            fixture.setElicitationResponse({
+                action: 'defer',
+                _meta: { source: 'client' },
+            });
+
+            const params: McpServerElicitationRequestParams = {
+                threadId: sessionId, turnId: 'turn-1', serverName: 'test-server',
+                mode: 'form', _meta: null, message: 'Please provide your username',
+                requestedSchema: { type: 'object', properties: { username: { type: 'string' } }, required: ['username'] },
+            };
+
+            const response = await fixture.sendServerRequest('mcpServer/elicitation/request', params);
+            expect(response).toEqual({ action: 'cancel', content: null, _meta: null });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should not treat malformed ACP elicitation accept responses as accepted', async () => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+            });
+            fixture.setElicitationResponse({
+                action: 'accept',
+                content: { username: { nested: 'invalid' } },
+            } as acp.CreateElicitationResponse);
+
+            const params: McpServerElicitationRequestParams = {
+                threadId: sessionId, turnId: 'turn-1', serverName: 'test-server',
+                mode: 'form', _meta: null, message: 'Please provide your username',
+                requestedSchema: { type: 'object', properties: { username: { type: 'string' } }, required: ['username'] },
+            };
+
+            const response = await fixture.sendServerRequest('mcpServer/elicitation/request', params);
+            expect(response).toEqual({ action: 'cancel', content: null, _meta: null });
+
+            completeTurn();
+            await promptPromise;
+        });
+
         it('should map accept to accept', async () => {
             const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
             fixture.setPermissionResponse({ outcome: { outcome: 'selected', optionId: 'accept' } });
