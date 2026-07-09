@@ -5,6 +5,10 @@ import type {Model, ReasoningEffortOption} from "./app-server/v2";
 export const MODEL_CONFIG_ID = "model";
 export const REASONING_EFFORT_CONFIG_ID = "reasoning_effort";
 
+function capitalize(value: string): string {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 export function findSupportedEffort(
     options: ReadonlyArray<ReasoningEffortOption>,
     effort: string | undefined,
@@ -51,7 +55,7 @@ export function createReasoningEffortConfigOption(
         currentValue: currentEffort,
         options: supportedReasoningEfforts.map(option => ({
             value: option.reasoningEffort,
-            name: option.reasoningEffort,
+            name: capitalize(option.reasoningEffort),
             description: option.description,
         })),
     };
