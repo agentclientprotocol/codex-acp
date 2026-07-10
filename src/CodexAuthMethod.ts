@@ -34,7 +34,7 @@ export interface ChatGPTAuthRequest extends AuthenticateRequest {
     methodId: "chat-gpt";
 }
 
-const GatewayAuthMethod: AuthMethod = {
+export const GatewayAuthMethod = {
     id: "gateway",
     name: "Custom model gateway",
     description: "Use a custom gateway to authenticate and access models",

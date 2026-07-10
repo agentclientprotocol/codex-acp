@@ -1,4 +1,4 @@
-import {CODEX_API_KEY_ENV_VAR, isCodexAuthRequest, OPENAI_API_KEY_ENV_VAR} from "./CodexAuthMethod";
+import {CODEX_API_KEY_ENV_VAR, GatewayAuthMethod, isCodexAuthRequest, OPENAI_API_KEY_ENV_VAR} from "./CodexAuthMethod";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
@@ -52,7 +52,7 @@ export const CUSTOM_GATEWAY_PROVIDER_ID = "custom-gateway";
  * ACP `LlmProtocol` values Codex can route through the custom gateway, mapped to
  * the Codex `wire_api`. Codex only supports the OpenAI Responses wire API here.
  */
-const SUPPORTED_GATEWAY_PROTOCOLS: Record<string, GatewayConfig["config"]["wire_api"]> = {
+const SUPPORTED_GATEWAY_PROTOCOLS: Record<acp.LlmProtocol, WireApi> = {
     openai: "responses",
 };
 
@@ -97,7 +97,7 @@ export class CodexAcpClient {
         if (!isCodexAuthRequest(authRequest)) {
             throw RequestError.invalidRequest();
         }
-
+        this.gatewayConfig = null;
         switch (authRequest.methodId) {
             case "api-key": {
                 const apiKey = authRequest._meta?.["api-key"]?.apiKey ?? this.readApiKeyFromEnv();
@@ -106,7 +106,6 @@ export class CodexAcpClient {
             case "chat-gpt": {
                 const accountResponse = await this.codexClient.accountRead({refreshToken: true});
                 if (accountResponse.account?.type === "chatgpt") {
-                    this.gatewayConfig = null;
                     return true;
                 }
                 const loginCompletedPromise = this.awaitNextLoginCompleted();
@@ -114,7 +113,6 @@ export class CodexAcpClient {
                 if (loginResponse.type == "chatgpt") {
                     await open(loginResponse.authUrl);
                 }
-                this.gatewayConfig = null;
                 const result = await loginCompletedPromise;
                 return result.success;
             }
@@ -126,18 +124,13 @@ export class CodexAcpClient {
 
                 this.applyGatewayConfig({
                     baseUrl: gatewaySettings.baseUrl,
+                    apiType: GatewayAuthMethod._meta.gateway.protocol,
                     headers: gatewaySettings.headers,
                     providerName: gatewaySettings.providerName,
                 });
 
-                // Early return: model provider information will be sent to Codex later during the session creation
                 return true;
-
         }
-
-        // Reset the gateway config to null if another authentication method was used
-        this.gatewayConfig = null;
-        return false;
     }
 
     private async authenticateWithApiKey(apiKey: string): Promise<Boolean> {
@@ -146,7 +139,6 @@ export class CodexAcpClient {
             type: "apiKey",
             apiKey,
         });
-        this.gatewayConfig = null;
         const result = await loginCompletedPromise;
         return result.success;
     }
@@ -225,10 +217,6 @@ export class CodexAcpClient {
         return response.requiresOpenaiAuth && !response.account;
     }
 
-    hasGatewayAuth(): boolean {
-        return this.gatewayConfig !== null;
-    }
-
     /**
      * Validates and stores custom gateway routing. Shared by the `gateway` auth
      * method and the ACP `providers/set` method. Throws `invalid_params` for an
@@ -238,9 +226,9 @@ export class CodexAcpClient {
         baseUrl: string;
         headers?: Record<string, string> | undefined;
         providerName?: string | undefined;
-        apiType?: acp.LlmProtocol | undefined;
+        apiType: acp.LlmProtocol;
     }): void {
-        const apiType = params.apiType ?? "openai";
+        const apiType = params.apiType;
         const wireApi = SUPPORTED_GATEWAY_PROTOCOLS[apiType];
         if (!wireApi) {
             throw RequestError.invalidParams(
@@ -931,13 +919,15 @@ function shouldDeduplicateMcpConflicts(): boolean {
     return !disabledByEnv;
 }
 
+type WireApi = "responses";
+
 interface GatewayConfig {
     modelProvider: string;
     config: {
         name: string,
         base_url: string,
         http_headers: Record<string, string>,
-        wire_api: "responses"
+        wire_api: WireApi
     }
 }
 
