@@ -24,7 +24,7 @@
         "messageId": "reasoning-1",
         "content": {
           "type": "text",
-          "text": "\n\n"
+          "text": "\nSecond thought"
         }
       }
     }
@@ -37,7 +37,7 @@
       "sessionId": "test-session-id",
       "update": {
         "sessionUpdate": "agent_thought_chunk",
-        "messageId": "reasoning-1",
+        "messageId": "reasoning-raw",
         "content": {
           "type": "text",
           "text": "Raw reasoning detail"

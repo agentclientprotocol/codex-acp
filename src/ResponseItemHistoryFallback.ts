@@ -7,6 +7,7 @@ import type { CommandAction, Thread, ThreadItem } from "./app-server/v2";
 import { createCommandActionEvent } from "./CodexToolCallMapper";
 import { createTerminalOutputMeta, type TerminalOutputMode } from "./TerminalOutputMode";
 import { createAgentMessageChunk, createCodexMessagePhaseMeta } from "./ContentChunks";
+import { normalizeReasoningSummary } from "./ReasoningText";
 
 type JsonRecord = Record<string, unknown>;
 type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
@@ -278,13 +279,18 @@ function createUserMessageEventUpdates(payload: JsonRecord): UpdateSessionEvent[
 
 function createAgentReasoningEventUpdates(payload: JsonRecord): UpdateSessionEvent[] {
     const text = stringValue(payload["text"]);
-    if (text === null || text.length === 0) {
+    if (text === null) {
+        return [];
+    }
+
+    const normalizedText = normalizeReasoningSummary(text);
+    if (normalizedText.length === 0) {
         return [];
     }
 
     return [{
         sessionUpdate: "agent_thought_chunk",
-        content: { type: "text", text },
+        content: { type: "text", text: normalizedText },
     }];
 }
 
@@ -329,16 +335,24 @@ function contentBlocksFromResponseContent(content: unknown): ContentBlock[] {
     });
 }
 
+// Keep legacy reasoning history consistent with live output.
 function createReasoningUpdates(item: JsonRecord): UpdateSessionEvent[] {
     const parts = textParts(item["summary"]);
     if (parts.length === 0) {
         parts.push(...textParts(item["content"]));
     }
 
-    return parts.map((text) => ({
-        sessionUpdate: "agent_thought_chunk",
-        content: { type: "text", text },
-    }));
+    const text = parts
+        .map(normalizeReasoningSummary)
+        .filter(text => text.length > 0)
+        .join("\n");
+
+    return text.length > 0
+        ? [{
+            sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text },
+        }]
+        : [];
 }
 
 function textParts(value: unknown): string[] {

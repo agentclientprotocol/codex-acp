@@ -35,6 +35,7 @@ import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
+import {normalizeReasoningSummary} from "./ReasoningText";
 import {
     type LegacyLoadSessionResponse,
     type LegacyNewSessionResponse,
@@ -1043,10 +1044,15 @@ export class CodexAcpServer {
         return updates;
     }
 
+    // Keep restored reasoning consistent with live output.
     private createReasoningUpdates(item: ThreadItem & { type: "reasoning" }): UpdateSessionEvent[] {
         const parts = item.summary.length > 0 ? item.summary : item.content;
         const messageId = item.id;
-        return parts.map((text) => createAgentTextThoughtChunk(text, messageId));
+        const text = parts
+            .map(normalizeReasoningSummary)
+            .filter(text => text.length > 0)
+            .join("\n");
+        return text.length > 0 ? [createAgentTextThoughtChunk(text, messageId)] : [];
     }
 
     private createWebSearchUpdate(

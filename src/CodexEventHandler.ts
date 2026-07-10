@@ -60,6 +60,7 @@ import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
 } from "./ContentChunks";
+import {normalizeReasoningSummary} from "./ReasoningText";
 
 export { stripShellPrefix };
 
@@ -72,7 +73,9 @@ export class CodexEventHandler {
     private readonly activeGuardianApprovalReviews = new Set<string>();
     private readonly activeImageGenerationItems = new Set<string>();
     private readonly emittedImageViewItems = new Set<string>();
-    private readonly seenReasoningDeltaItemIds = new Set<string>();
+    private readonly pendingReasoningSummaryParts = new Map<string, string>();
+    private readonly emittedReasoningSummaryItemIds = new Set<string>();
+    private readonly seenReasoningTextDeltaItemIds = new Set<string>();
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
@@ -162,11 +165,11 @@ export class CodexEventHandler {
             case "thread/compacted":
                 return this.createContextCompactedEvent();
             case "item/reasoning/summaryTextDelta":
-                return this.createReasoningDeltaEvent(notification.params);
+                return this.createReasoningSummaryDeltaEvent(notification.params);
             case "item/reasoning/textDelta":
-                return this.createReasoningDeltaEvent(notification.params);
+                return this.createReasoningTextDeltaEvent(notification.params);
             case "item/reasoning/summaryPartAdded":
-                return this.createReasoningSectionBreakEvent(notification.params);
+                return this.createReasoningSummaryPartEvent(notification.params);
             case "model/rerouted":
                 return this.createModelReroutedEvent(notification.params);
             case "fuzzyFileSearch/sessionUpdated":
@@ -291,20 +294,49 @@ export class CodexEventHandler {
             && left.tokenBudget === right.tokenBudget;
     }
 
-    private createReasoningDeltaEvent(
-        event: ReasoningSummaryTextDeltaNotification | ReasoningTextDeltaNotification
-    ): UpdateSessionEvent {
-        this.seenReasoningDeltaItemIds.add(event.itemId);
+    // Buffer complete parts because formatting can span deltas.
+    private createReasoningSummaryDeltaEvent(event: ReasoningSummaryTextDeltaNotification): null {
+        const pendingText = this.pendingReasoningSummaryParts.get(event.itemId) ?? "";
+        this.pendingReasoningSummaryParts.set(event.itemId, pendingText + event.delta);
+        return null;
+    }
+
+    private createReasoningTextDeltaEvent(event: ReasoningTextDeltaNotification): UpdateSessionEvent {
+        this.seenReasoningTextDeltaItemIds.add(event.itemId);
         return this.createAgentThoughtEvent(event.delta, event.itemId);
     }
 
-    private createReasoningSectionBreakEvent(event: ReasoningSummaryPartAddedNotification): UpdateSessionEvent {
-        this.seenReasoningDeltaItemIds.add(event.itemId);
-        return this.createAgentThoughtEvent("\n\n", event.itemId);
+    private createReasoningSummaryPartEvent(
+        event: ReasoningSummaryPartAddedNotification
+    ): UpdateSessionEvent | null {
+        const previousPart = this.takeReasoningSummaryPart(event.itemId);
+        this.pendingReasoningSummaryParts.set(event.itemId, "");
+        return this.createNormalizedReasoningSummaryEvent(previousPart, event.itemId);
     }
 
     private createAgentThoughtEvent(text: string, messageId: string): UpdateSessionEvent {
         return createAgentTextThoughtChunk(text, messageId);
+    }
+
+    private takeReasoningSummaryPart(itemId: string): string | null {
+        const text = this.pendingReasoningSummaryParts.get(itemId);
+        if (text === undefined) {
+            return null;
+        }
+        this.pendingReasoningSummaryParts.delete(itemId);
+        return normalizeReasoningSummary(text);
+    }
+
+    private createNormalizedReasoningSummaryEvent(
+        text: string | null,
+        messageId: string
+    ): UpdateSessionEvent | null {
+        if (!text) {
+            return null;
+        }
+        const prefix = this.emittedReasoningSummaryItemIds.has(messageId) ? "\n" : "";
+        this.emittedReasoningSummaryItemIds.add(messageId);
+        return this.createAgentThoughtEvent(prefix + text, messageId);
     }
 
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
@@ -379,11 +411,20 @@ export class CodexEventHandler {
                     return createImageGenerationCompleteUpdate(event.item);
                 }
                 return createImageGenerationUpdate(event.item, { terminalStatus: true });
-            case "reasoning":
-                if (this.seenReasoningDeltaItemIds.delete(event.item.id)) {
+            case "reasoning": {
+                const pendingSummary = this.takeReasoningSummaryPart(event.item.id);
+                const streamedRawText = this.seenReasoningTextDeltaItemIds.delete(event.item.id);
+                if (pendingSummary !== null) {
+                    const update = this.createNormalizedReasoningSummaryEvent(pendingSummary, event.item.id);
+                    this.emittedReasoningSummaryItemIds.delete(event.item.id);
+                    return update;
+                }
+                this.emittedReasoningSummaryItemIds.delete(event.item.id);
+                if (streamedRawText) {
                     return null;
                 }
                 return this.createCompletedReasoningEvent(event.item);
+            }
             case "webSearch":
                 return createWebSearchCompleteUpdate(event.item);
             case "collabAgentToolCall":
@@ -411,9 +452,13 @@ export class CodexEventHandler {
         this.agentMessagePhases.set(item.id, item.phase);
     }
 
+    // Keep completed reasoning consistent with streamed output.
     private createCompletedReasoningEvent(item: ThreadItem & { type: "reasoning" }): UpdateSessionEvent | null {
         const parts = item.summary.length > 0 ? item.summary : item.content;
-        const text = parts.filter(part => part.length > 0).join("\n\n");
+        const text = parts
+            .map(normalizeReasoningSummary)
+            .filter(part => part.length > 0)
+            .join("\n");
         if (text.length === 0) {
             return null;
         }

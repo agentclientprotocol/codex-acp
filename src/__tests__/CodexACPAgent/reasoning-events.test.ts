@@ -24,8 +24,18 @@ describe("CodexEventHandler - reasoning events", () => {
         agentMode: AgentMode.DEFAULT_AGENT_MODE
     });
 
-    it("streams reasoning deltas and section breaks without duplicating the completed item", async () => {
+    // Reproduce Codex part ordering and split summary markup.
+    it("normalizes streamed summaries and preserves raw reasoning without duplicates", async () => {
         const notifications: ServerNotification[] = [
+            {
+                method: "item/reasoning/summaryPartAdded",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    itemId: "reasoning-1",
+                    summaryIndex: 0,
+                },
+            },
             {
                 method: "item/reasoning/summaryTextDelta",
                 params: {
@@ -33,7 +43,17 @@ describe("CodexEventHandler - reasoning events", () => {
                     turnId: "turn-1",
                     itemId: "reasoning-1",
                     summaryIndex: 0,
-                    delta: "First thought",
+                    delta: "**First thought**\n\n<!--",
+                },
+            },
+            {
+                method: "item/reasoning/summaryTextDelta",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    itemId: "reasoning-1",
+                    summaryIndex: 0,
+                    delta: " -->",
                 },
             },
             {
@@ -46,11 +66,35 @@ describe("CodexEventHandler - reasoning events", () => {
                 },
             },
             {
-                method: "item/reasoning/textDelta",
+                method: "item/reasoning/summaryTextDelta",
                 params: {
                     threadId: sessionId,
                     turnId: "turn-1",
                     itemId: "reasoning-1",
+                    summaryIndex: 1,
+                    delta: "**Second thought**\n\n<!-- -->",
+                },
+            },
+            {
+                method: "item/completed",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    completedAtMs: 0,
+                    item: {
+                        type: "reasoning",
+                        id: "reasoning-1",
+                        summary: ["**First thought**\n\n<!-- -->", "**Second thought**\n\n<!-- -->"],
+                        content: [],
+                    },
+                },
+            },
+            {
+                method: "item/reasoning/textDelta",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    itemId: "reasoning-raw",
                     contentIndex: 0,
                     delta: "Raw reasoning detail",
                 },
@@ -63,9 +107,42 @@ describe("CodexEventHandler - reasoning events", () => {
                     completedAtMs: 0,
                     item: {
                         type: "reasoning",
-                        id: "reasoning-1",
-                        summary: ["Completed summary should not duplicate"],
-                        content: ["Completed content should not duplicate"],
+                        id: "reasoning-raw",
+                        summary: [],
+                        content: ["Raw reasoning detail"],
+                    },
+                },
+            },
+            {
+                method: "item/reasoning/summaryPartAdded",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    itemId: "reasoning-empty",
+                    summaryIndex: 0,
+                },
+            },
+            {
+                method: "item/reasoning/summaryTextDelta",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    itemId: "reasoning-empty",
+                    summaryIndex: 0,
+                    delta: "\n\n<!-- -->",
+                },
+            },
+            {
+                method: "item/completed",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    completedAtMs: 0,
+                    item: {
+                        type: "reasoning",
+                        id: "reasoning-empty",
+                        summary: ["\n\n<!-- -->"],
+                        content: [],
                     },
                 },
             },
