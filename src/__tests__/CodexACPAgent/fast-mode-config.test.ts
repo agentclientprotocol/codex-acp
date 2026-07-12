@@ -24,7 +24,7 @@ describe("Fast mode session config", () => {
     };
 
     async function createSession(
-        currentServiceTier: "fast" | "flex" | null = null,
+        currentServiceTier: "fast" | "priority" | "flex" | null = null,
         clientInfo: acp.Implementation | null = null,
         clientCapabilities?: acp.ClientCapabilities,
     ) {
@@ -98,12 +98,15 @@ describe("Fast mode session config", () => {
         expect(response.configOptions).toContainEqual(createFastModeConfigOption(false));
     });
 
-    it("initializes Fast mode as On when the app-server session tier is fast", async () => {
-        const {response, codexAcpAgent} = await createSession("fast");
+    it.each(["fast", "priority"] as const)(
+        "initializes Fast mode as On when the app-server session tier is %s",
+        async (serviceTier) => {
+            const {response, codexAcpAgent} = await createSession(serviceTier);
 
-        expect(response.configOptions).toContainEqual(createFastModeConfigOption(true));
-        expect(codexAcpAgent.getSessionState("session-id").fastModeEnabled).toBe(true);
-    });
+            expect(response.configOptions).toContainEqual(createFastModeConfigOption(true));
+            expect(codexAcpAgent.getSessionState("session-id").fastModeEnabled).toBe(true);
+        },
+    );
 
     it("omits Fast mode config options for JetBrains 2026.1 IntelliJ clients", async () => {
         const {response} = await createSession(null, {

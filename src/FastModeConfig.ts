@@ -18,6 +18,10 @@ export function resolveFastServiceTier(fastModeEnabled: boolean, currentModelSup
     return fastModeEnabled && currentModelSupportsFast ? "fast" : null;
 }
 
+export function isFastServiceTier(serviceTier: string | null | undefined): boolean {
+    return serviceTier === "fast" || serviceTier === "priority";
+}
+
 export function clientSupportsBooleanConfigOptions(clientCapabilities?: acp.ClientCapabilities | null): boolean {
     return clientCapabilities?.session?.configOptions?.boolean != null;
 }

@@ -842,7 +842,7 @@ export type SessionMetadata = {
     currentModelId: string,
     models: Model[],
     modelProvider?: string | null,
-    currentServiceTier?: ServiceTier | null,
+    currentServiceTier?: string | null,
     additionalDirectories: string[],
 }
 
