@@ -46,6 +46,7 @@ import {
 } from "./AcpExtensions";
 import {
     createCollabAgentToolCallUpdate,
+    createCompletedContextCompactionUpdate,
     createCommandExecutionCompleteUpdate,
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
@@ -1039,7 +1040,7 @@ export class CodexAcpServer {
             case "exitedReviewMode":
                 return [this.createReviewModeUpdate(item, false)];
             case "contextCompaction":
-                return [this.createContextCompactionUpdate()];
+                return [createCompletedContextCompactionUpdate(item)];
             case "plan":
                 return [this.createPlanUpdate(item)];
         }
@@ -1088,16 +1089,6 @@ export class CodexAcpServer {
             content: {
                 type: "text",
                 text: `${entered ? "Entered" : "Exited"} review mode: ${item.review}`,
-            },
-        };
-    }
-
-    private createContextCompactionUpdate(): UpdateSessionEvent {
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: "Context compacted.",
             },
         };
     }

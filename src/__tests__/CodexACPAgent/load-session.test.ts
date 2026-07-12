@@ -161,6 +161,10 @@ describe("CodexACPAgent - loadSession", () => {
                             result: "iVBORw0KGgo=",
                             savedPath: "/test/project/generated-blue-square.png",
                         },
+                        {
+                            type: "contextCompaction",
+                            id: "item-context-compaction-1",
+                        },
                     ],
                 },
             ],

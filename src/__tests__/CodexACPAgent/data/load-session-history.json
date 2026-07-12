@@ -328,3 +328,21 @@
     }
   ]
 }
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "item-context-compaction-1",
+        "kind": "other",
+        "title": "Context compacted",
+        "status": "completed",
+        "_meta": {
+          "contextCompaction": true
+        }
+      }
+    }
+  ]
+}

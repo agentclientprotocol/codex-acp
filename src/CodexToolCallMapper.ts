@@ -41,7 +41,10 @@ type GuardianApprovalReviewNotification =
 type WebSearchItem = ThreadItem & { type: "webSearch" };
 type CollabAgentToolCallItem = ThreadItem & { type: "collabAgentToolCall" };
 type CommandExecutionItem = ThreadItem & { type: "commandExecution" };
+type ContextCompactionItem = ThreadItem & { type: "contextCompaction" };
 type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
+
+const CONTEXT_COMPACTION_META = { contextCompaction: true };
 
 function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
     switch (status) {
@@ -217,6 +220,44 @@ export function createImageGenerationUpdate(
             : imageGenerationToolStatus(item.status),
         content: imageGenerationContent(item),
         rawOutput: imageGenerationRawOutput(item),
+    };
+}
+
+export function createContextCompactionStartUpdate(
+    item: ContextCompactionItem,
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "other",
+        title: "Context compacting",
+        status: "in_progress",
+        _meta: CONTEXT_COMPACTION_META,
+    };
+}
+
+export function createContextCompactionCompleteUpdate(
+    item: ContextCompactionItem,
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        title: "Context compacted",
+        status: "completed",
+        _meta: CONTEXT_COMPACTION_META,
+    };
+}
+
+export function createCompletedContextCompactionUpdate(
+    item: ContextCompactionItem,
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId: item.id,
+        kind: "other",
+        title: "Context compacted",
+        status: "completed",
+        _meta: CONTEXT_COMPACTION_META,
     };
 }
 
