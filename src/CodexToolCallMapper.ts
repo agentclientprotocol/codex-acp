@@ -2,6 +2,7 @@ import type { ContentBlock, ToolCallContent } from "@agentclientprotocol/sdk";
 import { applyPatch, parsePatch, reversePatch } from "diff";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
 import { stripShellPrefix } from "./CommandUtils";
 import type {
@@ -158,6 +159,7 @@ export function createImageViewUpdate(
     item: ThreadItem & { type: "imageView" }
 ): UpdateSessionEvent {
     const displayPath = item.path;
+    const mimeType = imageMimeTypeFromPath(displayPath);
     return {
         sessionUpdate: "tool_call",
         toolCallId: item.id,
@@ -167,13 +169,45 @@ export function createImageViewUpdate(
         content: [createContent({
             type: "resource_link",
             name: displayPath,
-            uri: displayPath,
+            uri: pathToFileURL(displayPath).href,
+            ...(mimeType ? { mimeType } : {}),
         })],
         locations: [{ path: item.path }],
         rawInput: {
             path: item.path,
         },
     };
+}
+
+function imageMimeTypeFromPath(filePath: string): string | undefined {
+    switch (path.extname(filePath).toLowerCase()) {
+        case ".avif":
+            return "image/avif";
+        case ".bmp":
+            return "image/bmp";
+        case ".gif":
+            return "image/gif";
+        case ".heic":
+            return "image/heic";
+        case ".heif":
+            return "image/heif";
+        case ".ico":
+            return "image/vnd.microsoft.icon";
+        case ".jpeg":
+        case ".jpg":
+            return "image/jpeg";
+        case ".png":
+            return "image/png";
+        case ".svg":
+            return "image/svg+xml";
+        case ".tif":
+        case ".tiff":
+            return "image/tiff";
+        case ".webp":
+            return "image/webp";
+        default:
+            return undefined;
+    }
 }
 
 export function createImageGenerationStartUpdate(

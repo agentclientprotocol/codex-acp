@@ -89,7 +89,7 @@ describe("CodexEventHandler - image events", () => {
         const item = {
             type: "imageView" as const,
             id: "view-image-1",
-            path: "/tmp/codex/input.png",
+            path: "/tmp/codex/input image.PNG",
         };
         const notifications: ServerNotification[] = [
             {

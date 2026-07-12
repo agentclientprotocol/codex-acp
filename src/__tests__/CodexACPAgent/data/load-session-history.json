@@ -273,7 +273,8 @@
             "content": {
               "type": "resource_link",
               "name": "/test/project/input.png",
-              "uri": "/test/project/input.png"
+              "uri": "file:///test/project/input.png",
+              "mimeType": "image/png"
             }
           }
         ],

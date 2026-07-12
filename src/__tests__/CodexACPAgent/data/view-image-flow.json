@@ -7,25 +7,26 @@
         "sessionUpdate": "tool_call",
         "toolCallId": "view-image-1",
         "kind": "read",
-        "title": "View Image /tmp/codex/input.png",
+        "title": "View Image /tmp/codex/input image.PNG",
         "status": "completed",
         "content": [
           {
             "type": "content",
             "content": {
               "type": "resource_link",
-              "name": "/tmp/codex/input.png",
-              "uri": "/tmp/codex/input.png"
+              "name": "/tmp/codex/input image.PNG",
+              "uri": "file:///tmp/codex/input%20image.PNG",
+              "mimeType": "image/png"
             }
           }
         ],
         "locations": [
           {
-            "path": "/tmp/codex/input.png"
+            "path": "/tmp/codex/input image.PNG"
           }
         ],
         "rawInput": {
-          "path": "/tmp/codex/input.png"
+          "path": "/tmp/codex/input image.PNG"
         }
       }
     }
