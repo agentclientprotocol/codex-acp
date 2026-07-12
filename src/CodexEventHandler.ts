@@ -563,7 +563,15 @@ export class CodexEventHandler {
 
     private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent> {
         const error = params.error.codexErrorInfo;
-        if (error === "usageLimitExceeded") {
+        if (params.willRetry) {
+            return this.createCodexSessionInfoUpdate({
+                error: {
+                    ...params.error,
+                    turnId: params.turnId,
+                    willRetry: true,
+                },
+            });
+        } else if (error === "usageLimitExceeded") {
             this.failure = RequestError.internalError(
                 this.createTurnErrorData(params.error),
             );

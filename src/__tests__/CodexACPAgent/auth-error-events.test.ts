@@ -64,8 +64,45 @@ const configuredAuthFailureCases: Array<{
 ];
 
 describe("CodexEventHandler - auth error events", () => {
+    it("keeps the prompt alive for a retryable HTTP 401", async () => {
+        const {result: response, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "retrying-session",
+            account: { type: "apiKey" },
+        }), {
+            message: "Reconnecting after provider returned 401",
+            codexErrorInfo: {
+                responseStreamDisconnected: {
+                    httpStatusCode: 401,
+                },
+            },
+            additionalDetails: "HTTP status 401",
+        }, true);
+
+        expect(response).toMatchObject({
+            stopReason: "end_turn",
+        });
+        expect(updates).toEqual([{
+            sessionUpdate: "session_info_update",
+            _meta: {
+                codex: {
+                    error: {
+                        message: "Reconnecting after provider returned 401",
+                        codexErrorInfo: {
+                            responseStreamDisconnected: {
+                                httpStatusCode: 401,
+                            },
+                        },
+                        additionalDetails: "HTTP status 401",
+                        turnId: "turn-id",
+                        willRetry: true,
+                    },
+                },
+            },
+        }]);
+    });
+
     it("returns AuthRequired for auth errors when no auth is configured", async () => {
-        const error = await runPromptWithError(createTestSessionState({
+        const {result: error} = await runPromptWithError(createTestSessionState({
             sessionId: "unauthenticated-session",
             account: null,
             authConfigured: false,
@@ -88,7 +125,7 @@ describe("CodexEventHandler - auth error events", () => {
     it.each(configuredAuthFailureCases)(
         "returns InternalError with details for $name when auth is configured",
         async ({turnError, sessionOverrides, expectedData}) => {
-            const error = await runPromptWithError(createTestSessionState({
+            const {result: error} = await runPromptWithError(createTestSessionState({
                 sessionId: "authenticated-session",
                 account: { type: "apiKey" },
                 ...sessionOverrides,
@@ -109,7 +146,8 @@ describe("CodexEventHandler - auth error events", () => {
 async function runPromptWithError(
     sessionState: SessionState,
     turnError: ErrorNotification["error"],
-): Promise<unknown> {
+    willRetry = false,
+): Promise<{result: unknown; updates: unknown[]}> {
     const mockFixture = createCodexMockTestFixture();
     const codexAcpAgent = mockFixture.getCodexAcpAgent();
     const codexAppServerClient = mockFixture.getCodexAppServerClient();
@@ -134,7 +172,7 @@ async function runPromptWithError(
         params: {
             threadId: sessionState.sessionId,
             turnId: "turn-id",
-            willRetry: false,
+            willRetry,
             error: turnError,
         },
     });
@@ -144,14 +182,16 @@ async function runPromptWithError(
         turn: createTurn("completed"),
     });
 
-    let caughtError: unknown;
+    let result: unknown;
     try {
-        await promptPromise;
+        result = await promptPromise;
     } catch (error) {
-        caughtError = error;
+        result = error;
     }
-    expect(caughtError).toBeDefined();
-    return caughtError;
+    return {
+        result,
+        updates: mockFixture.getAcpConnectionEvents([]).map(event => event.args[0].update),
+    };
 }
 
 function createTurn(status: "inProgress" | "completed") {
