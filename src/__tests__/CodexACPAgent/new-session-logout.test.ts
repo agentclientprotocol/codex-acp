@@ -15,7 +15,7 @@ describe("New session logout handling", () => {
 
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
 
-        await expect(codexAcpAgent.newSession({cwd: "", mcpServers: []}))
+        await expect(codexAcpAgent.newSession({cwd: "", mcpServers: []}, 0))
             .rejects.toMatchObject({
                 data: expect.stringContaining("You have been logged out. Please try again."),
             });
@@ -34,7 +34,7 @@ describe("New session logout handling", () => {
 
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
 
-        await expect(codexAcpAgent.newSession({cwd: "", mcpServers: []}))
+        await expect(codexAcpAgent.newSession({cwd: "", mcpServers: []}, 0))
             .rejects.toMatchObject({
                 data: expect.stringContaining("You have been logged out. Please try again."),
             });
@@ -79,10 +79,10 @@ describe("New session logout handling", () => {
             .mockRejectedValueOnce(new Error(errorMessage));
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
 
-        const openAiSession = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
-        const customProviderSession = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+        const openAiSession = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []}, 0);
+        const customProviderSession = await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []}, 0);
 
-        await expect(codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []}))
+        await expect(codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []}, 0))
             .rejects.toMatchObject({
                 data: expect.stringContaining("You have been logged out. Please try again."),
             });

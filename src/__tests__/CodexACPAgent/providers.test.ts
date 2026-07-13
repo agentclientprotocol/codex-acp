@@ -126,7 +126,7 @@ describe("Configurable LLM providers (providers/*)", () => {
             headers: {Authorization: "Bearer super-secret"},
         });
 
-        await expect(agent.newSession({cwd: "/workspace", mcpServers: []})).rejects.toThrow();
+        await expect(agent.newSession({cwd: "/workspace", mcpServers: []}, 0)).rejects.toThrow();
 
         expect(threadStartSpy).toHaveBeenCalledWith(expect.objectContaining({
             modelProvider: CUSTOM_GATEWAY_PROVIDER_ID,
@@ -158,7 +158,7 @@ describe("Configurable LLM providers (providers/*)", () => {
                     providerName: "Corp gateway",
                 },
             },
-        } as acp.AuthenticateRequest);
+        } as acp.AuthenticateRequest, 0);
 
         expect(codexAcpClient.listProviders()[0]!.current).toEqual({
             apiType: "openai",
