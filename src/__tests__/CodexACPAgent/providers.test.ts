@@ -149,7 +149,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpClient = fixture.getCodexAcpClient();
 
-        await codexAcpClient.authenticate({
+        await fixture.getCodexAcpAgent().authenticate({
             methodId: "gateway",
             _meta: {
                 gateway: {

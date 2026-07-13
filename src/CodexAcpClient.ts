@@ -41,6 +41,7 @@ import type {
 } from "./app-server/v2";
 import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
+import type { AcpClientConnection } from "./ACPSessionConnection";
 import {createCodexCollaborationMode} from "./CollaborationModeConfig";
 import type {ModeKind} from "./app-server/ModeKind";
 
@@ -99,7 +100,11 @@ export class CodexAcpClient {
         });
     }
 
-    async authenticate(authRequest: acp.AuthenticateRequest): Promise<Boolean> {
+    async authenticate(
+        connection: AcpClientConnection,
+        authRequest: acp.AuthenticateRequest,
+        env: NodeJS.ProcessEnv = process.env,
+    ): Promise<Boolean> {
         if (!isCodexAuthRequest(authRequest)) {
             throw RequestError.invalidRequest();
         }
@@ -114,13 +119,11 @@ export class CodexAcpClient {
                 if (accountResponse.account?.type === "chatgpt") {
                     return true;
                 }
-                const loginCompletedPromise = this.awaitNextLoginCompleted();
-                const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
-                if (loginResponse.type == "chatgpt") {
-                    await open(loginResponse.authUrl);
+                if (env["NO_BROWSER"]) {
+                    return await this.authenticateWithChatGptDeviceCode(connection);
+                } else {
+                    return await this.authenticateWithChatGptBrowser();
                 }
-                const result = await loginCompletedPromise;
-                return result.success;
             }
             case "gateway":
                 if (!authRequest._meta) throw RequestError.invalidRequest();
@@ -136,6 +139,58 @@ export class CodexAcpClient {
                 });
 
                 return true;
+        }
+    }
+
+    private async authenticateWithChatGptBrowser(): Promise<Boolean> {
+        const loginCompletedPromise = this.awaitNextLoginCompleted();
+        const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
+        if (loginResponse.type == "chatgpt") {
+            await open(loginResponse.authUrl);
+        }
+        const result = await loginCompletedPromise;
+        return result.success;
+    }
+
+    private async authenticateWithChatGptDeviceCode(connection: AcpClientConnection): Promise<Boolean> {
+        const loginCompletedPromise = this.awaitNextLoginCompleted();
+        const loginResponse = await this.codexClient.accountLogin({type: "chatgptDeviceCode"});
+        if (loginResponse.type == "chatgptDeviceCode") {
+            const url = loginResponse.verificationUrl;
+            const userCode = loginResponse.userCode;
+
+            await this.requestDeviceCodeAuth(connection, {
+                elicitationId: `chatgpt-login-${crypto.randomUUID()}`,
+                url,
+                message: `Follow these steps to sign in with ChatGPT using device code authorization:\n\
+                            \n1. Open this link in your browser and sign in to your account\n   ${url}\n\
+                            \n2. Enter this one-time code (expires in 15 minutes)\n   ${userCode}\n\
+                            \nDevice codes are a common phishing target. Never share this code.\n`,
+            });
+        }
+        const result = await loginCompletedPromise;
+        return result.success;
+    }
+
+    private async requestDeviceCodeAuth(
+        client: AcpClientConnection,
+        request: { elicitationId: string; url: string; message: string },
+    ): Promise<void> {
+        const response = await client.request(
+            acp.methods.client.elicitation.create,
+            {
+                mode: "url",
+                // This should be the authenticate requestId, but this is not exposed by the ACP SDK.
+                // The elicitation still works, but won't be tied to the authenticate request.
+                requestId: null,
+                elicitationId: request.elicitationId,
+                url: request.url,
+                message: request.message,
+            },
+        );
+
+        if (response.action !== "accept") {
+            throw RequestError.authRequired();
         }
     }
 

@@ -119,11 +119,27 @@ describe('CodexACPAgent - initialize', () => {
         ]));
     });
 
-    it('should not advertise ChatGPT auth when browser auth is disabled', () => {
+    it('should not advertise ChatGPT auth when browser auth is disabled and URL elicitation is unsupported', () => {
         const methodIds = getCodexAuthMethods(undefined, {NO_BROWSER: "1"} as NodeJS.ProcessEnv)
             .map((method) => method.id);
 
         expect(methodIds).not.toContain("chat-gpt");
         expect(methodIds).toEqual(expect.arrayContaining(["api-key"]));
+    });
+
+    it('should advertise ChatGPT auth when browser auth is disabled and URL elicitation is supported', () => {
+        const methodIds = getCodexAuthMethods(
+            {elicitation: {url: {}}},
+            {NO_BROWSER: "1"} as NodeJS.ProcessEnv,
+        ).map((method) => method.id);
+
+        expect(methodIds).toEqual(expect.arrayContaining(["chat-gpt", "api-key"]));
+    });
+
+    it('should advertise ChatGPT auth when browser auth is enabled without URL elicitation support', () => {
+        const methodIds = getCodexAuthMethods(undefined, {} as NodeJS.ProcessEnv)
+            .map((method) => method.id);
+
+        expect(methodIds).toEqual(expect.arrayContaining(["chat-gpt", "api-key"]));
     });
 });
