@@ -51,6 +51,8 @@ import type {
     ThreadStartResponse,
     ThreadUnsubscribeParams,
     ThreadUnsubscribeResponse,
+    ToolRequestUserInputParams,
+    ToolRequestUserInputResponse,
     TurnCompletedNotification,
     TurnInterruptParams,
     TurnInterruptResponse,
@@ -73,6 +75,7 @@ export interface ApprovalHandler {
 
 export interface ElicitationHandler {
     handleElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
+    handleUserInput(params: ToolRequestUserInputParams): Promise<ToolRequestUserInputResponse>;
 }
 
 export type McpStartupFailure = {
@@ -109,6 +112,12 @@ const McpServerElicitationRequest = new RequestType<
     McpServerElicitationRequestResponse,
     void
 >('mcpServer/elicitation/request');
+
+const ToolRequestUserInputRequest = new RequestType<
+    ToolRequestUserInputParams,
+    ToolRequestUserInputResponse,
+    void
+>('item/tool/requestUserInput');
 
 const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
 
@@ -216,6 +225,17 @@ export class CodexAppServerClient {
                 return { action: "cancel", content: null, _meta: null };
             }
             return await handler.handleElicitation(params);
+        });
+
+        this.connection.onRequest(ToolRequestUserInputRequest, async (params) => {
+            if (this.isStaleTurn(params.threadId, params.turnId)) {
+                return { answers: {} };
+            }
+            const handler = this.elicitationHandlers.get(params.threadId);
+            if (!handler) {
+                return { answers: {} };
+            }
+            return await handler.handleUserInput(params);
         });
     }
 

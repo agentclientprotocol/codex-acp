@@ -616,6 +616,10 @@ export class CodexAcpClient {
                 await this.waitForSessionNotifications(sessionId);
                 return await elicitationHandler.handleElicitation(params);
             },
+            handleUserInput: async (params) => {
+                await this.waitForSessionNotifications(sessionId);
+                return await elicitationHandler.handleUserInput(params);
+            },
         });
     }
 
