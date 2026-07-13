@@ -5,6 +5,40 @@ import { setupPromptTestSession } from "../acp-test-utils";
 describe("CodexEventHandler - session info updates", () => {
     const sessionId = "test-session-id";
 
+    it("uses the first user prompt as a fallback session title", async () => {
+        const { mockFixture } = setupPromptTestSession({
+            sessionId,
+            sessionTitleSource: "unset",
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [
+                { type: "text", text: "  Fix the flaky\n test  " },
+                { type: "text", text: "in CI" },
+            ],
+        });
+
+        await expect(`${mockFixture.getAcpConnectionDump([])}\n`).toMatchFileSnapshot(
+            "data/session-info-update-fallback-title.json"
+        );
+    });
+
+    it("does not replace an explicit session title with the prompt fallback", async () => {
+        const { mockFixture } = setupPromptTestSession({
+            sessionId,
+            sessionTitle: "Explicit title",
+            sessionTitleSource: "explicit",
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "Fallback title" }],
+        });
+
+        expect(mockFixture.getAcpConnectionEvents([])).toEqual([]);
+    });
+
     it("maps thread name updates to ACP session info updates", async () => {
         const { mockFixture } = setupPromptTestSession({ sessionId });
 

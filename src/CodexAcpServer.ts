@@ -102,6 +102,8 @@ export interface SessionState {
     sessionMcpServers?: Array<string>;
     terminalOutputMode: TerminalOutputMode;
     currentGoal?: ThreadGoalSnapshot | null;
+    sessionTitle: string | null;
+    sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
 }
 
 interface ActiveAuthState {
@@ -416,6 +418,8 @@ export class CodexAcpServer {
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             terminalOutputMode: this.terminalOutputMode,
+            sessionTitle: null,
+            sessionTitleSource: "sessionId" in request ? "unknown" : "unset",
         };
         this.sessions.set(sessionId, sessionState);
         resumeSubscribed = false;
@@ -945,6 +949,8 @@ export class CodexAcpServer {
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             terminalOutputMode: this.terminalOutputMode,
+            sessionTitle: null,
+            sessionTitleSource: "unset",
         };
         this.sessions.set(sessionId, sessionState);
         subscribed = false;
@@ -972,6 +978,7 @@ export class CodexAcpServer {
     private async streamThreadHistory(sessionId: string, thread: Thread): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
         const sessionState = this.getSessionState(sessionId);
+        await this.publishThreadHistoryTitle(session, sessionState, thread);
         const responseItemFallbackUpdates = await createResponseItemHistoryFallbackUpdates(
             thread,
             sessionState.terminalOutputMode,
@@ -991,6 +998,67 @@ export class CodexAcpServer {
         for (const update of updates) {
             await session.update(update);
         }
+    }
+
+    private async publishThreadHistoryTitle(
+        session: ACPSessionConnection,
+        sessionState: SessionState,
+        thread: Thread,
+    ): Promise<void> {
+        const explicitTitle = this.normalizeSessionTitle(thread.name);
+        if (explicitTitle) {
+            sessionState.sessionTitle = explicitTitle;
+            sessionState.sessionTitleSource = "explicit";
+            await session.update({
+                sessionUpdate: "session_info_update",
+                title: explicitTitle,
+            });
+            return;
+        }
+
+        const historyTitle = this.findFirstUserMessageTitle(thread)
+            ?? this.normalizeSessionTitle(thread.preview);
+        await this.publishFallbackSessionTitle(sessionState, historyTitle);
+    }
+
+    private findFirstUserMessageTitle(thread: Thread): string | null {
+        for (const turn of thread.turns) {
+            for (const item of turn.items) {
+                if (item.type !== "userMessage") continue;
+                const title = this.normalizeSessionTitle(item.content
+                    .filter((input): input is Extract<UserInput, {type: "text"}> => input.type === "text")
+                    .map(input => input.text)
+                    .join(" "));
+                if (title) return title;
+            }
+        }
+        return null;
+    }
+
+    private async publishFallbackSessionTitle(
+        sessionState: SessionState,
+        title: string | null,
+    ): Promise<void> {
+        if (sessionState.sessionTitleSource !== "unset" || !title) return;
+        sessionState.sessionTitle = title;
+        sessionState.sessionTitleSource = "fallback";
+        const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
+        await session.update({
+            sessionUpdate: "session_info_update",
+            title,
+        });
+    }
+
+    private createPromptFallbackTitle(prompt: acp.ContentBlock[]): string | null {
+        return this.normalizeSessionTitle(prompt
+            .filter((block): block is Extract<acp.ContentBlock, {type: "text"}> => block.type === "text")
+            .map(block => block.text)
+            .join(" "));
+    }
+
+    private normalizeSessionTitle(title: string | null | undefined): string | null {
+        const normalized = title?.replace(/\s+/g, " ").trim() ?? "";
+        return normalized.length > 0 ? normalized : null;
     }
 
     private async createHistoryUpdates(item: ThreadItem, sessionState: SessionState): Promise<UpdateSessionEvent[]> {
@@ -1596,6 +1664,11 @@ export class CodexAcpServer {
                 // noinspection ExceptionCaughtLocallyJS
                 throw error;
             }
+
+            await this.publishFallbackSessionTitle(
+                sessionState,
+                this.createPromptFallbackTitle(params.prompt),
+            );
 
             return {
                 stopReason: "end_turn",

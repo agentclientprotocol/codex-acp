@@ -66,7 +66,7 @@ describe("CodexACPAgent - loadSession", () => {
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
-            name: null,
+            name: "Saved title",
             turns: [
                 {
                     id: "turn-1",

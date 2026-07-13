@@ -122,6 +122,10 @@ export class CodexEventHandler {
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
             case "thread/name/updated":
+                this.sessionState.sessionTitle = notification.params.threadName ?? null;
+                this.sessionState.sessionTitleSource = notification.params.threadName == null
+                    ? "unset"
+                    : "explicit";
                 return {
                     sessionUpdate: "session_info_update",
                     title: notification.params.threadName ?? null,

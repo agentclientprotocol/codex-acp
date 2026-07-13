@@ -70,6 +70,18 @@
     {
       "sessionId": "session-legacy",
       "update": {
+        "sessionUpdate": "session_info_update",
+        "title": "List the files"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
         "sessionUpdate": "user_message_chunk",
         "messageId": "item-user-1",
         "content": {
