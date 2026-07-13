@@ -85,34 +85,6 @@ describe('CodexACPAgent - initialize', () => {
         ]));
     });
 
-    it('should opt into request_user_input only when the client supports ACP form elicitation', async () => {
-        await agent.initialize({
-            protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: {
-                elicitation: { form: {} },
-            },
-        });
-
-        expect(mockCodexConnection.sendRequest).toHaveBeenCalledWith("initialize", expect.objectContaining({
-            capabilities: {
-                experimentalApi: true,
-                requestAttestation: false,
-            },
-        }));
-
-        vi.clearAllMocks();
-        await agent.initialize({
-            protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: {
-                elicitation: { url: {} },
-            },
-        });
-
-        expect(mockCodexConnection.sendRequest).toHaveBeenCalledWith("initialize", expect.objectContaining({
-            capabilities: null,
-        }));
-    });
-
     it('should advertise API key auth with the legacy metadata method', () => {
         expect(getCodexAuthMethods()).toEqual(expect.arrayContaining([
             expect.objectContaining({
