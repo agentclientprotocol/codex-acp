@@ -1,0 +1,35 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "context-compaction-id",
+        "kind": "other",
+        "title": "Context compacting",
+        "status": "in_progress",
+        "_meta": {
+          "contextCompaction": true
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "context-compaction-id",
+        "title": "Context compacted",
+        "status": "completed",
+        "_meta": {
+          "contextCompaction": true
+        }
+      }
+    }
+  ]
+}

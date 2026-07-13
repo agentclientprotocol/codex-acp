@@ -35,6 +35,8 @@ import {
     commandExecutionUsesTerminalOutput,
     createCommandExecutionUpdate,
     createCommandExecutionCompleteUpdate,
+    createContextCompactionCompleteUpdate,
+    createContextCompactionStartUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
     createGuardianApprovalReviewToolCall,
@@ -349,6 +351,8 @@ export class CodexEventHandler {
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
                 return null;
+            case "contextCompaction":
+                return createContextCompactionStartUpdate(event.item);
             case "subAgentActivity":
                 return getSubAgentActivityTracker(this.sessionState).mapSubAgentActivity(event.item, "started");
             case "sleep":
@@ -357,7 +361,6 @@ export class CodexEventHandler {
             case "reasoning":
             case "enteredReviewMode":
             case "exitedReviewMode":
-            case "contextCompaction":
             case "plan":
                 return null;
         }
@@ -414,7 +417,7 @@ export class CodexEventHandler {
             case "exitedReviewMode":
                 return this.createExitedReviewModeEvent(event.item);
             case "contextCompaction":
-                return this.createContextCompactedEvent();
+                return createContextCompactionCompleteUpdate(event.item);
             //ignored types
             case "subAgentActivity":
                 return getSubAgentActivityTracker(this.sessionState).mapSubAgentActivity(event.item, "completed");

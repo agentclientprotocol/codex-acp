@@ -74,9 +74,9 @@ describe("Session config options", () => {
             currentValue: "medium",
             type: "select",
             options: [
-                {value: "low", name: "low"},
-                {value: "medium", name: "medium"},
-                {value: "high", name: "high"},
+                {value: "low", name: "Low"},
+                {value: "medium", name: "Medium"},
+                {value: "high", name: "High"},
             ],
         });
 

@@ -15,7 +15,6 @@ import type {
     Thread,
     ThreadGoalStatus,
     ThreadItem,
-    TurnCompletedNotification,
     UserInput
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
@@ -46,6 +45,8 @@ import {
     LEGACY_SET_SESSION_MODEL_METHOD,
 } from "./AcpExtensions";
 import {
+    createCollabAgentToolCallUpdate,
+    createCompletedContextCompactionUpdate,
     createCommandExecutionCompleteUpdate,
     createCommandExecutionUpdate,
     createDynamicToolCallUpdate,
@@ -208,6 +209,7 @@ export class CodexAcpServer {
                 auth: {
                     logout: {},
                 },
+                providers: {},
                 loadSession: true,
                 promptCapabilities: {
                     embeddedContext: true,
@@ -635,6 +637,20 @@ export class CodexAcpServer {
         logger.log("Logout request completed");
     }
 
+    listProviders(_params: acp.ListProvidersRequest): acp.ListProvidersResponse {
+        return { providers: this.codexAcpClient.listProviders() };
+    }
+
+    setProvider(params: acp.SetProviderRequest): acp.SetProviderResponse {
+        this.codexAcpClient.setProvider(params);
+        return { };
+    }
+
+    disableProvider(params: acp.DisableProviderRequest): acp.DisableProviderResponse {
+        this.codexAcpClient.disableProvider(params);
+        return { };
+    }
+
     private async refreshSessionsAuthState(authProvider: string | null): Promise<void> {
         if (this.sessions.size === 0) return;
 
@@ -1026,7 +1042,7 @@ export class CodexAcpServer {
             case "exitedReviewMode":
                 return [this.createReviewModeUpdate(item, false)];
             case "contextCompaction":
-                return [this.createContextCompactionUpdate()];
+                return [createCompletedContextCompactionUpdate(item)];
             case "plan":
                 return [this.createPlanUpdate(item)];
         }
@@ -1075,16 +1091,6 @@ export class CodexAcpServer {
             content: {
                 type: "text",
                 text: `${entered ? "Entered" : "Exited"} review mode: ${item.review}`,
-            },
-        };
-    }
-
-    private createContextCompactionUpdate(): UpdateSessionEvent {
-        return {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-                type: "text",
-                text: "Context compacted.",
             },
         };
     }
