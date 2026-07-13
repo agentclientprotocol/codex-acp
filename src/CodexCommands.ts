@@ -151,8 +151,14 @@ export class CodexCommands {
             },
             {
                 name: "goal",
-                description: "Set, pause, resume, or clear a task goal.",
-                input: { hint: "[<objective>|clear|pause|resume]" }
+                description: "Set a goal to keep pursuing.",
+                input: { hint: "[<objective>|clear|pause|resume]" },
+                _meta: {
+                    commandAction: {
+                        kind: "prefixPrompt",
+                        presentation: "state",
+                    },
+                },
             },
             {
                 name: "logout",
