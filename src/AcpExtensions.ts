@@ -1,5 +1,6 @@
 import type {
     ClientContext,
+    ContentBlock,
     LoadSessionResponse,
     NewSessionResponse,
     ResumeSessionResponse,
@@ -7,6 +8,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 
 export const LEGACY_SET_SESSION_MODEL_METHOD = "session/set_model";
+export const SESSION_STEERING_METHOD = "_session/steering";
 export const GOAL_CONTROL_METHOD = "_codex/session/goal_control";
 
 export type LegacySessionModel = {
@@ -43,13 +45,15 @@ export type ExtMethodRequest =
     AuthenticationStatusRequest
     | AuthenticationLogoutRequest
     | LegacySetSessionModelExtRequest
+    | SessionSteeringExtRequest
     | GoalControlExtRequest
 
 export function isExtMethodRequest(request: { method: string, params: Record<string, unknown> }): request is ExtMethodRequest {
     return request.method === "authentication/status"
         || request.method === "authentication/logout"
         || request.method === LEGACY_SET_SESSION_MODEL_METHOD
-        || request.method === GOAL_CONTROL_METHOD;
+        || request.method === GOAL_CONTROL_METHOD
+        || request.method === SESSION_STEERING_METHOD;
 }
 
 export type AuthenticationStatusRequest = { method: "authentication/status", params: {} }
@@ -78,4 +82,25 @@ export async function legacySetSessionModel(
     params: LegacySetSessionModelRequest,
 ): Promise<LegacySetSessionModelResponse> {
     return await connection.request<LegacySetSessionModelResponse, LegacySetSessionModelRequest>(LEGACY_SET_SESSION_MODEL_METHOD, params);
+}
+
+export type SessionSteerRequest = {
+    sessionId: SessionId;
+    prompt: ContentBlock[];
+}
+
+export type SessionSteeringResponse = {
+    outcome: "injected" | "startedNewTurn";
+}
+
+export type SessionSteeringExtRequest = {
+    method: typeof SESSION_STEERING_METHOD;
+    params: SessionSteerRequest;
+}
+
+export async function steerSessionWithFallback(
+    connection: Pick<ClientContext, "request">,
+    params: SessionSteerRequest,
+): Promise<SessionSteeringResponse> {
+    return await connection.request<SessionSteeringResponse, SessionSteerRequest>(SESSION_STEERING_METHOD, params);
 }

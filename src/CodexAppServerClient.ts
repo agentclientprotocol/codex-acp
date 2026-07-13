@@ -61,6 +61,8 @@ import type {
     TurnInterruptResponse,
     TurnStartParams,
     TurnStartResponse,
+    TurnSteerParams,
+    TurnSteerResponse,
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
     FileChangeRequestApprovalParams,
@@ -502,6 +504,10 @@ export class CodexAppServerClient {
 
     async turnInterrupt(params: TurnInterruptParams): Promise<TurnInterruptResponse> {
         return await this.sendRequest({ method: "turn/interrupt", params: params });
+    }
+
+    async turnSteer(params: TurnSteerParams): Promise<TurnSteerResponse> {
+        return await this.sendRequest({ method: "turn/steer", params: params });
     }
 
     async reviewStart(params: ReviewStartParams): Promise<ReviewStartResponse> {

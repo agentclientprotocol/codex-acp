@@ -37,6 +37,7 @@ import type {
     ThreadGoalStatus,
     ThreadSourceKind,
     TurnCompletedNotification,
+    TurnSteerResponse,
     UserInput,
 } from "./app-server/v2";
 import packageJson from "../package.json";
@@ -830,6 +831,14 @@ export class CodexAcpClient {
         await this.codexClient.turnInterrupt({
             threadId: params.threadId,
             turnId: params.turnId
+        });
+    }
+
+    async steerTurn(params: { threadId: string, turnId: string, prompt: acp.ContentBlock[] }): Promise<TurnSteerResponse> {
+        return await this.codexClient.turnSteer({
+            threadId: params.threadId,
+            expectedTurnId: params.turnId,
+            input: buildPromptItems(params.prompt),
         });
     }
 

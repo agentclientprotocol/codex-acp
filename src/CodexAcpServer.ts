@@ -46,9 +46,12 @@ import {
     type LegacySessionModelState,
     type LegacySetSessionModelRequest,
     type LegacySetSessionModelResponse,
+    type SessionSteerRequest,
+    type SessionSteeringResponse,
     GOAL_CONTROL_METHOD,
     isExtMethodRequest,
     LEGACY_SET_SESSION_MODEL_METHOD,
+    SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
 import {
     createCollabAgentToolCallUpdate,
@@ -163,6 +166,7 @@ export class CodexAcpServer {
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
     private readonly pendingTurnStarts: Map<string, PendingTurnStart>;
     private readonly activePrompts: Map<string, ActivePrompt>;
+    private readonly steeringRequests: Map<string, Promise<void>>;
     private readonly closingSessions: Map<string, number>;
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
@@ -178,6 +182,7 @@ export class CodexAcpServer {
         this.pendingMcpStartupSessions = new Map();
         this.pendingTurnStarts = new Map();
         this.activePrompts = new Map();
+        this.steeringRequests = new Map();
         this.closingSessions = new Map();
         this.sessionGenerations = new Map();
         this.sessionOpenGenerations = new Map();
@@ -238,6 +243,11 @@ export class CodexAcpServer {
                 }
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
+            _meta: {
+                steering: {
+                    supported: true,
+                },
+            },
         };
     }
 
@@ -255,6 +265,8 @@ export class CodexAcpServer {
             }
             case LEGACY_SET_SESSION_MODEL_METHOD:
                 return await this.unstable_setSessionModel(this.parseLegacySetSessionModelParams(methodRequest.params));
+            case SESSION_STEERING_METHOD:
+                return await this.steerSessionWithFallback(this.parseSessionSteerParams(methodRequest.params));
             case GOAL_CONTROL_METHOD: {
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
                 if (!sessionState) {
@@ -858,6 +870,145 @@ export class CodexAcpServer {
         return {
             sessionId: sessionId,
             modelId: modelId,
+        };
+    }
+
+    async steerSessionWithFallback(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+        const previousRequest = this.steeringRequests.get(params.sessionId) ?? Promise.resolve();
+        let releaseRequest: () => void = () => {};
+        const requestCompleted = new Promise<void>((resolve) => {
+            releaseRequest = resolve;
+        });
+        const requestQueue = previousRequest.then(() => requestCompleted);
+        this.steeringRequests.set(params.sessionId, requestQueue);
+
+        await previousRequest;
+        try {
+            return await this.performSteeringRequest(params);
+        } finally {
+            releaseRequest();
+            if (this.steeringRequests.get(params.sessionId) === requestQueue) {
+                this.steeringRequests.delete(params.sessionId);
+            }
+        }
+    }
+
+    private async performSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+        logger.log("Steering session requested", {
+            sessionId: params.sessionId,
+            prompt: params.prompt,
+        });
+        const sessionState = this.getSessionState(params.sessionId);
+
+        if (!sessionState.supportedInputModalities.includes("image") && params.prompt.some(b => b.type === "image")) {
+            throw RequestError.invalidRequest("The current model does not support image input");
+        }
+
+        const activePrompt = this.activePrompts.get(params.sessionId);
+        const turnId = await this.getSteerableTurnId(sessionState);
+        if (!turnId) {
+            return await this.startNewTurnFromSteering(params, activePrompt);
+        }
+
+        try {
+            await this.runWithProcessCheck(() => this.codexAcpClient.steerTurn({
+                threadId: params.sessionId,
+                turnId,
+                prompt: params.prompt,
+            }));
+        } catch (err) {
+            await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+            if (sessionState.currentTurnId === turnId && !this.isNoActiveTurnToSteerError(err)) {
+                throw err;
+            }
+            return await this.startNewTurnFromSteering(params, activePrompt);
+        }
+
+        logger.log("Steering session injected", {
+            sessionId: params.sessionId,
+            turnId,
+        });
+        return {outcome: "injected"};
+    }
+
+    private async startNewTurnFromSteering(
+        params: SessionSteerRequest,
+        previousPrompt: ActivePrompt | undefined,
+    ): Promise<SessionSteeringResponse> {
+        await previousPrompt?.completion;
+        if (this.sessionIsClosing(params.sessionId)) {
+            throw RequestError.invalidRequest(`Session ${params.sessionId} is closing`);
+        }
+
+        let resolveTurnStarted: () => void = () => {};
+        const turnStarted = new Promise<void>((resolve) => {
+            resolveTurnStarted = resolve;
+        });
+        const promptResult = this.prompt(params, undefined, resolveTurnStarted).then(
+            (response) => ({status: "completed" as const, response}),
+            (error: unknown) => ({status: "failed" as const, error}),
+        );
+        const acceptance = await Promise.race([
+            turnStarted.then(() => ({status: "started" as const})),
+            promptResult,
+        ]);
+
+        if (acceptance.status === "failed") {
+            throw acceptance.error;
+        }
+        if (acceptance.status === "completed" && acceptance.response.stopReason === "cancelled") {
+            throw RequestError.invalidRequest(`Session ${params.sessionId} was cancelled before the steering turn started`);
+        }
+
+        void promptResult.then((result) => {
+            if (result.status === "failed") {
+                logger.error(`Steering-started prompt for session ${params.sessionId} failed`, result.error);
+            }
+        });
+        logger.log("Steering session started a new turn", {sessionId: params.sessionId});
+        return {outcome: "startedNewTurn"};
+    }
+
+    private isNoActiveTurnToSteerError(error: unknown): boolean {
+        const messages = error instanceof Error ? [error.message] : [];
+        if (typeof error === "object" && error !== null && "data" in error) {
+            const data = (error as {data?: unknown}).data;
+            if (typeof data === "string") {
+                messages.push(data);
+            } else if (typeof data === "object" && data !== null && "details" in data) {
+                const details = (data as {details?: unknown}).details;
+                if (typeof details === "string") {
+                    messages.push(details);
+                }
+            }
+        }
+        return messages.some(message => message.toLowerCase().includes("no active turn to steer"));
+    }
+
+    private async getSteerableTurnId(sessionState: SessionState): Promise<string | null> {
+        if (this.sessionIsClosing(sessionState.sessionId)) {
+            return null;
+        }
+        if (sessionState.currentTurnId) {
+            return sessionState.currentTurnId;
+        }
+
+        const pendingTurnStart = this.pendingTurnStarts.get(sessionState.sessionId);
+        if (!pendingTurnStart) {
+            return null;
+        }
+        return await pendingTurnStart.promise;
+    }
+
+    private parseSessionSteerParams(params: Record<string, unknown>): SessionSteerRequest {
+        const sessionId = params["sessionId"];
+        const prompt = params["prompt"];
+        if (typeof sessionId !== "string" || !Array.isArray(prompt)) {
+            throw RequestError.invalidParams();
+        }
+        return {
+            sessionId: sessionId,
+            prompt: prompt as acp.ContentBlock[],
         };
     }
 
@@ -1609,7 +1760,11 @@ export class CodexAcpServer {
         return turnId;
     }
 
-    async prompt(params: acp.PromptRequest, signal?: AbortSignal): Promise<acp.PromptResponse> {
+    async prompt(
+        params: acp.PromptRequest,
+        signal?: AbortSignal,
+        onTurnStarted?: () => void,
+    ): Promise<acp.PromptResponse> {
         logger.log("Prompt received", {
             sessionId: params.sessionId,
             prompt: params.prompt,
@@ -1662,6 +1817,7 @@ export class CodexAcpServer {
                     }
                     sessionState.currentTurnId = turnId;
                     pendingTurnStart?.resolve(turnId);
+                    onTurnStarted?.();
                 },
                 setConfigOption: async (configId, value) => {
                     await this.applySessionConfigOption(sessionState, {
@@ -1751,6 +1907,7 @@ export class CodexAcpServer {
                         }
                         sessionState.currentTurnId = turnId;
                         pendingTurnStart?.resolve(turnId);
+                        onTurnStarted?.();
                     },
                     () => this.promptShouldStop(params.sessionId, activePrompt),
                 ));
