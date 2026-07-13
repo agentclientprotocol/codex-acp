@@ -10,7 +10,9 @@
             "goal": {
               "objective": "First task\nSecond task",
               "status": "budgetLimited",
-              "tokenBudget": 1000
+              "tokenBudget": 1000,
+              "timeUsedSeconds": 30,
+              "controlMethod": "session/goal_control"
             }
           }
         }

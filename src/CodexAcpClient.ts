@@ -33,6 +33,7 @@ import type {
     SkillsListResponse,
     SandboxPolicy,
     Thread,
+    ThreadGoal,
     ThreadGoalStatus,
     ThreadSourceKind,
     TurnCompletedNotification,
@@ -420,6 +421,11 @@ export class CodexAcpClient {
 
     async runCompact(sessionId: string): Promise<void> {
         await this.codexClient.runCompact({threadId: sessionId});
+    }
+
+    async getGoal(sessionId: string): Promise<ThreadGoal | null> {
+        const response = await this.codexClient.threadGoalGet({threadId: sessionId});
+        return response?.goal ?? null;
     }
 
     async setGoal(

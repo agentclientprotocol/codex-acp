@@ -4,6 +4,7 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {SessionState, ThreadGoalSnapshot} from "./CodexAcpServer";
+import {GOAL_CONTROL_METHOD} from "./AcpExtensions";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
@@ -283,6 +284,8 @@ export class CodexEventHandler {
             objective: event.goal.objective.trim(),
             status: event.goal.status,
             tokenBudget: event.goal.tokenBudget,
+            timeUsedSeconds: event.goal.timeUsedSeconds,
+            controlMethod: GOAL_CONTROL_METHOD,
         };
     }
 

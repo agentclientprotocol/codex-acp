@@ -16,6 +16,7 @@ import {AgentMode} from "../../AgentMode";
 import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
+import {GOAL_CONTROL_METHOD} from "../../AcpExtensions";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -1667,9 +1668,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     _meta: {
                         codex: {
                             goal: {
-                                objective: "Ship the migration and keep tests green",
-                                status: "active",
-                                tokenBudget: null,
+                            objective: "Ship the migration and keep tests green",
+                            status: "active",
+                            tokenBudget: null,
+                            timeUsedSeconds: 0,
+                            controlMethod: "session/goal_control",
                             },
                         },
                     },
@@ -2386,6 +2389,26 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         await expect(cancelPromise).resolves.toBeUndefined();
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+    });
+
+    it('controls an active goal through the out-of-band session extension', async () => {
+        const { mockFixture, sessionState } = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const setStatusSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "setGoalStatus").mockResolvedValue(undefined);
+        const clearGoalSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "clearGoal").mockResolvedValue(undefined);
+
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "pause",
+        })).resolves.toEqual({});
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "clear",
+        })).resolves.toEqual({});
+
+        expect(setStatusSpy).toHaveBeenCalledWith("session-id", "paused");
+        expect(clearGoalSpy).toHaveBeenCalledWith("session-id");
     });
 
     it('suppresses the first routed goal notification after cancellation marks the turn stale', async () => {

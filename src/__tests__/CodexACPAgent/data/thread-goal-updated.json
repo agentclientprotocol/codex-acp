@@ -10,7 +10,9 @@
             "goal": {
               "objective": "Ship the goal update",
               "status": "active",
-              "tokenBudget": null
+              "tokenBudget": null,
+              "timeUsedSeconds": 12,
+              "controlMethod": "session/goal_control"
             }
           }
         }

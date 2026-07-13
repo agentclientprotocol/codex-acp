@@ -48,6 +48,7 @@ import {
     type LegacySessionModelState,
     type LegacySetSessionModelRequest,
     type LegacySetSessionModelResponse,
+    GOAL_CONTROL_METHOD,
     isExtMethodRequest,
     LEGACY_SET_SESSION_MODEL_METHOD,
 } from "./AcpExtensions";
@@ -86,6 +87,8 @@ export interface ThreadGoalSnapshot {
     objective: string;
     status: ThreadGoalStatus;
     tokenBudget: number | null;
+    timeUsedSeconds: number;
+    controlMethod: typeof GOAL_CONTROL_METHOD;
 }
 
 export interface SessionState {
@@ -255,6 +258,18 @@ export class CodexAcpServer {
             }
             case LEGACY_SET_SESSION_MODEL_METHOD:
                 return await this.unstable_setSessionModel(this.parseLegacySetSessionModelParams(methodRequest.params));
+            case GOAL_CONTROL_METHOD: {
+                const sessionState = this.sessions.get(methodRequest.params.sessionId);
+                if (!sessionState) {
+                    throw RequestError.invalidParams(undefined, `Unknown session: ${methodRequest.params.sessionId}`);
+                }
+                if (methodRequest.params.action === "pause") {
+                    await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionState.sessionId, "paused"));
+                } else {
+                    await this.runWithProcessCheck(() => this.codexAcpClient.clearGoal(sessionState.sessionId));
+                }
+                return {};
+            }
         }
     }
 
@@ -443,6 +458,9 @@ export class CodexAcpServer {
         }
 
         this.publishAvailableCommandsAsync(sessionState);
+        if ("sessionId" in request) {
+            this.publishCurrentGoalAsync(sessionState);
+        }
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
 
@@ -879,6 +897,33 @@ export class CodexAcpServer {
         void this.availableCommands.publish(sessionState);
     }
 
+    private publishCurrentGoalAsync(sessionState: SessionState): void {
+        void this.publishCurrentGoal(sessionState).catch((err) => {
+            logger.error(`Failed to publish current goal for session ${sessionState.sessionId}`, err);
+        });
+    }
+
+    private async publishCurrentGoal(sessionState: SessionState): Promise<void> {
+        const goal = await this.runWithProcessCheck(() => this.codexAcpClient.getGoal(sessionState.sessionId));
+        const snapshot: ThreadGoalSnapshot | null = goal === null ? null : {
+            objective: goal.objective.trim(),
+            status: goal.status,
+            tokenBudget: goal.tokenBudget,
+            timeUsedSeconds: goal.timeUsedSeconds,
+            controlMethod: GOAL_CONTROL_METHOD,
+        };
+        sessionState.currentGoal = snapshot;
+        const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
+        await session.update({
+            sessionUpdate: "session_info_update",
+            _meta: {
+                codex: {
+                    goal: snapshot,
+                },
+            },
+        });
+    }
+
     private findCurrentModel(models: Model[], currentModelId: string): Model | undefined {
         const modelId = ModelId.fromString(currentModelId);
         return models.find(m => m.id === modelId.model);
@@ -992,6 +1037,7 @@ export class CodexAcpServer {
         }
 
         await this.availableCommands.publish(sessionState);
+        await this.publishCurrentGoal(sessionState);
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
 

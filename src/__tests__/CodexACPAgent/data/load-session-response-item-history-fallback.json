@@ -91,6 +91,22 @@
       "sessionId": "session-legacy",
       "update": {
         "sessionUpdate": "session_info_update",
+        "_meta": {
+          "codex": {
+            "goal": null
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-legacy",
+      "update": {
+        "sessionUpdate": "session_info_update",
         "title": "List the files"
       }
     }

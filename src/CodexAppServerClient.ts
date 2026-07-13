@@ -37,6 +37,8 @@ import type {
     ThreadGoalClearedNotification,
     ThreadGoalClearParams,
     ThreadGoalClearResponse,
+    ThreadGoalGetParams,
+    ThreadGoalGetResponse,
     ThreadGoalSetParams,
     ThreadGoalSetResponse,
     ThreadLoadedListParams,
@@ -543,6 +545,10 @@ export class CodexAppServerClient {
 
     async threadGoalSet(params: ThreadGoalSetParams): Promise<ThreadGoalSetResponse> {
         return await this.sendRequest({ method: "thread/goal/set", params: params });
+    }
+
+    async threadGoalGet(params: ThreadGoalGetParams): Promise<ThreadGoalGetResponse> {
+        return await this.sendRequest({ method: "thread/goal/get", params: params });
     }
 
     async threadGoalClear(params: ThreadGoalClearParams): Promise<ThreadGoalClearResponse> {

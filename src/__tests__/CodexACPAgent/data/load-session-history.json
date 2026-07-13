@@ -91,6 +91,28 @@
       "sessionId": "session-1",
       "update": {
         "sessionUpdate": "session_info_update",
+        "_meta": {
+          "codex": {
+            "goal": {
+              "objective": "Keep the restored migration green",
+              "status": "paused",
+              "tokenBudget": null,
+              "timeUsedSeconds": 46,
+              "controlMethod": "session/goal_control"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "session_info_update",
         "title": "Saved title"
       }
     }
