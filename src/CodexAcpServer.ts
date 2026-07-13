@@ -21,6 +21,13 @@ import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
 import {
+    COLLABORATION_MODE_CONFIG_ID,
+    createCollaborationModeConfigOption,
+    DEFAULT_COLLABORATION_MODE,
+    parseCollaborationMode,
+} from "./CollaborationModeConfig";
+import type {ModeKind} from "./app-server/ModeKind";
+import {
     createModelConfigOption,
     createReasoningEffortConfigOption,
     findSupportedEffort,
@@ -88,6 +95,7 @@ export interface SessionState {
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     supportedInputModalities: Array<InputModality>,
     agentMode: AgentMode,
+    collaborationMode: ModeKind,
     currentTurnId: string | null;
     lastTokenUsage: TokenCount | null;
     totalTokenUsage: TokenCount | null;
@@ -405,6 +413,7 @@ export class CodexAcpServer {
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
+            collaborationMode: DEFAULT_COLLABORATION_MODE,
             currentTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
@@ -690,12 +699,23 @@ export class CodexAcpServer {
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
+        await this.applySessionConfigOption(sessionState, params);
+
+        return {
+            configOptions: this.createSessionConfigOptions(sessionState),
+        };
+    }
+
+    private async applySessionConfigOption(sessionState: SessionState, params: acp.SetSessionConfigOptionRequest): Promise<void> {
         switch (params.configId) {
             case FAST_MODE_CONFIG_ID:
                 this.applyFastModeChange(sessionState, params);
                 break;
             case MODE_CONFIG_ID:
                 this.applyModeChange(sessionState, this.stringConfigValue(params));
+                break;
+            case COLLABORATION_MODE_CONFIG_ID:
+                await this.applyCollaborationModeChange(sessionState, this.stringConfigValue(params));
                 break;
             case MODEL_CONFIG_ID:
                 this.applyModelChange(sessionState, this.stringConfigValue(params));
@@ -706,10 +726,6 @@ export class CodexAcpServer {
             default:
                 throw RequestError.invalidParams();
         }
-
-        return {
-            configOptions: this.createSessionConfigOptions(sessionState),
-        };
     }
 
     private applyFastModeChange(sessionState: SessionState, params: acp.SetSessionConfigOptionRequest): void {
@@ -737,6 +753,15 @@ export class CodexAcpServer {
             throw RequestError.invalidParams();
         }
         sessionState.agentMode = newMode;
+    }
+
+    private async applyCollaborationModeChange(sessionState: SessionState, value: string): Promise<void> {
+        const mode = parseCollaborationMode(value);
+        if (mode === null) {
+            throw RequestError.invalidParams();
+        }
+        await this.codexAcpClient.setCollaborationMode(sessionState.sessionId, mode, sessionState.currentModelId);
+        sessionState.collaborationMode = mode;
     }
 
     private applyModelChange(sessionState: SessionState, value: string): void {
@@ -817,6 +842,7 @@ export class CodexAcpServer {
         const currentModelId = ModelId.fromString(sessionState.currentModelId);
         const configOptions = [
             sessionState.agentMode.toConfigOption(),
+            createCollaborationModeConfigOption(sessionState.collaborationMode),
             createModelConfigOption(sessionState.availableModels, currentModelId.model),
         ];
         if (sessionState.supportedReasoningEfforts.length > 0) {
@@ -936,6 +962,7 @@ export class CodexAcpServer {
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
+            collaborationMode: DEFAULT_COLLABORATION_MODE,
             currentTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
@@ -1548,6 +1575,18 @@ export class CodexAcpServer {
                     }
                     sessionState.currentTurnId = turnId;
                     pendingTurnStart?.resolve(turnId);
+                },
+                setConfigOption: async (configId, value) => {
+                    await this.applySessionConfigOption(sessionState, {
+                        sessionId: sessionState.sessionId,
+                        configId,
+                        value,
+                    });
+                    const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
+                    await session.update({
+                        sessionUpdate: "config_option_update",
+                        configOptions: this.createSessionConfigOptions(sessionState),
+                    });
                 },
             });
             void commandPromise.catch((err) => {

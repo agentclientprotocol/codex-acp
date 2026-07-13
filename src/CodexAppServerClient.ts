@@ -513,6 +513,10 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/resume", params: params });
     }
 
+    async threadSettingsUpdate(params: ExperimentalThreadSettingsUpdateParams): Promise<void> {
+        await this.connection.sendRequest("thread/settings/update", params);
+    }
+
     async threadList(params: ThreadListParams): Promise<ThreadListResponse> {
         return await this.sendRequest({ method: "thread/list", params: params });
     }
@@ -946,6 +950,18 @@ type CodexRequest = DistributiveOmit<ClientRequest, "id">
 type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>
     : never;
+
+export interface ExperimentalThreadSettingsUpdateParams {
+    threadId: string;
+    collaborationMode: {
+        mode: "default" | "plan";
+        settings: {
+            model: string;
+            reasoning_effort: string | null;
+            developer_instructions: string | null;
+        };
+    };
+}
 
 type McpServerStartupSnapshot = {
     status: McpServerStartupState;

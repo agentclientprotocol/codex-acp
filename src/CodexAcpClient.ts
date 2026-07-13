@@ -40,6 +40,8 @@ import type {
 } from "./app-server/v2";
 import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
+import {createCodexCollaborationMode} from "./CollaborationModeConfig";
+import type {ModeKind} from "./app-server/ModeKind";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -84,7 +86,10 @@ export class CodexAcpClient {
 
     async initialize(request: acp.InitializeRequest): Promise<void> {
         await this.codexClient.initialize({
-            capabilities: null,
+            capabilities: {
+                experimentalApi: true,
+                requestAttestation: false,
+            },
             clientInfo: {
                 name: request.clientInfo?.name ?? this.defaultClientInfo.name,
                 version: request.clientInfo?.version ?? this.defaultClientInfo.version,
@@ -677,6 +682,13 @@ export class CodexAcpClient {
             model: modelId.model,
             serviceTier: serviceTier,
         }, onTurnStarted);
+    }
+
+    async setCollaborationMode(sessionId: string, mode: ModeKind, currentModelId: string): Promise<void> {
+        await this.codexClient.threadSettingsUpdate({
+            threadId: sessionId,
+            collaborationMode: createCodexCollaborationMode(mode, currentModelId),
+        });
     }
 
     resolveTurnInterrupted(params: { threadId: string, turnId: string }): void {

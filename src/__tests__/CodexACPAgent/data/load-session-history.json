@@ -7,6 +7,20 @@
         "sessionUpdate": "available_commands_update",
         "availableCommands": [
           {
+            "name": "plan",
+            "description": "Turn plan mode on.",
+            "input": null,
+            "_meta": {
+              "commandAction": {
+                "kind": "setConfigOption",
+                "configId": "collaboration_mode",
+                "value": "plan",
+                "resetValue": "default",
+                "presentation": "state"
+              }
+            }
+          },
+          {
             "name": "mcp",
             "description": "List configured Model Context Protocol (MCP) tools.",
             "input": null
