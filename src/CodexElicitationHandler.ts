@@ -493,7 +493,6 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 ...(question.header ? { description: question.header } : {}),
                 _meta: {
                     codex: {
-                        questionId: question.id,
                         isOther: question.isOther,
                         isSecret: question.isSecret,
                     },
