@@ -773,7 +773,7 @@ describe('Elicitation Events', () => {
                         required: ['next_step', 'notes'],
                     },
                     _meta: {
-                        codex: { kind: 'request_user_input', autoResolutionMs: 60000 },
+                        codex: { autoResolutionMs: 60000 },
                     },
                 }],
             }]);

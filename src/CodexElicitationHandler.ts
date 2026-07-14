@@ -547,7 +547,6 @@ export class CodexElicitationHandler implements ElicitationHandler {
             },
             _meta: {
                 codex: {
-                    kind: "request_user_input",
                     autoResolutionMs: params.autoResolutionMs,
                 },
             },
