@@ -401,6 +401,13 @@ export class CodexAcpClient {
         await this.codexClient.threadArchive({threadId: sessionId});
     }
 
+    async setSessionTitle(sessionId: string, title: string): Promise<void> {
+        await this.codexClient.threadSetName({
+            threadId: sessionId,
+            name: title,
+        });
+    }
+
     async runReview(
         sessionId: string,
         target: ReviewTarget,

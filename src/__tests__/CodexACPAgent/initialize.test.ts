@@ -53,6 +53,7 @@ describe('CodexACPAgent - initialize', () => {
                     close: {},
                     delete: {},
                     additionalDirectories: {},
+                    setTitle: {},
                 },
                 mcpCapabilities: {
                     acp: false,
