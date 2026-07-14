@@ -12,6 +12,7 @@
               "status": "active",
               "tokenBudget": null,
               "timeUsedSeconds": 12,
+              "createdAt": 1710000000,
               "controlMethod": "session/goal_control"
             }
           }

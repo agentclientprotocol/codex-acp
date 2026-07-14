@@ -204,7 +204,10 @@ export class CodexCommands {
                     await this.sendCommandUsageMessage(commandName, "no arguments", sessionId);
                     return { handled: true };
                 }
-                await options.setConfigOption?.(COLLABORATION_MODE_CONFIG_ID, PLAN_COLLABORATION_MODE);
+                const mode = sessionState.collaborationMode === PLAN_COLLABORATION_MODE
+                    ? DEFAULT_COLLABORATION_MODE
+                    : PLAN_COLLABORATION_MODE;
+                await options.setConfigOption?.(COLLABORATION_MODE_CONFIG_ID, mode);
                 return { handled: options.setConfigOption !== undefined };
             }
             case "compact": {

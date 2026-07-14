@@ -13,7 +13,6 @@ import type {
     Model,
     ReasoningEffortOption,
     Thread,
-    ThreadGoalStatus,
     ThreadItem,
     UserInput
 } from "./app-server/v2";
@@ -23,7 +22,6 @@ import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
 import {
     COLLABORATION_MODE_CONFIG_ID,
     createCollaborationModeConfigOption,
-    DEFAULT_COLLABORATION_MODE,
     parseCollaborationMode,
 } from "./CollaborationModeConfig";
 import type {ModeKind} from "./app-server/ModeKind";
@@ -82,14 +80,11 @@ import {
     createAgentTextThoughtChunk,
     createUserMessageChunk,
 } from "./ContentChunks";
-
-export interface ThreadGoalSnapshot {
-    objective: string;
-    status: ThreadGoalStatus;
-    tokenBudget: number | null;
-    timeUsedSeconds: number;
-    controlMethod: typeof GOAL_CONTROL_METHOD;
-}
+import {
+    sameThreadGoalSnapshot,
+    type ThreadGoalSnapshot,
+    toThreadGoalSnapshot,
+} from "./ThreadGoalSnapshot";
 
 export interface SessionState {
     sessionId: string,
@@ -114,6 +109,7 @@ export interface SessionState {
     sessionMcpServers?: Array<string>;
     terminalOutputMode: TerminalOutputMode;
     currentGoal?: ThreadGoalSnapshot | null;
+    goalRevision: number;
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
 }
@@ -263,10 +259,17 @@ export class CodexAcpServer {
                 if (!sessionState) {
                     throw RequestError.invalidParams(undefined, `Unknown session: ${methodRequest.params.sessionId}`);
                 }
+                const sessionGeneration = this.getSessionGeneration(sessionState.sessionId);
                 if (methodRequest.params.action === "pause") {
-                    await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionState.sessionId, "paused"));
-                } else {
+                    const goal = await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionState.sessionId, "paused"));
+                    if (this.goalPublishIsCurrent(sessionState, sessionGeneration)) {
+                        await this.publishGoalSnapshot(sessionState, toThreadGoalSnapshot(goal), false);
+                    }
+                } else if (methodRequest.params.action === "clear") {
                     await this.runWithProcessCheck(() => this.codexAcpClient.clearGoal(sessionState.sessionId));
+                    if (this.goalPublishIsCurrent(sessionState, sessionGeneration)) {
+                        await this.publishGoalSnapshot(sessionState, null, false);
+                    }
                 }
                 return {};
             }
@@ -428,7 +431,7 @@ export class CodexAcpServer {
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
-            collaborationMode: DEFAULT_COLLABORATION_MODE,
+            collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
@@ -443,6 +446,7 @@ export class CodexAcpServer {
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             terminalOutputMode: this.terminalOutputMode,
+            goalRevision: 0,
             sessionTitle: null,
             sessionTitleSource: "sessionId" in request ? "unknown" : "unset",
         };
@@ -459,7 +463,7 @@ export class CodexAcpServer {
 
         this.publishAvailableCommandsAsync(sessionState);
         if ("sessionId" in request) {
-            this.publishCurrentGoalAsync(sessionState);
+            this.publishCurrentGoalAsync(sessionState, sessionGeneration);
         }
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
@@ -897,21 +901,55 @@ export class CodexAcpServer {
         void this.availableCommands.publish(sessionState);
     }
 
-    private publishCurrentGoalAsync(sessionState: SessionState): void {
-        void this.publishCurrentGoal(sessionState).catch((err) => {
-            logger.error(`Failed to publish current goal for session ${sessionState.sessionId}`, err);
-        });
+    private publishCurrentGoalAsync(sessionState: SessionState, sessionGeneration: number): void {
+        void this.publishCurrentGoalBestEffort(sessionState, sessionGeneration, true);
     }
 
-    private async publishCurrentGoal(sessionState: SessionState): Promise<void> {
+    private async publishCurrentGoalBestEffort(
+        sessionState: SessionState,
+        sessionGeneration: number,
+        force: boolean,
+    ): Promise<void> {
+        try {
+            await this.publishCurrentGoal(sessionState, sessionGeneration, force);
+        } catch (err) {
+            logger.error(`Failed to publish current goal for session ${sessionState.sessionId}`, err);
+        }
+    }
+
+    private async publishCurrentGoal(
+        sessionState: SessionState,
+        sessionGeneration: number,
+        force: boolean,
+    ): Promise<void> {
+        const requestRevision = ++sessionState.goalRevision;
         const goal = await this.runWithProcessCheck(() => this.codexAcpClient.getGoal(sessionState.sessionId));
-        const snapshot: ThreadGoalSnapshot | null = goal === null ? null : {
-            objective: goal.objective.trim(),
-            status: goal.status,
-            tokenBudget: goal.tokenBudget,
-            timeUsedSeconds: goal.timeUsedSeconds,
-            controlMethod: GOAL_CONTROL_METHOD,
-        };
+        const snapshot = goal === null ? null : toThreadGoalSnapshot(goal);
+        if (!this.goalPublishIsCurrent(sessionState, sessionGeneration)
+            || sessionState.goalRevision !== requestRevision) {
+            return;
+        }
+        await this.publishGoalSnapshot(sessionState, snapshot, force, false);
+    }
+
+    private goalPublishIsCurrent(sessionState: SessionState, sessionGeneration: number): boolean {
+        return this.sessions.get(sessionState.sessionId) === sessionState
+            && this.getSessionGeneration(sessionState.sessionId) === sessionGeneration
+            && !this.sessionIsClosing(sessionState.sessionId);
+    }
+
+    private async publishGoalSnapshot(
+        sessionState: SessionState,
+        snapshot: ThreadGoalSnapshot | null,
+        force: boolean,
+        incrementRevision = true,
+    ): Promise<void> {
+        if (incrementRevision) {
+            sessionState.goalRevision += 1;
+        }
+        if (!force && sameThreadGoalSnapshot(sessionState.currentGoal, snapshot)) {
+            return;
+        }
         sessionState.currentGoal = snapshot;
         const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
         await session.update({
@@ -1007,7 +1045,7 @@ export class CodexAcpServer {
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
-            collaborationMode: DEFAULT_COLLABORATION_MODE,
+            collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
@@ -1022,6 +1060,7 @@ export class CodexAcpServer {
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             terminalOutputMode: this.terminalOutputMode,
+            goalRevision: 0,
             sessionTitle: null,
             sessionTitleSource: "unset",
         };
@@ -1037,7 +1076,7 @@ export class CodexAcpServer {
         }
 
         await this.availableCommands.publish(sessionState);
-        await this.publishCurrentGoal(sessionState);
+        await this.publishCurrentGoalBestEffort(sessionState, requestedSessionGeneration, true);
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
 

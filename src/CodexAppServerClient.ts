@@ -49,6 +49,7 @@ import type {
     ThreadReadResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
+    ThreadSettings,
     ThreadStartParams,
     ThreadStartResponse,
     ThreadUnsubscribeParams,
@@ -141,6 +142,7 @@ export class CodexAppServerClient {
     private readonly threadStatusCaptures = new Map<string, Set<(status: ThreadStatus) => void>>();
     private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
+    private readonly threadSettings = new Map<string, ThreadSettings>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
 
     constructor(connection: MessageConnection) {
@@ -170,6 +172,9 @@ export class CodexAppServerClient {
             }
             if (isThreadGoalClearedNotification(serverNotification)) {
                 this.recordThreadGoalCleared(serverNotification.params);
+            }
+            if (serverNotification.method === "thread/settings/updated") {
+                this.threadSettings.set(serverNotification.params.threadId, serverNotification.params.threadSettings);
             }
             const routing = extractTurnRouting(serverNotification);
             if (this.handleStaleTurnNotification(serverNotification, routing)) {
@@ -312,6 +317,7 @@ export class CodexAppServerClient {
         params: ThreadGoalSetParams,
         onTurnStarted?: (turnId: string) => void,
         runtimeEffectsGraceMs = GOAL_RUNTIME_EFFECTS_GRACE_MS,
+        onGoalSet?: (goal: ThreadGoal) => void,
     ): Promise<TurnCompletedNotification | null> {
         let goalTurnId: string | null = null;
         const capturedCompletions: Array<TurnCompletedNotification> = [];
@@ -363,6 +369,7 @@ export class CodexAppServerClient {
         try {
             const goalSetResponse = await this.threadGoalSet(params);
             expectedGoal = goalSetResponse.goal;
+            onGoalSet?.(expectedGoal);
             if (capturedGoalUpdates.some(event => goalsMatch(event.goal, expectedGoal!))) {
                 goalUpdateHandled = true;
                 resolveGoalUpdateHandled();
@@ -513,6 +520,10 @@ export class CodexAppServerClient {
 
     async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
+    }
+
+    getThreadSettings(threadId: string): ThreadSettings | undefined {
+        return this.threadSettings.get(threadId);
     }
 
     async threadSettingsUpdate(params: ExperimentalThreadSettingsUpdateParams): Promise<void> {

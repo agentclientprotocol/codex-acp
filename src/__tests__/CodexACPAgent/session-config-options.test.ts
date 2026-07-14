@@ -46,6 +46,7 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
         sessionId: "session-id",
         currentModelId,
         models: availableModels,
+        collaborationMode: "default",
         additionalDirectories: [],
     });
 
@@ -172,24 +173,37 @@ describe("Session config options", () => {
         expect(result.configOptions?.find(o => o.id === COLLABORATION_MODE_CONFIG_ID)).toMatchObject({currentValue: "plan"});
     });
 
-    it("handles /plan as a config option shortcut without starting a model turn", async () => {
+    it("toggles collaboration mode with /plan without starting a model turn", async () => {
         const {fast} = buildModels();
         const {fixture, codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
         const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
         const turnStart = vi.spyOn(fixture.getCodexAppServerClient(), "turnStart");
 
-        const response = await codexAcpAgent.prompt({
+        const enabledResponse = await codexAcpAgent.prompt({
             sessionId: "session-id",
             prompt: [{type: "text", text: "/plan"}],
         });
 
-        expect(response.stopReason).toBe("end_turn");
+        expect(enabledResponse.stopReason).toBe("end_turn");
         expect(turnStart).not.toHaveBeenCalled();
         expect(update).toHaveBeenCalledWith(expect.objectContaining({
             threadId: "session-id",
             collaborationMode: expect.objectContaining({mode: "plan"}),
         }));
         expect(codexAcpAgent.getSessionState("session-id").collaborationMode).toBe("plan");
+
+        const disabledResponse = await codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "/plan"}],
+        });
+
+        expect(disabledResponse.stopReason).toBe("end_turn");
+        expect(turnStart).not.toHaveBeenCalled();
+        expect(update).toHaveBeenLastCalledWith(expect.objectContaining({
+            threadId: "session-id",
+            collaborationMode: expect.objectContaining({mode: "default"}),
+        }));
+        expect(codexAcpAgent.getSessionState("session-id").collaborationMode).toBe("default");
         expect(fixture.getAcpConnectionEvents([])).toContainEqual(expect.objectContaining({
             method: "sessionUpdate",
             args: [expect.objectContaining({
@@ -197,6 +211,17 @@ describe("Session config options", () => {
                     sessionUpdate: "config_option_update",
                     configOptions: expect.arrayContaining([
                         expect.objectContaining({id: COLLABORATION_MODE_CONFIG_ID, currentValue: "plan"}),
+                    ]),
+                }),
+            })],
+        }));
+        expect(fixture.getAcpConnectionEvents([])).toContainEqual(expect.objectContaining({
+            method: "sessionUpdate",
+            args: [expect.objectContaining({
+                update: expect.objectContaining({
+                    sessionUpdate: "config_option_update",
+                    configOptions: expect.arrayContaining([
+                        expect.objectContaining({id: COLLABORATION_MODE_CONFIG_ID, currentValue: "default"}),
                     ]),
                 }),
             })],
@@ -254,6 +279,7 @@ describe("Session config options", () => {
             sessionId: "session-id",
             currentModelId: "fast-model[medium]",
             models: [fast],
+            collaborationMode: "default",
             additionalDirectories: [],
         });
         await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
