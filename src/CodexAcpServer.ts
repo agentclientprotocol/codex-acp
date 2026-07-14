@@ -1,5 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
+import {readFile} from "node:fs/promises";
+import {extname} from "node:path";
+import {fileURLToPath, pathToFileURL} from "node:url";
 import {CodexEventHandler} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
@@ -80,6 +83,7 @@ import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
     createUserMessageChunk,
+    visibleUserMessageText,
 } from "./ContentChunks";
 import {
     sameThreadGoalSnapshot,
@@ -1232,13 +1236,11 @@ export class CodexAcpServer {
         }
     }
 
-    private createUserMessageUpdates(item: ThreadItem & { type: "userMessage" }): UpdateSessionEvent[] {
+    private async createUserMessageUpdates(item: ThreadItem & { type: "userMessage" }): Promise<UpdateSessionEvent[]> {
         const updates: UpdateSessionEvent[] = [];
-        const messageId = item.id;
         for (const input of item.content) {
-            const blocks = this.userInputToContentBlocks(input);
-            for (const block of blocks) {
-                updates.push(createUserMessageChunk(block, messageId));
+            for (const block of await this.userInputToContentBlocks(input)) {
+                updates.push(createUserMessageChunk(block, item.id));
             }
         }
         return updates;
@@ -1291,20 +1293,39 @@ export class CodexAcpServer {
         };
     }
 
-    private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
+    private async userInputToContentBlocks(input: UserInput): Promise<acp.ContentBlock[]> {
         switch (input.type) {
-            case "text":
-                return input.text.length > 0 ? [{ type: "text", text: input.text }] : [];
-            case "image":
+            case "text": {
+                const visibleText = visibleUserMessageText(input.text);
+                return visibleText.length > 0 ? [{ type: "text", text: visibleText }] : [];
+            }
+            case "image": {
+                const match = /^data:(image\/[^;]+);base64,(.+)$/.exec(input.url);
+                const mimeType = match?.[1];
+                const data = match?.[2];
+                if (mimeType && data) {
+                    return [{ type: "image", mimeType, data }];
+                }
                 return [{ type: "text", text: this.formatUriAsLink("image", input.url) }];
+            }
             case "localImage": {
-                const uri = input.path.startsWith("file://") ? input.path : `file://${input.path}`;
+                const path = input.path.startsWith("file://") ? fileURLToPath(input.path) : input.path;
+                const uri = pathToFileURL(path).href;
+                const extension = extname(path).slice(1).toLowerCase();
+                const data = extension ? await readFile(path).catch(() => null) : null;
+                if (data) {
+                    const mimeType = `image/${extension === "jpg" ? "jpeg" : extension}`;
+                    return [{ type: "image", data: data.toString("base64"), mimeType, uri }];
+                }
                 return [{ type: "text", text: this.formatUriAsLink(null, uri) }];
             }
             case "skill":
                 return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
+            case "mention": {
+                const uri = input.path.startsWith("file://") ? input.path : pathToFileURL(input.path).href;
+                return [{ type: "resource_link", name: input.name, uri }];
+            }
         }
-        return [];
     }
 
     private formatUriAsLink(name: string | null, uri: string): string {
