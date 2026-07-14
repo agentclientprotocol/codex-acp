@@ -225,19 +225,6 @@ function elicitationResponseMeta(
     return Object.keys(meta).length === 0 ? null : meta;
 }
 
-function userInputNoteFieldId(questionId: string, questionIds: Set<string>): string {
-    const base = `${questionId}${USER_INPUT_NOTE_FIELD_SUFFIX}`;
-    if (!questionIds.has(base)) {
-        return base;
-    }
-
-    let index = 2;
-    while (questionIds.has(`${base}_${index}`)) {
-        index += 1;
-    }
-    return `${base}_${index}`;
-}
-
 function userInputResponseValue(
     content: Record<string, acp.ElicitationContentValue>,
     fieldId: string
@@ -497,8 +484,6 @@ export class CodexElicitationHandler implements ElicitationHandler {
     private buildUserInputRequest(params: ToolRequestUserInputParams): acp.CreateElicitationRequest {
         const properties: Record<string, acp.ElicitationPropertySchema> = {};
         const required: string[] = [];
-        const questionIds = new Set(params.questions.map(question => question.id));
-
         for (const question of params.questions) {
             const options = question.options ?? [];
             const hasOptions = options.length > 0;
@@ -537,7 +522,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     type: "string",
                 };
             if (hasOtherAnswer) {
-                properties[userInputNoteFieldId(question.id, questionIds)] = {
+                properties[`${question.id}${USER_INPUT_NOTE_FIELD_SUFFIX}`] = {
                     type: "string",
                     title: "Additional answer or note",
                     _meta: {
@@ -701,7 +686,6 @@ export class CodexElicitationHandler implements ElicitationHandler {
 
         const answers: ToolRequestUserInputResponse["answers"] = {};
         const content = contentRecord(response.content);
-        const questionIds = new Set(params.questions.map(question => question.id));
         for (const question of params.questions) {
             const answerValues: string[] = [];
             const value = userInputResponseValue(content, question.id);
@@ -709,7 +693,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 answerValues.push(...(Array.isArray(value) ? value.map(String) : [String(value)]));
             }
             if (question.isOther && question.options != null && question.options.length > 0) {
-                const note = userInputResponseValue(content, userInputNoteFieldId(question.id, questionIds));
+                const note = userInputResponseValue(content, `${question.id}${USER_INPUT_NOTE_FIELD_SUFFIX}`);
                 if (note !== undefined) {
                     const notes = Array.isArray(note) ? note : [note];
                     answerValues.push(...notes.map(item => `${USER_INPUT_NOTE_PREFIX}${String(item).trim()}`));
