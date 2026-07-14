@@ -11,6 +11,7 @@ import {
     type TestFixture
 } from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
+import type {JsonObject} from "../../CodexAcpClient";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
 import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
@@ -2968,8 +2969,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
      * Sets up a mock fixture with turnStart/awaitTurnCompleted spied on,
      * and a given session state. Returns the fixture and turnStart spy.
      */
-    function setupPromptFixture(sessionOverrides?: Partial<SessionState>) {
-        const mockFixture = createCodexMockTestFixture();
+    function setupPromptFixture(sessionOverrides?: Partial<SessionState>, options?: { codexConfig?: JsonObject }) {
+        const mockFixture = createCodexMockTestFixture(options);
         const sessionState = createTestSessionState(sessionOverrides);
         const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart").mockResolvedValue({
             turn: {
@@ -3090,6 +3091,36 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
 
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "auto" }));
+    });
+
+    it ('should honor configured model_reasoning_summary from CODEX_CONFIG', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({
+            account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
+        }, { codexConfig: { model_reasoning_summary: "detailed" } });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "detailed" }));
+    });
+
+    it ('should fall back to auto for invalid model_reasoning_summary value', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({
+            account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
+        }, { codexConfig: { model_reasoning_summary: "verbose" } });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "auto" }));
+    });
+
+    it ('should force none when disableSummary is true regardless of configured summary', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture({
+            account: { type: "apiKey" },
+        }, { codexConfig: { model_reasoning_summary: "detailed" } });
+
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "none" }));
     });
 
     it ('should reject prompt with images when model does not support image input', async () => {
