@@ -62,7 +62,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
-    "@openai/codex": "^0.144.1",
+    "@openai/codex": "^0.144.4",
     "diff": "^9.0.0",
     "open": "^11.0.0",
     "vscode-jsonrpc": "^9.0.1",
