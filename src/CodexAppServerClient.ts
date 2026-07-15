@@ -160,6 +160,14 @@ class SharedConnectionRouter {
             const serverNotification = notification as ServerNotification;
             const threadId = extractThreadId(serverNotification);
             if (threadId !== null) {
+                if (serverNotification.method === 'thread/closed') {
+                    for (const client of this.clients) {
+                        if (client.ownsThread(threadId)) {
+                            client.onNotification(serverNotification);
+                        }
+                    }
+                    return;
+                }
                 this.uniqueOwner((client) => client.ownsThread(threadId))?.onNotification(serverNotification);
                 return;
             }

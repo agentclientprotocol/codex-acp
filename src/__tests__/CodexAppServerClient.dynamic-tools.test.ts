@@ -160,6 +160,29 @@ describe('CodexAppServerClient shared dynamic tool routing', () => {
         expect(handler).not.toHaveBeenCalled();
     });
 
+    it('revokes every ambiguous claimant when the server closes the thread', async () => {
+        const fixture = createSharedConnectionFixture();
+        const firstHandler = vi.fn(async () => successfulResponse('first'));
+        const secondHandler = vi.fn(async () => successfulResponse('second'));
+        const first = new CodexAppServerClient(fixture.connection, firstHandler);
+        const second = new CodexAppServerClient(fixture.connection, secondHandler);
+        first.bindDynamicToolHandler('thread-ambiguous-closed');
+        second.bindDynamicToolHandler('thread-ambiguous-closed');
+
+        fixture.sendNotification({
+            method: 'thread/closed',
+            params: {threadId: 'thread-ambiguous-closed'},
+        });
+        second.dispose();
+
+        await expect(fixture.sendRequest<DynamicToolCallResponse>(
+            DYNAMIC_TOOL_METHOD,
+            dynamicToolParams('thread-ambiguous-closed'),
+        )).resolves.toMatchObject({success: false});
+        expect(firstHandler).not.toHaveBeenCalled();
+        expect(secondHandler).not.toHaveBeenCalled();
+    });
+
     it('removes all owned thread routes on client disposal', async () => {
         const fixture = createSharedConnectionFixture();
         const handler = vi.fn(async () => successfulResponse('ready'));
