@@ -40,6 +40,7 @@ import type {
 } from "./app-server/v2";
 import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
+import {readCodexDynamicToolsMeta} from "./AcpExtensions";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -366,12 +367,14 @@ export class CodexAcpClient {
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        const dynamicTools = readCodexDynamicToolsMeta(request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadStart({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
+            ...(dynamicTools ? {dynamicTools} : {}),
         });
 
         const codexModels = await this.fetchAvailableModels();

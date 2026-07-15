@@ -12,7 +12,7 @@ import packageJson from "../package.json";
 import {logger} from "./Logger";
 import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
-import {LEGACY_SET_SESSION_MODEL_METHOD} from "./AcpExtensions";
+import {callCodexDynamicTool, LEGACY_SET_SESSION_MODEL_METHOD} from "./AcpExtensions";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -90,7 +90,10 @@ function startAcpServer() {
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
     function createAgent(connection: acp.AgentContext): CodexAcpServer {
-        const appServerClient = new CodexAppServerClient(codexConnection.connection);
+        const appServerClient = new CodexAppServerClient(
+            codexConnection.connection,
+            (params) => callCodexDynamicTool(connection, params),
+        );
         const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
         return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.process.exitCode, () => stderr);
     }

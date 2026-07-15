@@ -13,6 +13,8 @@ import os from "node:os";
 import {AgentMode} from "../AgentMode";
 import {expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
+import type {DynamicToolCallResponse} from "../app-server/v2";
+import {callCodexDynamicTool, CODEX_DYNAMIC_TOOL_CALL_METHOD} from "../AcpExtensions";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -95,7 +97,10 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         acpEventHandlers.forEach(handler => handler(normalizedEvent));
     });
 
-    const codexAppServerClient = new CodexAppServerClient(config.connection);
+    const codexAppServerClient = new CodexAppServerClient(
+        config.connection,
+        (params) => callCodexDynamicTool(acpConnection, params),
+    );
     const codexAcpClient = new CodexAcpClient(codexAppServerClient);
     const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient, undefined, config.getExitCode);
 
@@ -245,6 +250,7 @@ export interface CodexMockTestFixture extends TestFixture {
     sendServerRequest<T>(method: string, params: unknown): Promise<T>,
     setPermissionResponse(response: RequestPermissionResponse): void,
     setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void,
+    setDynamicToolResponse(response: DynamicToolCallResponse | Promise<DynamicToolCallResponse>): void,
 }
 
 /**
@@ -264,6 +270,9 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
     };
     const elicitationState: { response: CreateElicitationResponse | Promise<CreateElicitationResponse> } = {
         response: { action: 'cancel' }
+    };
+    const dynamicToolState: { response: DynamicToolCallResponse | Promise<DynamicToolCallResponse> } = {
+        response: {success: false, contentItems: [{type: 'inputText', text: 'not configured'}]},
     };
 
     const mockCodexConnection = {
@@ -288,6 +297,9 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
         }
         if (args[0] === acp.methods.client.elicitation.create) {
             return elicitationState.response;
+        }
+        if (args[0] === CODEX_DYNAMIC_TOOL_CALL_METHOD) {
+            return dynamicToolState.response;
         }
         return { mock: "Mocked return" };
     });
@@ -328,6 +340,9 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
         },
         setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void {
             elicitationState.response = response;
+        },
+        setDynamicToolResponse(response: DynamicToolCallResponse | Promise<DynamicToolCallResponse>): void {
+            dynamicToolState.response = response;
         },
     };
 }

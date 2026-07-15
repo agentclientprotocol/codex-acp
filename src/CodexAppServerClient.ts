@@ -65,6 +65,9 @@ import type {
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
     ItemCompletedNotification,
+    DynamicToolCallParams,
+    DynamicToolCallResponse,
+    DynamicToolSpec,
 } from "./app-server/v2";
 
 export interface ApprovalHandler {
@@ -77,6 +80,12 @@ export interface ElicitationHandler {
     handleElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
     handleUserInput(params: ToolRequestUserInputParams): Promise<ToolRequestUserInputResponse>;
 }
+
+export type DynamicToolCallHandler = (params: DynamicToolCallParams) => Promise<DynamicToolCallResponse>;
+
+export type ExperimentalThreadStartParams = ThreadStartParams & {
+    dynamicTools?: Array<DynamicToolSpec> | null;
+};
 
 export type McpStartupFailure = {
     server: string;
@@ -119,6 +128,12 @@ const ToolRequestUserInputRequest = new RequestType<
     void
 >('item/tool/requestUserInput');
 
+const DynamicToolCallRequest = new RequestType<
+    DynamicToolCallParams,
+    DynamicToolCallResponse,
+    void
+>('item/tool/call');
+
 const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
 
 /**
@@ -141,7 +156,7 @@ export class CodexAppServerClient {
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
 
-    constructor(connection: MessageConnection) {
+    constructor(connection: MessageConnection, dynamicToolCallHandler?: DynamicToolCallHandler) {
         this.connection = connection;
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
@@ -236,6 +251,13 @@ export class CodexAppServerClient {
                 return { answers: {} };
             }
             return await handler.handleUserInput(params);
+        });
+
+        this.connection.onRequest(DynamicToolCallRequest, async (params) => {
+            if (this.isStaleTurn(params.threadId, params.turnId) || !dynamicToolCallHandler) {
+                return dynamicToolUnavailableResponse();
+            }
+            return await dynamicToolCallHandler(params);
         });
     }
 
@@ -505,7 +527,7 @@ export class CodexAppServerClient {
         this.staleTurnIds.set(threadId, threadStaleTurns);
     }
 
-    async threadStart(params: ThreadStartParams): Promise<ThreadStartResponse> {
+    async threadStart(params: ExperimentalThreadStartParams): Promise<ThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
@@ -930,6 +952,13 @@ export class CodexAppServerClient {
         }
         return result;
     }
+}
+
+function dynamicToolUnavailableResponse(): DynamicToolCallResponse {
+    return {
+        success: false,
+        contentItems: [{type: "inputText", text: "Dynamic tool dispatcher unavailable"}],
+    };
 }
 
 export type CodexConnectionEvent =

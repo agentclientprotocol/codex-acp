@@ -10,6 +10,8 @@ import {
     createTestSessionState,
     type TestFixture
 } from "../acp-test-utils";
+import {CODEX_DYNAMIC_TOOL_CALL_METHOD, CODEX_DYNAMIC_TOOLS_META_KEY} from "../../AcpExtensions";
+import type {DynamicToolCallResponse} from "../../app-server/v2";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
@@ -354,6 +356,85 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             forceReload: true,
         });
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
+    });
+
+    it('injects versioned ACP dynamic tool registrations into thread/start', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        await codexAcpClient.newSession({
+            cwd: "/workspace",
+            mcpServers: [],
+            _meta: {
+                [CODEX_DYNAMIC_TOOLS_META_KEY]: {
+                    version: 1,
+                    tools: [{
+                        type: "function",
+                        name: "opl_runtime_read",
+                        description: "Read the active OPL runtime projection",
+                        inputSchema: {type: "object", properties: {}},
+                    }],
+                },
+            },
+        });
+
+        expect(threadStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            dynamicTools: [expect.objectContaining({name: "opl_runtime_read"})],
+        }));
+    });
+
+    it('rejects malformed dynamic tool registration metadata before thread/start', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const threadStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadStart");
+
+        await expect(codexAcpClient.newSession({
+            cwd: "/workspace",
+            mcpServers: [],
+            _meta: {[CODEX_DYNAMIC_TOOLS_META_KEY]: {version: 1, tools: [{type: "function"}]}},
+        })).rejects.toThrow();
+        expect(threadStartSpy).not.toHaveBeenCalled();
+    });
+
+    it('round-trips item/tool/call through the typed ACP extension callback', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const response: DynamicToolCallResponse = {
+            success: true,
+            contentItems: [{type: "inputText", text: "ready"}],
+        };
+        mockFixture.setDynamicToolResponse(response);
+
+        await expect(mockFixture.sendServerRequest<DynamicToolCallResponse>('item/tool/call', {
+            threadId: 'thread-id',
+            turnId: 'turn-id',
+            callId: 'call-id',
+            namespace: null,
+            tool: 'opl_runtime_read',
+            arguments: {detail: 'fast'},
+        })).resolves.toEqual(response);
+        expect(mockFixture.getAcpConnectionEvents([])).toContainEqual({
+            method: 'request',
+            args: [CODEX_DYNAMIC_TOOL_CALL_METHOD, {
+                threadId: 'thread-id',
+                turnId: 'turn-id',
+                callId: 'call-id',
+                namespace: null,
+                tool: 'opl_runtime_read',
+                arguments: {detail: 'fast'},
+            }],
+        });
     });
 
     it('prefers ACP additional directories over legacy meta roots for new session skill discovery', async () => {
