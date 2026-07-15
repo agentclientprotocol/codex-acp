@@ -165,6 +165,13 @@ describe("CodexACPAgent - loadSession", () => {
                             type: "contextCompaction",
                             id: "item-context-compaction-1",
                         },
+                        {
+                            type: "subAgentActivity",
+                            id: "item-subagent-1",
+                            kind: "started",
+                            agentThreadId: "thread-child-1",
+                            agentPath: "/root/test_audit",
+                        },
                     ],
                 },
             ],

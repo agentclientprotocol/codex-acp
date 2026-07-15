@@ -401,3 +401,32 @@
     }
   ]
 }
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "title": "Start subagent test_audit",
+        "kind": "other",
+        "toolCallId": "item-subagent-1",
+        "status": "completed",
+        "rawInput": {
+          "agentThreadId": "thread-child-1",
+          "agentPath": "/root/test_audit",
+          "activityKind": "started"
+        },
+        "_meta": {
+          "codex": {
+            "subagent": {
+              "threadId": "thread-child-1",
+              "path": "/root/test_audit",
+              "activity": "started"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

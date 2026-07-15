@@ -40,6 +40,7 @@ type GuardianApprovalReviewNotification =
     | ItemGuardianApprovalReviewCompletedNotification;
 type WebSearchItem = ThreadItem & { type: "webSearch" };
 type CollabAgentToolCallItem = ThreadItem & { type: "collabAgentToolCall" };
+type SubAgentActivityItem = ThreadItem & { type: "subAgentActivity" };
 type CommandExecutionItem = ThreadItem & { type: "commandExecution" };
 type ContextCompactionItem = ThreadItem & { type: "contextCompaction" };
 type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
@@ -412,6 +413,7 @@ export function createCollabAgentToolCallUpdate(
         title: item.tool,
         status: toAcpStatus(item.status),
         rawInput: createCollabAgentToolCallRawInput(item),
+        _meta: createCollabAgentToolCallMeta(item),
     };
 }
 
@@ -424,6 +426,7 @@ export function createCollabAgentToolCallCompleteUpdate(
         title: item.tool,
         status: toAcpStatus(item.status),
         rawInput: createCollabAgentToolCallRawInput(item),
+        _meta: createCollabAgentToolCallMeta(item),
     };
 }
 
@@ -433,8 +436,72 @@ function createCollabAgentToolCallRawInput(item: CollabAgentToolCallItem) {
         senderThreadId: item.senderThreadId,
         receiverThreadIds: item.receiverThreadIds,
         agentsStates: item.agentsStates,
+        model: item.model,
+        reasoningEffort: item.reasoningEffort,
         status: item.status,
     };
+}
+
+function createCollabAgentToolCallMeta(item: CollabAgentToolCallItem) {
+    return {
+        codex: {
+            collaboration: {
+                tool: item.tool,
+                senderThreadId: item.senderThreadId,
+                receiverThreadIds: item.receiverThreadIds,
+            },
+        },
+    };
+}
+
+export function createSubAgentActivityUpdate(
+    item: SubAgentActivityItem,
+    status: "in_progress" | "completed",
+    sessionUpdate: "tool_call" | "tool_call_update",
+): UpdateSessionEvent {
+    const name = item.agentPath.split("/").filter(Boolean).at(-1) ?? "subagent";
+    const title = formatSubAgentActivityTitle(item.kind, name);
+    const common = {
+        toolCallId: item.id,
+        status,
+        rawInput: {
+            agentThreadId: item.agentThreadId,
+            agentPath: item.agentPath,
+            activityKind: item.kind,
+        },
+        _meta: {
+            codex: {
+                subagent: {
+                    threadId: item.agentThreadId,
+                    path: item.agentPath,
+                    activity: item.kind,
+                },
+            },
+        },
+    };
+    if (sessionUpdate === "tool_call") {
+        return {
+            sessionUpdate,
+            title,
+            kind: "other",
+            ...common,
+        };
+    }
+    return {
+        sessionUpdate,
+        ...common,
+    };
+}
+
+function formatSubAgentActivityTitle(kind: SubAgentActivityItem["kind"], name: string): string {
+    switch (kind) {
+        case "started":
+            return `Start subagent ${name}`;
+        case "interacted":
+            return `Interact with subagent ${name}`;
+        case "interrupted":
+            return `Interrupt subagent ${name}`;
+    }
 }
 
 export function formatWebSearchTitle(item: WebSearchItem): string {

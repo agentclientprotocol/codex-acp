@@ -51,6 +51,7 @@ import {
     createFuzzyFileSearchComplete,
     createFuzzyFileSearchStartOrUpdate,
     createMcpToolCallUpdate,
+    createSubAgentActivityUpdate,
     createWebSearchCompleteUpdate,
     createWebSearchStartUpdate,
     fuzzyFileSearchToolCallId,
@@ -79,6 +80,7 @@ export class CodexEventHandler {
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
+    private readonly activeSubAgentActivities = new Set<string>();
 
     constructor(connection: AcpClientConnection, sessionState: SessionState) {
         this.connection = connection;
@@ -330,6 +332,8 @@ export class CodexEventHandler {
             case "contextCompaction":
                 return createContextCompactionStartUpdate(event.item);
             case "subAgentActivity":
+                this.activeSubAgentActivities.add(event.item.id);
+                return createSubAgentActivityUpdate(event.item, "in_progress", "tool_call");
             case "sleep":
             case "userMessage":
             case "hookPrompt":
@@ -387,7 +391,12 @@ export class CodexEventHandler {
             case "contextCompaction":
                 return createContextCompactionCompleteUpdate(event.item);
             //ignored types
-            case "subAgentActivity":
+            case "subAgentActivity": {
+                const sessionUpdate = this.activeSubAgentActivities.delete(event.item.id)
+                    ? "tool_call_update"
+                    : "tool_call";
+                return createSubAgentActivityUpdate(event.item, "completed", sessionUpdate);
+            }
             case "sleep":
             case "userMessage":
             case "hookPrompt":
