@@ -111,6 +111,7 @@ function startAcpServer() {
             const agent = createAgent(connection.client);
             codexAcpServer = agent;
             connection.signal.addEventListener("abort", () => {
+                agent.dispose();
                 if (codexAcpServer === agent) {
                     codexAcpServer = null;
                 }

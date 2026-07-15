@@ -316,6 +316,7 @@ export class CodexAcpClient {
 
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        const dynamicTools = readCodexDynamicToolsMeta(request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadResume({
@@ -324,6 +325,10 @@ export class CodexAcpClient {
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
+        this.codexClient.bindThread(request.sessionId);
+        if (dynamicTools !== undefined) {
+            this.codexClient.bindDynamicToolHandler(request.sessionId);
+        }
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
@@ -339,6 +344,7 @@ export class CodexAcpClient {
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        const dynamicTools = readCodexDynamicToolsMeta(request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadResume({
@@ -347,6 +353,10 @@ export class CodexAcpClient {
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
+        this.codexClient.bindThread(request.sessionId);
+        if (dynamicTools !== undefined) {
+            this.codexClient.bindDynamicToolHandler(request.sessionId);
+        }
         onSubscribed?.();
         const historyResponse = await this.codexClient.threadRead({
             threadId: response.thread.id,
@@ -376,6 +386,10 @@ export class CodexAcpClient {
             cwd: request.cwd,
             ...(dynamicTools ? {dynamicTools} : {}),
         });
+        this.codexClient.bindThread(response.thread.id);
+        if (dynamicTools !== undefined) {
+            this.codexClient.bindDynamicToolHandler(response.thread.id);
+        }
 
         const codexModels = await this.fetchAvailableModels();
         if (codexModels.length === 0) {
@@ -398,6 +412,10 @@ export class CodexAcpClient {
         } finally {
             this.codexClient.clearThreadHandlers(sessionId);
         }
+    }
+
+    dispose(): void {
+        this.codexClient.dispose();
     }
 
     async deleteSession(sessionId: string): Promise<void> {

@@ -415,6 +415,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             contentItems: [{type: "inputText", text: "ready"}],
         };
         mockFixture.setDynamicToolResponse(response);
+        mockFixture.getCodexAppServerClient().bindDynamicToolHandler('thread-id');
 
         await expect(mockFixture.sendServerRequest<DynamicToolCallResponse>('item/tool/call', {
             threadId: 'thread-id',
@@ -717,6 +718,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        codexAppServerClient.bindThread('thread-id');
 
         const startupPromise = codexAcpClient.awaitMcpServerStartup(
             ["alpha", "beta"],

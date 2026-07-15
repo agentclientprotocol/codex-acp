@@ -136,12 +136,120 @@ const DynamicToolCallRequest = new RequestType<
 
 const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
 
+type SharedConnectionClient = {
+    ownsThread(threadId: string): boolean;
+    onNotification(notification: ServerNotification): void;
+    ownsApproval(threadId: string): boolean;
+    handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
+    handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse>;
+    handlePermissionsRequest(params: PermissionsRequestApprovalParams): Promise<PermissionsRequestApprovalResponse>;
+    ownsElicitation(threadId: string): boolean;
+    handleElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
+    handleUserInput(params: ToolRequestUserInputParams): Promise<ToolRequestUserInputResponse>;
+    ownsDynamicToolThread(threadId: string): boolean;
+    handleDynamicToolCall(params: DynamicToolCallParams): Promise<DynamicToolCallResponse>;
+};
+
+const sharedConnectionRouters = new WeakMap<MessageConnection, SharedConnectionRouter>();
+
+class SharedConnectionRouter {
+    private readonly clients = new Set<SharedConnectionClient>();
+
+    constructor(connection: MessageConnection) {
+        connection.onUnhandledNotification((notification) => {
+            const serverNotification = notification as ServerNotification;
+            const threadId = extractThreadId(serverNotification);
+            if (threadId !== null) {
+                this.uniqueOwner((client) => client.ownsThread(threadId))?.onNotification(serverNotification);
+                return;
+            }
+            for (const client of [...this.clients]) {
+                client.onNotification(serverNotification);
+            }
+        });
+
+        connection.onRequest(CommandExecutionApprovalRequest, async (params) => {
+            const owner = this.uniqueOwner((client) => client.ownsApproval(params.threadId));
+            return owner ? await owner.handleCommandExecution(params) : {decision: 'cancel'};
+        });
+
+        connection.onRequest(FileChangeApprovalRequest, async (params) => {
+            const owner = this.uniqueOwner((client) => client.ownsApproval(params.threadId));
+            return owner ? await owner.handleFileChange(params) : {decision: 'cancel'};
+        });
+
+        connection.onRequest(PermissionsApprovalRequest, async (params) => {
+            const owner = this.uniqueOwner((client) => client.ownsApproval(params.threadId));
+            return owner
+                ? await owner.handlePermissionsRequest(params)
+                : {permissions: {}, scope: 'turn', strictAutoReview: true};
+        });
+
+        connection.onRequest(McpServerElicitationRequest, async (params) => {
+            const owner = this.uniqueOwner((client) => client.ownsElicitation(params.threadId));
+            return owner
+                ? await owner.handleElicitation(params)
+                : {action: 'cancel', content: null, _meta: null};
+        });
+
+        connection.onRequest(ToolRequestUserInputRequest, async (params) => {
+            const owner = this.uniqueOwner((client) => client.ownsElicitation(params.threadId));
+            return owner ? await owner.handleUserInput(params) : {answers: {}};
+        });
+
+        connection.onRequest(DynamicToolCallRequest, async (params) => {
+            const owner = this.uniqueOwner((client) => client.ownsDynamicToolThread(params.threadId));
+            return owner ? await owner.handleDynamicToolCall(params) : dynamicToolUnavailableResponse();
+        });
+    }
+
+    register(client: SharedConnectionClient): () => void {
+        this.clients.add(client);
+        let released = false;
+        return () => {
+            if (released) {
+                return;
+            }
+            released = true;
+            this.clients.delete(client);
+        };
+    }
+
+    private uniqueOwner(predicate: (client: SharedConnectionClient) => boolean): SharedConnectionClient | null {
+        let owner: SharedConnectionClient | null = null;
+        for (const client of this.clients) {
+            if (!predicate(client)) {
+                continue;
+            }
+            if (owner !== null) {
+                return null;
+            }
+            owner = client;
+        }
+        return owner;
+    }
+}
+
+function sharedConnectionRouter(connection: MessageConnection): SharedConnectionRouter {
+    const existing = sharedConnectionRouters.get(connection);
+    if (existing) {
+        return existing;
+    }
+    const created = new SharedConnectionRouter(connection);
+    sharedConnectionRouters.set(connection, created);
+    return created;
+}
+
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
  * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
  */
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
+    private readonly dynamicToolCallHandler: DynamicToolCallHandler | undefined;
+    private readonly ownedThreads = new Set<string>();
+    private readonly dynamicToolThreads = new Set<string>();
+    private readonly releaseSharedConnectionRouter: () => void;
     private approvalHandlers = new Map<string, ApprovalHandler>();
     private elicitationHandlers = new Map<string, ElicitationHandler>();
     private mcpServerStartupVersion = 0;
@@ -158,106 +266,93 @@ export class CodexAppServerClient {
 
     constructor(connection: MessageConnection, dynamicToolCallHandler?: DynamicToolCallHandler) {
         this.connection = connection;
-        this.connection.onUnhandledNotification((data) => {
-            const serverNotification = data as ServerNotification;
-            if (isMcpServerStatusUpdatedNotification(serverNotification)) {
-                this.mcpServerStartupVersion += 1;
-                this.mcpServerStartupStates.set(serverNotification.params.name, {
-                    status: serverNotification.params.status,
-                    error: serverNotification.params.error,
-                    version: this.mcpServerStartupVersion,
-                });
-                this.resolveMcpServerStartupResolvers();
-            }
-            if (isTurnCompletedNotification(serverNotification)) {
-                this.recordTurnCompleted(serverNotification.params);
-            }
-            if (isCompactionCompletedNotification(serverNotification)) {
-                this.recordCompactionCompleted(serverNotification);
-            }
-            if (isThreadStatusChangedNotification(serverNotification)) {
-                this.recordThreadStatusChanged(serverNotification.params);
-            }
-            if (isThreadGoalUpdatedNotification(serverNotification)) {
-                this.recordThreadGoalUpdated(serverNotification.params);
-            }
-            if (isThreadGoalClearedNotification(serverNotification)) {
-                this.recordThreadGoalCleared(serverNotification.params);
-            }
-            const routing = extractTurnRouting(serverNotification);
-            if (this.handleStaleTurnNotification(serverNotification, routing)) {
-                return;
-            }
-            this.recordTurnRouting(routing);
-            if (this.handleStaleTurnNotification(serverNotification, routing)) {
-                return;
-            }
-            this.notify(serverNotification);
-            for (const callback of this.codexEventHandlers) {
-                callback({ eventType: "notification", ...serverNotification });
-            }
-        });
-
-        this.connection.onRequest(CommandExecutionApprovalRequest, async (params) => {
-            if (this.isStaleTurn(params.threadId, params.turnId)) {
-                return { decision: "cancel" };
-            }
-            const handler = this.approvalHandlers.get(params.threadId);
-            if (!handler) {
-                return { decision: "cancel" };
-            }
-            return await handler.handleCommandExecution(params);
-        });
-
-        this.connection.onRequest(FileChangeApprovalRequest, async (params) => {
-            if (this.isStaleTurn(params.threadId, params.turnId)) {
-                return { decision: "cancel" };
-            }
-            const handler = this.approvalHandlers.get(params.threadId);
-            if (!handler) {
-                return { decision: "cancel" };
-            }
-            return await handler.handleFileChange(params);
-        });
-
-        this.connection.onRequest(PermissionsApprovalRequest, async (params) => {
-            if (this.isStaleTurn(params.threadId, params.turnId)) {
-                return { permissions: {}, scope: "turn", strictAutoReview: true };
-            }
-            const handler = this.approvalHandlers.get(params.threadId);
-            if (!handler) {
-                return { permissions: {}, scope: "turn", strictAutoReview: true };
-            }
-            return await handler.handlePermissionsRequest(params);
-        });
-
-        this.connection.onRequest(McpServerElicitationRequest, async (params) => {
-            if (this.isStaleTurn(params.threadId, params.turnId)) {
-                return { action: "cancel", content: null, _meta: null };
-            }
-            const handler = this.elicitationHandlers.get(params.threadId);
-            if (!handler) {
-                return { action: "cancel", content: null, _meta: null };
-            }
-            return await handler.handleElicitation(params);
-        });
-
-        this.connection.onRequest(ToolRequestUserInputRequest, async (params) => {
-            if (this.isStaleTurn(params.threadId, params.turnId)) {
-                return { answers: {} };
-            }
-            const handler = this.elicitationHandlers.get(params.threadId);
-            if (!handler) {
-                return { answers: {} };
-            }
-            return await handler.handleUserInput(params);
-        });
-
-        this.connection.onRequest(DynamicToolCallRequest, async (params) => {
-            if (this.isStaleTurn(params.threadId, params.turnId) || !dynamicToolCallHandler) {
-                return dynamicToolUnavailableResponse();
-            }
-            return await dynamicToolCallHandler(params);
+        this.dynamicToolCallHandler = dynamicToolCallHandler;
+        this.releaseSharedConnectionRouter = sharedConnectionRouter(connection).register({
+            ownsThread: (threadId) => this.ownsThread(threadId),
+            onNotification: (serverNotification) => {
+                if (isMcpServerStatusUpdatedNotification(serverNotification)) {
+                    this.mcpServerStartupVersion += 1;
+                    this.mcpServerStartupStates.set(serverNotification.params.name, {
+                        status: serverNotification.params.status,
+                        error: serverNotification.params.error,
+                        version: this.mcpServerStartupVersion,
+                    });
+                    this.resolveMcpServerStartupResolvers();
+                }
+                if (isTurnCompletedNotification(serverNotification)) {
+                    this.recordTurnCompleted(serverNotification.params);
+                }
+                if (isCompactionCompletedNotification(serverNotification)) {
+                    this.recordCompactionCompleted(serverNotification);
+                }
+                if (isThreadStatusChangedNotification(serverNotification)) {
+                    this.recordThreadStatusChanged(serverNotification.params);
+                }
+                if (isThreadGoalUpdatedNotification(serverNotification)) {
+                    this.recordThreadGoalUpdated(serverNotification.params);
+                }
+                if (isThreadGoalClearedNotification(serverNotification)) {
+                    this.recordThreadGoalCleared(serverNotification.params);
+                }
+                const routing = extractTurnRouting(serverNotification);
+                if (this.handleStaleTurnNotification(serverNotification, routing)) {
+                    return;
+                }
+                this.recordTurnRouting(routing);
+                if (this.handleStaleTurnNotification(serverNotification, routing)) {
+                    return;
+                }
+                this.notify(serverNotification);
+                for (const callback of this.codexEventHandlers) {
+                    callback({ eventType: "notification", ...serverNotification });
+                }
+                if (serverNotification.method === 'thread/closed') {
+                    this.clearThreadHandlers(serverNotification.params.threadId);
+                }
+            },
+            ownsApproval: (threadId) => this.approvalHandlers.has(threadId),
+            handleCommandExecution: async (params) => {
+                if (this.isStaleTurn(params.threadId, params.turnId)) {
+                    return {decision: 'cancel'};
+                }
+                return await this.approvalHandlers.get(params.threadId)!.handleCommandExecution(params);
+            },
+            handleFileChange: async (params) => {
+                if (this.isStaleTurn(params.threadId, params.turnId)) {
+                    return {decision: 'cancel'};
+                }
+                return await this.approvalHandlers.get(params.threadId)!.handleFileChange(params);
+            },
+            handlePermissionsRequest: async (params) => {
+                if (this.isStaleTurn(params.threadId, params.turnId)) {
+                    return {permissions: {}, scope: 'turn', strictAutoReview: true};
+                }
+                return await this.approvalHandlers.get(params.threadId)!.handlePermissionsRequest(params);
+            },
+            ownsElicitation: (threadId) => this.elicitationHandlers.has(threadId),
+            handleElicitation: async (params) => {
+                if (this.isStaleTurn(params.threadId, params.turnId)) {
+                    return {action: 'cancel', content: null, _meta: null};
+                }
+                return await this.elicitationHandlers.get(params.threadId)!.handleElicitation(params);
+            },
+            handleUserInput: async (params) => {
+                if (this.isStaleTurn(params.threadId, params.turnId)) {
+                    return {answers: {}};
+                }
+                return await this.elicitationHandlers.get(params.threadId)!.handleUserInput(params);
+            },
+            ownsDynamicToolThread: (threadId) => this.dynamicToolThreads.has(threadId),
+            handleDynamicToolCall: async (params) => {
+                if (this.isStaleTurn(params.threadId, params.turnId) || !this.dynamicToolCallHandler) {
+                    return dynamicToolUnavailableResponse();
+                }
+                try {
+                    return await this.dynamicToolCallHandler(params);
+                } catch {
+                    return dynamicToolUnavailableResponse();
+                }
+            },
         });
     }
 
@@ -273,6 +368,45 @@ export class CodexAppServerClient {
         this.notificationHandlers.delete(threadId);
         this.approvalHandlers.delete(threadId);
         this.elicitationHandlers.delete(threadId);
+        this.ownedThreads.delete(threadId);
+        this.dynamicToolThreads.delete(threadId);
+        this.staleTurnIds.delete(threadId);
+    }
+
+    bindThread(threadId: string): void {
+        this.ownedThreads.add(threadId);
+    }
+
+    bindDynamicToolHandler(threadId: string): void {
+        if (this.dynamicToolCallHandler) {
+            this.ownedThreads.add(threadId);
+            this.dynamicToolThreads.add(threadId);
+        }
+    }
+
+    dispose(): void {
+        this.releaseSharedConnectionRouter();
+        this.notificationHandlers.clear();
+        this.approvalHandlers.clear();
+        this.elicitationHandlers.clear();
+        this.ownedThreads.clear();
+        this.dynamicToolThreads.clear();
+        this.staleTurnIds.clear();
+    }
+
+    private ownsThread(threadId: string): boolean {
+        return this.ownedThreads.has(threadId)
+            || this.notificationHandlers.has(threadId)
+            || this.approvalHandlers.has(threadId)
+            || this.elicitationHandlers.has(threadId)
+            || this.dynamicToolThreads.has(threadId)
+            || this.pendingTurnCompletionResolvers.has(threadId)
+            || this.pendingCompactionCompletionResolvers.has(threadId)
+            || this.turnCompletionCaptures.has(threadId)
+            || this.turnRoutingCaptures.has(threadId)
+            || this.threadStatusCaptures.has(threadId)
+            || this.threadGoalUpdateCaptures.has(threadId)
+            || this.threadGoalClearedCaptures.has(threadId);
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {

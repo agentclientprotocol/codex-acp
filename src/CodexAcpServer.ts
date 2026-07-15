@@ -190,6 +190,10 @@ export class CodexAcpServer {
         );
     }
 
+    dispose(): void {
+        this.codexAcpClient.dispose();
+    }
+
     async initialize(
         _params: acp.InitializeRequest,
     ): Promise<acp.InitializeResponse> {
