@@ -1731,7 +1731,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                             tokenBudget: null,
                             timeUsedSeconds: 0,
                             createdAt: 1710000000,
-                            controlMethod: "session/goal_control",
+                            controlMethod: "_codex/session/goal_control",
                             },
                         },
                     },

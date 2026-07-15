@@ -7,7 +7,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 
 export const LEGACY_SET_SESSION_MODEL_METHOD = "session/set_model";
-export const GOAL_CONTROL_METHOD = "session/goal_control";
+export const GOAL_CONTROL_METHOD = "_codex/session/goal_control";
 
 export type LegacySessionModel = {
     modelId: string;

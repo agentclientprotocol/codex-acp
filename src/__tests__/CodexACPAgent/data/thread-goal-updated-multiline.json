@@ -13,7 +13,7 @@
               "tokenBudget": 1000,
               "timeUsedSeconds": 30,
               "createdAt": 1710000000,
-              "controlMethod": "session/goal_control"
+              "controlMethod": "_codex/session/goal_control"
             }
           }
         }
