@@ -78,10 +78,14 @@ export async function createFileChangeUpdate(
     };
 }
 
-export async function createCommandExecutionUpdate(item: CommandExecutionItem): Promise<UpdateSessionEvent> {
+// Use portable ACP content unless the client negotiated terminal metadata.
+export async function createCommandExecutionUpdate(
+    item: CommandExecutionItem,
+    terminalOutputMode: TerminalOutputMode = "content",
+): Promise<UpdateSessionEvent> {
     const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
     if (commandAction) {
-        return createCommandActionEvent(item.id, item.status, item.cwd, commandAction);
+        return createCommandActionEvent(item.id, item.status, item.cwd, commandAction, terminalOutputMode);
     }
     const command = stripShellPrefix(item.command);
     return createTerminalCommandEvent({
@@ -94,12 +98,14 @@ export async function createCommandExecutionUpdate(item: CommandExecutionItem): 
             command: item.command,
             cwd: item.cwd,
         },
-    }, item.id, item.cwd);
+    }, item.id, item.cwd, terminalOutputMode);
 }
 
+// Complete command calls with portable output and exit details.
 export function createCommandExecutionCompleteUpdate(
     item: CommandExecutionItem,
     terminalOutputMode: TerminalOutputMode,
+    options: { includeOutputContent?: boolean; includeTerminalMeta?: boolean } = {},
 ): UpdateSessionEvent | null {
     if (item.status === "inProgress") {
         return null;
@@ -115,12 +121,25 @@ export function createCommandExecutionCompleteUpdate(
         },
     };
 
+    if (terminalOutputMode === "content") {
+        const output = item.aggregatedOutput ?? "";
+        return {
+            ...update,
+            ...(options.includeOutputContent !== false && output.length > 0
+                ? { content: [createTextToolCallContent(output)] }
+                : {}),
+        };
+    }
+
     if (!commandExecutionUsesTerminalOutput(item)) {
+        return update;
+    }
+    if (options.includeTerminalMeta === false) {
         return update;
     }
 
     const terminalMeta: Record<string, unknown> = {};
-    if (item.aggregatedOutput) {
+    if (options.includeOutputContent !== false && item.aggregatedOutput) {
         Object.assign(
             terminalMeta,
             createTerminalOutputMeta(terminalOutputMode, item.id, item.aggregatedOutput),
@@ -531,7 +550,8 @@ export function createCommandActionEvent(
     id: string,
     status: CommandExecutionStatus,
     cwd: string,
-    commandAction: CommandAction
+    commandAction: CommandAction,
+    terminalOutputMode: TerminalOutputMode = "content",
 ): AcpToolCallEvent {
     const acpStatus = toAcpStatus(status);
     switch (commandAction.type) {
@@ -575,7 +595,7 @@ export function createCommandActionEvent(
                     command: commandAction.command,
                     cwd,
                 },
-            }, id, cwd);
+            }, id, cwd, terminalOutputMode);
     }
 }
 
@@ -584,11 +604,16 @@ export function commandExecutionUsesTerminalOutput(item: CommandExecutionItem): 
     return commandAction === undefined || commandAction.type === "unknown";
 }
 
+// Add synthetic terminal content only when the client negotiated the extension.
 function createTerminalCommandEvent(
     event: AcpToolCallEvent,
     terminalId: string,
     cwd: string,
+    terminalOutputMode: TerminalOutputMode,
 ): AcpToolCallEvent {
+    if (terminalOutputMode === "content") {
+        return event;
+    }
     const { rawInput, ...eventWithoutRawInput } = event;
     return {
         ...eventWithoutRawInput,
@@ -600,6 +625,13 @@ function createTerminalCommandEvent(
                 terminal_id: terminalId,
             },
         },
+    };
+}
+
+function createTextToolCallContent(text: string): ToolCallContent {
+    return {
+        type: "content",
+        content: { type: "text", text },
     };
 }
 

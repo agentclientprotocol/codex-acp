@@ -185,7 +185,16 @@
         "status": "completed",
         "rawOutput": {
           "output": "Chunk ID: search123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nsrc/service.ts:export class Service {}\n"
-        }
+        },
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Chunk ID: search123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nsrc/service.ts:export class Service {}\n"
+            }
+          }
+        ]
       }
     }
   ]
@@ -216,7 +225,16 @@
         "status": "failed",
         "rawOutput": {
           "output": "Chunk ID: search456\nWall time: 0.0000 seconds\nProcess exited with code 1\nOutput:\n"
-        }
+        },
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Chunk ID: search456\nWall time: 0.0000 seconds\nProcess exited with code 1\nOutput:\n"
+            }
+          }
+        ]
       }
     }
   ]
@@ -252,7 +270,16 @@
         "status": "completed",
         "rawOutput": {
           "output": "Chunk ID: read123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\n     1\tconsole.log('hi');\n"
-        }
+        },
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Chunk ID: read123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\n     1\tconsole.log('hi');\n"
+            }
+          }
+        ]
       }
     }
   ]
@@ -283,7 +310,16 @@
         "status": "completed",
         "rawOutput": {
           "output": "Chunk ID: abc123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nREADME.md\nsrc\n"
-        }
+        },
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Chunk ID: abc123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nREADME.md\nsrc\n"
+            }
+          }
+        ]
       }
     }
   ]

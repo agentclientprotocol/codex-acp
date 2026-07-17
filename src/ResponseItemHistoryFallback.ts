@@ -113,7 +113,7 @@ export function parseResponseItemHistoryFallback(
                 if (toolCallId && emittedToolCallIds.has(toolCallId)) {
                     break;
                 }
-                const result = createFunctionCallUpdate(item);
+                const result = createFunctionCallUpdate(item, terminalOutputMode);
                 if (!result) {
                     break;
                 }
@@ -361,7 +361,10 @@ function textParts(value: unknown): string[] {
     });
 }
 
-function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | null {
+function createFunctionCallUpdate(
+    item: JsonRecord,
+    terminalOutputMode: TerminalOutputMode,
+): LegacyFunctionCallUpdate | null {
     const toolCallId = stringValue(item["call_id"]);
     const name = stringValue(item["name"]);
     if (!toolCallId || !name) {
@@ -375,7 +378,7 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
     const commandAction = command ? inferCommandAction(command, cwd) : null;
     if (commandAction) {
         return {
-            update: createCommandActionEvent(toolCallId, "inProgress", cwd, commandAction),
+            update: createCommandActionEvent(toolCallId, "inProgress", cwd, commandAction, terminalOutputMode),
             usesTerminal: false,
             isExecCommand,
         };
@@ -390,7 +393,7 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
         rawInput: rawInputForFunctionCall(name, args),
     };
 
-    if (!functionCallUsesTerminal(item)) {
+    if (terminalOutputMode === "content" || !functionCallUsesTerminal(item)) {
         return { update, usesTerminal: false, isExecCommand };
     }
 
@@ -421,6 +424,14 @@ function createFunctionCallOutputUpdate(
             toolCallId,
             status,
             rawOutput: { output: item["output"] },
+            ...(execToolCallIds.has(toolCallId) && output.length > 0
+                ? {
+                    content: [{
+                        type: "content",
+                        content: { type: "text", text: output },
+                    }],
+                }
+                : {}),
         };
     }
 

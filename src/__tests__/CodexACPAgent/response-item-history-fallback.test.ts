@@ -96,6 +96,16 @@ describe("ResponseItemHistoryFallback", () => {
             { toolCallId: "call-read-ok", status: "completed" },
         ]);
     });
+
+    // Replay command history using standard ACP content.
+    it("recovers command history as portable content when no terminal extension is active", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            functionCall("call-portable", "npm test"),
+            functionCallOutput("call-portable", "Process exited with code 0\nOutput:\nTests passed\n"),
+        ]), "content");
+
+        expect(updates).toMatchFileSnapshot("data/response-item-portable-command.json");
+    });
 });
 
 function jsonl(records: unknown[]): string {

@@ -144,6 +144,7 @@ export class CodexAppServerClient {
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
+    private readonly childThreadParents = new Map<string, string>();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -180,6 +181,7 @@ export class CodexAppServerClient {
             if (this.handleStaleTurnNotification(serverNotification, routing)) {
                 return;
             }
+            this.recordChildThreadParent(serverNotification);
             this.recordTurnRouting(routing);
             if (this.handleStaleTurnNotification(serverNotification, routing)) {
                 return;
@@ -258,6 +260,12 @@ export class CodexAppServerClient {
         this.notificationHandlers.delete(threadId);
         this.approvalHandlers.delete(threadId);
         this.elicitationHandlers.delete(threadId);
+        this.childThreadParents.delete(threadId);
+        for (const [childThreadId, parentThreadId] of this.childThreadParents) {
+            if (parentThreadId === threadId) {
+                this.childThreadParents.delete(childThreadId);
+            }
+        }
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
@@ -675,10 +683,38 @@ export class CodexAppServerClient {
             if (handler) {
                 handler(notification);
             }
+            const parentThreadId = this.childThreadParents.get(threadId);
+            const parentHandler = parentThreadId ? this.notificationHandlers.get(parentThreadId) : undefined;
+            if (
+                parentHandler
+                && parentHandler !== handler
+                && isChildActivityNotification(notification)
+            ) {
+                parentHandler(notification);
+            }
             return;
         }
         for (const notificationHandler of this.notificationHandlers.values()) {
             notificationHandler(notification);
+        }
+    }
+
+    private recordChildThreadParent(notification: ServerNotification): void {
+        if (notification.method !== "item/started" && notification.method !== "item/completed") {
+            return;
+        }
+        const item = notification.params.item;
+        if (item.type === "subAgentActivity") {
+            this.childThreadParents.set(item.agentThreadId, notification.params.threadId);
+            return;
+        }
+        if (
+            item.type === "collabAgentToolCall"
+            && (item.tool === "spawnAgent" || item.tool === "resumeAgent")
+        ) {
+            for (const childThreadId of item.receiverThreadIds) {
+                this.childThreadParents.set(childThreadId, notification.params.threadId);
+            }
         }
     }
 
@@ -1004,6 +1040,14 @@ function isTurnCompletedNotification(notification: ServerNotification): notifica
     params: TurnCompletedNotification;
 } {
     return notification.method === "turn/completed";
+}
+
+function isChildActivityNotification(notification: ServerNotification): boolean {
+    if (notification.method === "turn/completed") {
+        return true;
+    }
+    return notification.method === "item/completed"
+        && notification.params.item.type === "agentMessage";
 }
 
 function isThreadStatusChangedNotification(notification: ServerNotification): notification is {
