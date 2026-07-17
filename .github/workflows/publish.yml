@@ -53,6 +53,7 @@ jobs:
   create-release:
     needs: publish-to-npm
     runs-on: ubuntu-latest
+    environment: release
     permissions: {}
     steps:
       - name: Generate GitHub token
@@ -71,6 +72,7 @@ jobs:
   trigger-registry-update:
     needs: create-release
     runs-on: ubuntu-latest
+    environment: release
     permissions: {}
     steps:
       - name: Generate token scoped to the registry repo
