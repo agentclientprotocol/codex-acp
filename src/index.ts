@@ -12,7 +12,7 @@ import packageJson from "../package.json";
 import {logger} from "./Logger";
 import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
-import {LEGACY_SET_SESSION_MODEL_METHOD} from "./AcpExtensions";
+import {GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD} from "./AcpExtensions";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -22,6 +22,11 @@ const emptyExtensionParamsParser = z.preprocess(
 const legacySetSessionModelParamsParser = z.object({
     sessionId: z.string(),
     modelId: z.string(),
+}).passthrough();
+
+const goalControlParamsParser = z.object({
+    sessionId: z.string(),
+    action: z.enum(["pause", "clear"]),
 }).passthrough();
 
 if (process.argv.includes("--version")) {
@@ -132,5 +137,6 @@ function startAcpServer() {
         .onRequest("authentication/status", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/status", ctx.params))
         .onRequest("authentication/logout", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/logout", ctx.params))
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
+        .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .connect(acpJsonStream);
 }

@@ -85,6 +85,22 @@ describe('CodexACPAgent - initialize', () => {
         ]));
     });
 
+    it('enables experimental thread settings without requesting attestation', async () => {
+        await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {
+                elicitation: { form: {}, url: {} },
+            },
+        });
+
+        expect(mockCodexConnection.sendRequest).toHaveBeenCalledWith("initialize", expect.objectContaining({
+            capabilities: {
+                experimentalApi: true,
+                requestAttestation: false,
+            },
+        }));
+    });
+
     it('should advertise API key auth with the legacy metadata method', () => {
         expect(getCodexAuthMethods()).toEqual(expect.arrayContaining([
             expect.objectContaining({

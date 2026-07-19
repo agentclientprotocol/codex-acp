@@ -64,6 +64,7 @@ describe("New session logout handling", () => {
                 sessionId: "openai-session",
                 currentModelId,
                 models: [model],
+                collaborationMode: "default",
                 modelProvider: "openai",
                 additionalDirectories: [],
             })
@@ -71,6 +72,7 @@ describe("New session logout handling", () => {
                 sessionId: "custom-provider-session",
                 currentModelId,
                 models: [model],
+                collaborationMode: "default",
                 modelProvider: "custom-provider",
                 additionalDirectories: [],
             })

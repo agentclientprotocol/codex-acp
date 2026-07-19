@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
-import type { Model, Thread } from "../../app-server/v2";
+import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
     it("should replay history during loadSession", async () => {
@@ -165,6 +165,13 @@ describe("CodexACPAgent - loadSession", () => {
                             type: "contextCompaction",
                             id: "item-context-compaction-1",
                         },
+                        {
+                            type: "subAgentActivity",
+                            id: "item-subagent-1",
+                            kind: "started",
+                            agentThreadId: "thread-child-1",
+                            agentPath: "/root/test_audit",
+                        },
                     ],
                 },
             ],
@@ -190,6 +197,17 @@ describe("CodexACPAgent - loadSession", () => {
         codexAppServerClient.threadRead = vi.fn().mockResolvedValue({
             thread: thread,
         });
+        const goal: ThreadGoal = {
+            threadId: thread.id,
+            objective: "Keep the restored migration green",
+            status: "paused",
+            tokenBudget: null,
+            tokensUsed: 42,
+            timeUsedSeconds: 46,
+            createdAt: 1710000000,
+            updatedAt: 1710000046,
+        };
+        codexAppServerClient.threadGoalGet = vi.fn().mockResolvedValue({ goal });
 
         await codexAcpAgent.initialize({ protocolVersion: 1 });
 
@@ -204,6 +222,7 @@ describe("CodexACPAgent - loadSession", () => {
             threadId: thread.id,
             includeTurns: true,
         });
+        expect(codexAppServerClient.threadGoalGet).toHaveBeenCalledWith({ threadId: thread.id });
         await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             "data/load-session-history.json"
         );

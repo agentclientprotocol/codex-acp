@@ -8,6 +8,11 @@ import type {RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
 import {logger} from "./Logger";
 import {createAgentTextMessageChunk} from "./ContentChunks";
+import {
+    COLLABORATION_MODE_CONFIG_ID,
+    DEFAULT_COLLABORATION_MODE,
+    PLAN_COLLABORATION_MODE,
+} from "./CollaborationModeConfig";
 
 type ParsedSlashCommand = {
     name: string;
@@ -21,6 +26,7 @@ export type CommandHandleResult =
 export type CommandHandleOptions = {
     onTurnStartPending?: () => void;
     onTurnStarted?: (turnId: string, threadId: string) => void;
+    setConfigOption?: (configId: string, value: string) => Promise<void>;
 };
 
 export type LogoutHandler = () => void | Promise<void>;
@@ -95,6 +101,20 @@ export class CodexCommands {
     private getBuiltinCommands(): AvailableCommand[] {
         return [
             {
+                name: "plan",
+                description: "Turn plan mode on.",
+                input: null,
+                _meta: {
+                    commandAction: {
+                        kind: "setConfigOption",
+                        configId: COLLABORATION_MODE_CONFIG_ID,
+                        value: PLAN_COLLABORATION_MODE,
+                        resetValue: DEFAULT_COLLABORATION_MODE,
+                        presentation: "state",
+                    },
+                },
+            },
+            {
                 name: "mcp",
                 description: "List configured Model Context Protocol (MCP) tools.",
                 input: null
@@ -131,8 +151,14 @@ export class CodexCommands {
             },
             {
                 name: "goal",
-                description: "Set, pause, resume, or clear a task goal.",
-                input: { hint: "[<objective>|clear|pause|resume]" }
+                description: "Set a goal to keep pursuing.",
+                input: { hint: "[<objective>|clear|pause|resume]" },
+                _meta: {
+                    commandAction: {
+                        kind: "prefixPrompt",
+                        presentation: "state",
+                    },
+                },
             },
             {
                 name: "logout",
@@ -173,6 +199,17 @@ export class CodexCommands {
 
         const sessionId = sessionState.sessionId;
         switch (commandName) {
+            case "plan": {
+                if (command.rest.length > 0) {
+                    await this.sendCommandUsageMessage(commandName, "no arguments", sessionId);
+                    return { handled: true };
+                }
+                const mode = sessionState.collaborationMode === PLAN_COLLABORATION_MODE
+                    ? DEFAULT_COLLABORATION_MODE
+                    : PLAN_COLLABORATION_MODE;
+                await options.setConfigOption?.(COLLABORATION_MODE_CONFIG_ID, mode);
+                return { handled: options.setConfigOption !== undefined };
+            }
             case "compact": {
                 await this.runWithProcessCheck(() => this.codexAcpClient.runCompact(sessionId));
                 return { handled: true };

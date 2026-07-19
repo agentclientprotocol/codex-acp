@@ -34,6 +34,7 @@ import type {
     SkillsListResponse,
     SandboxPolicy,
     Thread,
+    ThreadGoal,
     ThreadGoalStatus,
     ThreadSourceKind,
     TurnCompletedNotification,
@@ -41,6 +42,8 @@ import type {
 } from "./app-server/v2";
 import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
+import {createCodexCollaborationMode} from "./CollaborationModeConfig";
+import type {ModeKind} from "./app-server/ModeKind";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -85,7 +88,10 @@ export class CodexAcpClient {
 
     async initialize(request: acp.InitializeRequest): Promise<void> {
         await this.codexClient.initialize({
-            capabilities: null,
+            capabilities: {
+                experimentalApi: true,
+                requestAttestation: false,
+            },
             clientInfo: {
                 name: request.clientInfo?.name ?? this.defaultClientInfo.name,
                 version: request.clientInfo?.version ?? this.defaultClientInfo.version,
@@ -331,6 +337,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
@@ -358,6 +365,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             thread: historyResponse.thread,
@@ -384,6 +392,7 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
+            collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
@@ -418,6 +427,11 @@ export class CodexAcpClient {
         await this.codexClient.runCompact({threadId: sessionId});
     }
 
+    async getGoal(sessionId: string): Promise<ThreadGoal | null> {
+        const response = await this.codexClient.threadGoalGet({threadId: sessionId});
+        return response?.goal ?? null;
+    }
+
     async setGoal(
         sessionId: string,
         objective: string,
@@ -430,11 +444,18 @@ export class CodexAcpClient {
         }, onTurnStarted);
     }
 
-    async setGoalStatus(sessionId: string, status: ThreadGoalStatus): Promise<void> {
+    async setGoalStatus(sessionId: string, status: ThreadGoalStatus): Promise<ThreadGoal> {
+        let updatedGoal: ThreadGoal | null = null;
         await this.codexClient.runGoalSet({
             threadId: sessionId,
             status,
+        }, undefined, undefined, (goal) => {
+            updatedGoal = goal;
         });
+        if (updatedGoal === null) {
+            throw new Error(`Goal update for session ${sessionId} returned no goal`);
+        }
+        return updatedGoal;
     }
 
     async resumeGoal(
@@ -681,6 +702,17 @@ export class CodexAcpClient {
         }, onTurnStarted);
     }
 
+    async setCollaborationMode(sessionId: string, mode: ModeKind, currentModelId: string): Promise<void> {
+        await this.codexClient.threadSettingsUpdate({
+            threadId: sessionId,
+            collaborationMode: createCodexCollaborationMode(mode, currentModelId),
+        });
+    }
+
+    private getCollaborationMode(sessionId: string): ModeKind {
+        return this.codexClient.getThreadSettings(sessionId)?.collaborationMode.mode ?? "default";
+    }
+
     resolveTurnInterrupted(params: { threadId: string, turnId: string }): void {
         this.codexClient.resolveTurnInterrupted(params.threadId, params.turnId);
     }
@@ -863,6 +895,7 @@ export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
     models: Model[],
+    collaborationMode: ModeKind,
     modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,
     additionalDirectories: string[],

@@ -1,0 +1,29 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "title": "Start subagent weather_research",
+        "kind": "other",
+        "toolCallId": "call-spawn-weather",
+        "status": "completed",
+        "rawInput": {
+          "agentThreadId": "thread-paris",
+          "agentPath": "/root/weather_research",
+          "activityKind": "started"
+        },
+        "_meta": {
+          "codex": {
+            "subagent": {
+              "threadId": "thread-paris",
+              "path": "/root/weather_research",
+              "activity": "started"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

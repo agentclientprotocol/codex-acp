@@ -3,7 +3,7 @@ import type {
     FuzzyFileSearchSessionUpdatedNotification,
     ServerNotification
 } from "./app-server";
-import type {SessionState, ThreadGoalSnapshot} from "./CodexAcpServer";
+import type {SessionState} from "./CodexAcpServer";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
@@ -51,6 +51,7 @@ import {
     createFuzzyFileSearchComplete,
     createFuzzyFileSearchStartOrUpdate,
     createMcpToolCallUpdate,
+    createSubAgentActivityUpdate,
     createWebSearchCompleteUpdate,
     createWebSearchStartUpdate,
     fuzzyFileSearchToolCallId,
@@ -62,6 +63,7 @@ import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
 } from "./ContentChunks";
+import {sameThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
 
 export { stripShellPrefix };
 
@@ -78,6 +80,7 @@ export class CodexEventHandler {
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
+    private readonly activeSubAgentActivities = new Set<string>();
 
     constructor(connection: AcpClientConnection, sessionState: SessionState) {
         this.connection = connection;
@@ -256,8 +259,9 @@ export class CodexEventHandler {
     }
 
     private createThreadGoalUpdatedEvent(event: ThreadGoalUpdatedNotification): UpdateSessionEvent | null {
-        const goalSnapshot = this.createThreadGoalSnapshot(event);
-        if (this.sameThreadGoalSnapshot(this.sessionState.currentGoal, goalSnapshot)) {
+        this.sessionState.goalRevision += 1;
+        const goalSnapshot = toThreadGoalSnapshot(event.goal);
+        if (sameThreadGoalSnapshot(this.sessionState.currentGoal, goalSnapshot)) {
             return null;
         }
         this.sessionState.currentGoal = goalSnapshot;
@@ -268,6 +272,7 @@ export class CodexEventHandler {
     }
 
     private createThreadGoalClearedEvent(_event: ThreadGoalClearedNotification): UpdateSessionEvent | null {
+        this.sessionState.goalRevision += 1;
         if (this.sessionState.currentGoal === null) {
             return null;
         }
@@ -276,25 +281,6 @@ export class CodexEventHandler {
         return this.createCodexSessionInfoUpdate({
             goal: null,
         });
-    }
-
-    private createThreadGoalSnapshot(event: ThreadGoalUpdatedNotification): ThreadGoalSnapshot {
-        return {
-            objective: event.goal.objective.trim(),
-            status: event.goal.status,
-            tokenBudget: event.goal.tokenBudget,
-        };
-    }
-
-    private sameThreadGoalSnapshot(
-        left: ThreadGoalSnapshot | null | undefined,
-        right: ThreadGoalSnapshot
-    ): boolean {
-        return left !== null
-            && left !== undefined
-            && left.objective === right.objective
-            && left.status === right.status
-            && left.tokenBudget === right.tokenBudget;
     }
 
     private createReasoningDeltaEvent(
@@ -346,6 +332,8 @@ export class CodexEventHandler {
             case "contextCompaction":
                 return createContextCompactionStartUpdate(event.item);
             case "subAgentActivity":
+                this.activeSubAgentActivities.add(event.item.id);
+                return createSubAgentActivityUpdate(event.item, "in_progress", "tool_call");
             case "sleep":
             case "userMessage":
             case "hookPrompt":
@@ -403,7 +391,12 @@ export class CodexEventHandler {
             case "contextCompaction":
                 return createContextCompactionCompleteUpdate(event.item);
             //ignored types
-            case "subAgentActivity":
+            case "subAgentActivity": {
+                const sessionUpdate = this.activeSubAgentActivities.delete(event.item.id)
+                    ? "tool_call_update"
+                    : "tool_call";
+                return createSubAgentActivityUpdate(event.item, "completed", sessionUpdate);
+            }
             case "sleep":
             case "userMessage":
             case "hookPrompt":

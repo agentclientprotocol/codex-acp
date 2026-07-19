@@ -7,6 +7,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 
 export const LEGACY_SET_SESSION_MODEL_METHOD = "session/set_model";
+export const GOAL_CONTROL_METHOD = "_codex/session/goal_control";
 
 export type LegacySessionModel = {
     modelId: string;
@@ -42,11 +43,13 @@ export type ExtMethodRequest =
     AuthenticationStatusRequest
     | AuthenticationLogoutRequest
     | LegacySetSessionModelExtRequest
+    | GoalControlExtRequest
 
 export function isExtMethodRequest(request: { method: string, params: Record<string, unknown> }): request is ExtMethodRequest {
     return request.method === "authentication/status"
         || request.method === "authentication/logout"
-        || request.method === LEGACY_SET_SESSION_MODEL_METHOD;
+        || request.method === LEGACY_SET_SESSION_MODEL_METHOD
+        || request.method === GOAL_CONTROL_METHOD;
 }
 
 export type AuthenticationStatusRequest = { method: "authentication/status", params: {} }
@@ -58,6 +61,16 @@ export type AuthenticationLogoutResponse = {}
 export type LegacySetSessionModelExtRequest = {
     method: typeof LEGACY_SET_SESSION_MODEL_METHOD;
     params: LegacySetSessionModelRequest;
+}
+
+export type GoalControlRequest = {
+    sessionId: SessionId;
+    action: "pause" | "clear";
+}
+
+export type GoalControlExtRequest = {
+    method: typeof GOAL_CONTROL_METHOD;
+    params: GoalControlRequest;
 }
 
 export async function legacySetSessionModel(
