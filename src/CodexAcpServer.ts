@@ -35,6 +35,7 @@ import {
 import type {TokenCount} from "./TokenCount";
 import {toPromptUsage} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
+import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
@@ -166,7 +167,7 @@ export class CodexAcpServer {
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
     private readonly pendingTurnStarts: Map<string, PendingTurnStart>;
     private readonly activePrompts: Map<string, ActivePrompt>;
-    private readonly steeringRequests: Map<string, Promise<void>>;
+    private readonly steeringQueues: Map<string, SteeringQueue>;
     private readonly closingSessions: Map<string, number>;
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
@@ -182,7 +183,7 @@ export class CodexAcpServer {
         this.pendingMcpStartupSessions = new Map();
         this.pendingTurnStarts = new Map();
         this.activePrompts = new Map();
-        this.steeringRequests = new Map();
+        this.steeringQueues = new Map();
         this.closingSessions = new Map();
         this.sessionGenerations = new Map();
         this.sessionOpenGenerations = new Map();
@@ -266,7 +267,7 @@ export class CodexAcpServer {
             case LEGACY_SET_SESSION_MODEL_METHOD:
                 return await this.unstable_setSessionModel(this.parseLegacySetSessionModelParams(methodRequest.params));
             case SESSION_STEERING_METHOD:
-                return await this.steerSessionWithFallback(this.parseSessionSteerParams(methodRequest.params));
+                return await this.executeOrQueueSteeringRequest(this.parseSessionSteerParams(methodRequest.params));
             case GOAL_CONTROL_METHOD: {
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
                 if (!sessionState) {
@@ -601,6 +602,7 @@ export class CodexAcpServer {
                 this.pendingMcpStartupSessions.delete(params.sessionId);
                 this.pendingTurnStarts.delete(params.sessionId);
                 this.activePrompts.delete(params.sessionId);
+                this.steeringQueues.delete(params.sessionId);
             }
             this.endSessionCloseFence(params.sessionId);
         }
@@ -873,24 +875,47 @@ export class CodexAcpServer {
         };
     }
 
-    async steerSessionWithFallback(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
-        const previousRequest = this.steeringRequests.get(params.sessionId) ?? Promise.resolve();
-        let releaseRequest: () => void = () => {};
-        const requestCompleted = new Promise<void>((resolve) => {
-            releaseRequest = resolve;
-        });
-        const requestQueue = previousRequest.then(() => requestCompleted);
-        this.steeringRequests.set(params.sessionId, requestQueue);
-
-        await previousRequest;
+    /**
+     * Handles one incoming steering request, serialising it against any other
+     * steer already in flight for the same session.
+     *
+     * Every session gets its own {@link SteeringQueue}: the request is enqueued
+     * and awaited, so concurrent steers for one session run strictly one at a
+     * time, in arrival order, and can never race to inject into — or start —
+     * rival turns. Steers for different sessions use different queues and run
+     * concurrently. Once the queue drains to idle it is removed from the map,
+     * so no per-session entry leaks after the session goes quiet (the identity
+     * check guards against deleting a queue a later request has since reused).
+     *
+     * @param params The target session id and the prompt to steer with.
+     * @returns Whether the prompt joined the active turn ("injected") or started
+     *     a new one ("startedNewTurn"); see {@link performSteeringRequest}.
+     */
+    async executeOrQueueSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+        const queue = this.getSteeringQueue(params.sessionId);
         try {
-            return await this.performSteeringRequest(params);
+            return await queue.enqueue(params);
         } finally {
-            releaseRequest();
-            if (this.steeringRequests.get(params.sessionId) === requestQueue) {
-                this.steeringRequests.delete(params.sessionId);
+            if (queue.isIdle && this.steeringQueues.get(params.sessionId) === queue) {
+                this.steeringQueues.delete(params.sessionId);
             }
         }
+    }
+
+    /**
+     * Returns the steering queue for a session, creating and registering it on
+     * first use.
+     *
+     * @param sessionId The session whose steering queue is required.
+     * @returns The session's existing queue, or a freshly created one.
+     */
+    private getSteeringQueue(sessionId: string): SteeringQueue {
+        let queue = this.steeringQueues.get(sessionId);
+        if (!queue) {
+            queue = new SteeringQueue((params) => this.performSteeringRequest(params));
+            this.steeringQueues.set(sessionId, queue);
+        }
+        return queue;
     }
 
     private async performSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
