@@ -192,6 +192,18 @@ describe('_session/steering', () => {
         });
     });
 
+    it('reports failed instead of throwing when steering hits an unexpected error', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockImplementation(() => {
+            throw new Error("unexpected boom");
+        });
+
+        await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "keep the agent alive"}],
+        })).resolves.toEqual({outcome: "failed"});
+    });
+
     it('rejects malformed steer params', async () => {
         const mockFixture = createCodexMockTestFixture();
 

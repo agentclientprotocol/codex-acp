@@ -90,7 +90,7 @@ export type SessionSteerRequest = {
 }
 
 export type SessionSteeringResponse = {
-    outcome: "injected" | "startedNewTurn";
+    outcome: "injected" | "startedNewTurn" | "failed";
 }
 
 export type SessionSteeringExtRequest = {

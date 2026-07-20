@@ -888,13 +888,20 @@ export class CodexAcpServer {
      * check guards against deleting a queue a later request has since reused).
      *
      * @param params The target session id and the prompt to steer with.
-     * @returns Whether the prompt joined the active turn ("injected") or started
-     *     a new one ("startedNewTurn"); see {@link performSteeringRequest}.
+     * @returns Whether the prompt joined the active turn ("injected"), started a
+     *     new one ("startedNewTurn"), or could not be applied ("failed"); see
+     *     {@link performSteeringRequest}.
      */
     async executeOrQueueSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
         const queue = this.getSteeringQueue(params.sessionId);
         try {
             return await queue.enqueue(params);
+        } catch (error) {
+            if (error instanceof RequestError) {
+                throw error;
+            }
+            logger.error(`Steering request for session ${params.sessionId} failed`, error);
+            return {outcome: "failed"};
         } finally {
             if (queue.isIdle && this.steeringQueues.get(params.sessionId) === queue) {
                 this.steeringQueues.delete(params.sessionId);
