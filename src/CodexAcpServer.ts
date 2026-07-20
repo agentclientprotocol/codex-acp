@@ -925,80 +925,138 @@ export class CodexAcpServer {
         return queue;
     }
 
+    /**
+     * Delivers a steering prompt to the session: injects it into the live turn
+     * when there is one, otherwise starts a new turn.
+     *
+     * @param params The target session id and the prompt to steer with.
+     * @returns "injected" when the prompt joined an existing turn, otherwise the
+     *     outcome of starting a new turn.
+     */
     private async performSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
         logger.log("Steering session requested", {
             sessionId: params.sessionId,
             prompt: params.prompt,
         });
         const sessionState = this.getSessionState(params.sessionId);
+        this.assertSteerInputSupported(params, sessionState);
 
-        if (!sessionState.supportedInputModalities.includes("image") && params.prompt.some(b => b.type === "image")) {
+        const turnId = await this.getSteerableTurnId(sessionState);
+        if (turnId) {
+            const injected = await this.injectSteerIntoActiveTurn(params, turnId, sessionState);
+            if (injected) {
+                logger.log("Steering session injected", {sessionId: params.sessionId, turnId});
+                return {outcome: "injected"};
+            }
+        }
+        return await this.startNewTurnFromSteering(params);
+    }
+
+    /**
+     * Rejects a steering prompt whose content the active model cannot accept
+     * (currently: image blocks on a text-only model).
+     */
+    private assertSteerInputSupported(params: SessionSteerRequest, sessionState: SessionState): void {
+        const hasImage = params.prompt.some(block => block.type === "image");
+        if (hasImage && !sessionState.supportedInputModalities.includes("image")) {
             throw RequestError.invalidRequest("The current model does not support image input");
         }
+    }
 
-        const activePrompt = this.activePrompts.get(params.sessionId);
-        const turnId = await this.getSteerableTurnId(sessionState);
-        if (!turnId) {
-            return await this.startNewTurnFromSteering(params, activePrompt);
-        }
-
+    /**
+     * Attempts to inject the prompt into the given running turn.
+     *
+     * A failed injection is fatal only when the turn is still the session's
+     * current turn and Codex reported something other than "no active turn to
+     * steer". Otherwise the turn has already ended underneath us and the caller
+     * should start a new turn instead.
+     *
+     * @returns true when the prompt was injected; false when the caller should
+     *     fall back to starting a new turn.
+     */
+    private async injectSteerIntoActiveTurn(
+        params: SessionSteerRequest,
+        turnId: string,
+        sessionState: SessionState,
+    ): Promise<boolean> {
         try {
             await this.runWithProcessCheck(() => this.codexAcpClient.steerTurn({
                 threadId: params.sessionId,
                 turnId,
                 prompt: params.prompt,
             }));
+            return true;
         } catch (err) {
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-            if (sessionState.currentTurnId === turnId && !this.isNoActiveTurnToSteerError(err)) {
+            const turnStillActive = sessionState.currentTurnId === turnId;
+            if (turnStillActive && !this.isNoActiveTurnToSteerError(err)) {
                 throw err;
             }
-            return await this.startNewTurnFromSteering(params, activePrompt);
+            return false;
         }
-
-        logger.log("Steering session injected", {
-            sessionId: params.sessionId,
-            turnId,
-        });
-        return {outcome: "injected"};
     }
 
-    private async startNewTurnFromSteering(
-        params: SessionSteerRequest,
-        previousPrompt: ActivePrompt | undefined,
-    ): Promise<SessionSteeringResponse> {
+    /**
+     * Starts a new turn from a steering prompt when there is no live turn to
+     * inject into, and returns as soon as that turn is running.
+     *
+     * Waits for any previous prompt to drain first, then re-checks that the
+     * session is not closing — the await above is a window during which a close
+     * request can arrive.
+     *
+     * @param params The target session id and the prompt to steer with.
+     * @returns "startedNewTurn" once the turn is running; throws if the prompt
+     *     fails or is cancelled before the turn starts.
+     */
+    private async startNewTurnFromSteering(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+        // A prompt can outlive its turn (post-turn cleanup runs before it leaves
+        // activePrompts), so a steer can miss the turn while the prompt is still
+        // winding down. Starting a new turn now would run a second prompt on the
+        // same session, so wait for the current one to drain first (a no-op when idle).
+        const previousPrompt = this.activePrompts.get(params.sessionId);
         await previousPrompt?.completion;
         if (this.sessionIsClosing(params.sessionId)) {
             throw RequestError.invalidRequest(`Session ${params.sessionId} is closing`);
         }
 
-        let resolveTurnStarted: () => void = () => {};
-        const turnStarted = new Promise<void>((resolve) => {
-            resolveTurnStarted = resolve;
+        return await new Promise<SessionSteeringResponse>((resolve, reject) => {
+            let turnStarted = false;
+            const promptDone = this.prompt(params, undefined, () => {
+                turnStarted = true;
+                logger.log("Steering session started a new turn", {sessionId: params.sessionId});
+                // The new turn is now running. This is the success path: answer the
+                // steer immediately ("a turn was started") and let prompt() finish the
+                // turn in the background.
+                resolve({outcome: "startedNewTurn"});
+            });
+            promptDone.then(
+                (response) => {
+                    if (!turnStarted && response.stopReason === "cancelled") {
+                        // The prompt ended without the turn ever starting, because it
+                        // was cancelled. The steer never took, so fail the request.
+                        reject(RequestError.invalidRequest(`Session ${params.sessionId} was cancelled before the steering turn started`));
+                    } else {
+                        // Either the turn already started (this is a no-op after the
+                        // resolve in the callback above), or the prompt finished
+                        // without ever starting a turn and was not cancelled (e.g. a
+                        // command-only turn). Both count as a successfully accepted steer.
+                        resolve({outcome: "startedNewTurn"});
+                    }
+                },
+                (error: unknown) => {
+                    if (turnStarted) {
+                        // The turn had already started, so the steer was already
+                        // answered "startedNewTurn". This is a failure of a turn running
+                        // in the background — nothing to return, just log it.
+                        logger.error(`Steering-started prompt for session ${params.sessionId} failed`, error);
+                    } else {
+                        // The prompt failed before the turn started. The steer never
+                        // took, so surface the failure to the caller.
+                        reject(error);
+                    }
+                },
+            );
         });
-        const promptResult = this.prompt(params, undefined, resolveTurnStarted).then(
-            (response) => ({status: "completed" as const, response}),
-            (error: unknown) => ({status: "failed" as const, error}),
-        );
-        const acceptance = await Promise.race([
-            turnStarted.then(() => ({status: "started" as const})),
-            promptResult,
-        ]);
-
-        if (acceptance.status === "failed") {
-            throw acceptance.error;
-        }
-        if (acceptance.status === "completed" && acceptance.response.stopReason === "cancelled") {
-            throw RequestError.invalidRequest(`Session ${params.sessionId} was cancelled before the steering turn started`);
-        }
-
-        void promptResult.then((result) => {
-            if (result.status === "failed") {
-                logger.error(`Steering-started prompt for session ${params.sessionId} failed`, result.error);
-            }
-        });
-        logger.log("Steering session started a new turn", {sessionId: params.sessionId});
-        return {outcome: "startedNewTurn"};
     }
 
     private isNoActiveTurnToSteerError(error: unknown): boolean {
