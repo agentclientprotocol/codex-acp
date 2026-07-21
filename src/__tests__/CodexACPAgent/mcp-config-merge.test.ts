@@ -63,10 +63,10 @@ url = "https://example.com/mcp"
             env: [{name: "example", value: "example"}],
         };
 
-        const newSessionResponse = await codexAcpAgent.newSession({
-            cwd: "",
-            mcpServers: [conflictingMcp],
-        });
+        const newSessionResponse = await codexAcpAgent.newSession(
+            {cwd: "", mcpServers: [conflictingMcp]},
+            0,
+        );
         fixture.clearAcpConnectionDump();
 
         await codexAcpAgent.prompt({
@@ -111,9 +111,11 @@ url = "https://example.com/mcp"
             env: [{name: "example", value: "example"}],
         };
 
-        await expect(codexAcpAgent.newSession({
-            cwd: "",
-            mcpServers: [conflictingMcp],
-        })).rejects.toThrow("url is not supported for stdio");
+        await expect(
+            codexAcpAgent.newSession(
+                {cwd: "", mcpServers: [conflictingMcp]},
+                0,
+            ),
+        ).rejects.toThrow("url is not supported for stdio");
     });
 });

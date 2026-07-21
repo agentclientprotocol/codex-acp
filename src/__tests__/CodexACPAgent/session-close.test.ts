@@ -202,11 +202,10 @@ describe("ACP session close", () => {
         vi.spyOn(codexAcpClient, "resumeSession").mockReturnValue(resume.promise);
         const closeSessionSpy = vi.spyOn(codexAcpClient, "closeSession");
 
-        const resumePromise = codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        });
+        const resumePromise = codexAcpAgent.resumeSession(
+            {sessionId, cwd: "/test/cwd", mcpServers: []},
+            0,
+        );
 
         await codexAcpAgent.closeSession({sessionId});
         resume.resolve(createSessionMetadata());
@@ -225,18 +224,16 @@ describe("ACP session close", () => {
             .mockResolvedValueOnce(createSessionMetadata());
         const closeSessionSpy = vi.spyOn(codexAcpClient, "closeSession");
 
-        const staleResumePromise = codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        });
+        const staleResumePromise = codexAcpAgent.resumeSession(
+            {sessionId, cwd: "/test/cwd", mcpServers: []},
+            0,
+        );
 
         await codexAcpAgent.closeSession({sessionId});
-        await codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        });
+        await codexAcpAgent.resumeSession(
+            {sessionId, cwd: "/test/cwd", mcpServers: []},
+            1,
+        );
 
         staleResume.resolve(createSessionMetadata());
 
@@ -256,11 +253,10 @@ describe("ACP session close", () => {
             .mockResolvedValueOnce()
             .mockReturnValueOnce(staleUnsubscribe.promise);
 
-        const staleResumePromise = codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        });
+        const staleResumePromise = codexAcpAgent.resumeSession(
+            {sessionId, cwd: "/test/cwd", mcpServers: []},
+            0,
+        );
 
         await codexAcpAgent.closeSession({sessionId});
         staleResume.resolve(createSessionMetadata());
@@ -269,25 +265,29 @@ describe("ACP session close", () => {
             expect(closeSessionSpy).toHaveBeenCalledTimes(2);
         });
 
-        await expect(codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        })).rejects.toThrow("Invalid request");
+        await expect(
+            codexAcpAgent.resumeSession(
+                {sessionId, cwd: "/test/cwd", mcpServers: []},
+                0,
+            ),
+        ).rejects.toThrow("Invalid request");
         expect(resumeSpy).toHaveBeenCalledTimes(1);
 
         staleUnsubscribe.resolve(undefined);
         await expect(staleResumePromise).rejects.toThrow("Invalid request");
 
-        await expect(codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        })).resolves.toEqual(expect.objectContaining({
-            models: expect.objectContaining({
-                currentModelId: "model-id[medium]",
+        await expect(
+            codexAcpAgent.resumeSession(
+                {sessionId, cwd: "/test/cwd", mcpServers: []},
+                0,
+            ),
+        ).resolves.toEqual(
+            expect.objectContaining({
+                models: expect.objectContaining({
+                    currentModelId: "model-id[medium]",
+                }),
             }),
-        }));
+        );
     });
 
     it("preserves local close cleanup while stale resume cleanup overlaps close", async () => {
@@ -300,11 +300,10 @@ describe("ACP session close", () => {
             .mockReturnValueOnce(activeUnsubscribe.promise)
             .mockReturnValueOnce(staleUnsubscribe.promise);
 
-        const staleResumePromise = codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        });
+        const staleResumePromise = codexAcpAgent.resumeSession(
+            {sessionId, cwd: "/test/cwd", mcpServers: []},
+            0,
+        );
         const closePromise = codexAcpAgent.closeSession({sessionId});
 
         await vi.waitFor(() => {
@@ -335,11 +334,12 @@ describe("ACP session close", () => {
         });
         const closeSessionSpy = vi.spyOn(codexAcpClient, "closeSession").mockResolvedValue();
 
-        await expect(codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        })).rejects.toThrow("model list failed");
+        await expect(
+            codexAcpAgent.resumeSession(
+                {sessionId, cwd: "/test/cwd", mcpServers: []},
+                0,
+            ),
+        ).rejects.toThrow("model list failed");
 
         expect(closeSessionSpy).toHaveBeenCalledWith(sessionId);
     });
@@ -356,11 +356,12 @@ describe("ACP session close", () => {
         vi.spyOn(codexAcpClient, "getAccount").mockRejectedValue(new Error("account read failed"));
         const closeSessionSpy = vi.spyOn(codexAcpClient, "closeSession").mockResolvedValue();
 
-        await expect(codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        })).rejects.toThrow("account read failed");
+        await expect(
+            codexAcpAgent.resumeSession(
+                {sessionId, cwd: "/test/cwd", mcpServers: []},
+                0,
+            ),
+        ).rejects.toThrow("account read failed");
 
         expect(closeSessionSpy).toHaveBeenCalledWith(sessionId);
     });
@@ -388,11 +389,10 @@ describe("ACP session close", () => {
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
 
         vi.spyOn(codexAcpClient, "resumeSession").mockResolvedValue(createSessionMetadata());
-        await codexAcpAgent.resumeSession({
-            sessionId,
-            cwd: "/test/cwd",
-            mcpServers: [],
-        });
+        await codexAcpAgent.resumeSession(
+            {sessionId, cwd: "/test/cwd", mcpServers: []},
+            0,
+        );
         await codexAcpAgent.prompt({
             sessionId,
             prompt: [{type: "text", text: "new prompt"}],
@@ -464,7 +464,7 @@ async function createSession(options: {
 
     options.configure?.({fixture, codexAcpAgent, codexAcpClient});
 
-    await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: options.mcpServers ?? []});
+    await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: options.mcpServers ?? []}, 0);
     fixture.clearCodexConnectionDump();
     fixture.clearAcpConnectionDump();
 

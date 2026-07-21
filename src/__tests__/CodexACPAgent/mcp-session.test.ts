@@ -22,7 +22,7 @@ describe('MCP session configuration', { timeout: 40_000 }, () => {
             name: "test-mcp", command: "./node_modules/.bin/mcp-hello-world", args: ["example"], env: [{name:"example", value: "example"}]
         };
 
-        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: [mcpServer]});
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: [mcpServer]}, 0);
         fixture.clearAcpConnectionDump();
         await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "/mcp"}]});
         const transportDump = fixture.getAcpConnectionDump([]);

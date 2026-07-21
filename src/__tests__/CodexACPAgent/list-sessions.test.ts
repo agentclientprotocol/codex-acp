@@ -73,7 +73,7 @@ describe("CodexACPAgent - list sessions", () => {
             cwd: "/repo/project",
             cursor: null,
         };
-        const response = await codexAcpAgent.listSessions(params);
+        const response = await codexAcpAgent.listSessions(params, 0);
 
         expect(codexAppServerClient.threadList).toHaveBeenCalledWith(expect.objectContaining({
             sourceKinds: [
@@ -126,10 +126,10 @@ describe("CodexACPAgent - list sessions", () => {
             nextCursor: null,
         });
 
-        const response = await codexAcpAgent.listSessions({
-            cwd: null,
-            cursor: null,
-        });
+        const response = await codexAcpAgent.listSessions(
+            {cwd: null, cursor: null},
+            0,
+        );
 
         await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
             "data/list-sessions-thread-name.json"
@@ -201,16 +201,15 @@ describe("CodexACPAgent - list sessions", () => {
             backwardsCursor: null,
         });
 
-        await codexAcpAgent.newSession({
-            cwd: "/repo/project",
-            additionalDirectories: ["/repo/extra"],
-            mcpServers: [],
-        });
+        await codexAcpAgent.newSession(
+            {cwd: "/repo/project", additionalDirectories: ["/repo/extra"], mcpServers: []},
+            0,
+        );
 
-        const response = await codexAcpAgent.listSessions({
-            cwd: null,
-            cursor: null,
-        });
+        const response = await codexAcpAgent.listSessions(
+            {cwd: null, cursor: null},
+            0,
+        );
 
         expect(response.sessions[0]?.additionalDirectories).toEqual(["/repo/extra"]);
     });

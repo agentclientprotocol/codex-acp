@@ -50,7 +50,7 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
         additionalDirectories: [],
     });
 
-    const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
+    const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []}, 0);
     return {fixture, codexAcpAgent, codexAcpClient, response};
 }
 
@@ -282,7 +282,7 @@ describe("Session config options", () => {
             collaborationMode: "default",
             additionalDirectories: [],
         });
-        await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
+        await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []}, 0);
 
         const extraModel = createTestModel({
             id: "extra-model",

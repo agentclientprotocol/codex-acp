@@ -216,7 +216,7 @@ describe("CodexACPAgent - loadSession", () => {
             cwd: "/test/project",
             mcpServers: [],
         };
-        await codexAcpAgent.loadSession(loadParams);
+        await codexAcpAgent.loadSession(loadParams, 0);
 
         expect(codexAppServerClient.threadRead).toHaveBeenCalledWith({
             threadId: thread.id,
@@ -301,11 +301,10 @@ describe("CodexACPAgent - loadSession", () => {
         });
 
         await codexAcpAgent.initialize({ protocolVersion: 1 });
-        await codexAcpAgent.loadSession({
-            sessionId: "session-1",
-            cwd: "/test/project",
-            mcpServers: [],
-        });
+        await codexAcpAgent.loadSession(
+            {sessionId: "session-1", cwd: "/test/project", mcpServers: []},
+            0,
+        );
 
         expect(codexAcpAgent.getSessionState("session-1").sessionMcpServers).toEqual([]);
     });
@@ -556,11 +555,10 @@ describe("CodexACPAgent - loadSession", () => {
                     },
                 },
             });
-            await codexAcpAgent.loadSession({
-                sessionId: thread.id,
-                cwd: "/test/project",
-                mcpServers: [],
-            });
+            await codexAcpAgent.loadSession(
+                {sessionId: thread.id, cwd: "/test/project", mcpServers: []},
+                0,
+            );
 
             await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
                 "data/load-session-response-item-history-fallback.json",
@@ -644,16 +642,21 @@ describe("CodexACPAgent - loadSession", () => {
 
         await codexAcpAgent.initialize({ protocolVersion: 1 });
 
-        const loadPromise = codexAcpAgent.loadSession({
-            sessionId: "session-1",
-            cwd: "/test/project",
-            mcpServers: [{
-                name: "broken-mcp",
-                command: "npx",
-                args: ["broken"],
-                env: [],
-            }],
-        });
+        const loadPromise = codexAcpAgent.loadSession(
+            {
+                sessionId: "session-1",
+                cwd: "/test/project",
+                mcpServers: [
+                    {
+                        name: "broken-mcp",
+                        command: "npx",
+                        args: ["broken"],
+                        env: [],
+                    },
+                ],
+            },
+            0,
+        );
 
         await vi.waitFor(() => {
             expect(codexAcpAgent.getSessionState("session-1").sessionMcpServers).toEqual(["broken-mcp"]);
