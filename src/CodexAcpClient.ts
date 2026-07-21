@@ -518,11 +518,16 @@ export class CodexAcpClient {
 
     private async getConfigMcpServerNames(projectPath: string): Promise<Set<string>> {
         const response = await this.codexClient.configRead({ includeLayers: true, cwd: projectPath });
-        const mcpServers = response?.config?.["mcp_servers"];
-        if (!mcpServers || typeof mcpServers !== "object" || Array.isArray(mcpServers)) {
+        const effectiveMcpServers = response?.config?.["mcp_servers"];
+        const configLayers = response?.layers ?? [];
+        const layerMcpServers = configLayers.map(layer => {
+            return isJsonObject(layer.config) ? layer.config["mcp_servers"] : undefined;
+        });
+        const configuredMcpServers = [effectiveMcpServers, ...layerMcpServers].filter(isJsonObject);
+        if (configuredMcpServers.length === 0) {
             return new Set();
         }
-        return new Set(Object.keys(mcpServers));
+        return new Set(configuredMcpServers.flatMap(server => Object.keys(server)));
     }
 
     getModelProvider(): string | null {
