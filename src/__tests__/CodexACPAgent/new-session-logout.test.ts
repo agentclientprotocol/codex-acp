@@ -41,6 +41,24 @@ describe("New session logout handling", () => {
         expect(logoutSpy).toHaveBeenCalledOnce();
     });
 
+    it("includes the global config path in reload configuration errors", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
+
+        const errorMessage = 'Internal error: "failed to reload config: filesystem path `/tmp` must be absolute, use `~/...`, or start with `:`"';
+        vi.spyOn(codexAppServerClient, "threadStart").mockRejectedValue(new Error(errorMessage));
+
+        expect(logoutSpy).toHaveBeenCalledTimes(0);
+        await expect(codexAcpAgent.newSession({cwd: "", mcpServers: []}))
+            .rejects.toMatchObject({
+                data: expect.stringContaining(`Check global and project .codex directories`),
+            });
+    });
+
     it("refreshes OpenAI sessions when newSession error forces logout", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();

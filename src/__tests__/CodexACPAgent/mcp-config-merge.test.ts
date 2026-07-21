@@ -114,6 +114,8 @@ url = "https://example.com/mcp"
         await expect(codexAcpAgent.newSession({
             cwd: "",
             mcpServers: [conflictingMcp],
-        })).rejects.toThrow("url is not supported for stdio");
+        })).rejects.toMatchObject({
+            data: expect.stringContaining("url is not supported for stdio"),
+        });
     });
 });

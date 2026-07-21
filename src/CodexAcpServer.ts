@@ -310,6 +310,10 @@ export class CodexAcpServer {
             await this.refreshSessionsAuthState(null);
             throw RequestError.internalError(`${(e.message)}\n\nYou have been logged out. Please try again.`);
         }
+        const configPath = this.codexAcpClient.getHomePath() ?? "global";
+        if (e.message.includes("load config")) {
+            throw RequestError.internalError(`${e.message}\n\nCheck ${configPath} and project .codex directories, especially their config.toml files, or any CODEX_CONFIG override.`);
+        }
     }
 
     private beginSessionOpen(sessionId: string): number {
