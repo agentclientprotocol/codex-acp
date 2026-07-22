@@ -4,6 +4,51 @@ import { createCodexMockTestFixture } from "../acp-test-utils";
 import type { Thread } from "../../app-server/v2";
 
 describe("CodexACPAgent - list sessions", () => {
+    it.each([
+        {
+            serverCwdBehavior: "string-only",
+            acceptsRequestedCwd: (cwd: string | string[] | null | undefined) => cwd === "/repo/project",
+        },
+        {
+            serverCwdBehavior: "string-or-array",
+            acceptsRequestedCwd: (cwd: string | string[] | null | undefined) => {
+                const cwds = Array.isArray(cwd) ? cwd : cwd ? [cwd] : [];
+                return cwds.includes("/repo/project");
+            },
+        },
+    ])("forwards cwd before $serverCwdBehavior thread pagination", async ({acceptsRequestedCwd}) => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+
+        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+
+        const matchingThread = createThread("sess-project", "/repo/project");
+        const unrelatedThread = createThread("sess-other", "/repo/other");
+        codexAppServerClient.threadList = vi.fn().mockImplementation(async (params) => {
+            if (acceptsRequestedCwd(params.cwd)) {
+                return {data: [matchingThread], nextCursor: null};
+            }
+            return {data: [unrelatedThread], nextCursor: "unrelated-global-cursor"};
+        });
+
+        const response = await codexAcpAgent.listSessions({
+            cwd: "/repo/project",
+            cursor: null,
+        });
+
+        expect(response).toEqual({
+            sessions: [{
+                sessionId: "sess-project",
+                cwd: "/repo/project",
+                title: "Session sess-project",
+                updatedAt: "1970-01-01T00:03:20.000Z",
+            }],
+            nextCursor: null,
+        });
+    });
+
     it("should list sessions filtered by cwd", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -215,3 +260,29 @@ describe("CodexACPAgent - list sessions", () => {
         expect(response.sessions[0]?.additionalDirectories).toEqual(["/repo/extra"]);
     });
 });
+
+function createThread(id: string, cwd: string): Thread {
+    return {
+        id,
+        sessionId: id,
+        parentThreadId: null,
+        threadSource: null,
+        forkedFromId: null,
+        preview: `Session ${id}`,
+        ephemeral: false,
+        modelProvider: "openai",
+        createdAt: 100,
+        updatedAt: 200,
+        recencyAt: null,
+        status: {type: "idle"},
+        path: null,
+        cwd,
+        cliVersion: "0.0.0",
+        source: "cli",
+        agentNickname: null,
+        agentRole: null,
+        gitInfo: null,
+        name: null,
+        turns: [],
+    };
+}
