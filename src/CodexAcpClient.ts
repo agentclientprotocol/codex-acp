@@ -578,12 +578,14 @@ export class CodexAcpClient {
                     throw RequestError.invalidRequest("Codex doesn't support MCP SSE transport protocol")
                 case "http":
                     return {
+                        "enabled": true,
                         "url": mcpServer.url,
                         "http_headers": Object.fromEntries(mcpServer.headers.map(h => [h.name, h.value])),
                     }
             }
         }
         return {
+            "enabled": true,
             "command": mcpServer.command,
             "args": mcpServer.args,
             "env": Object.fromEntries(mcpServer.env.map(env => [env.name, env.value])),

@@ -677,11 +677,13 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const threadStartRequest = threadStartSpy.mock.calls[0]![0];
         expect(threadStartRequest.config?.["mcp_servers"]).toEqual({
             stdio_server_one: {
+                enabled: true,
                 command: "npx",
                 args: ["stdio"],
                 env: {EXAMPLE: "1"},
             },
             http_server_two: {
+                enabled: true,
                 url: "https://example.com/http",
                 http_headers: {Authorization: "Bearer token"},
             },
