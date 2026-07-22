@@ -190,6 +190,8 @@ export class CodexEventHandler {
                 return this.createTerminalInteractionEvent(notification.params);
             // ignored events
             case "thread/deleted":
+            case "thread/environment/connected":
+            case "thread/environment/disconnected":
             case "command/exec/outputDelta":
             case "hook/started":
             case "hook/completed":
@@ -219,6 +221,7 @@ export class CodexEventHandler {
             case "mcpServer/oauthLogin/completed":
             case "externalAgentConfig/import/completed":
             case "rawResponseItem/completed":
+            case "rawResponse/completed":
             case "thread/started":
             case "item/plan/delta":
             case "remoteControl/status/changed":
