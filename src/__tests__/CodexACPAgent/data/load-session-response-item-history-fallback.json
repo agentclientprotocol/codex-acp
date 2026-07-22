@@ -151,9 +151,15 @@
       "sessionId": "session-legacy",
       "update": {
         "sessionUpdate": "agent_message_chunk",
+        "messageId": "item-plan-1",
         "content": {
           "type": "text",
-          "text": "Plan:\nInspect project files"
+          "text": "Inspect project files"
+        },
+        "_meta": {
+          "codex": {
+            "phase": "final_answer"
+          }
         }
       }
     }

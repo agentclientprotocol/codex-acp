@@ -1,0 +1,23 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "plan",
+        "entries": [
+          {
+            "status": "completed",
+            "content": "Add the event mapping",
+            "priority": "medium"
+          },
+          {
+            "status": "in_progress",
+            "content": "Verify it in Zed",
+            "priority": "medium"
+          }
+        ]
+      }
+    }
+  ]
+}
