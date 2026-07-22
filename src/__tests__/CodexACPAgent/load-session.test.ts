@@ -156,7 +156,7 @@ describe("CodexACPAgent - loadSession", () => {
                         {
                             type: "imageGeneration",
                             id: "item-image-generation-1",
-                            status: "completed",
+                            status: "generating",
                             revisedPrompt: "A tiny blue square",
                             result: "iVBORw0KGgo=",
                             savedPath: "/test/project/generated-blue-square.png",
