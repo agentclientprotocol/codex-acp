@@ -71,6 +71,7 @@ export class CodexEventHandler {
 
     private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
+    private readonly onSkillsChanged: () => void | Promise<void>;
     private failure: RequestError | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
     private readonly activeGuardianApprovalReviews = new Set<string>();
@@ -82,9 +83,14 @@ export class CodexEventHandler {
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly activeSubAgentActivities = new Set<string>();
 
-    constructor(connection: AcpClientConnection, sessionState: SessionState) {
+    constructor(
+        connection: AcpClientConnection,
+        sessionState: SessionState,
+        onSkillsChanged: () => void | Promise<void>,
+    ) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.onSkillsChanged = onSkillsChanged;
     }
 
     getFailure(): RequestError | null {
@@ -188,6 +194,9 @@ export class CodexEventHandler {
                 return this.createThreadGoalClearedEvent(notification.params);
             case "item/commandExecution/terminalInteraction":
                 return this.createTerminalInteractionEvent(notification.params);
+            case "skills/changed":
+                await this.onSkillsChanged();
+                return null;
             // ignored events
             case "thread/deleted":
             case "thread/environment/connected":
@@ -216,7 +225,6 @@ export class CodexEventHandler {
             case "thread/realtime/closed":
             case "windowsSandbox/setupCompleted":
             case "account/login/completed":
-            case "skills/changed":
             case "deprecationNotice":
             case "mcpServer/oauthLogin/completed":
             case "externalAgentConfig/import/completed":

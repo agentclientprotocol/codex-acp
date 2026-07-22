@@ -1878,7 +1878,11 @@ export class CodexAcpServer {
         const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
 
         try {
-            const eventHandler = new CodexEventHandler(this.connection, sessionState);
+            const eventHandler = new CodexEventHandler(
+                this.connection,
+                sessionState,
+                () => this.availableCommands.publish(sessionState),
+            );
             const approvalHandler = new CodexApprovalHandler(this.connection, sessionState, activePrompt.signal);
             const elicitationHandler = new CodexElicitationHandler(
                 this.connection,

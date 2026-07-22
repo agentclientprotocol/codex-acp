@@ -1351,6 +1351,42 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-skills.json");
     });
 
+    it('should refresh available commands when skills change', async () => {
+        const { mockFixture } = setupPromptFixture({
+            sessionId: "session-id",
+            cwd: "/workspace",
+            additionalDirectories: ["/workspace/extra"],
+        });
+        const listSkillsSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue({
+            data: [{
+                cwd: "/workspace",
+                skills: [{
+                    name: "build",
+                    description: "Build the project",
+                    shortDescription: "Build",
+                    path: "/workspace",
+                    scope: "user",
+                    enabled: true
+                }],
+                errors: []
+            }]
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{ type: "text", text: "Hello" }],
+        });
+        mockFixture.clearAcpConnectionDump();
+
+        mockFixture.sendServerNotification({ method: "skills/changed", params: {} });
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications("session-id");
+
+        expect(listSkillsSpy).toHaveBeenCalledWith({
+            cwds: ["/workspace", "/workspace/extra"],
+        });
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-skills.json");
+    });
+
     it('handles builtin slash command locally', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
