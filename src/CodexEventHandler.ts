@@ -19,6 +19,7 @@ import type {
     ItemStartedNotification,
     ThreadItem,
     ModelReroutedNotification,
+    PlanDeltaNotification,
     ReasoningSummaryPartAddedNotification,
     ReasoningSummaryTextDeltaNotification,
     ReasoningTextDeltaNotification,
@@ -76,6 +77,7 @@ export class CodexEventHandler {
     private readonly activeGuardianApprovalReviews = new Set<string>();
     private readonly activeImageGenerationItems = new Set<string>();
     private readonly emittedImageViewItems = new Set<string>();
+    private readonly planDeltaTextByItemId = new Map<string, string>();
     private readonly seenReasoningDeltaItemIds = new Set<string>();
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
@@ -110,6 +112,8 @@ export class CodexEventHandler {
         switch (notification.method) {
             case "item/agentMessage/delta":
                 return await this.createTextEvent(notification.params);
+            case "item/plan/delta":
+                return this.createPlanDeltaEvent(notification.params);
             case "item/started":
                 return await this.createItemEvent(notification.params);
             case "item/completed":
@@ -223,7 +227,6 @@ export class CodexEventHandler {
             case "rawResponseItem/completed":
             case "rawResponse/completed":
             case "thread/started":
-            case "item/plan/delta":
             case "remoteControl/status/changed":
             case "app/list/updated":
             case "thread/settings/updated":
@@ -291,6 +294,15 @@ export class CodexEventHandler {
     ): UpdateSessionEvent {
         this.seenReasoningDeltaItemIds.add(event.itemId);
         return this.createAgentThoughtEvent(event.delta, event.itemId);
+    }
+
+    private createPlanDeltaEvent(event: PlanDeltaNotification): UpdateSessionEvent | null {
+        if (event.delta.length === 0) {
+            return null;
+        }
+        const text = this.planDeltaTextByItemId.get(event.itemId) ?? "";
+        this.planDeltaTextByItemId.set(event.itemId, text + event.delta);
+        return null;
     }
 
     private createReasoningSectionBreakEvent(event: ReasoningSummaryPartAddedNotification): UpdateSessionEvent {
@@ -389,6 +401,11 @@ export class CodexEventHandler {
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
                 return null;
+            case "plan": {
+                const deltaText = this.planDeltaTextByItemId.get(event.item.id) ?? "";
+                this.planDeltaTextByItemId.delete(event.item.id);
+                return this.createCompletedPlanEvent(event.item, deltaText);
+            }
             case "exitedReviewMode":
                 return this.createExitedReviewModeEvent(event.item);
             case "contextCompaction":
@@ -404,7 +421,6 @@ export class CodexEventHandler {
             case "userMessage":
             case "hookPrompt":
             case "enteredReviewMode":
-            case "plan":
                 return null;
 
         }
@@ -421,6 +437,25 @@ export class CodexEventHandler {
             return null;
         }
         return this.createAgentThoughtEvent(text, item.id);
+    }
+
+    private createCompletedPlanEvent(
+        item: ThreadItem & { type: "plan" },
+        deltaText: string,
+    ): UpdateSessionEvent | null {
+        const text = item.text.length > 0 ? item.text : deltaText;
+        if (text.length === 0) {
+            return null;
+        }
+        return this.createPlanTextEvent(text, item.id);
+    }
+
+    private createPlanTextEvent(text: string, messageId: string): UpdateSessionEvent {
+        return createAgentTextMessageChunk(
+            text,
+            messageId,
+            createCodexMessagePhaseMeta("final_answer"),
+        );
     }
 
     private createExitedReviewModeEvent(item: ThreadItem & { type: "exitedReviewMode" }): UpdateSessionEvent | null {
