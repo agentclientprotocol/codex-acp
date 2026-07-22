@@ -810,7 +810,7 @@ export class CodexAcpClient {
             updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
         });
 
-        if (listResponse.data.length === 0) {
+        if (!requestedCwd && listResponse.data.length === 0) {
             const diagnostics = await this.runSessionListDiagnostics();
             logger.log("Session list diagnostics", diagnostics);
         }

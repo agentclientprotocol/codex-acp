@@ -92,6 +92,27 @@ describe("CodexACPAgent - list sessions", () => {
         }
     });
 
+    it("returns an empty filtered page without global diagnostics", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+
+        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAppServerClient.threadList = vi.fn().mockResolvedValue({
+            data: [],
+            nextCursor: null,
+        });
+
+        const response = await codexAcpAgent.listSessions({
+            cwd: "/project/new-worktree",
+            cursor: null,
+        });
+
+        expect(response).toEqual({sessions: [], nextCursor: null});
+        expect(codexAppServerClient.threadList).toHaveBeenCalledOnce();
+    });
+
     it("should list sessions filtered by cwd", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
