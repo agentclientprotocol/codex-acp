@@ -147,10 +147,10 @@ describe("CodexACPAgent - list sessions", () => {
             turns: [],
         };
 
-        codexAppServerClient.threadList = vi.fn().mockResolvedValue({
-            data: [threadA, threadB],
+        codexAppServerClient.threadList = vi.fn().mockImplementation(async (params) => ({
+            data: [threadA, threadB].filter(thread => thread.cwd === params.cwd),
             nextCursor: "next-cursor",
-        });
+        }));
         codexAppServerClient.threadLoadedList = vi.fn().mockResolvedValue({
             data: [],
             nextCursor: null,
