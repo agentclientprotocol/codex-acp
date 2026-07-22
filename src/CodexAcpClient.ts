@@ -807,6 +807,8 @@ export class CodexAcpClient {
             modelProviders: modelProviders,
             sourceKinds: sourceKinds,
             cwd: requestedCwd,
+            sortKey: "updated_at",
+            sortDirection: "desc",
         });
 
         const mapThreadToSession = (thread: Thread) => ({

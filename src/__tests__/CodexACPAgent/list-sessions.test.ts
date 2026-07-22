@@ -49,6 +49,49 @@ describe("CodexACPAgent - list sessions", () => {
         });
     });
 
+    it("forwards cwd, cursor, and CLI ordering across pagination", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+
+        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAppServerClient.threadList = vi.fn()
+            .mockResolvedValueOnce({
+                data: [createThread("sess-newer", "/repo/project")],
+                nextCursor: "project-page-2",
+            })
+            .mockResolvedValueOnce({
+                data: [createThread("sess-older", "/repo/project")],
+                nextCursor: null,
+            });
+
+        const firstPage = await codexAcpAgent.listSessions({
+            cwd: "/repo/project",
+            cursor: null,
+        });
+        await codexAcpAgent.listSessions({
+            cwd: "/repo/project",
+            cursor: firstPage.nextCursor ?? null,
+        });
+
+        expect(codexAppServerClient.threadList).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            cwd: "/repo/project",
+            cursor: null,
+            sortKey: "updated_at",
+            sortDirection: "desc",
+        }));
+        expect(codexAppServerClient.threadList).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            cwd: "/repo/project",
+            cursor: "project-page-2",
+            sortKey: "updated_at",
+            sortDirection: "desc",
+        }));
+        for (const [params] of vi.mocked(codexAppServerClient.threadList).mock.calls) {
+            expect(params).not.toHaveProperty("limit");
+        }
+    });
+
     it("should list sessions filtered by cwd", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
