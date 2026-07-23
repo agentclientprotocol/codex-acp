@@ -1,4 +1,4 @@
-import type {ContentBlock} from "@agentclientprotocol/sdk";
+import type {ClientCapabilities, ContentBlock} from "@agentclientprotocol/sdk";
 import type {UpdateSessionEvent} from "./ACPSessionConnection";
 
 type AcpMeta = Record<string, unknown>;
@@ -60,6 +60,28 @@ export function createAgentThoughtChunk(content: ContentBlock, messageId?: strin
 
 export function createAgentTextMessageChunk(text: string, messageId?: string, meta?: AcpMeta): UpdateSessionEvent {
     return createAgentMessageChunk({type: "text", text}, messageId, meta);
+}
+
+export function createPlanTextUpdate(
+    text: string,
+    planId: string,
+    clientCapabilities: ClientCapabilities | null,
+): UpdateSessionEvent {
+    if (clientCapabilities?.plan) {
+        return {
+            sessionUpdate: "plan_update",
+            plan: {
+                type: "markdown",
+                planId,
+                content: text,
+            },
+        };
+    }
+    return createAgentTextMessageChunk(
+        text,
+        planId,
+        createCodexMessagePhaseMeta("final_answer"),
+    );
 }
 
 export function createAgentTextThoughtChunk(text: string, messageId?: string, meta?: AcpMeta): UpdateSessionEvent {

@@ -551,6 +551,7 @@ describe("CodexACPAgent - loadSession", () => {
             await codexAcpAgent.initialize({
                 protocolVersion: 1,
                 clientCapabilities: {
+                    plan: {},
                     _meta: {
                         terminal_output: true,
                     },
