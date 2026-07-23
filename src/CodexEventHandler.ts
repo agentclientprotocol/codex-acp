@@ -161,7 +161,7 @@ export class CodexEventHandler {
                 return this.createMcpToolProgressEvent(notification.params);
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
-                return null;
+                return this.createUsageUpdateFromState();
             case "configWarning":
                 return await this.createConfigWarningEvent(notification.params);
             case "warning":
@@ -669,7 +669,10 @@ export class CodexEventHandler {
 
     private createUsageUpdate(params: ThreadTokenUsageUpdatedNotification): UpdateSessionEvent | null {
         this.handleTokenUsageUpdated(params);
+        return this.createUsageUpdateFromState();
+    }
 
+    private createUsageUpdateFromState(): UpdateSessionEvent | null {
         const used = this.sessionState.lastTokenUsage?.totalTokens;
         const size = this.sessionState.modelContextWindow;
         if (used == null || size == null || size <= 0) {
@@ -680,6 +683,16 @@ export class CodexEventHandler {
             sessionUpdate: "usage_update",
             used,
             size,
+            ...(this.sessionState.rateLimits
+                ? {
+                      _meta: {
+                          "_codex/rateLimits": Array.from(this.sessionState.rateLimits.values(), (entry) => ({
+                              ...entry.snapshot,
+                              limitId: entry.limitId,
+                          })),
+                      },
+                  }
+                : {}),
         };
     }
 
