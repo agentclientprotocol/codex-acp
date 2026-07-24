@@ -16,6 +16,7 @@ import {AgentMode} from "../../AgentMode";
 import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
+import {CodexAcpClient} from "../../CodexAcpClient";
 import {GOAL_CONTROL_METHOD} from "../../AcpExtensions";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
@@ -3203,14 +3204,25 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "none" }));
     });
 
-    it ('should enable reasoning.summary by default', async () => {
-        const { mockFixture, turnStartSpy } = setupPromptFixture({
-            account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
-        });
+    // Explicit adapter config must override the default summary mode.
+    it ('should prefer CODEX_CONFIG reasoning.summary', async () => {
+        const { mockFixture, turnStartSpy } = setupPromptFixture();
+        const configuredClient = new CodexAcpClient(
+            mockFixture.getCodexAppServerClient(),
+            {model_reasoning_summary: "detailed"},
+        );
 
-        await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
+        await configuredClient.sendPrompt(
+            {sessionId: "id", prompt: [{type: "text", text: "test"}]},
+            AgentMode.DEFAULT_AGENT_MODE,
+            ModelId.create("model-id", "medium"),
+            null,
+            false,
+            "/test/cwd",
+            [],
+        );
 
-        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "auto" }));
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({summary: "detailed"}));
     });
 
     it ('should disable reasoning.summary when model lacks reasoning', async () => {
@@ -3224,7 +3236,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "none" }));
     });
 
-    it ('should enable reasoning.summary when model supports reasoning', async () => {
+    it ('should use auto reasoning.summary by default when model supports reasoning', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({
             account: { type: "chatgpt", email: "test@example.com", planType: "pro" },
             supportedReasoningEfforts: [
@@ -3235,7 +3247,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt: [{ type: "text", text: "test" }] });
 
-        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "auto" }));
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({summary: "auto"}));
     });
 
     it ('should reject prompt with images when model does not support image input', async () => {
