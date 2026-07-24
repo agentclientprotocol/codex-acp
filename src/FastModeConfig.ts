@@ -3,6 +3,8 @@ import type * as acp from "@agentclientprotocol/sdk";
 import type {ServiceTier} from "./app-server";
 import type {Model} from "./app-server/v2";
 
+export type SupportedServiceTier = ServiceTier | "priority";
+
 export const FAST_MODE_CONFIG_ID = "fast-mode";
 export const FAST_MODE_CATEGORY = "model_config";
 export const FAST_MODE_ON = "on";
@@ -12,6 +14,10 @@ const FAST_MODE_DESCRIPTION = "1.5x speed, increased usage";
 
 export function modelSupportsFast(model: Model | undefined): boolean {
     return model?.additionalSpeedTiers?.includes("fast") ?? false;
+}
+
+export function serviceTierEnablesFast(serviceTier: SupportedServiceTier | null | undefined): boolean {
+    return serviceTier === "fast" || serviceTier === "priority";
 }
 
 export function resolveFastServiceTier(fastModeEnabled: boolean, currentModelSupportsFast: boolean): ServiceTier | null {
