@@ -19,8 +19,9 @@ describe("resolveTerminalOutputMode", () => {
         })).toBe("terminal_output_delta");
     });
 
-    it("keeps legacy terminal_output_delta when capabilities are absent", () => {
-        expect(resolveTerminalOutputMode(null)).toBe("terminal_output_delta");
-        expect(resolveTerminalOutputMode({})).toBe("terminal_output_delta");
+    // Portable output is the default when no terminal extension is advertised.
+    it("uses portable content when terminal extensions are absent", () => {
+        expect(resolveTerminalOutputMode(null)).toBe("content");
+        expect(resolveTerminalOutputMode({})).toBe("content");
     });
 });

@@ -1,0 +1,102 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "portable-ok",
+        "kind": "execute",
+        "title": "echo ok",
+        "status": "in_progress",
+        "rawInput": {
+          "command": "echo ok",
+          "cwd": "/test/project"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "portable-ok",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "ok\n"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "portable-ok",
+        "status": "completed",
+        "rawOutput": {
+          "formatted_output": "ok\n",
+          "exit_code": 0
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "portable-failed",
+        "kind": "execute",
+        "title": "false",
+        "status": "in_progress",
+        "rawInput": {
+          "command": "false",
+          "cwd": "/test/project"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "portable-failed",
+        "status": "failed",
+        "rawOutput": {
+          "formatted_output": "command failed\n",
+          "exit_code": 1
+        },
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "command failed\n"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

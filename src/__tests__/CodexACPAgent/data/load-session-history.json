@@ -194,21 +194,9 @@
         "kind": "execute",
         "title": "ls",
         "status": "completed",
-        "content": [
-          {
-            "type": "terminal",
-            "terminalId": "item-cmd-1"
-          }
-        ],
         "rawInput": {
           "command": "ls",
           "cwd": "/test/project"
-        },
-        "_meta": {
-          "terminal_info": {
-            "cwd": "/test/project",
-            "terminal_id": "item-cmd-1"
-          }
         }
       }
     }
@@ -227,17 +215,15 @@
           "formatted_output": "Added.txt\nREADME.md\n",
           "exit_code": 0
         },
-        "_meta": {
-          "terminal_output_delta": {
-            "data": "Added.txt\nREADME.md\n",
-            "terminal_id": "item-cmd-1"
-          },
-          "terminal_exit": {
-            "exit_code": 0,
-            "signal": null,
-            "terminal_id": "item-cmd-1"
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Added.txt\nREADME.md\n"
+            }
           }
-        }
+        ]
       }
     }
   ]
@@ -408,21 +394,24 @@
       "sessionId": "session-1",
       "update": {
         "sessionUpdate": "tool_call",
-        "title": "Start subagent test_audit",
-        "kind": "other",
         "toolCallId": "item-subagent-1",
-        "status": "completed",
+        "kind": "other",
+        "title": "Test audit",
+        "status": "in_progress",
         "rawInput": {
+          "description": "Test audit"
+        },
+        "rawOutput": {
           "agentThreadId": "thread-child-1",
           "agentPath": "/root/test_audit",
-          "activityKind": "started"
+          "activity": "started"
         },
         "_meta": {
           "codex": {
-            "subagent": {
-              "threadId": "thread-child-1",
-              "path": "/root/test_audit",
-              "activity": "started"
+            "toolName": "Agent",
+            "subAgent": {
+              "agentThreadId": "thread-child-1",
+              "runId": "item-subagent-1"
             }
           }
         }
