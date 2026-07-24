@@ -100,6 +100,11 @@ describe("CodexACPAgent - loadSession", () => {
                             content: [],
                         },
                         {
+                            type: "plan",
+                            id: "item-plan-1",
+                            text: "Inspect project files",
+                        },
+                        {
                             type: "commandExecution",
                             id: "item-cmd-1",
                             command: "ls",
@@ -551,6 +556,7 @@ describe("CodexACPAgent - loadSession", () => {
             await codexAcpAgent.initialize({
                 protocolVersion: 1,
                 clientCapabilities: {
+                    plan: {},
                     _meta: {
                         terminal_output: true,
                     },

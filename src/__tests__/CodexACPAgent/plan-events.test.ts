@@ -25,6 +25,10 @@ describe("CodexEventHandler - plan events", () => {
     });
 
     it("emits the authoritative completed plan after buffering deltas", async () => {
+        await mockFixture.getCodexAcpAgent().initialize({
+            protocolVersion: 1,
+            clientCapabilities: {plan: {}},
+        });
         const notifications: ServerNotification[] = [
             {
                 method: "item/started",
@@ -80,6 +84,10 @@ describe("CodexEventHandler - plan events", () => {
     });
 
     it("falls back to buffered deltas when the completed plan is empty", async () => {
+        await mockFixture.getCodexAcpAgent().initialize({
+            protocolVersion: 1,
+            clientCapabilities: {plan: {}},
+        });
         const notifications: ServerNotification[] = [
             {
                 method: "item/plan/delta",
@@ -121,7 +129,7 @@ describe("CodexEventHandler - plan events", () => {
         );
     });
 
-    it("emits the completed plan when no deltas streamed", async () => {
+    it("retains the agent-message fallback when the client does not support plans", async () => {
         const notifications: ServerNotification[] = [
             {
                 method: "item/completed",

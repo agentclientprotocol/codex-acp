@@ -4,16 +4,11 @@
     {
       "sessionId": "test-session-id",
       "update": {
-        "sessionUpdate": "agent_message_chunk",
-        "messageId": "plan-1",
-        "content": {
-          "type": "text",
-          "text": "Completed text should not duplicate the streamed plan."
-        },
-        "_meta": {
-          "codex": {
-            "phase": "final_answer"
-          }
+        "sessionUpdate": "plan_update",
+        "plan": {
+          "type": "markdown",
+          "planId": "plan-1",
+          "content": "Completed text should not duplicate the streamed plan."
         }
       }
     }
