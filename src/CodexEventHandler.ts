@@ -20,6 +20,7 @@ import type {
     ThreadItem,
     ModelReroutedNotification,
     PlanDeltaNotification,
+    RateLimitSnapshot,
     ReasoningSummaryPartAddedNotification,
     ReasoningSummaryTextDeltaNotification,
     ReasoningTextDeltaNotification,
@@ -67,6 +68,23 @@ import {
 import {sameThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
 
 export { stripShellPrefix };
+
+function mergeSparseRateLimitSnapshot(
+    previous: RateLimitSnapshot,
+    update: RateLimitSnapshot
+): RateLimitSnapshot {
+    return {
+        limitId: update.limitId ?? previous.limitId,
+        limitName: update.limitName ?? previous.limitName,
+        primary: update.primary ?? previous.primary,
+        secondary: update.secondary ?? previous.secondary,
+        credits: update.credits ?? previous.credits,
+        individualLimit: update.individualLimit ?? previous.individualLimit,
+        spendControlReached: update.spendControlReached ?? previous.spendControlReached,
+        planType: update.planType ?? previous.planType,
+        rateLimitReachedType: update.rateLimitReachedType ?? previous.rateLimitReachedType,
+    };
+}
 
 export class CodexEventHandler {
 
@@ -700,11 +718,33 @@ export class CodexEventHandler {
         if (!this.sessionState.rateLimits) {
             this.sessionState.rateLimits = new Map();
         }
-        const limitId = params.rateLimits.limitId ?? params.rateLimits.limitName ?? "unknown";
+
+        const update = params.rateLimits;
+        let previousKey = update.limitId !== null && this.sessionState.rateLimits.has(update.limitId)
+            ? update.limitId
+            : undefined;
+        if (previousKey === undefined && update.limitName !== null) {
+            previousKey = Array.from(this.sessionState.rateLimits.entries())
+                .find(([, entry]) => entry.limitName === update.limitName)?.[0];
+        }
+        if (previousKey === undefined && update.limitId === null && update.limitName === null) {
+            previousKey = this.sessionState.rateLimits.has("unknown") ? "unknown" : undefined;
+        }
+
+        const previous = previousKey === undefined
+            ? undefined
+            : this.sessionState.rateLimits.get(previousKey);
+        const snapshot = previous
+            ? mergeSparseRateLimitSnapshot(previous.snapshot, update)
+            : update;
+        const limitId = snapshot.limitId ?? previous?.limitId ?? snapshot.limitName ?? "unknown";
+        if (previousKey !== undefined && previousKey !== limitId) {
+            this.sessionState.rateLimits.delete(previousKey);
+        }
         this.sessionState.rateLimits.set(limitId, {
-            limitId: limitId,
-            limitName: params.rateLimits.limitName ?? limitId,
-            snapshot: params.rateLimits,
+            limitId,
+            limitName: snapshot.limitName ?? previous?.limitName ?? limitId,
+            snapshot,
         });
     }
 
