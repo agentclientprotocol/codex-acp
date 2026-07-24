@@ -15,14 +15,21 @@
             "content": {
               "type": "image",
               "data": "iVBORw0KGgo=",
-              "mimeType": "image/png"
+              "mimeType": "image/png",
+              "uri": "/tmp/codex/generated-completed-only.png"
             }
+          }
+        ],
+        "locations": [
+          {
+            "path": "/tmp/codex/generated-completed-only.png"
           }
         ],
         "rawOutput": {
           "status": "generating",
           "revisedPrompt": null,
-          "result": "iVBORw0KGgo="
+          "result": "iVBORw0KGgo=",
+          "savedPath": "/tmp/codex/generated-completed-only.png"
         }
       }
     }
