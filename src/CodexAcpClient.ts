@@ -912,10 +912,8 @@ function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
         switch (block.type) {
             case "text":
                 return {type: "text", text: block.text, text_elements: []};
-            case "image": {
-                const url = isSupportedImageUrl(block.uri) ? block.uri : imageDataUrl(block);
-                return {type: "image", url};
-            }
+            case "image":
+                return {type: "image", url: imageDataUrl(block)};
             case "resource_link":
                 return {type: "text", text: formatUriAsLink(block.name, block.uri), text_elements: []};
             case "resource": {
@@ -945,18 +943,6 @@ function imageDataUrl(block: acp.ContentBlock & { type: "image" }): string {
 
 function isImageMimeType(mimeType: string | null | undefined): mimeType is string {
     return mimeType?.startsWith("image/") ?? false;
-}
-
-function isSupportedImageUrl(uri: string | null | undefined): uri is string {
-    if (!uri) {
-        return false;
-    }
-    try {
-        const protocol = new URL(uri).protocol;
-        return protocol === "http:" || protocol === "https:" || protocol === "data:";
-    } catch {
-        return false;
-    }
 }
 
 function formatUriAsLink(name: string | null | undefined, uri: string): string {
