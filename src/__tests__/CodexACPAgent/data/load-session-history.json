@@ -189,6 +189,27 @@
     {
       "sessionId": "session-1",
       "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "item-plan-1",
+        "content": {
+          "type": "text",
+          "text": "Inspect project files"
+        },
+        "_meta": {
+          "codex": {
+            "phase": "final_answer"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-cmd-1",
         "kind": "execute",

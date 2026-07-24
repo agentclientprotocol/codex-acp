@@ -100,6 +100,11 @@ describe("CodexACPAgent - loadSession", () => {
                             content: [],
                         },
                         {
+                            type: "plan",
+                            id: "item-plan-1",
+                            text: "Inspect project files",
+                        },
+                        {
                             type: "commandExecution",
                             id: "item-cmd-1",
                             command: "ls",
