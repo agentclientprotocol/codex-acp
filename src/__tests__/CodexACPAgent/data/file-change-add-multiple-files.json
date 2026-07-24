@@ -28,7 +28,37 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/FileA.kt"
+          },
+          {
+            "path": "/test/project/FileB.kt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/FileA.kt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "class FileA\n"
+            },
+            {
+              "path": "/test/project/FileB.kt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "class FileB\n"
+            }
+          ]
+        },
+        "rawOutput": {
+          "status": "completed",
+          "success": true
+        }
       }
     }
   ]

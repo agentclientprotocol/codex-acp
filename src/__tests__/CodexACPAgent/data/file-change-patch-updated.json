@@ -1,0 +1,44 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "file-change-patch-updated",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "diff",
+            "oldText": "before context\nold value\nafter context",
+            "newText": "before context\nnew value\nafter context",
+            "path": "/test/project/UpdatedFile.kt",
+            "_meta": {
+              "kind": "update",
+              "old_start": 40,
+              "new_start": 40
+            }
+          }
+        ],
+        "locations": [
+          {
+            "path": "/test/project/UpdatedFile.kt",
+            "line": 40
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/UpdatedFile.kt",
+              "kind": {
+                "type": "update",
+                "move_path": null
+              },
+              "diff": "@@ -40,3 +40,3 @@\n before context\n-old value\n+new value\n after context\n"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

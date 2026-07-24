@@ -263,7 +263,27 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/Added.txt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/Added.txt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "Hello\nWorld\n"
+            }
+          ]
+        },
+        "rawOutput": {
+          "status": "completed",
+          "success": true
+        }
       }
     }
   ]

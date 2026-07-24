@@ -19,7 +19,27 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/NewFile.kt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/NewFile.kt",
+              "kind": {
+                "type": "add"
+              },
+              "diff": "package test.project\n\nclass NewFile {\n    fun hello() = \"Hello\"\n}\n"
+            }
+          ]
+        },
+        "rawOutput": {
+          "status": "completed",
+          "success": true
+        }
       }
     }
   ]
