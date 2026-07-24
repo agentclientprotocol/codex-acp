@@ -1,6 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
 import type {CreateElicitationResponse, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
-import {CodexAcpClient} from '../CodexAcpClient';
+import {CodexAcpClient, type JsonObject} from '../CodexAcpClient';
 import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';
 import {startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexAcpServer, type SessionState} from "../CodexAcpServer";
@@ -85,6 +85,7 @@ export interface ConnectionConfig {
     connection: MessageConnection;
     getExitCode: () => number | null;
     acpConnection?: AcpConnectionConfig;
+    codexConfig?: JsonObject;
 }
 
 export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
@@ -97,7 +98,7 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
     });
 
     const codexAppServerClient = new CodexAppServerClient(config.connection);
-    const codexAcpClient = new CodexAcpClient(codexAppServerClient);
+    const codexAcpClient = new CodexAcpClient(codexAppServerClient, config.codexConfig);
     const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient, undefined, config.getExitCode);
 
     const transportEvents: CodexConnectionEvent[] = [];
@@ -255,7 +256,7 @@ export interface CodexMockTestFixture extends TestFixture {
  * Provides `sendServerRequest()` to simulate server-initiated requests (e.g., approval requests).
  * Provides `setPermissionResponse()` to control ACP permission dialog responses.
  */
-export function createCodexMockTestFixture(): CodexMockTestFixture {
+export function createCodexMockTestFixture(options?: { codexConfig?: JsonObject }): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
 
@@ -307,7 +308,8 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
             connection: acpConnection,
             events: acpConnectionEvents,
             eventHandlers: acpEventHandlers,
-        }
+        },
+        ...(options?.codexConfig != null ? { codexConfig: options.codexConfig } : {}),
     });
 
     return {
