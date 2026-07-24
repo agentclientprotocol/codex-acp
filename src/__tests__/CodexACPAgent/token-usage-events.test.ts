@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
-import type { TokenUsageBreakdown } from '../../app-server/v2';
+import type { RateLimitSnapshot, TokenUsageBreakdown } from '../../app-server/v2';
 
 function createTokenUsageNotification(
     sessionId: string,
@@ -18,6 +18,13 @@ function createTokenUsageNotification(
             turnId: 'turn-id',
             tokenUsage,
         },
+    };
+}
+
+function createRateLimitsNotification(rateLimits: RateLimitSnapshot): ServerNotification {
+    return {
+        method: 'account/rateLimits/updated',
+        params: { rateLimits },
     };
 }
 
@@ -240,6 +247,103 @@ describe('Token Usage Events', () => {
             ])();
 
             await expect(`${JSON.stringify(events, null, 2)}\n`).toMatchFileSnapshot('data/token-usage-session-update-multiple.json');
+        });
+
+        it('should emit stored rate limits on usage updates', async () => {
+            const events = await setupPromptAndReturnEvents([
+                createRateLimitsNotification({
+                    limitId: 'standard-limit',
+                    limitName: 'Standard',
+                    primary: { usedPercent: 30, resetsAt: 1_800_000_000, windowDurationMins: 300 },
+                    secondary: null,
+                    credits: null,
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                }),
+                createTokenUsageNotification(sessionId, {
+                    total: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
+                    last: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
+                    modelContextWindow: 128000,
+                }),
+                createRateLimitsNotification({
+                    limitId: 'fast-limit',
+                    limitName: 'Fast',
+                    primary: { usedPercent: 50, resetsAt: 1_800_500_000, windowDurationMins: 60 },
+                    secondary: null,
+                    credits: null,
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                }),
+            ])();
+
+            await expect(`${JSON.stringify(events, null, 2)}\n`).toMatchFileSnapshot('data/rate-limits-usage-updates.json');
+        });
+
+        it('should preserve known values across sparse rate-limit updates', async () => {
+            const events = await setupPromptAndReturnEvents([
+                createTokenUsageNotification(sessionId, {
+                    total: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
+                    last: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
+                    modelContextWindow: 128000,
+                }),
+                createRateLimitsNotification({
+                    limitId: 'standard-limit',
+                    limitName: 'Standard',
+                    primary: { usedPercent: 30, resetsAt: 1_800_000_000, windowDurationMins: 300 },
+                    secondary: { usedPercent: 60, resetsAt: 1_800_500_000, windowDurationMins: 1440 },
+                    credits: { hasCredits: true, unlimited: false, balance: '12.50' },
+                    individualLimit: { limit: '100.00', used: '25.00', remainingPercent: 75, resetsAt: 1_801_000_000 },
+                    spendControlReached: false,
+                    planType: 'plus',
+                    rateLimitReachedType: 'rate_limit_reached',
+                }),
+                createRateLimitsNotification({
+                    limitId: null,
+                    limitName: 'Standard',
+                    primary: { usedPercent: 35, resetsAt: 1_800_100_000, windowDurationMins: 300 },
+                    secondary: null,
+                    credits: null,
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                }),
+                createRateLimitsNotification({
+                    limitId: 'standard-limit',
+                    limitName: null,
+                    primary: null,
+                    secondary: { usedPercent: 65, resetsAt: 1_800_600_000, windowDurationMins: 1440 },
+                    credits: null,
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                }),
+            ])();
+
+            expect(events.at(-1)).toMatchObject({
+                args: [{
+                    update: {
+                        _meta: {
+                            '_codex/rateLimits': [{
+                                limitId: 'standard-limit',
+                                limitName: 'Standard',
+                                primary: { usedPercent: 35, resetsAt: 1_800_100_000, windowDurationMins: 300 },
+                                secondary: { usedPercent: 65, resetsAt: 1_800_600_000, windowDurationMins: 1440 },
+                                credits: { hasCredits: true, unlimited: false, balance: '12.50' },
+                                individualLimit: { limit: '100.00', used: '25.00', remainingPercent: 75, resetsAt: 1_801_000_000 },
+                                spendControlReached: false,
+                                planType: 'plus',
+                                rateLimitReachedType: 'rate_limit_reached',
+                            }],
+                        },
+                    },
+                }],
+            });
         });
 
         it('should skip usage_update when model context window is unavailable', async () => {
