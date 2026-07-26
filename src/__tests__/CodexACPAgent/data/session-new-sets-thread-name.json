@@ -1,0 +1,23 @@
+{
+  "eventType": "request",
+  "method": "thread/name/set",
+  "params": {
+    "threadId": "thread-id",
+    "name": "Fizz · #buzz-dev"
+  }
+}
+{
+  "eventType": "response"
+}
+{
+  "eventType": "request",
+  "method": "skills/list",
+  "params": {
+    "cwds": [
+      ""
+    ]
+  }
+}
+{
+  "eventType": "response"
+}

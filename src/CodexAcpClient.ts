@@ -389,6 +389,8 @@ export class CodexAcpClient {
             cwd: request.cwd,
         });
 
+        const sessionTitle = await this.applySessionTitle(response.thread.id, request._meta);
+
         const codexModels = await this.fetchAvailableModels();
         if (codexModels.length === 0) {
             throw new Error("Codex did not return any models");
@@ -402,7 +404,31 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            sessionTitle,
         };
+    }
+
+    /**
+     * Name the thread from `_meta.sessionTitle`, supplied out of band by the
+     * client so the title never enters the prompt.
+     *
+     * Returns the applied title, or `null` when none was requested or the
+     * naming request failed. Naming is cosmetic: a failure must not fail
+     * session creation, so errors are logged and swallowed.
+     */
+    private async applySessionTitle(
+        threadId: string,
+        meta?: Record<string, unknown> | null,
+    ): Promise<string | null> {
+        const title = readMetaSessionTitle(meta);
+        if (!title) return null;
+        try {
+            await this.codexClient.threadSetName({threadId, name: title});
+            return title;
+        } catch (err) {
+            logger.error(`Failed to set thread name for ${threadId}`, err);
+            return null;
+        }
     }
 
     async closeSession(sessionId: string): Promise<void> {
@@ -901,6 +927,12 @@ export type SessionMetadata = {
     modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,
     additionalDirectories: string[],
+    /**
+     * Title applied to the thread from `_meta.sessionTitle`, or `null` when
+     * none was requested. Reported back so the caller can seed its title state
+     * synchronously and not let a fallback title overwrite an explicit one.
+     */
+    sessionTitle?: string | null,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
@@ -998,6 +1030,15 @@ function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[
         .filter((value): value is string => typeof value === "string")
         .map(value => value.trim())
         .filter(value => value.length > 0));
+}
+
+function readMetaSessionTitle(meta?: Record<string, unknown> | null): string | null {
+    const rawTitle = meta?.["sessionTitle"];
+    if (typeof rawTitle !== "string") {
+        return null;
+    }
+    const title = rawTitle.replace(/\s+/g, " ").trim();
+    return title.length > 0 ? title : null;
 }
 
 function readAdditionalDirectories(cwd: string, additionalDirectories?: string[],  meta?: Record<string, unknown> | null): string[] {
