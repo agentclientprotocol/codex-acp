@@ -49,12 +49,27 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
         collaborationMode: "default",
         additionalDirectories: [],
     });
+    const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate")
+        .mockResolvedValue(undefined);
 
     const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
-    return {fixture, codexAcpAgent, codexAcpClient, response};
+    return {fixture, codexAcpAgent, codexAcpClient, response, update};
 }
 
 describe("Session config options", () => {
+    it("distinguishes modes that share an approval policy and sandbox", () => {
+        expect(AgentMode.fromSettings(
+            AgentMode.ReadOnly.approvalPolicy,
+            AgentMode.ReadOnly.approvalsReviewer,
+            AgentMode.ReadOnly.sandboxPolicy,
+        )).toBe(AgentMode.ReadOnly);
+        expect(AgentMode.fromSettings(
+            AgentMode.Agent.approvalPolicy,
+            AgentMode.Agent.approvalsReviewer,
+            AgentMode.Agent.sandboxPolicy,
+        )).toBe(AgentMode.Agent);
+    });
+
     it("exposes mode, model, reasoning_effort and fast-mode in the new session response", async () => {
         const {fast, slow} = buildModels();
         const {response} = await createSession("fast-model[medium]", [fast, slow]);
@@ -158,23 +173,28 @@ describe("Session config options", () => {
 
     it("changes the agent mode via setSessionConfigOption", async () => {
         const {fast} = buildModels();
-        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast]);
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
 
         const result = await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
             configId: MODE_CONFIG_ID,
-            value: AgentMode.Agent.id,
+            value: AgentMode.ReadOnly.id,
         });
 
-        expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.Agent);
+        expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.ReadOnly);
+        expect(update).toHaveBeenCalledWith({
+            threadId: "session-id",
+            approvalPolicy: AgentMode.ReadOnly.approvalPolicy,
+            approvalsReviewer: AgentMode.ReadOnly.approvalsReviewer,
+            sandboxPolicy: AgentMode.ReadOnly.sandboxPolicy,
+        });
         const modeOption = result.configOptions?.find(o => o.id === MODE_CONFIG_ID);
-        expect((modeOption as any).currentValue).toBe(AgentMode.Agent.id);
+        expect((modeOption as any).currentValue).toBe(AgentMode.ReadOnly.id);
     });
 
     it("changes collaboration mode without starting a model turn", async () => {
         const {fast} = buildModels();
-        const {codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
-        const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
 
         const result = await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
@@ -192,8 +212,7 @@ describe("Session config options", () => {
 
     it("toggles collaboration mode with /plan without starting a model turn", async () => {
         const {fast} = buildModels();
-        const {fixture, codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
-        const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
+        const {fixture, codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
         const turnStart = vi.spyOn(fixture.getCodexAppServerClient(), "turnStart");
 
         const enabledResponse = await codexAcpAgent.prompt({
@@ -247,7 +266,7 @@ describe("Session config options", () => {
 
     it("changes the model and keeps the current reasoning effort when supported", async () => {
         const {fast, slow} = buildModels();
-        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast, slow]);
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast, slow]);
 
         await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
@@ -256,6 +275,11 @@ describe("Session config options", () => {
         });
 
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("slow-model[medium]");
+        expect(update).toHaveBeenCalledWith({
+            threadId: "session-id",
+            model: "slow-model",
+            effort: "medium",
+        });
     });
 
     it("falls back to the new model's default effort when the current effort is unsupported", async () => {
@@ -273,7 +297,7 @@ describe("Session config options", () => {
 
     it("changes only the reasoning effort", async () => {
         const {fast} = buildModels();
-        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast]);
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
 
         await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
@@ -282,6 +306,11 @@ describe("Session config options", () => {
         });
 
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("fast-model[high]");
+        expect(update).toHaveBeenCalledWith({
+            threadId: "session-id",
+            model: "fast-model",
+            effort: "high",
+        });
     });
 
     it("refreshes the cached model list when unstable_setSessionModel picks a freshly fetched model", async () => {
@@ -309,6 +338,7 @@ describe("Session config options", () => {
             defaultReasoningEffort: "medium",
         });
         vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue([fast, extraModel]);
+        vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
 
         await codexAcpAgent.unstable_setSessionModel({
             sessionId: "session-id",

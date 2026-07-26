@@ -122,6 +122,18 @@ export class AgentMode {
         return match ?? null;
     }
 
+    static fromSettings(
+        approvalPolicy: AskForApproval | undefined,
+        sandboxPolicy: SandboxPolicy | undefined,
+    ): AgentMode | null {
+        if (!sandboxPolicy) return null;
+        const match = AgentMode.all().find(mode =>
+            mode.approvalPolicy === approvalPolicy
+            && mode.sandboxPolicy.type === sandboxPolicy.type
+        );
+        return match ?? null;
+    }
+
     static getInitialAgentMode(): AgentMode {
         const predefinedAgentMode = process.env["INITIAL_AGENT_MODE"];
         if (predefinedAgentMode) {
