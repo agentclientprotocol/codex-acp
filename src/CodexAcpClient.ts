@@ -1032,12 +1032,38 @@ function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[
         .filter(value => value.length > 0));
 }
 
+/** Upper bound on the length of a title requested through `_meta`. */
+const SESSION_TITLE_MAX_CHARS = 80;
+
+/**
+ * Read and sanitize the title requested in `_meta.sessionTitle`.
+ *
+ * Whitespace collapses to single spaces, control and format characters are
+ * dropped, and the result is capped at [`SESSION_TITLE_MAX_CHARS`] code points.
+ * Returns `null` when the value is absent, not a string, or has nothing
+ * printable left.
+ *
+ * This is the ACP boundary for arbitrary clients, and Codex's own thread-name
+ * normalization only trims: without a cap and a control-character filter an
+ * unbounded or invisible-character title would be persisted verbatim into the
+ * Codex thread store.
+ */
 function readMetaSessionTitle(meta?: Record<string, unknown> | null): string | null {
     const rawTitle = meta?.["sessionTitle"];
     if (typeof rawTitle !== "string") {
         return null;
     }
-    const title = rawTitle.replace(/\s+/g, " ").trim();
+    const collapsed = rawTitle
+        // Whitespace controls become spaces before the control filter runs, so
+        // a newline separates words instead of joining them.
+        .replace(/\s/gu, " ")
+        // Cc/Cf/Cs carry no printable meaning; Cf covers zero-width spaces and
+        // bidi overrides, Cs covers lone surrogates.
+        .replace(/[\p{Cc}\p{Cf}\p{Cs}]/gu, "")
+        .replace(/ +/g, " ")
+        .trim();
+    // Slice by code point, not by UTF-16 unit, so the cap can't split a pair.
+    const title = Array.from(collapsed).slice(0, SESSION_TITLE_MAX_CHARS).join("").trimEnd();
     return title.length > 0 ? title : null;
 }
 

@@ -475,6 +475,10 @@ export class CodexAcpServer {
         this.sessions.set(sessionId, sessionState);
         resumeSubscribed = false;
 
+        if (sessionState.sessionTitleSource === "explicit" && sessionState.sessionTitle) {
+            this.publishExplicitSessionTitleAsync(sessionId, sessionGeneration, sessionState.sessionTitle);
+        }
+
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.pendingMcpStartupSessions.set(sessionId, {
                 requestedServers: new Set(getRequestedMcpServerNames(requestedMcpServers)),
@@ -1592,6 +1596,48 @@ export class CodexAcpServer {
 
     private publishMcpStartupStatusAsync(sessionId: string): void {
         void this.doPublishMcpStartupStatus(sessionId);
+    }
+
+    /**
+     * Publish the title the client requested in `_meta`, once, after the
+     * `session/new` response has been written.
+     *
+     * The SDK's client installs its per-session update queue only when
+     * `session/new` resolves, and drops updates for sessions that have no queue
+     * attached, so an update emitted from inside the create path would be lost
+     * for a legitimate client. `setImmediate` puts the publish behind a
+     * macrotask boundary, which drains the microtasks that hand the response to
+     * the connection, and the connection serializes its writes — so the
+     * notification can only leave after the response.
+     */
+    private publishExplicitSessionTitleAsync(sessionId: string, generation: number, title: string): void {
+        setImmediate(() => {
+            void this.doPublishExplicitSessionTitle(sessionId, generation, title);
+        });
+    }
+
+    private async doPublishExplicitSessionTitle(
+        sessionId: string,
+        generation: number,
+        title: string,
+    ): Promise<void> {
+        const sessionState = this.sessions.get(sessionId);
+        // A session closed, reopened, or renamed during the gap must not be
+        // told about a title that is no longer its own.
+        if (!sessionState
+            || !this.sessionOpenCanInstall(sessionId, generation)
+            || sessionState.sessionTitleSource !== "explicit"
+            || sessionState.sessionTitle !== title) {
+            return;
+        }
+        try {
+            await new ACPSessionConnection(this.connection, sessionId).update({
+                sessionUpdate: "session_info_update",
+                title,
+            });
+        } catch (err) {
+            logger.error(`Failed to publish session title for session ${sessionId}`, err);
+        }
     }
 
     private async doPublishMcpStartupStatus(sessionId: string): Promise<void> {

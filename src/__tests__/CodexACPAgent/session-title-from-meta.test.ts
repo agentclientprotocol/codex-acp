@@ -3,7 +3,7 @@ import {createCodexMockTestFixture, createTestModel, type CodexMockTestFixture} 
 import type * as acp from "@agentclientprotocol/sdk";
 
 const threadId = "thread-id";
-const sessionTitle = "Fizz · #buzz-dev";
+const sessionTitle = "Nightly · #release-prep";
 
 describe("session title from _meta", () => {
     it("names the thread with the title supplied in _meta", async () => {
@@ -29,15 +29,52 @@ describe("session title from _meta", () => {
     it("collapses whitespace in the requested title before naming the thread", async () => {
         const fixture = createFixture();
 
-        await fixture.getCodexAcpAgent().newSession(newSessionRequest({sessionTitle: "  Fizz  ·\n\t#buzz-dev  "}));
+        await fixture.getCodexAcpAgent().newSession(
+            newSessionRequest({sessionTitle: "  Nightly  ·\n\t#release-prep  "}),
+        );
 
         expect(threadNamesSet(fixture)).toEqual([sessionTitle]);
+    });
+
+    it("strips control characters from the requested title", async () => {
+        const fixture = createFixture();
+
+        await fixture.getCodexAcpAgent().newSession(
+            newSessionRequest({sessionTitle: "Nightly\u0007 \u200b·\u202e #release-prep"}),
+        );
+
+        expect(threadNamesSet(fixture)).toEqual([sessionTitle]);
+    });
+
+    it("caps an over-long requested title", async () => {
+        const fixture = createFixture();
+        const requested = "a".repeat(500);
+
+        await fixture.getCodexAcpAgent().newSession(newSessionRequest({sessionTitle: requested}));
+
+        expect(threadNamesSet(fixture)).toEqual(["a".repeat(80)]);
+    });
+
+    it("caps an over-long requested title without splitting a surrogate pair", async () => {
+        const fixture = createFixture();
+
+        await fixture.getCodexAcpAgent().newSession(newSessionRequest({sessionTitle: "😀".repeat(200)}));
+
+        expect(threadNamesSet(fixture)).toEqual(["😀".repeat(80)]);
     });
 
     it("does not name the thread when the requested title is blank", async () => {
         const fixture = createFixture();
 
         await fixture.getCodexAcpAgent().newSession(newSessionRequest({sessionTitle: " \n\t "}));
+
+        expect(threadNamesSet(fixture)).toEqual([]);
+    });
+
+    it("does not name the thread when the requested title is only control characters", async () => {
+        const fixture = createFixture();
+
+        await fixture.getCodexAcpAgent().newSession(newSessionRequest({sessionTitle: "\u0007\u200b\u202e"}));
 
         expect(threadNamesSet(fixture)).toEqual([]);
     });
@@ -50,7 +87,7 @@ describe("session title from _meta", () => {
         expect(threadNamesSet(fixture)).toEqual([]);
     });
 
-    it("seeds the session title state so a prompt fallback cannot overwrite it", async () => {
+    it("records the applied title as the explicit title in the session state", async () => {
         const fixture = createFixture();
 
         const response = await fixture.getCodexAcpAgent().newSession(newSessionRequest({sessionTitle}));
