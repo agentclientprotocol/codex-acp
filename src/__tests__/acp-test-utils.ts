@@ -254,28 +254,22 @@ export interface CodexMockTestFixture extends TestFixture {
     setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void,
 }
 
+export interface MockCodexConnection {
+    connection: MessageConnection,
+    sendServerNotification(notification: ServerNotification | Record<string, unknown>): void,
+    sendServerRequest<T>(method: string, params: unknown): Promise<T>,
+}
+
 /**
- * Creates a test fixture with a mock Codex connection.
- * Use for unit tests that don't need a real Codex binary.
- * Provides `sendServerNotification()` to simulate server notifications.
- * Provides `sendServerRequest()` to simulate server-initiated requests (e.g., approval requests).
- * Provides `setPermissionResponse()` to control ACP permission dialog responses.
+ * Creates a mock Codex `MessageConnection` that records nothing and answers
+ * every request with `undefined`, so callers spy on the wrapper methods they
+ * care about.
  */
-export function createCodexMockTestFixture(
-    restartCodexClient?: () => Promise<CodexAcpClient>,
-): CodexMockTestFixture {
+export function createMockCodexConnection(): MockCodexConnection {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
 
-    // State for controlling permission responses
-    const permissionState: { response: RequestPermissionResponse | Promise<RequestPermissionResponse> } = {
-        response: { outcome: { outcome: 'cancelled' } }
-    };
-    const elicitationState: { response: CreateElicitationResponse | Promise<CreateElicitationResponse> } = {
-        response: { action: 'cancel' }
-    };
-
-    const mockCodexConnection = {
+    const connection = {
         sendRequest: () => Promise.resolve(undefined),
         onUnhandledNotification: (handler: (notification: any) => void) => {
             unhandledNotificationHandler = handler;
@@ -286,6 +280,41 @@ export function createCodexMockTestFixture(
         },
         end: () => {},
     } as unknown as MessageConnection;
+
+    return {
+        connection,
+        sendServerNotification(notification: ServerNotification | Record<string, unknown>): void {
+            unhandledNotificationHandler?.(notification);
+        },
+        async sendServerRequest<T>(method: string, params: unknown): Promise<T> {
+            const handler = requestHandlers.get(method);
+            if (!handler) {
+                throw new Error(`No handler registered for ${method}`);
+            }
+            return await handler(params) as T;
+        },
+    };
+}
+
+/**
+ * Creates a test fixture with a mock Codex connection.
+ * Use for unit tests that don't need a real Codex binary.
+ * Provides `sendServerNotification()` to simulate server notifications.
+ * Provides `sendServerRequest()` to simulate server-initiated requests (e.g., approval requests).
+ * Provides `setPermissionResponse()` to control ACP permission dialog responses.
+ */
+export function createCodexMockTestFixture(
+    restartCodexClient?: () => Promise<CodexAcpClient>,
+): CodexMockTestFixture {
+    const mockCodexConnection = createMockCodexConnection();
+
+    // State for controlling permission responses
+    const permissionState: { response: RequestPermissionResponse | Promise<RequestPermissionResponse> } = {
+        response: { outcome: { outcome: 'cancelled' } }
+    };
+    const elicitationState: { response: CreateElicitationResponse | Promise<CreateElicitationResponse> } = {
+        response: { action: 'cancel' }
+    };
 
     // Create ACP connection with configurable permission response
     const acpConnectionEvents: MethodCallEvent[] = [];
@@ -309,7 +338,7 @@ export function createCodexMockTestFixture(
     }, { returnValues });
 
     const baseFixture = createBaseTestFixture({
-        connection: mockCodexConnection,
+        connection: mockCodexConnection.connection,
         getExitCode: () => null,
         acpConnection: {
             connection: acpConnection,
@@ -324,18 +353,8 @@ export function createCodexMockTestFixture(
 
     return {
         ...baseFixture,
-        sendServerNotification(notification: ServerNotification | Record<string, unknown>): void {
-            if (unhandledNotificationHandler) {
-                unhandledNotificationHandler(notification);
-            }
-        },
-        async sendServerRequest<T>(method: string, params: unknown): Promise<T> {
-            const handler = requestHandlers.get(method);
-            if (!handler) {
-                throw new Error(`No handler registered for ${method}`);
-            }
-            return await handler(params) as T;
-        },
+        sendServerNotification: mockCodexConnection.sendServerNotification,
+        sendServerRequest: mockCodexConnection.sendServerRequest,
         setPermissionResponse(response: RequestPermissionResponse | Promise<RequestPermissionResponse>): void {
             permissionState.response = response;
         },

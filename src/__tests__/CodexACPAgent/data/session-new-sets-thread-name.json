@@ -3,7 +3,7 @@
   "method": "thread/name/set",
   "params": {
     "threadId": "thread-id",
-    "name": "Fizz · #buzz-dev"
+    "name": "Nightly · #release-prep"
   }
 }
 {
