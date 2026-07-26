@@ -624,8 +624,12 @@ export class CodexAcpServer {
             sessionMcpServers: sessionMcpServers,
             terminalOutputMode: this.terminalOutputMode,
             goalRevision: 0,
-            sessionTitle: null,
-            sessionTitleSource: "sessionId" in request ? "unknown" : "unset",
+            sessionTitle: sessionMetadata.sessionTitle ?? null,
+            // Seed from the title the client already applied, so a later
+            // fallback title cannot overwrite an explicit one.
+            sessionTitleSource: "sessionId" in request
+                ? "unknown"
+                : (sessionMetadata.sessionTitle ? "explicit" : "unset"),
         };
         this.sessions.set(sessionId, sessionState);
         resumeSubscribed = false;
