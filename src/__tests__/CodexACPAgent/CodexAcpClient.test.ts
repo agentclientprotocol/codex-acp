@@ -454,7 +454,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
-    it('restores collaboration mode for resumed and loaded sessions', async () => {
+    it('restores collaboration and agent modes for resumed and loaded sessions', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
         const codexAcpClient = mockFixture.getCodexAcpClient();
@@ -483,6 +483,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 modelProvider: "openai",
                 reasoningEffort: "medium",
                 serviceTier: null,
+                approvalPolicy: "never",
+                sandbox: {type: "dangerFullAccess"},
             } as any;
         });
         vi.spyOn(codexAppServerClient, "threadRead").mockImplementation(async ({threadId}) => ({
@@ -505,8 +507,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         expect(codexAcpAgent.getSessionState("resume-id").collaborationMode).toBe("plan");
         expect(codexAcpAgent.getSessionState("load-id").collaborationMode).toBe("plan");
+        expect(codexAcpAgent.getSessionState("resume-id").agentMode).toBe(AgentMode.AgentFullAccess);
+        expect(codexAcpAgent.getSessionState("load-id").agentMode).toBe(AgentMode.AgentFullAccess);
         expect(resumed.configOptions?.find(option => option.id === "collaboration_mode")).toMatchObject({currentValue: "plan"});
         expect(loaded.configOptions?.find(option => option.id === "collaboration_mode")).toMatchObject({currentValue: "plan"});
+        expect(resumed.configOptions?.find(option => option.id === "mode")).toMatchObject({currentValue: "agent-full-access"});
+        expect(loaded.configOptions?.find(option => option.id === "mode")).toMatchObject({currentValue: "agent-full-access"});
     });
 
     it('uses configured model provider when resuming sessions without an explicit provider', async () => {
