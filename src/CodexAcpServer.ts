@@ -538,6 +538,7 @@ export class CodexAcpServer {
             availableModelCount: modelState.availableModels.length
         });
         return {
+            sessionId,
             models: modelState,
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
