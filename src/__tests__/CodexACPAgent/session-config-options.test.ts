@@ -206,6 +206,35 @@ describe("Session config options", () => {
         await modeChange;
     });
 
+    it("uses a new agent mode when it changes during prompt preparation", async () => {
+        const {fast} = buildModels();
+        const {fixture, codexAcpAgent} = await createSession("fast-model[medium]", [fast]);
+        const sessionState = codexAcpAgent.getSessionState("session-id");
+        const turnStartSpy = mockPromptTurn(fixture, sessionState.sessionId);
+        const skillRefresh = deferred<{data: []}>();
+        const listSkillsSpy = vi.spyOn(fixture.getCodexAppServerClient(), "listSkills")
+            .mockReturnValue(skillRefresh.promise);
+
+        const prompt = codexAcpAgent.prompt({
+            sessionId: sessionState.sessionId,
+            prompt: [{type: "text", text: "test"}],
+        });
+        await vi.waitFor(() => expect(listSkillsSpy).toHaveBeenCalled());
+
+        await codexAcpAgent.setSessionConfigOption({
+            sessionId: sessionState.sessionId,
+            configId: MODE_CONFIG_ID,
+            value: AgentMode.AgentFullAccess.id,
+        });
+        skillRefresh.resolve({data: []});
+        await prompt;
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            approvalPolicy: AgentMode.AgentFullAccess.approvalPolicy,
+            sandboxPolicy: AgentMode.AgentFullAccess.sandboxPolicy,
+        }));
+    });
+
     it("rolls back the agent mode when thread persistence fails", async () => {
         const {fast} = buildModels();
         const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);

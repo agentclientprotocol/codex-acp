@@ -1993,7 +1993,6 @@ export class CodexAcpServer {
             if (!sessionState.supportedInputModalities.includes("image") && params.prompt.some(b => b.type === "image")) {
                 throw RequestError.invalidRequest("The current model does not support image input");
             }
-            const agentMode = sessionState.agentMode;
             const serviceTier = resolveFastServiceTier(
                 sessionState.fastModeEnabled,
                 sessionState.currentModelSupportsFast,
@@ -2002,7 +2001,7 @@ export class CodexAcpServer {
             const sendPromptPromise = this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(
                     params,
-                    agentMode,
+                    () => sessionState.agentMode,
                     modelId,
                     serviceTier,
                     disableSummary,
