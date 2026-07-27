@@ -153,7 +153,11 @@ describe("CodexEventHandler - plan events", () => {
         );
     });
 
-    it("keeps turn plan updates as ACP checklist updates", async () => {
+    it("keeps turn plan updates as standard ACP checklist updates when plan_update is supported", async () => {
+        await mockFixture.getCodexAcpAgent().initialize({
+            protocolVersion: 1,
+            clientCapabilities: {plan: {}},
+        });
         const notifications: ServerNotification[] = [
             {
                 method: "turn/plan/updated",
