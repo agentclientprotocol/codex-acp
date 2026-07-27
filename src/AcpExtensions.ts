@@ -50,6 +50,7 @@ export type LegacyNewSessionResponse = NewSessionResponse & {
 }
 
 export type LegacyLoadSessionResponse = LoadSessionResponse & {
+    sessionId: SessionId;
     models?: LegacySessionModelState | null;
 }
 
