@@ -761,7 +761,7 @@ export class CodexAcpClient {
 
     async sendPrompt(
         request: acp.PromptRequest,
-        agentMode: AgentMode,
+        getAgentMode: () => AgentMode,
         modelId: ModelId,
         serviceTier: ServiceTier | null,
         disableSummary: boolean,
@@ -776,6 +776,7 @@ export class CodexAcpClient {
         if (shouldCancel?.()) {
             return null;
         }
+        const agentMode = getAgentMode();
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
