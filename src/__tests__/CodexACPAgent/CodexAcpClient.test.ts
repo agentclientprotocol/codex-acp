@@ -1270,7 +1270,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             }
         });
 
-        const sessionState: SessionState = createTestSessionState();
+        const sessionState: SessionState = createTestSessionState({
+            supportedInputModalities: ["text", "image", "audio"],
+        });
         vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
 
         const prompt: acp.ContentBlock[] = [
@@ -1280,6 +1282,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             { type: "resource", resource: { uri: "file:///tmp/notes.txt", text: "Notes body" } as acp.EmbeddedResourceResource },
             { type: "resource", resource: { uri: "file:///tmp/pixel.png", mimeType: "image/png", blob: "iVBORw0KGgo=" } as acp.EmbeddedResourceResource },
             { type: "resource", resource: { uri: "file:///tmp/archive.bin", mimeType: "application/octet-stream", blob: "AAEC" } as acp.EmbeddedResourceResource },
+            { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
         ];
 
         await codexAcpAgent.prompt({ sessionId: "session-id", prompt });
@@ -3270,6 +3273,19 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 { type: "image", url: "https://example.com/image.png" },
             ]
         }));
+    });
+
+    it ('should reject prompt with audio when model does not support audio input', async () => {
+        const { mockFixture } = setupPromptFixture({
+            supportedInputModalities: ["text", "image"],
+        });
+
+        const prompt: acp.ContentBlock[] = [
+            { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
+        ];
+
+        await expect(mockFixture.getCodexAcpAgent().prompt({ sessionId: "id", prompt }))
+            .rejects.toThrow("Invalid request");
     });
 
     it ('should use inline image data for internal image URIs', async () => {

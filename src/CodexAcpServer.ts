@@ -228,7 +228,8 @@ export class CodexAcpServer {
                 loadSession: true,
                 promptCapabilities: {
                     embeddedContext: true,
-                    image: true
+                    image: true,
+                    audio: true
                 },
                 sessionCapabilities: {
                     resume: { },
@@ -958,12 +959,16 @@ export class CodexAcpServer {
 
     /**
      * Rejects a steering prompt whose content the active model cannot accept
-     * (currently: image blocks on a text-only model).
+     * (currently: image or audio blocks when their modality is unsupported).
      */
     private assertSteerInputSupported(params: SessionSteerRequest, sessionState: SessionState): void {
         const hasImage = params.prompt.some(block => block.type === "image");
         if (hasImage && !sessionState.supportedInputModalities.includes("image")) {
             throw RequestError.invalidRequest("The current model does not support image input");
+        }
+        const hasAudio = params.prompt.some(block => block.type === "audio");
+        if (hasAudio && !sessionState.supportedInputModalities.includes("audio")) {
+            throw RequestError.invalidRequest("The current model does not support audio input");
         }
     }
 
@@ -1974,6 +1979,9 @@ export class CodexAcpServer {
 
             if (!sessionState.supportedInputModalities.includes("image") && params.prompt.some(b => b.type === "image")) {
                 throw RequestError.invalidRequest("The current model does not support image input");
+            }
+            if (!sessionState.supportedInputModalities.includes("audio") && params.prompt.some(b => b.type === "audio")) {
+                throw RequestError.invalidRequest("The current model does not support audio input");
             }
             const agentMode = sessionState.agentMode;
             const serviceTier = resolveFastServiceTier(
