@@ -155,6 +155,27 @@ describe('Approval Events', () => {
                 expect.objectContaining({
                     optionId: ApprovalOptionId.AcceptWithExecpolicyAmendment,
                     kind: 'allow_always',
+                    _meta: {
+                        permission: {
+                            version: 1,
+                            changes: [{
+                                type: 'policy_rule',
+                                operation: 'add',
+                                ruleBehavior: 'allow',
+                                description: 'Allow commands starting with npm install',
+                                targets: [{
+                                    type: 'command',
+                                    matcher: {
+                                        type: 'argv_prefix',
+                                        argv: proposedExecpolicyAmendment,
+                                    },
+                                }],
+                            }],
+                        },
+                        codex: expect.objectContaining({
+                            execpolicyAmendment: proposedExecpolicyAmendment,
+                        }),
+                    },
                 })
             );
 
@@ -201,6 +222,27 @@ describe('Approval Events', () => {
                 expect.objectContaining({
                     optionId,
                     kind: 'allow_always',
+                    _meta: {
+                        permission: {
+                            version: 1,
+                            changes: [{
+                                type: 'policy_rule',
+                                operation: 'add',
+                                ruleBehavior: 'allow',
+                                description: 'Allow access to registry.npmjs.org',
+                                targets: [{
+                                    type: 'network',
+                                    matcher: {
+                                        type: 'host',
+                                        host: 'registry.npmjs.org',
+                                    },
+                                }],
+                            }],
+                        },
+                        codex: expect.objectContaining({
+                            networkPolicyAmendment,
+                        }),
+                    },
                 })
             );
 
@@ -384,6 +426,46 @@ describe('Approval Events', () => {
             );
 
             expect(response).toEqual({ decision: 'cancel' });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should describe a session write-root grant with common permission metadata', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: ApprovalOptionId.AllowAlways }
+            });
+
+            const params: FileChangeRequestApprovalParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                startedAtMs: 0,
+                itemId: 'file-change-grant-root',
+                reason: 'Write generated files',
+                grantRoot: '/workspace/generated',
+            };
+
+            await fixture.sendServerRequest('item/fileChange/requestApproval', params);
+
+            const request = fixture.getAcpConnectionEvents([])[0]!.args[0];
+            expect(request.options.find((option: { optionId: string }) => option.optionId === ApprovalOptionId.AllowAlways)?._meta)
+                .toMatchObject({
+                    permission: {
+                        version: 1,
+                        changes: [{
+                            type: 'grant',
+                            operation: 'grant',
+                            description: 'Allow writes under /workspace/generated for this session',
+                            lifetime: {scope: 'session'},
+                            targets: [{
+                                type: 'filesystem',
+                                access: ['write'],
+                                matcher: {type: 'directory', path: '/workspace/generated'},
+                            }],
+                        }],
+                    },
+                });
 
             completeTurn();
             await promptPromise;

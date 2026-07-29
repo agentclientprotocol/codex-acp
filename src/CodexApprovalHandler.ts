@@ -29,17 +29,28 @@ type FileChangeDecisionOption = {
     decision: FileChangeApprovalDecision;
 };
 
+type PermissionMetadata = {
+    version: 1;
+    changes: Array<Record<string, unknown>>;
+};
+
 function permissionOption(
     optionId: string,
     name: string,
     kind: acp.PermissionOptionKind,
     codexMeta?: Record<string, unknown>,
+    permission?: PermissionMetadata,
 ): acp.PermissionOption {
     return {
         optionId,
         name,
         kind,
-        ...(codexMeta ? { _meta: { codex: codexMeta } } : {}),
+        ...((codexMeta || permission) ? {
+            _meta: {
+                ...(permission ? {permission} : {}),
+                ...(codexMeta ? {codex: codexMeta} : {}),
+            },
+        } : {}),
     };
 }
 
@@ -175,12 +186,14 @@ export class CodexApprovalHandler implements ApprovalHandler {
                     "Allow for Session",
                     "allow_always",
                     { decision: "allowPermissionsForSession", permissions: params.permissions },
+                    this.permissionGrantMetadata(params.permissions, "session"),
                 ),
                 permissionOption(
                     ApprovalOptionId.AllowPermissionsForTurn,
                     "Allow Once",
                     "allow_once",
                     { decision: "allowPermissionsForTurn", permissions: params.permissions },
+                    this.permissionGrantMetadata(params.permissions, "turn"),
                 ),
                 permissionOption(
                     ApprovalOptionId.RejectPermissions,
@@ -265,6 +278,23 @@ export class CodexApprovalHandler implements ApprovalHandler {
                         : "Allow for Session",
                     "allow_always",
                     { decision: "acceptForSession" },
+                    params.networkApprovalContext ? {
+                        version: 1,
+                        changes: [{
+                            type: "grant",
+                            operation: "grant",
+                            description: `Allow access to ${params.networkApprovalContext.host} for this session`,
+                            lifetime: {scope: "session"},
+                            targets: [{
+                                type: "network",
+                                matcher: {
+                                    type: "host",
+                                    host: params.networkApprovalContext.host,
+                                    protocol: params.networkApprovalContext.protocol,
+                                },
+                            }],
+                        }],
+                    } : undefined,
                 ),
                 decision: "acceptForSession",
             },
@@ -279,6 +309,22 @@ export class CodexApprovalHandler implements ApprovalHandler {
                     {
                         decision: "acceptWithExecpolicyAmendment",
                         execpolicyAmendment: params.proposedExecpolicyAmendment,
+                    },
+                    {
+                        version: 1,
+                        changes: [{
+                            type: "policy_rule",
+                            operation: "add",
+                            ruleBehavior: "allow",
+                            description: `Allow commands starting with ${params.proposedExecpolicyAmendment.join(" ")}`,
+                            targets: [{
+                                type: "command",
+                                matcher: {
+                                    type: "argv_prefix",
+                                    argv: params.proposedExecpolicyAmendment,
+                                },
+                            }],
+                        }],
                     },
                 ),
                 decision: {
@@ -298,6 +344,24 @@ export class CodexApprovalHandler implements ApprovalHandler {
                     {
                         decision: "applyNetworkPolicyAmendment",
                         networkPolicyAmendment: amendment,
+                    },
+                    {
+                        version: 1,
+                        changes: [{
+                            type: "policy_rule",
+                            operation: "add",
+                            ruleBehavior: amendment.action,
+                            description: amendment.action === "allow"
+                                ? `Allow access to ${amendment.host}`
+                                : `Block access to ${amendment.host}`,
+                            targets: [{
+                                type: "network",
+                                matcher: {
+                                    type: "host",
+                                    host: amendment.host,
+                                },
+                            }],
+                        }],
                     },
                 ),
                 decision: {
@@ -328,6 +392,20 @@ export class CodexApprovalHandler implements ApprovalHandler {
                     params.grantRoot ? "Allow Root for Session" : "Allow for Session",
                     "allow_always",
                     { decision: "acceptForSession", grantRoot: params.grantRoot ?? null },
+                    params.grantRoot ? {
+                        version: 1,
+                        changes: [{
+                            type: "grant",
+                            operation: "grant",
+                            description: `Allow writes under ${params.grantRoot} for this session`,
+                            lifetime: {scope: "session"},
+                            targets: [{
+                                type: "filesystem",
+                                access: ["write"],
+                                matcher: {type: "directory", path: params.grantRoot},
+                            }],
+                        }],
+                    } : undefined,
                 ),
                 decision: "acceptForSession",
             },
@@ -350,6 +428,85 @@ export class CodexApprovalHandler implements ApprovalHandler {
         return {
             ...(permissions.network ? { network: permissions.network } : {}),
             ...(permissions.fileSystem ? { fileSystem: permissions.fileSystem } : {}),
+        };
+    }
+
+    private permissionGrantMetadata(
+        permissions: RequestPermissionProfile,
+        scope: "turn" | "session",
+    ): PermissionMetadata | undefined {
+        const changes: Array<Record<string, unknown>> = [];
+        const lifetime = {scope};
+        const suffix = scope === "session" ? " for this session" : " for this turn";
+
+        if (permissions.network?.enabled !== null && permissions.network?.enabled !== undefined) {
+            const allowed = permissions.network.enabled;
+            changes.push({
+                type: allowed ? "grant" : "policy_rule",
+                operation: allowed ? "grant" : "add",
+                ...(allowed ? {} : {ruleBehavior: "deny"}),
+                description: `${allowed ? "Allow" : "Deny"} network access${suffix}`,
+                lifetime,
+                targets: [{type: "network", matcher: {type: "any"}}],
+            });
+        }
+
+        const fileSystem = permissions.fileSystem;
+        for (const path of fileSystem?.read ?? []) {
+            changes.push(this.fileSystemGrantChange(path, "read", lifetime, suffix));
+        }
+        for (const path of fileSystem?.write ?? []) {
+            changes.push(this.fileSystemGrantChange(path, "write", lifetime, suffix));
+        }
+        for (const entry of fileSystem?.entries ?? []) {
+            const matcher = (() => {
+                switch (entry.path.type) {
+                    case "path":
+                        return {type: "exact_path", path: entry.path.path};
+                    case "glob_pattern":
+                        return {type: "glob", pattern: entry.path.pattern};
+                    case "special":
+                        return {type: "special", provider: "codex", value: entry.path.value};
+                }
+            })();
+            const pathDescription = entry.path.type === "path"
+                ? entry.path.path
+                : entry.path.type === "glob_pattern" ? entry.path.pattern : JSON.stringify(entry.path.value);
+            changes.push({
+                type: entry.access === "deny" ? "policy_rule" : "grant",
+                operation: entry.access === "deny" ? "add" : "grant",
+                ...(entry.access === "deny" ? {ruleBehavior: "deny"} : {}),
+                description: entry.access === "deny"
+                    ? `Deny filesystem access to ${pathDescription}${suffix}`
+                    : `Allow ${entry.access} access to ${pathDescription}${suffix}`,
+                lifetime,
+                targets: [{
+                    type: "filesystem",
+                    ...(entry.access === "deny" ? {} : {access: [entry.access]}),
+                    matcher,
+                }],
+            });
+        }
+
+        return changes.length > 0 ? {version: 1, changes} : undefined;
+    }
+
+    private fileSystemGrantChange(
+        path: string,
+        access: "read" | "write",
+        lifetime: {scope: "turn" | "session"},
+        suffix: string,
+    ): Record<string, unknown> {
+        return {
+            type: "grant",
+            operation: "grant",
+            description: `Allow ${access} access to ${path}${suffix}`,
+            lifetime,
+            targets: [{
+                type: "filesystem",
+                access: [access],
+                matcher: {type: "exact_path", path},
+            }],
         };
     }
 
