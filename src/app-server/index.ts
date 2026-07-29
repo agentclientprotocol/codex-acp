@@ -186,6 +186,7 @@ export type { ParsedCommand } from "./ParsedCommand";
 export type { PatchApplyBeginEvent } from "./PatchApplyBeginEvent";
 export type { PatchApplyEndEvent } from "./PatchApplyEndEvent";
 export type { PatchApplyStatus } from "./PatchApplyStatus";
+export type { PathUri } from "./PathUri";
 export type { PermissionProfile } from "./PermissionProfile";
 export type { Personality } from "./Personality";
 export type { PlanDeltaEvent } from "./PlanDeltaEvent";
