@@ -29,6 +29,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-123',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'ls -la',
                     cwd: '/test/project',
                     processId: null,
@@ -67,6 +69,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-shell-prefix',
+                    pluginId: null,
+                    scriptPath: null,
                     command,
                     cwd: '/test/project',
                     processId: null,
@@ -135,6 +139,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-123',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'ls -la',
                     cwd: '/test/project',
                     processId: 'pid-456',
@@ -165,6 +171,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-456',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'cat nonexistent.txt',
                     cwd: '/test/project',
                     processId: 'pid-789',
@@ -223,6 +231,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-flow',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'echo hello',
                     cwd: '/test/project',
                     processId: null,
@@ -255,6 +265,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-flow',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'echo hello',
                     cwd: '/test/project',
                     processId: 'pid-123',
@@ -295,6 +307,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-terminal-output',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'python manage.py migrate',
                     cwd: '/test/project',
                     processId: null,
@@ -335,6 +349,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-terminal-output',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'python manage.py migrate',
                     cwd: '/test/project',
                     processId: 'pid-456',
@@ -376,6 +392,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-terminal-output-completion',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'git status --short',
                     cwd: '/test/project',
                     processId: null,
@@ -397,6 +415,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-terminal-output-completion',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'git status --short',
                     cwd: '/test/project',
                     processId: 'pid-456',
@@ -436,6 +456,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-read-file',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'cat README.md',
                     cwd: '/test/project',
                     processId: null,
@@ -473,6 +495,8 @@ describe('CodexEventHandler - terminal output events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-read-file',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'cat README.md',
                     cwd: '/test/project',
                     processId: 'pid-456',
