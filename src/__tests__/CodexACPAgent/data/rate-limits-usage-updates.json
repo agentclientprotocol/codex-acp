@@ -1,0 +1,81 @@
+[
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "test-session-id",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 1000,
+          "size": 128000,
+          "_meta": {
+            "_codex/rateLimits": [
+              {
+                "limitId": "standard-limit",
+                "limitName": "Standard",
+                "primary": {
+                  "usedPercent": 30,
+                  "resetsAt": 1800000000,
+                  "windowDurationMins": 300
+                },
+                "secondary": null,
+                "credits": null,
+                "individualLimit": null,
+                "spendControlReached": null,
+                "planType": null,
+                "rateLimitReachedType": null
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "test-session-id",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 1000,
+          "size": 128000,
+          "_meta": {
+            "_codex/rateLimits": [
+              {
+                "limitId": "standard-limit",
+                "limitName": "Standard",
+                "primary": {
+                  "usedPercent": 30,
+                  "resetsAt": 1800000000,
+                  "windowDurationMins": 300
+                },
+                "secondary": null,
+                "credits": null,
+                "individualLimit": null,
+                "spendControlReached": null,
+                "planType": null,
+                "rateLimitReachedType": null
+              },
+              {
+                "limitId": "fast-limit",
+                "limitName": "Fast",
+                "primary": {
+                  "usedPercent": 50,
+                  "resetsAt": 1800500000,
+                  "windowDurationMins": 60
+                },
+                "secondary": null,
+                "credits": null,
+                "individualLimit": null,
+                "spendControlReached": null,
+                "planType": null,
+                "rateLimitReachedType": null
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+]
