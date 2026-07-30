@@ -31,6 +31,90 @@ describe("ResponseItemHistoryFallback", () => {
         expect(toolCallUpdateStatuses(updates)).toEqual([]);
     });
 
+    it("recovers scripted tool calls recorded as custom_tool_call", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            customToolCall(
+                "call-scripted",
+                'const r = await tools.exec_command({"cmd":"echo hello"});\ntext(r.output);\n',
+            ),
+            customToolCallOutput("call-scripted", "Script completed\nOutput:\n", "hello\n"),
+        ]), "terminal_output", new Set());
+
+        expect(toolCallIds(updates)).toEqual(["call-scripted"]);
+        expect(toolCallUpdateStatuses(updates)).toEqual([
+            { toolCallId: "call-scripted", status: "completed" },
+        ]);
+    });
+
+    it("surfaces the script itself, since what a script ran is not recorded", () => {
+        const script = 'for (const cmd of ["echo alpha", "echo beta"]) { await tools.exec_command({cmd}); }';
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            customToolCall("call-loop", script),
+        ]), "terminal_output", new Set());
+
+        const serialized = JSON.stringify(updates);
+        expect(serialized).toContain("echo alpha");
+        expect(serialized).toContain("echo beta");
+    });
+
+    it("maps a scripted call to the execute kind", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            customToolCall("call-kind", 'await tools.exec_command({"cmd":"ls"});'),
+        ]), "terminal_output", new Set());
+
+        const toolCall = (updates ?? []).find((update) => update.sessionUpdate === "tool_call");
+        expect(toolCall && "kind" in toolCall ? toolCall.kind : null).toBe("execute");
+    });
+
+    it("carries the combined script output through", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            customToolCall("call-out", 'await tools.exec_command({"cmd":"ls"});'),
+            customToolCallOutput("call-out", "Output:\n", "1: alpha\n", "2: beta\n"),
+        ]), "terminal_output", new Set());
+
+        const serialized = JSON.stringify(updates);
+        expect(serialized).toContain("1: alpha");
+        expect(serialized).toContain("2: beta");
+    });
+
+    it("skips scripted calls already present in the parsed thread", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            customToolCall("call-existing", 'await tools.exec_command({"cmd":"ls"});'),
+            customToolCallOutput("call-existing", "Output:\n", "ok\n"),
+        ]), "terminal_output", new Set(["call-existing"]));
+
+        expect(toolCallIds(updates)).toEqual([]);
+        expect(toolCallUpdateStatuses(updates)).toEqual([]);
+    });
+
+    it("reports a failing script as failed", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            customToolCall("call-fail", 'await tools.exec_command({"cmd":"false"});'),
+            customToolCallOutput("call-fail", "Permission denied\n"),
+        ]), "terminal_output", new Set());
+
+        expect(toolCallUpdateStatuses(updates)).toEqual([
+            { toolCallId: "call-fail", status: "failed" },
+        ]);
+    });
+
+    it("still recovers a scripted call whose tool name is unfamiliar", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            {
+                type: "response_item",
+                payload: {
+                    type: "custom_tool_call",
+                    call_id: "call-other",
+                    name: "some_other_sandbox",
+                    input: 'await tools.exec_command({"cmd":"ls"});',
+                },
+            },
+        ]), "terminal_output", new Set());
+
+        expect(toolCallIds(updates)).toEqual(["call-other"]);
+        expect(JSON.stringify(updates)).toContain("tools.exec_command");
+    });
+
     it("does not duplicate adjacent reasoning from event and response item records", () => {
         const updates = parseResponseItemHistoryFallback(jsonl([
             {
@@ -125,6 +209,24 @@ function functionCallOutput(callId: string, output: string): unknown {
             type: "function_call_output",
             call_id: callId,
             output,
+        },
+    };
+}
+
+function customToolCall(callId: string, input: string): unknown {
+    return {
+        type: "response_item",
+        payload: { type: "custom_tool_call", call_id: callId, name: "exec", input },
+    };
+}
+
+function customToolCallOutput(callId: string, ...texts: string[]): unknown {
+    return {
+        type: "response_item",
+        payload: {
+            type: "custom_tool_call_output",
+            call_id: callId,
+            output: texts.map((text) => ({ type: "input_text", text })),
         },
     };
 }
