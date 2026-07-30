@@ -24,33 +24,34 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
     });
 
-    it("maps live collab agent tool calls to ACP tool call updates", async () => {
+    // Covers one activity per subagent run, including controls, resume, and failed spawn.
+    it("folds collaboration controls into coherent subagent run activities", async () => {
         const notifications: ServerNotification[] = [
             {
-                method: "item/started",
+                method: "item/completed",
                 params: {
                     threadId: sessionId,
                     turnId: "turn-1",
-                    startedAtMs: 0,
+                    completedAtMs: 0,
                     item: {
-                        type: "collabAgentToolCall",
-                        id: "call-spawn-weather",
-                        tool: "spawnAgent",
-                        status: "inProgress",
-                        senderThreadId: "thread-main",
-                        receiverThreadIds: ["thread-paris"],
-                        prompt: "Find the current weather in Paris.",
-                        model: null,
-                        reasoningEffort: null,
-                        agentsStates: {
-                            "thread-paris": {
-                                status: "running",
-                                message: "Checking weather",
-                            },
-                        },
+                        type: "subAgentActivity",
+                        id: "activity-initial",
+                        kind: "started",
+                        agentThreadId: "thread-paris",
+                        agentPath: "/root/weather_audit",
                     },
                 },
             },
+            emptyWait("wait-1", "started"),
+            childMessage("child-result-1", "@agentclientprotocol/codex-acp"),
+            childTurnCompleted("child-turn-1"),
+            emptyWait("wait-1", "completed"),
+            collabStarted("resume-1", "resumeAgent", "running"),
+            collabCompleted("resume-1", "resumeAgent", "running"),
+            collabCompleted("send-1", "sendInput", "running", "Check alerts too."),
+            childMessage("child-result-2", "No alerts found."),
+            childTurnCompleted("child-turn-2"),
+            collabCompleted("close-1", "closeAgent", "shutdown"),
             {
                 method: "item/completed",
                 params: {
@@ -59,20 +60,15 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                     completedAtMs: 0,
                     item: {
                         type: "collabAgentToolCall",
-                        id: "call-spawn-weather",
+                        id: "spawn-failed",
                         tool: "spawnAgent",
-                        status: "completed",
+                        status: "failed",
                         senderThreadId: "thread-main",
-                        receiverThreadIds: ["thread-paris"],
-                        prompt: "Find the current weather in Paris.",
+                        receiverThreadIds: [],
+                        prompt: "Try an unavailable worker.",
                         model: null,
                         reasoningEffort: null,
-                        agentsStates: {
-                            "thread-paris": {
-                                status: "completed",
-                                message: null,
-                            },
-                        },
+                        agentsStates: {},
                     },
                 },
             },
@@ -85,29 +81,143 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         );
     });
 
-    it("maps live subagent activity to an ACP tool call", async () => {
-        const notifications: ServerNotification[] = [
-            {
+    function collabStarted(
+        id: string,
+        tool: "resumeAgent",
+        agentStatus: "running",
+    ): ServerNotification {
+        return {
+            method: "item/started",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                startedAtMs: 0,
+                item: collabItem(id, tool, "inProgress", agentStatus),
+            },
+        };
+    }
+
+    function emptyWait(id: string, lifecycle: "started" | "completed"): ServerNotification {
+        return lifecycle === "started"
+            ? {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "collabAgentToolCall",
+                        id,
+                        tool: "wait",
+                        status: "inProgress",
+                        senderThreadId: "thread-main",
+                        receiverThreadIds: [],
+                        prompt: null,
+                        model: null,
+                        reasoningEffort: null,
+                        agentsStates: {},
+                    },
+                },
+            }
+            : {
                 method: "item/completed",
                 params: {
                     threadId: sessionId,
                     turnId: "turn-1",
                     completedAtMs: 0,
                     item: {
-                        type: "subAgentActivity",
-                        id: "call-spawn-weather",
-                        kind: "started",
-                        agentThreadId: "thread-paris",
-                        agentPath: "/root/weather_research",
+                        type: "collabAgentToolCall",
+                        id,
+                        tool: "wait",
+                        status: "completed",
+                        senderThreadId: "thread-main",
+                        receiverThreadIds: [],
+                        prompt: null,
+                        model: null,
+                        reasoningEffort: null,
+                        agentsStates: {},
                     },
                 },
+            };
+    }
+
+    function childMessage(id: string, text: string): ServerNotification {
+        return {
+            method: "item/completed",
+            params: {
+                threadId: "thread-paris",
+                turnId: "child-turn",
+                completedAtMs: 0,
+                item: {
+                    type: "agentMessage",
+                    id,
+                    text,
+                    phase: "final_answer",
+                    memoryCitation: null,
+                },
             },
-        ];
+        };
+    }
 
-        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+    function childTurnCompleted(turnId: string): ServerNotification {
+        return {
+            method: "turn/completed",
+            params: {
+                threadId: "thread-paris",
+                turn: {
+                    id: turnId,
+                    items: [],
+                    itemsView: "notLoaded",
+                    status: "completed",
+                    error: null,
+                    startedAt: 0,
+                    completedAt: 1,
+                    durationMs: 1000,
+                },
+            },
+        };
+    }
 
-        await expect(`${mockFixture.getAcpConnectionDump([])}\n`).toMatchFileSnapshot(
-            "data/subagent-activity-flow.json"
-        );
-    });
+    function collabCompleted(
+        id: string,
+        tool: "wait" | "resumeAgent" | "sendInput" | "closeAgent",
+        agentStatus: "completed" | "running" | "shutdown",
+        prompt: string | null = null,
+    ): ServerNotification {
+        return {
+            method: "item/completed",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                completedAtMs: 0,
+                item: collabItem(id, tool, "completed", agentStatus, prompt),
+            },
+        };
+    }
+
+    function collabItem(
+        id: string,
+        tool: "wait" | "resumeAgent" | "sendInput" | "closeAgent",
+        status: "inProgress" | "completed",
+        agentStatus: "completed" | "running" | "shutdown",
+        prompt: string | null = null,
+    ): Extract<ServerNotification, { method: "item/completed" }>["params"]["item"] & { type: "collabAgentToolCall" } {
+        return {
+            type: "collabAgentToolCall",
+            id,
+            tool,
+            status,
+            senderThreadId: "thread-main",
+            receiverThreadIds: ["thread-paris"],
+            prompt,
+            model: null,
+            reasoningEffort: null,
+            agentsStates: {
+                "thread-paris": {
+                    status: agentStatus,
+                    message: agentStatus === "running" ? "Working" : null,
+                },
+            },
+        };
+    }
 });

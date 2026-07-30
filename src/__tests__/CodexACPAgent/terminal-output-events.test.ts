@@ -185,6 +185,115 @@ describe('CodexEventHandler - terminal output events', () => {
         );
     });
 
+    // Covers portable success and failure output without synthetic terminal references.
+    it('should report portable command output without synthetic terminals', async () => {
+        const portableSessionState = createTestSessionState({
+            ...sessionState,
+            terminalOutputMode: 'content',
+        });
+        const notifications: ServerNotification[] = [
+            {
+                method: 'item/started',
+                params: {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    startedAtMs: 0,
+                    item: {
+                        type: 'commandExecution',
+                        id: 'portable-ok',
+                        command: 'echo ok',
+                        cwd: '/test/project',
+                        processId: null,
+                        source: 'agent',
+                        status: 'inProgress',
+                        commandActions: [],
+                        aggregatedOutput: null,
+                        exitCode: null,
+                        durationMs: null,
+                    },
+                },
+            },
+            {
+                method: 'item/commandExecution/outputDelta',
+                params: {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    itemId: 'portable-ok',
+                    delta: 'ok\n',
+                },
+            },
+            {
+                method: 'item/completed',
+                params: {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    completedAtMs: 0,
+                    item: {
+                        type: 'commandExecution',
+                        id: 'portable-ok',
+                        command: 'echo ok',
+                        cwd: '/test/project',
+                        processId: 'pid-ok',
+                        source: 'agent',
+                        status: 'completed',
+                        commandActions: [],
+                        aggregatedOutput: 'ok\n',
+                        exitCode: 0,
+                        durationMs: 10,
+                    },
+                },
+            },
+            {
+                method: 'item/started',
+                params: {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    startedAtMs: 0,
+                    item: {
+                        type: 'commandExecution',
+                        id: 'portable-failed',
+                        command: 'false',
+                        cwd: '/test/project',
+                        processId: null,
+                        source: 'agent',
+                        status: 'inProgress',
+                        commandActions: [],
+                        aggregatedOutput: null,
+                        exitCode: null,
+                        durationMs: null,
+                    },
+                },
+            },
+            {
+                method: 'item/completed',
+                params: {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    completedAtMs: 0,
+                    item: {
+                        type: 'commandExecution',
+                        id: 'portable-failed',
+                        command: 'false',
+                        cwd: '/test/project',
+                        processId: 'pid-failed',
+                        source: 'agent',
+                        status: 'failed',
+                        commandActions: [],
+                        aggregatedOutput: 'command failed\n',
+                        exitCode: 1,
+                        durationMs: 10,
+                    },
+                },
+            },
+        ];
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, portableSessionState, notifications);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/portable-command-flow.json'
+        );
+    });
+
     it('should send status update when dynamic tool call completes', async () => {
         const dynamicToolCompletedNotification: ServerNotification = {
             method: 'item/completed',
