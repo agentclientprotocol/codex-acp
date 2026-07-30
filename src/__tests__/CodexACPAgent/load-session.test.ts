@@ -3,11 +3,16 @@ import type * as acp from "@agentclientprotocol/sdk";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
     it("should replay history during loadSession", async () => {
+        const localImageDirectory = await mkdtemp(join(tmpdir(), "codex-acp-load-session-"));
+        const localImagePath = join(localImageDirectory, "image.png");
+        await writeFile(localImagePath, "test image");
+
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
@@ -82,8 +87,15 @@ describe("CodexACPAgent - loadSession", () => {
                             id: "item-user-1",
                             clientId: null,
                             content: [
-                                { type: "text", text: "Hi", text_elements: [] },
+                                {
+                                    type: "text",
+                                    text: `\n# Files mentioned by the user:\n\n## image.png: ${localImagePath}\n\n## My request for Codex:\nHi`,
+                                    text_elements: [],
+                                },
                                 { type: "image", url: "https://example.com/image.png" },
+                                { type: "image", url: "data:image/png;base64,dGVzdCBpbWFnZQ==" },
+                                { type: "localImage", path: localImagePath },
+                                { type: "mention", name: "notes.txt", path: "/test/project/notes.txt" },
                             ],
                         },
                         {
@@ -223,9 +235,14 @@ describe("CodexACPAgent - loadSession", () => {
             includeTurns: true,
         });
         expect(codexAppServerClient.threadGoalGet).toHaveBeenCalledWith({ threadId: thread.id });
-        await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+        const replay = fixture.getAcpConnectionDump([]).replaceAll(
+            pathToFileURL(localImagePath).href,
+            "file:///tmp/codex-acp-load-session-image.png",
+        );
+        await expect(`${replay}\n`).toMatchFileSnapshot(
             "data/load-session-history.json"
         );
+        await rm(localImageDirectory, { recursive: true });
     });
 
     it("should not recover session mcp servers during loadSession when request omits them", async () => {

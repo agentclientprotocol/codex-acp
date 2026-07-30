@@ -55,6 +55,24 @@ describe("ResponseItemHistoryFallback", () => {
         expect(thoughtTexts(updates)).toEqual(["Need to inspect the directory."]);
     });
 
+    it("leaves user attachments to thread history", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            {
+                type: "event_msg",
+                payload: {
+                    type: "user_message",
+                    message: "\n# Files mentioned by the user:\n\n## screenshot.png: /tmp/screenshot.png\n\n## My request for Codex:\nInspect the screenshot",
+                    images: [],
+                    local_images: ["/tmp/screenshot.png"],
+                },
+            },
+            functionCall("call-missing", "ls"),
+            functionCallOutput("call-missing", "Chunk ID: missing\nProcess exited with code 0\nOutput:\nREADME.md\n"),
+        ]), "terminal_output");
+
+        expect(userMessageTexts(updates)).toEqual(["Inspect the screenshot"]);
+    });
+
     it("preserves assistant message phase metadata from response items", () => {
         const updates = parseResponseItemHistoryFallback(jsonl([
             {
@@ -150,6 +168,14 @@ function thoughtTexts(updates: UpdateSessionEvent[] | null): string[] {
     return (updates ?? [])
         .filter((update): update is Extract<UpdateSessionEvent, { sessionUpdate: "agent_thought_chunk" }> => (
             update.sessionUpdate === "agent_thought_chunk"
+        ))
+        .flatMap((update) => update.content.type === "text" ? [update.content.text] : []);
+}
+
+function userMessageTexts(updates: UpdateSessionEvent[] | null): string[] {
+    return (updates ?? [])
+        .filter((update): update is Extract<UpdateSessionEvent, { sessionUpdate: "user_message_chunk" }> => (
+            update.sessionUpdate === "user_message_chunk"
         ))
         .flatMap((update) => update.content.type === "text" ? [update.content.text] : []);
 }

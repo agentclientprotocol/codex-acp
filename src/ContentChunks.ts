@@ -3,6 +3,20 @@ import type {UpdateSessionEvent} from "./ACPSessionConnection";
 
 type AcpMeta = Record<string, unknown>;
 
+const FILES_MENTIONED_HEADER = "# Files mentioned by the user:\n";
+const REQUEST_MARKER = "\n## My request for Codex:\n";
+
+export function visibleUserMessageText(text: string): string {
+    const normalized = text.trimStart();
+    const requestIndex = normalized.indexOf(REQUEST_MARKER);
+
+    if (normalized.startsWith(FILES_MENTIONED_HEADER) && requestIndex !== -1) {
+        return normalized.slice(requestIndex + REQUEST_MARKER.length);
+    }
+
+    return text;
+}
+
 export function createCodexMessagePhaseMeta(phase: string | null | undefined): AcpMeta | undefined {
     if (!phase) {
         return undefined;

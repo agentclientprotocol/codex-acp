@@ -6,7 +6,7 @@ import { stripShellPrefix } from "./CommandUtils";
 import type { CommandAction, Thread, ThreadItem } from "./app-server/v2";
 import { createCommandActionEvent } from "./CodexToolCallMapper";
 import { createTerminalOutputMeta, type TerminalOutputMode } from "./TerminalOutputMode";
-import { createAgentMessageChunk, createCodexMessagePhaseMeta } from "./ContentChunks";
+import { createAgentMessageChunk, createCodexMessagePhaseMeta, createUserMessageChunk, visibleUserMessageText } from "./ContentChunks";
 
 type JsonRecord = Record<string, unknown>;
 type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
@@ -262,18 +262,12 @@ function createEventMsgUpdates(record: JsonRecord): UpdateSessionEvent[] | null 
 }
 
 function createUserMessageEventUpdates(payload: JsonRecord): UpdateSessionEvent[] {
-    const blocks: ContentBlock[] = [];
-    const message = stringValue(payload["message"]);
-    if (message !== null && message.length > 0) {
-        blocks.push({ type: "text", text: message });
+    const text = visibleUserMessageText(stringValue(payload["message"]) ?? "");
+    if (text.length > 0) {
+        return [createUserMessageChunk({ type: "text", text })];
     }
-    blocks.push(...imageBlocks(payload["images"]));
-    blocks.push(...imageBlocks(payload["local_images"]));
 
-    return blocks.map((content) => ({
-        sessionUpdate: "user_message_chunk",
-        content,
-    }));
+    return [];
 }
 
 function createAgentReasoningEventUpdates(payload: JsonRecord): UpdateSessionEvent[] {
@@ -286,22 +280,6 @@ function createAgentReasoningEventUpdates(payload: JsonRecord): UpdateSessionEve
         sessionUpdate: "agent_thought_chunk",
         content: { type: "text", text },
     }];
-}
-
-function imageBlocks(images: unknown): ContentBlock[] {
-    if (!Array.isArray(images)) {
-        return [];
-    }
-
-    return images.flatMap((image): ContentBlock[] => {
-        if (typeof image === "string") {
-            return [{ type: "text", text: `[@image](${image})` }];
-        }
-
-        const record = asRecord(image);
-        const path = record ? stringValue(record["path"]) ?? stringValue(record["url"]) : null;
-        return path ? [{ type: "text", text: `[@image](${path})` }] : [];
-    });
 }
 
 function contentBlocksFromResponseContent(content: unknown): ContentBlock[] {
