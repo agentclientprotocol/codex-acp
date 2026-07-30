@@ -4,7 +4,7 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {SessionState} from "./CodexAcpServer";
-import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
+import {type ClientCapabilities, type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
     AccountRateLimitsUpdatedNotification,
@@ -63,6 +63,7 @@ import {
     createCodexMessagePhaseMeta,
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
+    createPlanTextUpdate,
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
 
@@ -72,6 +73,7 @@ export class CodexEventHandler {
 
     private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
+    private readonly clientCapabilities: ClientCapabilities | null;
     private failure: RequestError | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
     private readonly activeGuardianApprovalReviews = new Set<string>();
@@ -84,9 +86,14 @@ export class CodexEventHandler {
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly activeSubAgentActivities = new Set<string>();
 
-    constructor(connection: AcpClientConnection, sessionState: SessionState) {
+    constructor(
+        connection: AcpClientConnection,
+        sessionState: SessionState,
+        clientCapabilities: ClientCapabilities | null,
+    ) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.clientCapabilities = clientCapabilities;
     }
 
     getFailure(): RequestError | null {
@@ -451,11 +458,7 @@ export class CodexEventHandler {
     }
 
     private createPlanTextEvent(text: string, messageId: string): UpdateSessionEvent {
-        return createAgentTextMessageChunk(
-            text,
-            messageId,
-            createCodexMessagePhaseMeta("final_answer"),
-        );
+        return createPlanTextUpdate(text, messageId, this.clientCapabilities);
     }
 
     private createExitedReviewModeEvent(item: ThreadItem & { type: "exitedReviewMode" }): UpdateSessionEvent | null {
