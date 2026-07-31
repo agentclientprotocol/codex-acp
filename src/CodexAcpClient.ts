@@ -61,6 +61,8 @@ const SUPPORTED_GATEWAY_PROTOCOLS: Record<acp.LlmProtocol, WireApi> = {
     openai: "responses",
 };
 
+const SESSION_LIST_PAGE_SIZE = 20;
+
 /**
  * API for accessing the Codex App Server using ACP requests.
  * Converts ACP requests into corresponding app-server operations.
@@ -809,6 +811,7 @@ export class CodexAcpClient {
         const modelProviders = preferredProvider ? [preferredProvider] : [];
         const listResponse = await this.codexClient.threadList({
             cursor: request.cursor ?? null,
+            limit: SESSION_LIST_PAGE_SIZE,
             modelProviders: modelProviders,
             sourceKinds: sourceKinds,
         });
