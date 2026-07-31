@@ -29,6 +29,7 @@ describe("Codex ACP live peer", () => {
                     userMessages: true,
                     clientUserMessageIds: true,
                     turnLifecycle: true,
+                    historyReplay: true,
                 },
             },
         });
@@ -155,6 +156,107 @@ describe("Codex ACP live peer", () => {
             expect(updates).toContain("inspect this");
             expect(updates).toContain("[@screenshot.png](file:///workspace/screenshot.png)");
         });
+    });
+
+    it("frames replayed turns and reports the active turn when loading", async () => {
+        await initializeLivePeer(fixture);
+        const appServer = fixture.getCodexAppServerClient();
+        const completedTurn = {
+            id: "turn-completed",
+            items: [
+                {
+                    type: "userMessage",
+                    id: "user-completed",
+                    clientId: null,
+                    content: [{type: "text", text: "old prompt", text_elements: []}],
+                },
+                {
+                    type: "agentMessage",
+                    id: "agent-completed",
+                    text: "old answer",
+                    phase: null,
+                    memoryCitation: null,
+                },
+            ],
+            itemsView: "full",
+            status: "completed",
+            error: null,
+            startedAt: 10,
+            completedAt: 20,
+            durationMs: 10_000,
+        };
+        const activeTurn = {
+            id: "turn-active",
+            items: [],
+            itemsView: "full",
+            status: "inProgress",
+            error: null,
+            startedAt: 30,
+            completedAt: null,
+            durationMs: null,
+        };
+        const thread = {
+            id: "session-history",
+            sessionId: "session-history",
+            parentThreadId: null,
+            threadSource: null,
+            forkedFromId: null,
+            preview: "old prompt",
+            ephemeral: false,
+            modelProvider: "openai",
+            createdAt: 1,
+            updatedAt: 30,
+            recencyAt: null,
+            status: {type: "active", activeFlags: []},
+            path: null,
+            cwd: "/workspace",
+            cliVersion: "test",
+            source: "cli",
+            agentNickname: null,
+            agentRole: null,
+            gitInfo: null,
+            name: null,
+            turns: [completedTurn, activeTurn],
+        };
+        vi.spyOn(appServer, "threadResume").mockResolvedValue({
+            thread,
+            model: "model-id",
+            modelProvider: "openai",
+            cwd: "/workspace",
+            approvalPolicy: "on-request",
+            sandbox: {type: "workspaceWrite", writableRoots: []},
+            reasoningEffort: "medium",
+        } as never);
+        vi.spyOn(appServer, "threadRead").mockResolvedValue({thread} as never);
+
+        const response = await fixture.getCodexAcpAgent().loadSession({
+            sessionId: thread.id,
+            cwd: "/workspace",
+            mcpServers: [],
+        });
+
+        expect(response._meta).toMatchObject({
+            codex: {livePeer: {activeTurnId: "turn-active"}},
+        });
+        const updates = fixture.getAcpConnectionEvents([])
+            .map(event => event.args[0]?.update);
+        expect(updates).toContainEqual(expect.objectContaining({
+            _meta: {codex: {historyReplay: {phase: "started"}}},
+        }));
+        expect(updates).toContainEqual(expect.objectContaining({
+            _meta: expect.objectContaining({
+                codex: {
+                    turn: expect.objectContaining({
+                        id: "turn-completed",
+                        status: "completed",
+                        replayed: true,
+                    }),
+                },
+            }),
+        }));
+        expect(updates).toContainEqual(expect.objectContaining({
+            _meta: {codex: {historyReplay: {phase: "finished"}}},
+        }));
     });
 
     it("relays an ambient approval after the session is created", async () => {

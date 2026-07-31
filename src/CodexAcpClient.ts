@@ -344,6 +344,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            activeTurnId: activeTurnId(response.thread),
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
@@ -372,6 +373,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            activeTurnId: activeTurnId(historyResponse.thread),
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
@@ -910,10 +912,15 @@ export type SessionMetadata = {
     modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,
     additionalDirectories: string[],
+    activeTurnId?: string | null,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
     thread: Thread,
+}
+
+function activeTurnId(thread: Thread): string | null {
+    return thread.turns?.find((turn) => turn.status === "inProgress")?.id ?? null;
 }
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {

@@ -73,6 +73,7 @@ describe('CodexACPAgent - initialize', () => {
                         userMessages: true,
                         clientUserMessageIds: true,
                         turnLifecycle: true,
+                        historyReplay: true,
                     },
                 },
             },
