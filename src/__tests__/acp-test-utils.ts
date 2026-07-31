@@ -180,13 +180,13 @@ export function createTestFixture(): TestFixture {
         ...process.env,
         CODEX_HOME: codexHome,
     });
-    codexConnection.process.on("exit", () => {
+    codexConnection.runtime.onExit(() => {
         removeDirectoryWithRetry(codexHome);
     });
 
     return createBaseTestFixture({
         connection: codexConnection.connection,
-        getExitCode: () => codexConnection.process.exitCode
+        getExitCode: () => codexConnection.runtime.exitCode
     });
 }
 

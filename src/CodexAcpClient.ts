@@ -18,6 +18,7 @@ import type {
 } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
+import {getClientUserMessageId} from "./CodexMeta";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
@@ -700,8 +701,10 @@ export class CodexAcpClient {
         if (shouldCancel?.()) {
             return null;
         }
+        const clientUserMessageId = getClientUserMessageId(request._meta);
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
+            ...(clientUserMessageId ? {clientUserMessageId} : {}),
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
@@ -845,10 +848,16 @@ export class CodexAcpClient {
         });
     }
 
-    async steerTurn(params: { threadId: string, turnId: string, prompt: acp.ContentBlock[] }): Promise<TurnSteerResponse> {
+    async steerTurn(params: {
+        threadId: string,
+        turnId: string,
+        prompt: acp.ContentBlock[],
+        clientUserMessageId?: string | null,
+    }): Promise<TurnSteerResponse> {
         return await this.codexClient.turnSteer({
             threadId: params.threadId,
             expectedTurnId: params.turnId,
+            ...(params.clientUserMessageId ? {clientUserMessageId: params.clientUserMessageId} : {}),
             input: buildPromptItems(params.prompt),
         });
     }

@@ -85,17 +85,17 @@ function startAcpServer() {
 
     const maxStderrTailChars = 2 * 1024;
     let stderr = "";
-    codexConnection.process.stderr.addListener("data", (data: Buffer) => {
+    codexConnection.runtime.stderr.addListener("data", (data: Buffer) => {
         stderr = (stderr + data.toString()).slice(-maxStderrTailChars);
     });
 
     process.stdin.on("close", () => {
-        codexConnection.process.stdin.end();
-        // Kill the codex process if it doesn't exit naturally
+        codexConnection.runtime.close();
+        // Terminate the App Server connection if it does not close naturally.
         setTimeout(() => {
-            if (!codexConnection.process.killed) {
-                logger.log("Codex still running 2s after stdin closed; terminating process");
-                codexConnection.process.kill();
+            if (codexConnection.runtime.exitCode === null) {
+                logger.log("Codex connection still open 2s after stdin closed; terminating");
+                codexConnection.runtime.terminate();
             }
         }, 2000);
     });
@@ -105,7 +105,7 @@ function startAcpServer() {
     function createAgent(connection: acp.AgentContext): CodexAcpServer {
         const appServerClient = new CodexAppServerClient(codexConnection.connection);
         const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
-        return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.process.exitCode, () => stderr);
+        return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.runtime.exitCode, () => stderr);
     }
 
     let codexAcpServer: CodexAcpServer | null = null;

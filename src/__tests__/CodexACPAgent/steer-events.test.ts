@@ -65,11 +65,17 @@ describe('_session/steering', () => {
         await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
             sessionId: "session-id",
             prompt: [{type: "text", text: "also keep backward compatibility"}],
+            _meta: {
+                codex: {
+                    clientUserMessageId: "telegram:chat-1:update-100",
+                },
+            },
         })).resolves.toEqual({outcome: "injected"});
 
         expect(turnSteerSpy).toHaveBeenCalledWith({
             threadId: "session-id",
             expectedTurnId: "turn-id",
+            clientUserMessageId: "telegram:chat-1:update-100",
             input: [{type: "text", text: "also keep backward compatibility", text_elements: []}],
         });
 
@@ -93,10 +99,16 @@ describe('_session/steering', () => {
         await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
             sessionId: "session-id",
             prompt: [{type: "text", text: "too late for the previous turn"}],
+            _meta: {
+                codex: {
+                    clientUserMessageId: "telegram:chat-1:update-101",
+                },
+            },
         })).resolves.toEqual({outcome: "startedNewTurn"});
 
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
             threadId: "session-id",
+            clientUserMessageId: "telegram:chat-1:update-101",
             input: [{type: "text", text: "too late for the previous turn", text_elements: []}],
         }));
 

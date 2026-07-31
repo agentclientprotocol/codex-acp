@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { once } from 'node:events';
 import * as acp from '@agentclientprotocol/sdk';
 import { startCodexConnection } from '../../CodexJsonRpcConnection';
 import { CodexAppServerClient } from '../../CodexAppServerClient';
@@ -18,18 +17,22 @@ describe('CodexACPAgent - process exit error', () => {
 
         const connection = startCodexConnection(fakeCodex);
         let stderr = '';
-        connection.process.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+        connection.runtime.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
 
         const codexClient = new CodexAcpClient(new CodexAppServerClient(connection.connection));
         const agent = new CodexAcpServer(
             createMockConnections().mockAcpConnection,
             codexClient,
             undefined,
-            () => connection.process.exitCode,
+            () => connection.runtime.exitCode,
             () => stderr,
         );
 
-        await once(connection.process, 'close'); // process exited and stderr flushed
+        if (connection.runtime.exitCode === null) {
+            await new Promise<void>(resolve => {
+                connection.runtime.onExit(() => resolve());
+            });
+        }
 
         await expect(agent.initialize({ protocolVersion: acp.PROTOCOL_VERSION }))
             .rejects.toThrow("Codex process has exited with code 1:\ncodex: failed to launch");

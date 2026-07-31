@@ -112,7 +112,7 @@ async function login(options: LoginOptions): Promise<boolean> {
         }
     } finally {
         codexConnection.connection.dispose();
-        codexConnection.process.kill();
+        codexConnection.runtime.close();
     }
 }
 
