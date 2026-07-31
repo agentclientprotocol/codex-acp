@@ -793,9 +793,6 @@ export class CodexAcpClient {
         const sourceKinds: ThreadSourceKind[] = [
             "cli",
             "vscode",
-            "exec",
-            "appServer",
-            "unknown",
         ];
         const requestedCwd = request.cwd?.trim() ?? null;
         const filterByCwd = (thread: Thread): boolean => {

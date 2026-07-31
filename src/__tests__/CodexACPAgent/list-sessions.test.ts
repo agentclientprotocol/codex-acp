@@ -80,9 +80,6 @@ describe("CodexACPAgent - list sessions", () => {
             sourceKinds: [
                 "cli",
                 "vscode",
-                "exec",
-                "appServer",
-                "unknown",
             ],
         }));
         await expect(JSON.stringify(response, null, 2)).toMatchFileSnapshot(
