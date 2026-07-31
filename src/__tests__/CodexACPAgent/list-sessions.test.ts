@@ -76,12 +76,10 @@ describe("CodexACPAgent - list sessions", () => {
         const response = await codexAcpAgent.listSessions(params);
 
         expect(codexAppServerClient.threadList).toHaveBeenCalledWith(expect.objectContaining({
+            limit: 20,
             sourceKinds: [
                 "cli",
                 "vscode",
-                "exec",
-                "appServer",
-                "unknown",
             ],
         }));
         await expect(JSON.stringify(response, null, 2)).toMatchFileSnapshot(
@@ -134,6 +132,54 @@ describe("CodexACPAgent - list sessions", () => {
         await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
             "data/list-sessions-thread-name.json"
         );
+    });
+
+    it("reports whether a session is working, live, or only saved", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+
+        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        const base: Thread = {
+            id: "working",
+            sessionId: "working",
+            parentThreadId: null,
+            threadSource: null,
+            forkedFromId: null,
+            preview: "Working session",
+            ephemeral: false,
+            modelProvider: "openai",
+            createdAt: 100,
+            updatedAt: 200,
+            recencyAt: null,
+            status: {type: "active", activeFlags: []},
+            path: null,
+            cwd: "/repo/project",
+            cliVersion: "0.0.0",
+            source: "cli",
+            agentNickname: null,
+            agentRole: null,
+            gitInfo: null,
+            name: null,
+            turns: [],
+        };
+        codexAppServerClient.threadList = vi.fn().mockResolvedValue({
+            data: [
+                base,
+                {...base, id: "live", sessionId: "live", status: {type: "idle"}},
+                {...base, id: "saved", sessionId: "saved", status: {type: "notLoaded"}},
+            ],
+            nextCursor: null,
+        });
+
+        const response = await codexAcpAgent.listSessions({cwd: null, cursor: null});
+
+        expect(response.sessions.map((session) => session._meta)).toEqual([
+            {codex: {livePeer: {presence: "working"}}},
+            {codex: {livePeer: {presence: "live"}}},
+            {codex: {livePeer: {presence: "saved"}}},
+        ]);
     });
 
     it("includes tracked additional directories for active sessions", async () => {

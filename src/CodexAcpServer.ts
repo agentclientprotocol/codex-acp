@@ -14,6 +14,7 @@ import type {
     ReasoningEffortOption,
     Thread,
     ThreadItem,
+    Turn,
     UserInput
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
@@ -90,6 +91,13 @@ import {
     type ThreadGoalSnapshot,
     toThreadGoalSnapshot,
 } from "./ThreadGoalSnapshot";
+import {
+    createClientUserMessageIdMeta,
+    getClientUserMessageId,
+    LIVE_PEER_CAPABILITIES,
+    requestsLivePeer,
+} from "./CodexMeta";
+import {userInputToContentBlocks} from "./UserInputMapper";
 
 export interface SessionState {
     sessionId: string,
@@ -162,6 +170,7 @@ export class CodexAcpServer {
     private clientCapabilities: acp.ClientCapabilities | null;
     private terminalOutputMode: TerminalOutputMode;
     private booleanConfigOptionsSupported: boolean;
+    private livePeerEnabled: boolean;
 
     private readonly sessions: Map<string, SessionState>;
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
@@ -196,6 +205,7 @@ export class CodexAcpServer {
         this.clientCapabilities = null;
         this.terminalOutputMode = "terminal_output_delta";
         this.booleanConfigOptionsSupported = false;
+        this.livePeerEnabled = false;
         this.availableCommands = new CodexCommands(
             connection,
             codexAcpClient,
@@ -210,6 +220,7 @@ export class CodexAcpServer {
         logger.log("Initialize request received");
         this.clientInfo = _params.clientInfo ?? null;
         this.clientCapabilities = _params.clientCapabilities ?? null;
+        this.livePeerEnabled = requestsLivePeer(_params._meta);
         this.terminalOutputMode = resolveTerminalOutputMode(_params.clientCapabilities);
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
@@ -247,6 +258,9 @@ export class CodexAcpServer {
             _meta: {
                 steering: {
                     supported: true,
+                },
+                codex: {
+                    livePeer: LIVE_PEER_CAPABILITIES,
                 },
             },
         };
@@ -307,7 +321,7 @@ export class CodexAcpServer {
         }
     }
 
-    async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
+    async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState, string | null]> {
         try {
             return await this.tryCreateSession(request);
         } catch (e) {
@@ -392,7 +406,7 @@ export class CodexAcpServer {
         return generation;
     }
 
-    async tryCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
+    async tryCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState, string | null]> {
         const requestedSessionGeneration = "sessionId" in request
             ? this.beginSessionOpen(request.sessionId)
             : null;
@@ -469,6 +483,9 @@ export class CodexAcpServer {
             sessionTitleSource: "sessionId" in request ? "unknown" : "unset",
         };
         this.sessions.set(sessionId, sessionState);
+        if (this.livePeerEnabled) {
+            await this.installSessionHandlers(sessionState);
+        }
         resumeSubscribed = false;
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
@@ -486,7 +503,12 @@ export class CodexAcpServer {
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
 
-        return [sessionId, sessionModelState, sessionModeState];
+        return [
+            sessionId,
+            sessionModelState,
+            sessionModeState,
+            sessionMetadata.activeTurnId ?? null,
+        ];
     }
 
     private async getAuthStateForProvider(authProvider: string | null): Promise<ActiveAuthState> {
@@ -528,6 +550,7 @@ export class CodexAcpServer {
             modelState,
             modeState,
             thread,
+            activeTurnId,
         } = await this.getOrCreateSessionWithHistory(params);
 
         await this.streamThreadHistory(sessionId, thread);
@@ -541,12 +564,21 @@ export class CodexAcpServer {
             models: modelState,
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
+            ...(this.livePeerEnabled ? {
+                _meta: {
+                    codex: {
+                        livePeer: {
+                            activeTurnId,
+                        },
+                    },
+                },
+            } : {}),
         };
     }
 
     async resumeSession(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
         logger.log("Resuming session...", {sessionId: params.sessionId});
-        const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
+        const [sessionId, modelState, modeState, activeTurnId] = await this.getOrCreateSession(params);
 
         logger.log("Session resumed", {
             sessionId: sessionId,
@@ -557,6 +589,15 @@ export class CodexAcpServer {
             models: modelState,
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
+            ...(this.livePeerEnabled ? {
+                _meta: {
+                    codex: {
+                        livePeer: {
+                            activeTurnId,
+                        },
+                    },
+                },
+            } : {}),
         };
     }
 
@@ -988,6 +1029,7 @@ export class CodexAcpServer {
                 threadId: params.sessionId,
                 turnId,
                 prompt: params.prompt,
+                clientUserMessageId: getClientUserMessageId(params._meta),
             }));
             return true;
         } catch (err) {
@@ -1097,12 +1139,16 @@ export class CodexAcpServer {
     private parseSessionSteerParams(params: Record<string, unknown>): SessionSteerRequest {
         const sessionId = params["sessionId"];
         const prompt = params["prompt"];
+        const meta = params["_meta"];
         if (typeof sessionId !== "string" || !Array.isArray(prompt)) {
             throw RequestError.invalidParams();
         }
         return {
             sessionId: sessionId,
             prompt: prompt as acp.ContentBlock[],
+            ...(typeof meta === "object" && meta !== null && !Array.isArray(meta)
+                ? {_meta: meta as Record<string, unknown>}
+                : {}),
         };
     }
 
@@ -1242,6 +1288,7 @@ export class CodexAcpServer {
         modelState: LegacySessionModelState;
         modeState: SessionModeState;
         thread: Thread;
+        activeTurnId: string | null;
     }> {
         const requestedSessionGeneration = this.beginSessionOpen(request.sessionId);
         await this.checkAuthorization();
@@ -1311,6 +1358,9 @@ export class CodexAcpServer {
             sessionTitleSource: "unset",
         };
         this.sessions.set(sessionId, sessionState);
+        if (this.livePeerEnabled) {
+            await this.installSessionHandlers(sessionState);
+        }
         subscribed = false;
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
@@ -1331,6 +1381,7 @@ export class CodexAcpServer {
             modelState: sessionModelState,
             modeState: sessionModeState,
             thread: thread,
+            activeTurnId: sessionMetadata.activeTurnId ?? null,
         };
     }
 
@@ -1338,6 +1389,22 @@ export class CodexAcpServer {
         const session = new ACPSessionConnection(this.connection, sessionId);
         const sessionState = this.getSessionState(sessionId);
         await this.publishThreadHistoryTitle(session, sessionState, thread);
+        if (this.livePeerEnabled) {
+            await session.update(historySnapshotUpdate("started"));
+            for (const turn of thread.turns) {
+                await session.update(historyTurnUpdate(turn, "started"));
+                for (const item of turn.items) {
+                    for (const update of await this.createHistoryUpdates(item, sessionState)) {
+                        await session.update(update);
+                    }
+                }
+                if (turn.status !== "inProgress") {
+                    await session.update(historyTurnUpdate(turn, "finished"));
+                }
+            }
+            await session.update(historySnapshotUpdate("finished"));
+            return;
+        }
         const responseItemFallbackUpdates = await createResponseItemHistoryFallbackUpdates(
             thread,
             sessionState.terminalOutputMode,
@@ -1477,9 +1544,15 @@ export class CodexAcpServer {
         const updates: UpdateSessionEvent[] = [];
         const messageId = item.id;
         for (const input of item.content) {
-            const blocks = this.userInputToContentBlocks(input);
+            const blocks = userInputToContentBlocks(input);
             for (const block of blocks) {
-                updates.push(createUserMessageChunk(block, messageId));
+                updates.push(createUserMessageChunk(
+                    block,
+                    messageId,
+                    this.livePeerEnabled
+                        ? createClientUserMessageIdMeta(item.clientId)
+                        : undefined,
+                ));
             }
         }
         return updates;
@@ -1528,34 +1601,6 @@ export class CodexAcpServer {
             item.id,
             createCodexMessagePhaseMeta("final_answer"),
         );
-    }
-
-    private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
-        switch (input.type) {
-            case "text":
-                return input.text.length > 0 ? [{ type: "text", text: input.text }] : [];
-            case "image":
-                return [{ type: "text", text: this.formatUriAsLink("image", input.url) }];
-            case "localImage": {
-                const uri = input.path.startsWith("file://") ? input.path : `file://${input.path}`;
-                return [{ type: "text", text: this.formatUriAsLink(null, uri) }];
-            }
-            case "skill":
-                return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
-        }
-        return [];
-    }
-
-    private formatUriAsLink(name: string | null, uri: string): string {
-        if (name && name.length > 0) {
-            return `[@${name}](${uri})`;
-        }
-        if (uri.startsWith("file://")) {
-            const path = uri.replace("file://", "");
-            const fileName = path.split("/").pop() ?? path;
-            return `[@${fileName}](${uri})`;
-        }
-        return uri;
     }
 
     getSessionState(sessionId: string): SessionState {
@@ -1876,21 +1921,7 @@ export class CodexAcpServer {
         const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
 
         try {
-            const eventHandler = new CodexEventHandler(this.connection, sessionState);
-            const approvalHandler = new CodexApprovalHandler(this.connection, sessionState, activePrompt.signal);
-            const elicitationHandler = new CodexElicitationHandler(
-                this.connection,
-                sessionState,
-                this.clientCapabilities,
-                activePrompt.signal,
-            );
-            await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
-                async (event) => {
-                    await elicitationHandler.handleNotification(event);
-                    return eventHandler.handleNotification(event);
-                },
-                approvalHandler,
-                elicitationHandler);
+            const eventHandler = await this.installSessionHandlers(sessionState, activePrompt.signal);
 
             if (activePrompt.signal.aborted) {
                 return this.cancelledPromptResponse(sessionState);
@@ -2053,8 +2084,47 @@ export class CodexAcpServer {
                 this.pendingTurnStarts.delete(params.sessionId);
                 registeredPendingTurnStart.resolve(null);
             }
+            if (
+                this.livePeerEnabled
+                && this.sessions.get(params.sessionId) === sessionState
+                && !this.sessionIsClosing(params.sessionId)
+            ) {
+                await this.installSessionHandlers(sessionState);
+            }
             activePrompt.complete();
         }
+    }
+
+    private async installSessionHandlers(
+        sessionState: SessionState,
+        cancellationSignal?: AbortSignal,
+    ): Promise<CodexEventHandler> {
+        const eventHandler = new CodexEventHandler(
+            this.connection,
+            sessionState,
+            {emitUserMessages: this.livePeerEnabled},
+        );
+        const approvalHandler = new CodexApprovalHandler(
+            this.connection,
+            sessionState,
+            cancellationSignal,
+        );
+        const elicitationHandler = new CodexElicitationHandler(
+            this.connection,
+            sessionState,
+            this.clientCapabilities,
+            cancellationSignal,
+        );
+        await this.codexAcpClient.subscribeToSessionEvents(
+            sessionState.sessionId,
+            async (event) => {
+                await elicitationHandler.handleNotification(event);
+                return eventHandler.handleNotification(event);
+            },
+            approvalHandler,
+            elicitationHandler,
+        );
+        return eventHandler;
     }
 
     private cancelledPromptResponse(sessionState: SessionState): acp.PromptResponse {
@@ -2129,6 +2199,42 @@ export class CodexAcpServer {
         // After turnInterrupt(), Codex will send turn/completed, which naturally completes awaitTurnCompleted().
         await this.interruptSessionTurn(sessionState, "Cancel", false);
     }
+}
+
+function historyTurnUpdate(
+    turn: Turn,
+    phase: "started" | "finished",
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "session_info_update",
+        _meta: {
+            codex: {
+                turn: {
+                    id: turn.id,
+                    status: phase === "started" ? "inProgress" : turn.status,
+                    error: turn.error?.message ?? null,
+                    replayed: true,
+                    startedAt: turn.startedAt,
+                    completedAt: turn.completedAt,
+                },
+            },
+        },
+    };
+}
+
+function historySnapshotUpdate(
+    phase: "started" | "finished",
+): UpdateSessionEvent {
+    return {
+        sessionUpdate: "session_info_update",
+        _meta: {
+            codex: {
+                historyReplay: {
+                    phase,
+                },
+            },
+        },
+    };
 }
 
 function mergeHistoryUpdates(

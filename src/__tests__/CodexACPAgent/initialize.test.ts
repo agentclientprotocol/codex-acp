@@ -65,6 +65,17 @@ describe('CodexACPAgent - initialize', () => {
                 steering: {
                     supported: true,
                 },
+                codex: {
+                    livePeer: {
+                        version: 1,
+                        ambientEvents: true,
+                        interactions: true,
+                        userMessages: true,
+                        clientUserMessageIds: true,
+                        turnLifecycle: true,
+                        historyReplay: true,
+                    },
+                },
             },
         });
     });

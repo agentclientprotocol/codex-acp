@@ -63,8 +63,11 @@ import {
     createCodexMessagePhaseMeta,
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
+    createUserMessageChunk,
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
+import {createClientUserMessageIdMeta} from "./CodexMeta";
+import {userInputToContentBlocks} from "./UserInputMapper";
 
 export { stripShellPrefix };
 
@@ -83,10 +86,16 @@ export class CodexEventHandler {
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly activeSubAgentActivities = new Set<string>();
+    private readonly emitUserMessages: boolean;
 
-    constructor(connection: AcpClientConnection, sessionState: SessionState) {
+    constructor(
+        connection: AcpClientConnection,
+        sessionState: SessionState,
+        options: {emitUserMessages?: boolean} = {},
+    ) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.emitUserMessages = options.emitUserMessages ?? false;
     }
 
     getFailure(): RequestError | null {
@@ -95,13 +104,18 @@ export class CodexEventHandler {
 
     async handleNotification(notification: ServerNotification) {
         const session = new ACPSessionConnection(this.connection, this.sessionState.sessionId);
-        const updateEvent = await this.createUpdateEvent(notification);
-        if (updateEvent) {
+        const updateEvents = await this.createUpdateEvent(notification);
+        for (const updateEvent of Array.isArray(updateEvents) ? updateEvents : [updateEvents]) {
+            if (!updateEvent) {
+                continue;
+            }
             await session.update(updateEvent);
         }
     }
 
-    private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
+    private async createUpdateEvent(
+        notification: ServerNotification,
+    ): Promise<UpdateSessionEvent | UpdateSessionEvent[] | null> {
         /*
         TODO split UpdateSessionEvent to improve completion
         createUpdateEvent({
@@ -124,10 +138,21 @@ export class CodexEventHandler {
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
                 this.sessionState.currentTurnId = notification.params.turn.id;
-                return null;
+                return this.createCodexSessionInfoUpdate({
+                    turn: {
+                        id: notification.params.turn.id,
+                        status: notification.params.turn.status,
+                    },
+                });
             case "turn/completed":
                 this.sessionState.currentTurnId = null;
-                return null;
+                return this.createCodexSessionInfoUpdate({
+                    turn: {
+                        id: notification.params.turn.id,
+                        status: notification.params.turn.status,
+                        error: notification.params.turn.error,
+                    },
+                });
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
             case "thread/name/updated":
@@ -314,7 +339,9 @@ export class CodexEventHandler {
         return createAgentTextThoughtChunk(text, messageId);
     }
 
-    private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
+    private async createItemEvent(
+        event: ItemStartedNotification,
+    ): Promise<UpdateSessionEvent | UpdateSessionEvent[] | null> {
         switch (event.item.type) {
             case "fileChange":
                 return await createFileChangeUpdate(event.item);
@@ -344,13 +371,25 @@ export class CodexEventHandler {
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
                 return null;
+            case "userMessage": {
+                if (!this.emitUserMessages) {
+                    return null;
+                }
+                const clientUserMessageMeta = createClientUserMessageIdMeta(event.item.clientId);
+                return event.item.content
+                    .flatMap(userInputToContentBlocks)
+                    .map(content => createUserMessageChunk(
+                        content,
+                        event.item.id,
+                        clientUserMessageMeta,
+                    ));
+            }
             case "contextCompaction":
                 return createContextCompactionStartUpdate(event.item);
             case "subAgentActivity":
                 this.activeSubAgentActivities.add(event.item.id);
                 return createSubAgentActivityUpdate(event.item, "in_progress", "tool_call");
             case "sleep":
-            case "userMessage":
             case "hookPrompt":
             case "reasoning":
             case "enteredReviewMode":

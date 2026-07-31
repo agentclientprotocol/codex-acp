@@ -6,6 +6,41 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 
 `codex-acp` is a stdio ACP agent server. It starts the Codex App Server, translates ACP requests into Codex operations, and maps Codex events back into the client.
 
+## Trunkline live-peer mode
+
+This downstream branch can connect to an App Server that is already shared with
+the stock Codex TUI:
+
+```bash
+CODEX_APP_SERVER_URL=unix:// codex-acp
+```
+
+`unix://PATH`, `ws://`, and `wss://` endpoints are also supported.
+
+Live-peer behavior is opt-in through ACP initialization metadata:
+
+```json
+{
+  "_meta": {
+    "codex": {
+      "livePeer": {
+        "version": 1
+      }
+    }
+  }
+}
+```
+
+The initialize response advertises the supported live-peer version and
+capabilities. When enabled, loaded sessions continue streaming events and
+interaction requests even when the ACP client does not own the active prompt.
+Live user-message updates carry `_meta.codex.clientUserMessageId` when Codex
+provides one.
+
+ACP prompt and `_session/steering` requests may set the same metadata field.
+Codex persists it on the user item, allowing clients to suppress their own echo
+without comparing message text.
+
 ## Features
 
 - ChatGPT, API key, and client-provided custom gateway authentication.
@@ -56,6 +91,8 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
+- `CODEX_APP_SERVER_URL` - connect to an existing App Server over `unix://`,
+  `unix://PATH`, `ws://`, or `wss://` instead of spawning a private server.
 
 ## Development
 

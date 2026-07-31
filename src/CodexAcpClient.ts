@@ -18,6 +18,7 @@ import type {
 } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
+import {getClientUserMessageId} from "./CodexMeta";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
@@ -59,6 +60,8 @@ export const CUSTOM_GATEWAY_PROVIDER_ID = "custom-gateway";
 const SUPPORTED_GATEWAY_PROTOCOLS: Record<acp.LlmProtocol, WireApi> = {
     openai: "responses",
 };
+
+const SESSION_LIST_PAGE_SIZE = 20;
 
 /**
  * API for accessing the Codex App Server using ACP requests.
@@ -343,6 +346,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            activeTurnId: activeTurnId(response.thread),
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
@@ -371,6 +375,7 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            activeTurnId: activeTurnId(historyResponse.thread),
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
@@ -700,8 +705,10 @@ export class CodexAcpClient {
         if (shouldCancel?.()) {
             return null;
         }
+        const clientUserMessageId = getClientUserMessageId(request._meta);
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
+            ...(clientUserMessageId ? {clientUserMessageId} : {}),
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
@@ -786,9 +793,6 @@ export class CodexAcpClient {
         const sourceKinds: ThreadSourceKind[] = [
             "cli",
             "vscode",
-            "exec",
-            "appServer",
-            "unknown",
         ];
         const requestedCwd = request.cwd?.trim() ?? null;
         const filterByCwd = (thread: Thread): boolean => {
@@ -804,6 +808,7 @@ export class CodexAcpClient {
         const modelProviders = preferredProvider ? [preferredProvider] : [];
         const listResponse = await this.codexClient.threadList({
             cursor: request.cursor ?? null,
+            limit: SESSION_LIST_PAGE_SIZE,
             modelProviders: modelProviders,
             sourceKinds: sourceKinds,
         });
@@ -813,6 +818,17 @@ export class CodexAcpClient {
             cwd: thread.cwd,
             title: (thread.name ?? thread.preview) || null,
             updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
+            _meta: {
+                codex: {
+                    livePeer: {
+                        presence: thread.status.type === "active"
+                            ? "working"
+                            : thread.status.type === "idle"
+                                ? "live"
+                                : "saved",
+                    },
+                },
+            },
         });
 
         if (listResponse.data.length === 0) {
@@ -845,10 +861,16 @@ export class CodexAcpClient {
         });
     }
 
-    async steerTurn(params: { threadId: string, turnId: string, prompt: acp.ContentBlock[] }): Promise<TurnSteerResponse> {
+    async steerTurn(params: {
+        threadId: string,
+        turnId: string,
+        prompt: acp.ContentBlock[],
+        clientUserMessageId?: string | null,
+    }): Promise<TurnSteerResponse> {
         return await this.codexClient.turnSteer({
             threadId: params.threadId,
             expectedTurnId: params.turnId,
+            ...(params.clientUserMessageId ? {clientUserMessageId: params.clientUserMessageId} : {}),
             input: buildPromptItems(params.prompt),
         });
     }
@@ -901,10 +923,15 @@ export type SessionMetadata = {
     modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,
     additionalDirectories: string[],
+    activeTurnId?: string | null,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
     thread: Thread,
+}
+
+function activeTurnId(thread: Thread): string | null {
+    return thread.turns?.find((turn) => turn.status === "inProgress")?.id ?? null;
 }
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {

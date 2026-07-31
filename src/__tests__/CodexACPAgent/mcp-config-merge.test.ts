@@ -40,7 +40,7 @@ url = "https://example.com/mcp"
 
         fixture = createBaseTestFixture({
             connection: codexConnection.connection,
-            getExitCode: () => codexConnection.process.exitCode,
+            getExitCode: () => codexConnection.runtime.exitCode,
         });
     });
 
