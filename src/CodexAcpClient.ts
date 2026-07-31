@@ -1,4 +1,11 @@
-import {CODEX_API_KEY_ENV_VAR, GatewayAuthMethod, isCodexAuthRequest, OPENAI_API_KEY_ENV_VAR} from "./CodexAuthMethod";
+import {
+    type ApiKeyAuthRequest,
+    CODEX_API_KEY_ENV_VAR,
+    GatewayAuthMethod,
+    type GatewayAuthRequest,
+    isCodexAuthRequest,
+    OPENAI_API_KEY_ENV_VAR,
+} from "./CodexAuthMethod";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
@@ -130,66 +137,19 @@ export class CodexAcpClient {
         }
         this.gatewayConfig = null;
         switch (authRequest.methodId) {
-            case "api-key": {
-                const apiKey = authRequest._meta?.["api-key"]?.apiKey ?? this.readApiKeyFromEnv();
-                return await this.authenticateWithApiKey(apiKey);
-            }
-            case "chat-gpt": {
-                const accountResponse = await this.codexClient.accountRead({refreshToken: true});
-                if (accountResponse.account?.type === "chatgpt") {
-                    return true;
-                }
-                const loginCompletedPromise = this.awaitNextLoginCompleted();
-                const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
-                if (loginResponse.type == "chatgpt") {
-                    await open(loginResponse.authUrl);
-                }
-                const result = await loginCompletedPromise;
-                return result.success;
-            }
-            case "chat-gpt-device-code": {
-                const accountResponse = await this.codexClient.accountRead({refreshToken: true});
-                if (accountResponse.account?.type === "chatgpt") {
-                    return true;
-                }
-                if (!urlElicitationRequester) {
-                    throw RequestError.invalidRequest(undefined, "Device code authentication requires URL elicitation support");
-                }
-                const loginCompletedPromise = this.awaitNextLoginCompleted();
-                const loginResponse = await this.codexClient.accountLogin({type: "chatgptDeviceCode"});
-                if (loginResponse.type !== "chatgptDeviceCode") {
-                    return false;
-                }
-                const elicitationResponse = await urlElicitationRequester.elicitUrl({
-                    url: loginResponse.verificationUrl,
-                    message: `Sign in to ChatGPT and enter this code: ${loginResponse.userCode}`,
-                    elicitationId: loginResponse.loginId,
-                });
-                if (!acp.CreateElicitationResponse.isAccept(elicitationResponse)) {
-                    await this.codexClient.accountLoginCancel({loginId: loginResponse.loginId});
-                    return false;
-                }
-                const result = await loginCompletedPromise;
-                return result.success;
-            }
+            case "api-key":
+                return await this.authenticateWithApiKey(authRequest);
+            case "chat-gpt":
+                return await this.authenticateWithChatGpt();
+            case "chat-gpt-device-code":
+                return await this.authenticateWithChatGptDeviceCode(urlElicitationRequester);
             case "gateway":
-                if (!authRequest._meta) throw RequestError.invalidRequest();
-
-                const gatewaySettings = authRequest._meta["gateway"];
-                if (!gatewaySettings) throw RequestError.invalidRequest();
-
-                this.applyGatewayConfig({
-                    baseUrl: gatewaySettings.baseUrl,
-                    apiType: GatewayAuthMethod._meta.gateway.protocol,
-                    headers: gatewaySettings.headers,
-                    providerName: gatewaySettings.providerName,
-                });
-
-                return true;
+                return this.authenticateWithGateway(authRequest);
         }
     }
 
-    private async authenticateWithApiKey(apiKey: string): Promise<Boolean> {
+    private async authenticateWithApiKey(authRequest: ApiKeyAuthRequest): Promise<Boolean> {
+        const apiKey = authRequest._meta?.["api-key"]?.apiKey ?? this.readApiKeyFromEnv();
         const loginCompletedPromise = this.awaitNextLoginCompleted();
         await this.codexClient.accountLogin({
             type: "apiKey",
@@ -197,6 +157,62 @@ export class CodexAcpClient {
         });
         const result = await loginCompletedPromise;
         return result.success;
+    }
+
+    private async authenticateWithChatGpt(): Promise<Boolean> {
+        const accountResponse = await this.codexClient.accountRead({refreshToken: true});
+        if (accountResponse.account?.type === "chatgpt") {
+            return true;
+        }
+        const loginCompletedPromise = this.awaitNextLoginCompleted();
+        const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
+        if (loginResponse.type == "chatgpt") {
+            await open(loginResponse.authUrl);
+        }
+        const result = await loginCompletedPromise;
+        return result.success;
+    }
+
+    private async authenticateWithChatGptDeviceCode(urlElicitationRequester?: UrlElicitationRequester): Promise<Boolean> {
+        const accountResponse = await this.codexClient.accountRead({refreshToken: true});
+        if (accountResponse.account?.type === "chatgpt") {
+            return true;
+        }
+        if (!urlElicitationRequester) {
+            throw RequestError.invalidRequest(undefined, "Device code authentication requires URL elicitation support");
+        }
+        const loginCompletedPromise = this.awaitNextLoginCompleted();
+        const loginResponse = await this.codexClient.accountLogin({type: "chatgptDeviceCode"});
+        if (loginResponse.type !== "chatgptDeviceCode") {
+            return false;
+        }
+        const elicitationResponse = await urlElicitationRequester.elicitUrl({
+            url: loginResponse.verificationUrl,
+            message: `Sign in to ChatGPT and enter this code: ${loginResponse.userCode}`,
+            elicitationId: loginResponse.loginId,
+        });
+        if (!acp.CreateElicitationResponse.isAccept(elicitationResponse)) {
+            await this.codexClient.accountLoginCancel({loginId: loginResponse.loginId});
+            return false;
+        }
+        const result = await loginCompletedPromise;
+        return result.success;
+    }
+
+    private authenticateWithGateway(authRequest: GatewayAuthRequest): boolean {
+        if (!authRequest._meta) throw RequestError.invalidRequest();
+
+        const gatewaySettings = authRequest._meta["gateway"];
+        if (!gatewaySettings) throw RequestError.invalidRequest();
+
+        this.applyGatewayConfig({
+            baseUrl: gatewaySettings.baseUrl,
+            apiType: GatewayAuthMethod._meta.gateway.protocol,
+            headers: gatewaySettings.headers,
+            providerName: gatewaySettings.providerName,
+        });
+
+        return true;
     }
 
     private readApiKeyFromEnv(): string {

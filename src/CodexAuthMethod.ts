@@ -5,7 +5,7 @@ import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 export const CODEX_API_KEY_ENV_VAR = "CODEX_API_KEY";
 export const OPENAI_API_KEY_ENV_VAR = "OPENAI_API_KEY";
 
-interface ApiKeyAuthRequest extends AuthenticateRequest {
+export interface ApiKeyAuthRequest extends AuthenticateRequest {
     methodId: "api-key";
     _meta?: {
         "api-key"?: {
