@@ -818,6 +818,17 @@ export class CodexAcpClient {
             cwd: thread.cwd,
             title: (thread.name ?? thread.preview) || null,
             updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
+            _meta: {
+                codex: {
+                    livePeer: {
+                        presence: thread.status.type === "active"
+                            ? "working"
+                            : thread.status.type === "idle"
+                                ? "live"
+                                : "saved",
+                    },
+                },
+            },
         });
 
         if (listResponse.data.length === 0) {
