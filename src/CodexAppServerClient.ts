@@ -6,6 +6,8 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
+    CancelLoginAccountParams,
+    CancelLoginAccountResponse,
     ConfigReadParams,
     ConfigReadResponse,
     GetAccountParams,
@@ -578,6 +580,10 @@ export class CodexAppServerClient {
 
     async accountLogin(params: LoginAccountParams): Promise<LoginAccountResponse> {
         return await this.sendRequest({ method: "account/login/start", params: params });
+    }
+
+    async accountLoginCancel(params: CancelLoginAccountParams): Promise<CancelLoginAccountResponse> {
+        return await this.sendRequest({ method: "account/login/cancel", params: params });
     }
 
     async accountLogout(): Promise<LogoutAccountResponse> {
