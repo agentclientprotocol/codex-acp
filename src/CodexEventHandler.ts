@@ -138,10 +138,21 @@ export class CodexEventHandler {
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
                 this.sessionState.currentTurnId = notification.params.turn.id;
-                return null;
+                return this.createCodexSessionInfoUpdate({
+                    turn: {
+                        id: notification.params.turn.id,
+                        status: notification.params.turn.status,
+                    },
+                });
             case "turn/completed":
                 this.sessionState.currentTurnId = null;
-                return null;
+                return this.createCodexSessionInfoUpdate({
+                    turn: {
+                        id: notification.params.turn.id,
+                        status: notification.params.turn.status,
+                        error: notification.params.turn.error,
+                    },
+                });
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
             case "thread/name/updated":

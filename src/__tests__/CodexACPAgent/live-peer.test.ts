@@ -28,6 +28,7 @@ describe("Codex ACP live peer", () => {
                     interactions: true,
                     userMessages: true,
                     clientUserMessageIds: true,
+                    turnLifecycle: true,
                 },
             },
         });
@@ -62,6 +63,74 @@ describe("Codex ACP live peer", () => {
         expect(fixture.getAcpConnectionDump([])).toContain(
             '"clientUserMessageId": "telegram:chat-1:update-42"',
         );
+    });
+
+    it("streams ambient turn lifecycle without guessing from message silence", async () => {
+        await initializeLivePeer(fixture);
+        const session = await fixture.getCodexAcpAgent().newSession({
+            cwd: "/workspace",
+            mcpServers: [],
+        });
+        fixture.clearAcpConnectionDump();
+
+        fixture.sendServerNotification({
+            method: "turn/started",
+            params: {
+                threadId: session.sessionId,
+                turn: {
+                    id: "turn-ambient",
+                    items: [],
+                    itemsView: "notLoaded",
+                    status: "inProgress",
+                    error: null,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
+                },
+            },
+        });
+        fixture.sendServerNotification({
+            method: "turn/completed",
+            params: {
+                threadId: session.sessionId,
+                turn: {
+                    id: "turn-ambient",
+                    items: [],
+                    itemsView: "notLoaded",
+                    status: "completed",
+                    error: null,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
+                },
+            },
+        });
+
+        await vi.waitFor(() => {
+            const updates = fixture.getAcpConnectionEvents([])
+                .map(event => event.args[0]?.update);
+            expect(updates).toContainEqual(expect.objectContaining({
+                _meta: {
+                    codex: {
+                        turn: {
+                            id: "turn-ambient",
+                            status: "inProgress",
+                        },
+                    },
+                },
+            }));
+            expect(updates).toContainEqual(expect.objectContaining({
+                _meta: {
+                    codex: {
+                        turn: {
+                            id: "turn-ambient",
+                            status: "completed",
+                            error: null,
+                        },
+                    },
+                },
+            }));
+        });
     });
 
     it("uses the history mapper for ambient user-message content", async () => {

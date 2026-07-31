@@ -13,6 +13,7 @@ export const LIVE_PEER_CAPABILITIES = {
     interactions: true,
     userMessages: true,
     clientUserMessageIds: true,
+    turnLifecycle: true,
 } as const;
 
 export function requestsLivePeer(meta: unknown): boolean {
