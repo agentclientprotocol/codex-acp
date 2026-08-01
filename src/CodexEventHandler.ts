@@ -68,11 +68,18 @@ import {sameThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot
 
 export { stripShellPrefix };
 
+export type CompletedPlan = {
+    itemId: string;
+    text: string;
+};
+
 export class CodexEventHandler {
 
     private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
+    private readonly supportsPlanUpdates: boolean;
     private failure: RequestError | null = null;
+    private completedPlan: CompletedPlan | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
     private readonly activeGuardianApprovalReviews = new Set<string>();
     private readonly activeImageGenerationItems = new Set<string>();
@@ -84,13 +91,24 @@ export class CodexEventHandler {
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly activeSubAgentActivities = new Set<string>();
 
-    constructor(connection: AcpClientConnection, sessionState: SessionState) {
+    constructor(
+        connection: AcpClientConnection,
+        sessionState: SessionState,
+        supportsPlanUpdates = false,
+    ) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.supportsPlanUpdates = supportsPlanUpdates;
     }
 
     getFailure(): RequestError | null {
         return this.failure;
+    }
+
+    takeCompletedPlan(): CompletedPlan | null {
+        const plan = this.completedPlan;
+        this.completedPlan = null;
+        return plan;
     }
 
     async handleNotification(notification: ServerNotification) {
@@ -301,8 +319,11 @@ export class CodexEventHandler {
             return null;
         }
         const text = this.planDeltaTextByItemId.get(event.itemId) ?? "";
-        this.planDeltaTextByItemId.set(event.itemId, text + event.delta);
-        return null;
+        const updatedText = text + event.delta;
+        this.planDeltaTextByItemId.set(event.itemId, updatedText);
+        return this.supportsPlanUpdates
+            ? this.createPlanUpdateEvent(updatedText, event.itemId)
+            : null;
     }
 
     private createReasoningSectionBreakEvent(event: ReasoningSummaryPartAddedNotification): UpdateSessionEvent {
@@ -447,7 +468,21 @@ export class CodexEventHandler {
         if (text.length === 0) {
             return null;
         }
-        return this.createPlanTextEvent(text, item.id);
+        this.completedPlan = {itemId: item.id, text};
+        return this.supportsPlanUpdates
+            ? this.createPlanUpdateEvent(text, item.id)
+            : this.createPlanTextEvent(text, item.id);
+    }
+
+    private createPlanUpdateEvent(text: string, planId: string): UpdateSessionEvent {
+        return {
+            sessionUpdate: "plan_update",
+            plan: {
+                type: "markdown",
+                planId,
+                content: text,
+            },
+        };
     }
 
     private createPlanTextEvent(text: string, messageId: string): UpdateSessionEvent {
