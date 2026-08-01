@@ -124,6 +124,17 @@ interface ActiveAuthState {
     authConfigured: boolean;
 }
 
+interface InstallSessionStateOptions {
+    cwd: string;
+    sessionMetadata: SessionMetadata;
+    authState: ActiveAuthState;
+    authProvider: string | null;
+    requestedMcpServers: Array<acp.McpServer>;
+    mcpServerStartupVersion: number | null;
+    recoverMcpServers: boolean;
+    sessionTitleSource: SessionState["sessionTitleSource"];
+}
+
 interface PendingMcpStartupSession {
     requestedServers: Set<string>;
     afterVersion: number;
@@ -232,6 +243,7 @@ export class CodexAcpServer {
                 },
                 sessionCapabilities: {
                     resume: { },
+                    fork: { },
                     list: { },
                     close: { },
                     delete: { },
@@ -308,8 +320,12 @@ export class CodexAcpServer {
     }
 
     async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
+        return await this.withSessionOpenErrorHandling(() => this.tryCreateSession(request));
+    }
+
+    private async withSessionOpenErrorHandling<T>(openSession: () => Promise<T>): Promise<T> {
         try {
-            return await this.tryCreateSession(request);
+            return await openSession();
         } catch (e) {
             const error = e instanceof Error ? e : new Error(String(e));
             await this.handleError(error);
@@ -439,9 +455,41 @@ export class CodexAcpServer {
             resumeSubscribed = false;
             await this.closeStaleSessionOpen(sessionId, sessionGeneration);
         }
-        const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, "sessionId" in request);
+        const sessionState = this.installSessionState({
+            cwd: request.cwd,
+            sessionMetadata,
+            authState,
+            authProvider,
+            requestedMcpServers,
+            mcpServerStartupVersion,
+            recoverMcpServers: "sessionId" in request,
+            sessionTitleSource: "sessionId" in request ? "unknown" : "unset",
+        });
+        resumeSubscribed = false;
+
+        this.publishAvailableCommandsAsync(sessionState);
+        if ("sessionId" in request) {
+            this.publishCurrentGoalAsync(sessionState, sessionGeneration);
+        }
+        const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
+        const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
+
+        return [sessionId, sessionModelState, sessionModeState];
+    }
+
+    private installSessionState(options: InstallSessionStateOptions): SessionState {
+        const {
+            cwd,
+            sessionMetadata,
+            authState,
+            authProvider,
+            requestedMcpServers,
+            mcpServerStartupVersion,
+            recoverMcpServers,
+            sessionTitleSource,
+        } = options;
+        const {sessionId, currentModelId, models} = sessionMetadata;
         const currentModel = this.findCurrentModel(models, currentModelId);
-        const currentModelSupportsFast = modelSupportsFast(currentModel);
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
@@ -458,18 +506,17 @@ export class CodexAcpServer {
             account: authState.account,
             authConfigured: authState.authConfigured,
             authProvider: authProvider,
-            cwd: request.cwd,
+            cwd: cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
-            currentModelSupportsFast: currentModelSupportsFast,
-            sessionMcpServers: sessionMcpServers,
+            currentModelSupportsFast: modelSupportsFast(currentModel),
+            sessionMcpServers: this.resolveSessionMcpServers(requestedMcpServers, recoverMcpServers),
             terminalOutputMode: this.terminalOutputMode,
             goalRevision: 0,
             sessionTitle: null,
-            sessionTitleSource: "sessionId" in request ? "unknown" : "unset",
+            sessionTitleSource: sessionTitleSource,
         };
         this.sessions.set(sessionId, sessionState);
-        resumeSubscribed = false;
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.pendingMcpStartupSessions.set(sessionId, {
@@ -479,14 +526,7 @@ export class CodexAcpServer {
             this.publishMcpStartupStatusAsync(sessionId);
         }
 
-        this.publishAvailableCommandsAsync(sessionState);
-        if ("sessionId" in request) {
-            this.publishCurrentGoalAsync(sessionState, sessionGeneration);
-        }
-        const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
-        const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
-
-        return [sessionId, sessionModelState, sessionModeState];
+        return sessionState;
     }
 
     private async getAuthStateForProvider(authProvider: string | null): Promise<ActiveAuthState> {
@@ -557,6 +597,66 @@ export class CodexAcpServer {
             models: modelState,
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
+        };
+    }
+
+    async unstable_forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+        logger.log("Forking session...", {sessionId: params.sessionId});
+        return await this.withSessionOpenErrorHandling(() => this.tryForkSession(params));
+    }
+
+    private async tryForkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+        await this.checkAuthorization();
+        const requestedMcpServers = params.mcpServers ?? [];
+        const mcpServerStartupVersion = requestedMcpServers.length > 0
+            ? this.codexAcpClient.getMcpServerStartupVersion()
+            : null;
+        let subscribedSessionId: string | null = null;
+        let sessionGeneration: number | null = null;
+        let sessionMetadata: SessionMetadata;
+        let sessionState: SessionState;
+        try {
+            sessionMetadata = await this.runWithProcessCheck(() =>
+                this.codexAcpClient.forkSession(params, (sessionId) => {
+                    subscribedSessionId = sessionId;
+                    sessionGeneration = this.beginSessionOpen(sessionId);
+                })
+            );
+            const {sessionId} = sessionMetadata;
+            if (sessionGeneration === null) {
+                throw new Error("Codex session/fork did not report its child subscription");
+            }
+            const authProvider = sessionMetadata.modelProvider ?? this.codexAcpClient.getModelProvider();
+            const authState = await this.getAuthStateForProvider(authProvider);
+            if (!this.sessionOpenCanInstall(sessionId, sessionGeneration)) {
+                subscribedSessionId = null;
+                await this.closeStaleSessionOpen(sessionId, sessionGeneration);
+            }
+            sessionState = this.installSessionState({
+                cwd: params.cwd,
+                sessionMetadata,
+                authState,
+                authProvider,
+                requestedMcpServers,
+                mcpServerStartupVersion,
+                recoverMcpServers: false,
+                sessionTitleSource: "unknown",
+            });
+            subscribedSessionId = null;
+        } catch (err) {
+            if (subscribedSessionId !== null && sessionGeneration !== null) {
+                await this.cleanupStaleSessionOpen(subscribedSessionId, sessionGeneration);
+            }
+            throw err;
+        }
+
+        this.publishAvailableCommandsAsync(sessionState);
+        this.publishCurrentGoalAsync(sessionState, sessionGeneration);
+        logger.log("Session forked", {parentSessionId: params.sessionId, sessionId: sessionMetadata.sessionId});
+        return {
+            sessionId: sessionMetadata.sessionId,
+            modes: sessionState.agentMode.toSessionModeState(),
+            ...this.createSessionConfigOptionsResponse(sessionState),
         };
     }
 
