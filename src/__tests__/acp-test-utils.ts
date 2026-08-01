@@ -14,6 +14,7 @@ import {AgentMode} from "../AgentMode";
 import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
+import {USER_APPROVALS_REVIEWER} from "../ApprovalsReviewerConfig";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -384,6 +385,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         supportedReasoningEfforts: [],
         supportedInputModalities: ["text", "image"],
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
+        approvalsReviewer: USER_APPROVALS_REVIEWER,
         collaborationMode: DEFAULT_COLLABORATION_MODE,
         fastModeEnabled: false,
         currentModelSupportsFast: false,

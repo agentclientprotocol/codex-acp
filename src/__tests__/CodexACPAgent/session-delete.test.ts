@@ -129,6 +129,7 @@ async function createSession(): Promise<{
         currentModelId: "model-id[medium]",
         models: [model],
         collaborationMode: "default",
+        approvalsReviewer: "user",
         currentServiceTier: null,
         additionalDirectories: [],
     });

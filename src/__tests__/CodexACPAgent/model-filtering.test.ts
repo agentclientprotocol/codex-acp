@@ -129,6 +129,7 @@ describe("Model filtering", () => {
             currentModelId: "gpt-5.2[medium]",
             models,
             collaborationMode: "default",
+            approvalsReviewer: "user",
             additionalDirectories: [],
         });
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});

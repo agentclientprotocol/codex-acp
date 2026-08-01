@@ -1,5 +1,9 @@
 import {describe, expect, it, vi} from "vitest";
-import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
+import {
+    createCodexMockTestFixture,
+    createTestModel,
+    setupPromptTestSession,
+} from "../acp-test-utils";
 import {AgentMode, MODE_CONFIG_ID} from "../../AgentMode";
 import {
     MODEL_CONFIG_ID,
@@ -11,6 +15,13 @@ import {
     COLLABORATION_MODE_CONFIG_ID,
     PLAN_COLLABORATION_MODE,
 } from "../../CollaborationModeConfig";
+import {
+    APPROVALS_REVIEWER_CONFIG_ID,
+    AUTO_APPROVALS_REVIEWER,
+    createApprovalsReviewerConfigOption,
+    type SelectableApprovalsReviewer,
+    USER_APPROVALS_REVIEWER,
+} from "../../ApprovalsReviewerConfig";
 
 const lowEffort: ReasoningEffortOption = {reasoningEffort: "low", description: "Fast"};
 const mediumEffort: ReasoningEffortOption = {reasoningEffort: "medium", description: "Balanced"};
@@ -35,7 +46,11 @@ function buildModels(): {fast: Model; slow: Model} {
     return {fast, slow};
 }
 
-async function createSession(currentModelId: string, availableModels: Array<Model>) {
+async function createSession(
+    currentModelId: string,
+    availableModels: Array<Model>,
+    approvalsReviewer: SelectableApprovalsReviewer = USER_APPROVALS_REVIEWER,
+) {
     const fixture = createCodexMockTestFixture();
     const codexAcpAgent = fixture.getCodexAcpAgent();
     const codexAcpClient = fixture.getCodexAcpClient();
@@ -47,6 +62,7 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
         currentModelId,
         models: availableModels,
         collaborationMode: "default",
+        approvalsReviewer,
         additionalDirectories: [],
     });
 
@@ -55,12 +71,26 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
 }
 
 describe("Session config options", () => {
-    it("exposes mode, model, reasoning_effort and fast-mode in the new session response", async () => {
+    it("exposes mode, approval reviewer, model, reasoning_effort and fast-mode in the new session response", async () => {
         const {fast, slow} = buildModels();
         const {response} = await createSession("fast-model[medium]", [fast, slow]);
 
         const ids = response.configOptions?.map(o => o.id);
-        expect(ids).toEqual([MODE_CONFIG_ID, COLLABORATION_MODE_CONFIG_ID, MODEL_CONFIG_ID, REASONING_EFFORT_CONFIG_ID, "fast-mode"]);
+        expect(ids).toEqual([
+            MODE_CONFIG_ID,
+            APPROVALS_REVIEWER_CONFIG_ID,
+            COLLABORATION_MODE_CONFIG_ID,
+            MODEL_CONFIG_ID,
+            REASONING_EFFORT_CONFIG_ID,
+            "fast-mode",
+        ]);
+
+        const approvalsReviewerOption = response.configOptions?.find(
+            o => o.id === APPROVALS_REVIEWER_CONFIG_ID,
+        );
+        expect(approvalsReviewerOption).toEqual(
+            createApprovalsReviewerConfigOption(USER_APPROVALS_REVIEWER),
+        );
 
         const modelOption = response.configOptions?.find(o => o.id === MODEL_CONFIG_ID);
         expect(modelOption).toMatchObject({
@@ -101,7 +131,12 @@ describe("Session config options", () => {
         const {codexAcpAgent, response} = await createSession("custom-model[high]", [fast, slow]);
 
         const ids = response.configOptions?.map(o => o.id);
-        expect(ids).toEqual([MODE_CONFIG_ID, COLLABORATION_MODE_CONFIG_ID, MODEL_CONFIG_ID]);
+        expect(ids).toEqual([
+            MODE_CONFIG_ID,
+            APPROVALS_REVIEWER_CONFIG_ID,
+            COLLABORATION_MODE_CONFIG_ID,
+            MODEL_CONFIG_ID,
+        ]);
 
         const modelOption = response.configOptions?.find(o => o.id === MODEL_CONFIG_ID);
         expect(modelOption).toMatchObject({
@@ -152,6 +187,39 @@ describe("Session config options", () => {
         expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.ReadOnly);
         const modeOption = result.configOptions?.find(o => o.id === MODE_CONFIG_ID);
         expect((modeOption as any).currentValue).toBe(AgentMode.ReadOnly.id);
+    });
+
+    it("changes the approval reviewer via setSessionConfigOption", async () => {
+        const {fast} = buildModels();
+        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast]);
+
+        const result = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: APPROVALS_REVIEWER_CONFIG_ID,
+            value: AUTO_APPROVALS_REVIEWER,
+        });
+
+        expect(codexAcpAgent.getSessionState("session-id").approvalsReviewer).toBe(
+            AUTO_APPROVALS_REVIEWER,
+        );
+        expect(
+            result.configOptions?.find(o => o.id === APPROVALS_REVIEWER_CONFIG_ID),
+        ).toEqual(createApprovalsReviewerConfigOption(AUTO_APPROVALS_REVIEWER));
+    });
+
+    it("sends the selected approval reviewer with the next turn", async () => {
+        const {mockFixture, turnStartSpy} = setupPromptTestSession({
+            approvalsReviewer: AUTO_APPROVALS_REVIEWER,
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "hello"}],
+        });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            approvalsReviewer: AUTO_APPROVALS_REVIEWER,
+        }));
     });
 
     it("changes collaboration mode without starting a model turn", async () => {
@@ -280,6 +348,7 @@ describe("Session config options", () => {
             currentModelId: "fast-model[medium]",
             models: [fast],
             collaborationMode: "default",
+            approvalsReviewer: USER_APPROVALS_REVIEWER,
             additionalDirectories: [],
         });
         await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
@@ -316,7 +385,7 @@ describe("Session config options", () => {
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("slow-model[medium]");
     });
 
-    it("rejects unknown model, effort, and mode values", async () => {
+    it("rejects unknown model, effort, mode, and approval reviewer values", async () => {
         const {fast} = buildModels();
         const {codexAcpAgent} = await createSession("fast-model[medium]", [fast]);
 
@@ -336,6 +405,12 @@ describe("Session config options", () => {
             sessionId: "session-id",
             configId: MODE_CONFIG_ID,
             value: "no-such-mode",
+        })).rejects.toThrow();
+
+        await expect(codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: APPROVALS_REVIEWER_CONFIG_ID,
+            value: "no-such-reviewer",
         })).rejects.toThrow();
     });
 });
