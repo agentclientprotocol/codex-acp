@@ -1963,7 +1963,6 @@ export class CodexAcpServer {
                 logger.log("Prompt handled by a command");
                 await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                 if (commandResult.turnCompleted?.turn.status === "interrupted") {
-                    await this.notifyConversationInterrupted(params.sessionId);
                     return this.cancelledPromptResponse(sessionState);
                 }
                 const error = eventHandler.getFailure();
@@ -2044,7 +2043,6 @@ export class CodexAcpServer {
 
             if (turnCompleted.turn.status === "interrupted") {
                 await eventHandler.flushPendingPlanUpdates();
-                await this.notifyConversationInterrupted(params.sessionId);
                 return this.cancelledPromptResponse(sessionState);
             }
 
@@ -2121,7 +2119,6 @@ export class CodexAcpServer {
                     await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                     if (turnCompleted.turn.status === "interrupted") {
                         await eventHandler.flushPendingPlanUpdates();
-                        await this.notifyConversationInterrupted(params.sessionId);
                         return this.cancelledPromptResponse(sessionState);
                     }
 
@@ -2224,16 +2221,6 @@ export class CodexAcpServer {
             usage: this.buildPromptUsage(sessionState.lastTokenUsage),
             _meta: this.buildQuotaMeta(sessionState),
         };
-    }
-
-    private async notifyConversationInterrupted(sessionId: string): Promise<void> {
-        if (this.sessionIsClosing(sessionId) || !this.sessions.has(sessionId)) {
-            return;
-        }
-        await this.connection.notify(acp.methods.client.session.update, {
-            sessionId,
-            update: createAgentTextMessageChunk("*Conversation interrupted*"),
-        });
     }
 
     private buildQuotaMeta(sessionState: SessionState): { quota: QuotaMeta } {

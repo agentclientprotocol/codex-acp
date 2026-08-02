@@ -86,7 +86,6 @@ describe("ACP session close", () => {
         const requestMethods = fixture.getCodexConnectionEvents([])
             .flatMap(event => event.eventType === "request" ? [event.method] : []);
         expect(requestMethods).toEqual(["thread/unsubscribe"]);
-        expect(fixture.getAcpConnectionDump([])).not.toContain("Conversation interrupted");
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
 
         fixture.clearCodexConnectionDump();
