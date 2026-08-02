@@ -457,6 +457,7 @@ async function createSession(options: {
         currentModelId: "model-id[medium]",
         models: [model],
         collaborationMode: "default",
+        approvalsReviewer: "user",
         currentServiceTier: null,
         additionalDirectories: [],
     });
@@ -504,6 +505,7 @@ function createSessionMetadata(): SessionMetadata {
         currentModelId: "model-id[medium]",
         models: [createTestModel()],
         collaborationMode: "default",
+        approvalsReviewer: "user",
         currentServiceTier: null,
         additionalDirectories: [],
     };

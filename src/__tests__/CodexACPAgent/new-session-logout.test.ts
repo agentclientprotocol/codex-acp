@@ -83,6 +83,7 @@ describe("New session logout handling", () => {
                 currentModelId,
                 models: [model],
                 collaborationMode: "default",
+                approvalsReviewer: "user",
                 modelProvider: "openai",
                 additionalDirectories: [],
             })
@@ -91,6 +92,7 @@ describe("New session logout handling", () => {
                 currentModelId,
                 models: [model],
                 collaborationMode: "default",
+                approvalsReviewer: "user",
                 modelProvider: "custom-provider",
                 additionalDirectories: [],
             })
