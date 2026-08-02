@@ -65,6 +65,7 @@ import {
     createAgentTextThoughtChunk,
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
+import {logger} from "./Logger";
 
 export { stripShellPrefix };
 
@@ -75,7 +76,8 @@ export type CompletedPlan = {
 
 export class CodexEventHandler {
 
-    private readonly connection: AcpClientConnection;
+    private static readonly PLAN_UPDATE_INTERVAL_MS = 150;
+
     private readonly sessionState: SessionState;
     private readonly supportsPlanUpdates: boolean;
     private failure: RequestError | null = null;
@@ -85,6 +87,12 @@ export class CodexEventHandler {
     private readonly activeImageGenerationItems = new Set<string>();
     private readonly emittedImageViewItems = new Set<string>();
     private readonly planDeltaTextByItemId = new Map<string, string>();
+    private readonly pendingPlanItemIds = new Set<string>();
+    private readonly lastEmittedPlanTextByItemId = new Map<string, string>();
+    private readonly session: ACPSessionConnection;
+    private planUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+    private planUpdateChain: Promise<void> = Promise.resolve();
+    private disposed = false;
     private readonly seenReasoningDeltaItemIds = new Set<string>();
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
@@ -96,9 +104,9 @@ export class CodexEventHandler {
         sessionState: SessionState,
         supportsPlanUpdates = false,
     ) {
-        this.connection = connection;
         this.sessionState = sessionState;
         this.supportsPlanUpdates = supportsPlanUpdates;
+        this.session = new ACPSessionConnection(connection, sessionState.sessionId);
     }
 
     getFailure(): RequestError | null {
@@ -112,11 +120,35 @@ export class CodexEventHandler {
     }
 
     async handleNotification(notification: ServerNotification) {
-        const session = new ACPSessionConnection(this.connection, this.sessionState.sessionId);
         const updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
-            await session.update(updateEvent);
+            await this.session.update(updateEvent);
         }
+    }
+
+    async flushPendingPlanUpdates(): Promise<void> {
+        this.cancelPlanUpdateTimer();
+        do {
+            const itemIds = [...this.pendingPlanItemIds];
+            this.pendingPlanItemIds.clear();
+            await Promise.all(itemIds.map(itemId => {
+                const text = this.planDeltaTextByItemId.get(itemId) ?? "";
+                return text.length > 0
+                    ? this.enqueuePlanSnapshot(itemId, text)
+                    : Promise.resolve();
+            }));
+            await this.planUpdateChain;
+        } while (this.pendingPlanItemIds.size > 0);
+    }
+
+    async dispose(): Promise<void> {
+        if (this.disposed) return;
+        await this.flushPendingPlanUpdates();
+        this.disposed = true;
+        this.cancelPlanUpdateTimer();
+        this.pendingPlanItemIds.clear();
+        this.planDeltaTextByItemId.clear();
+        this.lastEmittedPlanTextByItemId.clear();
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
@@ -144,6 +176,8 @@ export class CodexEventHandler {
                 this.sessionState.currentTurnId = notification.params.turn.id;
                 return null;
             case "turn/completed":
+                await this.flushPendingPlanUpdates();
+                this.clearPlanTurnState();
                 this.sessionState.currentTurnId = null;
                 return null;
             case "thread/tokenUsage/updated":
@@ -314,16 +348,18 @@ export class CodexEventHandler {
         return this.createAgentThoughtEvent(event.delta, event.itemId);
     }
 
-    private createPlanDeltaEvent(event: PlanDeltaNotification): UpdateSessionEvent | null {
+    private createPlanDeltaEvent(event: PlanDeltaNotification): null {
         if (event.delta.length === 0) {
             return null;
         }
         const text = this.planDeltaTextByItemId.get(event.itemId) ?? "";
         const updatedText = text + event.delta;
         this.planDeltaTextByItemId.set(event.itemId, updatedText);
-        return this.supportsPlanUpdates
-            ? this.createPlanUpdateEvent(updatedText, event.itemId)
-            : null;
+        if (this.supportsPlanUpdates) {
+            this.pendingPlanItemIds.add(event.itemId);
+            this.schedulePlanUpdate();
+        }
+        return null;
     }
 
     private createReasoningSectionBreakEvent(event: ReasoningSummaryPartAddedNotification): UpdateSessionEvent {
@@ -424,8 +460,7 @@ export class CodexEventHandler {
                 return null;
             case "plan": {
                 const deltaText = this.planDeltaTextByItemId.get(event.item.id) ?? "";
-                this.planDeltaTextByItemId.delete(event.item.id);
-                return this.createCompletedPlanEvent(event.item, deltaText);
+                return await this.createCompletedPlanEvent(event.item, deltaText);
             }
             case "exitedReviewMode":
                 return this.createExitedReviewModeEvent(event.item);
@@ -460,18 +495,59 @@ export class CodexEventHandler {
         return this.createAgentThoughtEvent(text, item.id);
     }
 
-    private createCompletedPlanEvent(
+    private async createCompletedPlanEvent(
         item: ThreadItem & { type: "plan" },
         deltaText: string,
-    ): UpdateSessionEvent | null {
+    ): Promise<UpdateSessionEvent | null> {
         const text = item.text.length > 0 ? item.text : deltaText;
+        this.pendingPlanItemIds.delete(item.id);
+        if (this.pendingPlanItemIds.size === 0) {
+            this.cancelPlanUpdateTimer();
+        }
+        this.planDeltaTextByItemId.delete(item.id);
         if (text.length === 0) {
             return null;
         }
         this.completedPlan = {itemId: item.id, text};
-        return this.supportsPlanUpdates
-            ? this.createPlanUpdateEvent(text, item.id)
-            : this.createPlanTextEvent(text, item.id);
+        if (this.supportsPlanUpdates) {
+            await this.enqueuePlanSnapshot(item.id, text);
+            return null;
+        }
+        return this.createPlanTextEvent(text, item.id);
+    }
+
+    private schedulePlanUpdate(): void {
+        if (this.disposed || this.planUpdateTimer !== null) return;
+        this.planUpdateTimer = setTimeout(() => {
+            this.planUpdateTimer = null;
+            void this.flushPendingPlanUpdates().catch(error => {
+                logger.error("Failed to flush throttled plan updates", error);
+            });
+        }, CodexEventHandler.PLAN_UPDATE_INTERVAL_MS);
+    }
+
+    private cancelPlanUpdateTimer(): void {
+        if (this.planUpdateTimer === null) return;
+        clearTimeout(this.planUpdateTimer);
+        this.planUpdateTimer = null;
+    }
+
+    private enqueuePlanSnapshot(itemId: string, text: string): Promise<void> {
+        const send = async () => {
+            if (this.lastEmittedPlanTextByItemId.get(itemId) === text) return;
+            await this.session.update(this.createPlanUpdateEvent(text, itemId));
+            this.lastEmittedPlanTextByItemId.set(itemId, text);
+        };
+        const result = this.planUpdateChain.then(send);
+        this.planUpdateChain = result.catch(() => {});
+        return result;
+    }
+
+    private clearPlanTurnState(): void {
+        this.cancelPlanUpdateTimer();
+        this.pendingPlanItemIds.clear();
+        this.planDeltaTextByItemId.clear();
+        this.lastEmittedPlanTextByItemId.clear();
     }
 
     private createPlanUpdateEvent(text: string, planId: string): UpdateSessionEvent {

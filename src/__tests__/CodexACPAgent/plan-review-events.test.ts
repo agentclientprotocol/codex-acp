@@ -170,6 +170,15 @@ describe("CodexACPAgent - plan review", () => {
                 },
             }],
         });
+        const finalPlanUpdateIndex = events.reduce((lastIndex, event, index) =>
+            event.method === "sessionUpdate"
+            && (event.args[0] as {update?: {sessionUpdate?: string}}).update?.sessionUpdate === "plan_update"
+                ? index
+                : lastIndex,
+        -1);
+        const permissionIndex = events.findIndex(event => event.method === "requestPermission");
+        expect(finalPlanUpdateIndex).toBeGreaterThanOrEqual(0);
+        expect(permissionIndex).toBeGreaterThan(finalPlanUpdateIndex);
         expect(sessionState.collaborationMode).toBe("default");
 
         implementationTurn.resolve({

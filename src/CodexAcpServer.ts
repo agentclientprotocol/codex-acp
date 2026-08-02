@@ -1890,13 +1890,15 @@ export class CodexAcpServer {
             return pendingTurnStart;
         };
         const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
+        let eventHandler: CodexEventHandler | null = null;
 
         try {
-            const eventHandler = new CodexEventHandler(
+            const promptEventHandler = new CodexEventHandler(
                 this.connection,
                 sessionState,
                 clientSupportsPlanUpdates(this.clientCapabilities),
             );
+            eventHandler = promptEventHandler;
             const approvalHandler = new CodexApprovalHandler(this.connection, sessionState, activePrompt.signal);
             const elicitationHandler = new CodexElicitationHandler(
                 this.connection,
@@ -1907,7 +1909,7 @@ export class CodexAcpServer {
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
                     await elicitationHandler.handleNotification(event);
-                    return eventHandler.handleNotification(event);
+                    return promptEventHandler.handleNotification(event);
                 },
                 approvalHandler,
                 elicitationHandler);
@@ -2041,6 +2043,7 @@ export class CodexAcpServer {
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
 
             if (turnCompleted.turn.status === "interrupted") {
+                await eventHandler.flushPendingPlanUpdates();
                 await this.notifyConversationInterrupted(params.sessionId);
                 return this.cancelledPromptResponse(sessionState);
             }
@@ -2051,6 +2054,7 @@ export class CodexAcpServer {
                 throw error;
             }
 
+            await eventHandler.flushPendingPlanUpdates();
             const completedPlan = eventHandler.takeCompletedPlan();
             if (
                 completedPlan !== null
@@ -2116,6 +2120,7 @@ export class CodexAcpServer {
 
                     await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                     if (turnCompleted.turn.status === "interrupted") {
+                        await eventHandler.flushPendingPlanUpdates();
                         await this.notifyConversationInterrupted(params.sessionId);
                         return this.cancelledPromptResponse(sessionState);
                     }
@@ -2142,6 +2147,7 @@ export class CodexAcpServer {
             throw err;
         } finally {
             logger.log("Prompt completed", {sessionId: params.sessionId});
+            await eventHandler?.dispose();
             disposePromptRequestCancellation();
             sessionState.currentTurnId = null;
             const registeredPendingTurnStart = this.pendingTurnStarts.get(params.sessionId);
