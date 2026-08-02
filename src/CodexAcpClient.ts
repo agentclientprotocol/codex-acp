@@ -343,6 +343,8 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            agentMode: AgentMode.fromSettings(response.approvalPolicy, response.sandbox)
+                ?? AgentMode.getInitialAgentMode(),
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
@@ -371,6 +373,8 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            agentMode: AgentMode.fromSettings(response.approvalPolicy, response.sandbox)
+                ?? AgentMode.getInitialAgentMode(),
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
@@ -398,6 +402,8 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
+            agentMode: AgentMode.fromSettings(response.approvalPolicy, response.sandbox)
+                ?? AgentMode.getInitialAgentMode(),
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
@@ -685,7 +691,7 @@ export class CodexAcpClient {
 
     async sendPrompt(
         request: acp.PromptRequest,
-        agentMode: AgentMode,
+        getAgentMode: () => AgentMode,
         modelId: ModelId,
         serviceTier: ServiceTier | null,
         disableSummary: boolean,
@@ -700,6 +706,7 @@ export class CodexAcpClient {
         if (shouldCancel?.()) {
             return null;
         }
+        const agentMode = getAgentMode();
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
@@ -716,6 +723,23 @@ export class CodexAcpClient {
         await this.codexClient.threadSettingsUpdate({
             threadId: sessionId,
             collaborationMode: createCodexCollaborationMode(mode, currentModelId),
+        });
+    }
+
+    async setAgentMode(sessionId: string, mode: AgentMode): Promise<void> {
+        await this.codexClient.threadSettingsUpdate({
+            threadId: sessionId,
+            approvalPolicy: mode.approvalPolicy,
+            sandboxPolicy: mode.sandboxPolicy,
+        });
+    }
+
+    async setModelAndEffort(sessionId: string, currentModelId: string): Promise<void> {
+        const modelId = ModelId.fromString(currentModelId);
+        await this.codexClient.threadSettingsUpdate({
+            threadId: sessionId,
+            model: modelId.model,
+            effort: modelId.effort as ReasoningEffort,
         });
     }
 
@@ -897,6 +921,7 @@ export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
     models: Model[],
+    agentMode?: AgentMode,
     collaborationMode: ModeKind,
     modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,

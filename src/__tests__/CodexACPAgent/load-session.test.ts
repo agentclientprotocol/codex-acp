@@ -216,8 +216,9 @@ describe("CodexACPAgent - loadSession", () => {
             cwd: "/test/project",
             mcpServers: [],
         };
-        await codexAcpAgent.loadSession(loadParams);
+        const response = await codexAcpAgent.loadSession(loadParams);
 
+        expect(response.sessionId).toBe(thread.id);
         expect(codexAppServerClient.threadRead).toHaveBeenCalledWith({
             threadId: thread.id,
             includeTurns: true,
