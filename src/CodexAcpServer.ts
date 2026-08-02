@@ -35,7 +35,7 @@ import {
     REASONING_EFFORT_CONFIG_ID,
 } from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
-import {toPromptUsage} from "./TokenCount";
+import {subtractTokenCounts, toPromptUsage} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
@@ -1878,6 +1878,7 @@ export class CodexAcpServer {
             prompt: params.prompt,
         });
         const sessionState = this.getSessionState(params.sessionId);
+        const promptStartTotalTokenUsage = sessionState.totalTokenUsage;
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
         const activePrompt = this.trackActivePrompt(params.sessionId);
@@ -1913,7 +1914,7 @@ export class CodexAcpServer {
                 elicitationHandler);
 
             if (activePrompt.signal.aborted) {
-                return this.cancelledPromptResponse(sessionState);
+                return this.cancelledPromptResponse(sessionState, promptStartTotalTokenUsage);
             }
 
             const commandPromise = this.availableCommands.tryHandleCommand(params.prompt, sessionState, {
@@ -1955,14 +1956,14 @@ export class CodexAcpServer {
                 this.cancelBeforeTurnStarted(activePrompt),
             ]);
             if (commandResult === null) {
-                return this.cancelledPromptResponse(sessionState);
+                return this.cancelledPromptResponse(sessionState, promptStartTotalTokenUsage);
             }
             if (commandResult.handled) {
                 logger.log("Prompt handled by a command");
                 await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                 if (commandResult.turnCompleted?.turn.status === "interrupted") {
                     await this.notifyConversationInterrupted(params.sessionId);
-                    return this.cancelledPromptResponse(sessionState);
+                    return this.cancelledPromptResponse(sessionState, promptStartTotalTokenUsage);
                 }
                 const error = eventHandler.getFailure();
                 if (error) {
@@ -1971,13 +1972,13 @@ export class CodexAcpServer {
                 }
                 return {
                     stopReason: "end_turn",
-                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                    usage: this.buildPromptUsage(sessionState, promptStartTotalTokenUsage),
                     _meta: this.buildQuotaMeta(sessionState),
                 };
             }
 
             if (this.sessionIsClosing(params.sessionId)) {
-                return this.cancelledPromptResponse(sessionState);
+                return this.cancelledPromptResponse(sessionState, promptStartTotalTokenUsage);
             }
 
             const modelId = ModelId.fromString(sessionState.currentModelId);
@@ -2035,14 +2036,14 @@ export class CodexAcpServer {
             ]);
 
             if (turnCompleted === null) {
-                return this.cancelledPromptResponse(sessionState);
+                return this.cancelledPromptResponse(sessionState, promptStartTotalTokenUsage);
             }
 
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
 
             if (turnCompleted.turn.status === "interrupted") {
                 await this.notifyConversationInterrupted(params.sessionId);
-                return this.cancelledPromptResponse(sessionState);
+                return this.cancelledPromptResponse(sessionState, promptStartTotalTokenUsage);
             }
 
             const error = eventHandler.getFailure();
@@ -2063,7 +2064,7 @@ export class CodexAcpServer {
                     activePrompt.signal,
                 );
                 if (this.promptShouldStop(params.sessionId, activePrompt)) {
-                    return this.cancelledPromptResponse(sessionState);
+                    return this.cancelledPromptResponse(sessionState, promptStartTotalTokenUsage);
                 }
                 if (approved && !this.promptShouldStop(params.sessionId, activePrompt)) {
                     await this.applyCollaborationModeChange(sessionState, DEFAULT_COLLABORATION_MODE);
@@ -2111,13 +2112,13 @@ export class CodexAcpServer {
                     ]);
 
                     if (turnCompleted === null) {
-                        return this.cancelledPromptResponse(sessionState);
+                        return this.cancelledPromptResponse(sessionState, promptStartTotalTokenUsage);
                     }
 
                     await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                     if (turnCompleted.turn.status === "interrupted") {
                         await this.notifyConversationInterrupted(params.sessionId);
-                        return this.cancelledPromptResponse(sessionState);
+                        return this.cancelledPromptResponse(sessionState, promptStartTotalTokenUsage);
                     }
 
                     const implementationError = eventHandler.getFailure();
@@ -2134,7 +2135,7 @@ export class CodexAcpServer {
 
             return {
                 stopReason: "end_turn",
-                usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                usage: this.buildPromptUsage(sessionState, promptStartTotalTokenUsage),
                 _meta: this.buildQuotaMeta(sessionState),
             };
         } catch (err) {
@@ -2212,10 +2213,13 @@ export class CodexAcpServer {
         }
     }
 
-    private cancelledPromptResponse(sessionState: SessionState): acp.PromptResponse {
+    private cancelledPromptResponse(
+        sessionState: SessionState,
+        promptStartTotalTokenUsage: TokenCount | null,
+    ): acp.PromptResponse {
         return {
             stopReason: "cancelled",
-            usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+            usage: this.buildPromptUsage(sessionState, promptStartTotalTokenUsage),
             _meta: this.buildQuotaMeta(sessionState),
         };
     }
@@ -2249,11 +2253,17 @@ export class CodexAcpServer {
         };
     }
 
-    private buildPromptUsage(lastTokenUsage: TokenCount | null): acp.Usage | null {
-        if (lastTokenUsage == null) {
+    private buildPromptUsage(
+        sessionState: SessionState,
+        promptStartTotalTokenUsage: TokenCount | null,
+    ): acp.Usage | null {
+        if (sessionState.lastTokenUsage == null || sessionState.totalTokenUsage == null) {
             return null;
         }
-        return toPromptUsage(lastTokenUsage);
+        const promptTokenUsage = promptStartTotalTokenUsage == null
+            ? sessionState.totalTokenUsage
+            : subtractTokenCounts(sessionState.totalTokenUsage, promptStartTotalTokenUsage);
+        return toPromptUsage(promptTokenUsage);
     }
 
     private async runWithProcessCheck<T>(operation: () => Promise<T>): Promise<T> {

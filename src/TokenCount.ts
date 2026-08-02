@@ -36,6 +36,19 @@ export function toTokenCount(usage: TokenUsageBreakdown): TokenCount {
 }
 
 /**
+ * Returns the usage accumulated after a cumulative token-count baseline.
+ */
+export function subtractTokenCounts(total: TokenCount, baseline: TokenCount): TokenCount {
+    return {
+        totalTokens: total.totalTokens - baseline.totalTokens,
+        inputTokens: total.inputTokens - baseline.inputTokens,
+        cachedInputTokens: total.cachedInputTokens - baseline.cachedInputTokens,
+        outputTokens: total.outputTokens - baseline.outputTokens,
+        reasoningOutputTokens: total.reasoningOutputTokens - baseline.reasoningOutputTokens,
+    };
+}
+
+/**
  * Maps our per-turn token breakdown to ACP PromptResponse usage fields.
  * Cached input tokens are reported as ACP cache reads, and reasoning output
  * tokens are exposed through ACP's thoughtTokens field.
