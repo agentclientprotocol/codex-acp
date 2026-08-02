@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { TokenUsageBreakdown } from '../../app-server/v2';
+import type { TokenCount } from '../../TokenCount';
 
 function createTokenUsageNotification(
     sessionId: string,
@@ -30,7 +31,11 @@ describe('Token Usage Events', () => {
         vi.clearAllMocks();
     });
     describe('PromptResponse usage', () => {
-        function setupPromptWithTokenUsage(notifications: ServerNotification[], turnStatus: string = "completed") {
+        function setupPromptWithTokenUsage(
+            notifications: ServerNotification[],
+            turnStatus: string = "completed",
+            initialTotalTokenUsage: TokenCount | null = null,
+        ) {
             const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
             mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
@@ -49,7 +54,10 @@ describe('Token Usage Events', () => {
                 };
             });
 
-            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({ sessionId }));
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({
+                sessionId,
+                totalTokenUsage: initialTotalTokenUsage,
+            }));
 
             return codexAcpAgent;
         }
@@ -133,7 +141,7 @@ describe('Token Usage Events', () => {
             );
         });
 
-        it('should use last token usage from multiple updates', async () => {
+        it('should include cumulative token usage from multiple updates', async () => {
             const notifications: ServerNotification[] = [
                 createTokenUsageNotification(sessionId, {
                     total: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
@@ -161,6 +169,50 @@ describe('Token Usage Events', () => {
 
             await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
                 'data/token-usage-multiple-updates.json'
+            );
+        });
+
+        it('should report usage accumulated since the previous prompt', async () => {
+            const initialTotalTokenUsage: TokenCount = {
+                totalTokens: 2000,
+                inputTokens: 1600,
+                cachedInputTokens: 0,
+                outputTokens: 400,
+                reasoningOutputTokens: 0,
+            };
+            const tokenUsageNotification = createTokenUsageNotification(sessionId, {
+                total: {
+                    totalTokens: 5200,
+                    inputTokens: 4200,
+                    cachedInputTokens: 1000,
+                    cacheWriteInputTokens: 0,
+                    outputTokens: 1000,
+                    reasoningOutputTokens: 100,
+                },
+                last: {
+                    totalTokens: 1500,
+                    inputTokens: 1200,
+                    cachedInputTokens: 500,
+                    cacheWriteInputTokens: 0,
+                    outputTokens: 300,
+                    reasoningOutputTokens: 100,
+                },
+                modelContextWindow: 128000,
+            });
+
+            const codexAcpAgent = setupPromptWithTokenUsage(
+                [tokenUsageNotification],
+                "completed",
+                initialTotalTokenUsage,
+            );
+
+            const response = await codexAcpAgent.prompt({
+                sessionId,
+                prompt: [{ type: 'text', text: 'test prompt' }],
+            });
+
+            await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
+                'data/token-usage-prompt-delta.json'
             );
         });
     });

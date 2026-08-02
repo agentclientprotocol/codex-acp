@@ -1,30 +1,30 @@
 {
   "stopReason": "end_turn",
   "usage": {
-    "totalTokens": 5000,
-    "inputTokens": 3000,
+    "totalTokens": 3200,
+    "inputTokens": 1600,
     "cachedReadTokens": 1000,
-    "outputTokens": 900,
+    "outputTokens": 600,
     "thoughtTokens": 100
   },
   "_meta": {
     "quota": {
       "token_count": {
-        "totalTokens": 2500,
-        "inputTokens": 1500,
+        "totalTokens": 1500,
+        "inputTokens": 700,
         "cachedInputTokens": 500,
-        "outputTokens": 450,
-        "reasoningOutputTokens": 50
+        "outputTokens": 300,
+        "reasoningOutputTokens": 100
       },
       "model_usage": [
         {
           "model": "model-id",
           "token_count": {
-            "totalTokens": 2500,
-            "inputTokens": 1500,
+            "totalTokens": 1500,
+            "inputTokens": 700,
             "cachedInputTokens": 500,
-            "outputTokens": 450,
-            "reasoningOutputTokens": 50
+            "outputTokens": 300,
+            "reasoningOutputTokens": 100
           }
         }
       ]

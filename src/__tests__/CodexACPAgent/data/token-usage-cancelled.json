@@ -1,10 +1,10 @@
 {
   "stopReason": "cancelled",
   "usage": {
-    "totalTokens": 1500,
-    "inputTokens": 1200,
+    "totalTokens": 3000,
+    "inputTokens": 2500,
     "cachedReadTokens": 0,
-    "outputTokens": 300,
+    "outputTokens": 500,
     "thoughtTokens": 0
   },
   "_meta": {
