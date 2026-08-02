@@ -6,6 +6,7 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
+    AskForApproval,
     ConfigReadParams,
     ConfigReadResponse,
     GetAccountParams,
@@ -266,11 +267,11 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "initialize", params: params });
     }
 
-    async turnStart(params: TurnStartParams): Promise<TurnStartResponse> {
+    async turnStart(params: ExperimentalTurnStartParams): Promise<TurnStartResponse> {
         return await this.sendRequest({ method: "turn/start", params: params });
     }
 
-    async runTurn(params: TurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
+    async runTurn(params: ExperimentalTurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
             capturedCompletions.push(event);
@@ -520,11 +521,11 @@ export class CodexAppServerClient {
         this.staleTurnIds.set(threadId, threadStaleTurns);
     }
 
-    async threadStart(params: ThreadStartParams): Promise<ThreadStartResponse> {
+    async threadStart(params: ExperimentalThreadStartParams): Promise<ThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
-    async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
+    async threadResume(params: ExperimentalThreadResumeParams): Promise<ThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
     }
 
@@ -976,7 +977,8 @@ type DistributiveOmit<T, K extends keyof any> = T extends any
 
 export interface ExperimentalThreadSettingsUpdateParams {
     threadId: string;
-    collaborationMode: {
+    approvalPolicy?: AskForApproval;
+    collaborationMode?: {
         mode: "default" | "plan";
         settings: {
             model: string;
@@ -984,7 +986,26 @@ export interface ExperimentalThreadSettingsUpdateParams {
             developer_instructions: string | null;
         };
     };
+    permissions?: string;
 }
+
+// Codex's generated public TypeScript schema omits fields gated by ExperimentalApi.
+// This adapter opts into that API during initialize, so keep the small wire extension
+// local until those fields are emitted by `codex app-server generate-ts`.
+export type ExperimentalThreadStartParams = ThreadStartParams & {
+    permissions?: string;
+    runtimeWorkspaceRoots?: string[];
+};
+
+export type ExperimentalThreadResumeParams = ThreadResumeParams & {
+    permissions?: string;
+    runtimeWorkspaceRoots?: string[];
+};
+
+export type ExperimentalTurnStartParams = TurnStartParams & {
+    permissions?: string;
+    runtimeWorkspaceRoots?: string[];
+};
 
 type McpServerStartupSnapshot = {
     status: McpServerStartupState;

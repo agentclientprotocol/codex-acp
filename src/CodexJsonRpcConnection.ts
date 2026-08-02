@@ -12,17 +12,20 @@ export interface CodexConnection {
     readonly process: ChildProcessWithoutNullStreams;
 }
 
-export function startCodexConnection(codexPath?: string, env?: NodeJS.ProcessEnv): CodexConnection {
+export function startCodexConnection(
+    codexPath?: string,
+    env?: NodeJS.ProcessEnv,
+    configOverrides: string[] = [],
+): CodexConnection {
     const spawnEnv = env ?? process.env;
+    const args = ["app-server", ...configOverrides.flatMap((override) => ["-c", override])];
 
     let codex: ChildProcessWithoutNullStreams;
     if (codexPath) {
-        codex = process.platform === 'win32'
-            ? spawn(`"${codexPath}" app-server`, { shell: true, env: spawnEnv })
-            : spawn(codexPath, ['app-server'], { env: spawnEnv });
+        codex = spawn(codexPath, args, {env: spawnEnv, shell: process.platform === "win32"});
     } else {
         const bundledCodexPath = createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js");
-        codex = spawn(process.execPath, [bundledCodexPath, 'app-server'], {env: spawnEnv});
+        codex = spawn(process.execPath, [bundledCodexPath, ...args], {env: spawnEnv});
     }
 
     attachLogs(codex);
