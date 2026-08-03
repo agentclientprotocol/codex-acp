@@ -13,6 +13,19 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
 
+`CODEX_CONFIG` can enable network access for the `agent` (workspace-write) mode:
+
+```json
+{
+  "sandbox_workspace_write": {
+    "network_access": true
+  }
+}
+```
+
+Only a boolean value overrides the workspace-write default of `false`. This setting
+does not change the `read-only` or `agent-full-access` policies.
+
 ### Quick start
 
 #### Develop on Windows?
