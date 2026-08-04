@@ -84,14 +84,25 @@ export async function legacySetSessionModel(
     return await connection.request<LegacySetSessionModelResponse, LegacySetSessionModelRequest>(LEGACY_SET_SESSION_MODEL_METHOD, params);
 }
 
+export type SessionSteerMeta = {
+    [key: string]: unknown;
+    steering?: {
+        [key: string]: unknown;
+        idleBehavior?: "promptRequired";
+    };
+}
+
 export type SessionSteerRequest = {
     sessionId: SessionId;
     prompt: ContentBlock[];
+    _meta?: SessionSteerMeta | null;
 }
 
-export type SessionSteeringResponse = {
-    outcome: "injected" | "startedNewTurn" | "failed";
-}
+export type SessionSteeringResponse =
+    | {outcome: "injected"}
+    | {outcome: "startedNewTurn"}
+    | {outcome: "failed"}
+    | {outcome: "promptRequired"; reason: "noRunningTurn"};
 
 export type SessionSteeringExtRequest = {
     method: typeof SESSION_STEERING_METHOD;
