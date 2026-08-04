@@ -989,7 +989,7 @@ export class CodexAcpServer {
             }
         }
         if (params._meta?.steering?.idleBehavior === "promptRequired") {
-            await this.waitForSteeringFallbackReady(params.sessionId);
+            await this.waitForSessionToBeReadyForPrompt(params.sessionId);
             return {outcome: "promptRequired", reason: "noRunningTurn"};
         }
         return await this.startNewTurnFromSteering(params);
@@ -1052,7 +1052,7 @@ export class CodexAcpServer {
      *     fails or is cancelled before the turn starts.
      */
     private async startNewTurnFromSteering(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
-        await this.waitForSteeringFallbackReady(params.sessionId);
+        await this.waitForSessionToBeReadyForPrompt(params.sessionId);
 
         return await new Promise<SessionSteeringResponse>((resolve, reject) => {
             let turnStarted = false;
@@ -1094,7 +1094,7 @@ export class CodexAcpServer {
         });
     }
 
-    private async waitForSteeringFallbackReady(sessionId: SessionId): Promise<void> {
+    private async waitForSessionToBeReadyForPrompt(sessionId: SessionId): Promise<void> {
         // A prompt can outlive its turn (post-turn cleanup runs before it leaves
         // activePrompts), so a steer can miss the turn while the prompt is still
         // winding down. Starting a new turn now would run a second prompt on the
