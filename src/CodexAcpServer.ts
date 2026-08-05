@@ -1351,9 +1351,24 @@ export class CodexAcpServer {
 
         const threadUpdates: UpdateSessionEvent[] = [];
         for (const turn of thread.turns) {
+            const turnTiming = turn.startedAt !== null || turn.completedAt !== null
+                ? {startedAt: turn.startedAt, completedAt: turn.completedAt}
+                : null;
             for (const item of turn.items) {
                 const updates = await this.createHistoryUpdates(item, sessionState);
-                threadUpdates.push(...updates);
+                threadUpdates.push(...updates.map(update => {
+                    if (!turnTiming) return update;
+                    return {
+                        ...update,
+                        _meta: {
+                            ...update._meta,
+                            codex: {
+                                ...(update._meta?.["codex"] as Record<string, unknown> | undefined),
+                                ...turnTiming,
+                            },
+                        },
+                    };
+                }));
             }
         }
 

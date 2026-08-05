@@ -130,6 +130,12 @@
         "content": {
           "type": "text",
           "text": "Hi"
+        },
+        "_meta": {
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
+          }
         }
       }
     }
@@ -146,6 +152,12 @@
         "content": {
           "type": "text",
           "text": "[@image](https://example.com/image.png)"
+        },
+        "_meta": {
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
+          }
         }
       }
     }
@@ -162,6 +174,12 @@
         "content": {
           "type": "text",
           "text": "Hello!"
+        },
+        "_meta": {
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
+          }
         }
       }
     }
@@ -178,6 +196,12 @@
         "content": {
           "type": "text",
           "text": "Thinking..."
+        },
+        "_meta": {
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
+          }
         }
       }
     }
@@ -208,6 +232,10 @@
           "terminal_info": {
             "cwd": "/test/project",
             "terminal_id": "item-cmd-1"
+          },
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
           }
         }
       }
@@ -236,6 +264,10 @@
             "exit_code": 0,
             "signal": null,
             "terminal_id": "item-cmd-1"
+          },
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
           }
         }
       }
@@ -263,7 +295,13 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "_meta": {
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
+          }
+        }
       }
     }
   ]
@@ -285,7 +323,11 @@
           "arguments": {}
         },
         "_meta": {
-          "is_mcp_tool_call": true
+          "is_mcp_tool_call": true,
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
+          }
         }
       }
     }
@@ -305,6 +347,12 @@
         "rawInput": {
           "arguments": {
             "includeDisabled": false
+          }
+        },
+        "_meta": {
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
           }
         }
       }
@@ -339,6 +387,12 @@
         ],
         "rawInput": {
           "path": "/test/project/input.png"
+        },
+        "_meta": {
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
+          }
         }
       }
     }
@@ -378,6 +432,12 @@
           "revisedPrompt": "A tiny blue square",
           "result": "iVBORw0KGgo=",
           "savedPath": "/test/project/generated-blue-square.png"
+        },
+        "_meta": {
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
+          }
         }
       }
     }
@@ -395,7 +455,11 @@
         "title": "Context compacted",
         "status": "completed",
         "_meta": {
-          "contextCompaction": true
+          "contextCompaction": true,
+          "codex": {
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
+          }
         }
       }
     }
@@ -423,7 +487,9 @@
               "threadId": "thread-child-1",
               "path": "/root/test_audit",
               "activity": "started"
-            }
+            },
+            "startedAt": 1710000000,
+            "completedAt": 1710000005
           }
         }
       }

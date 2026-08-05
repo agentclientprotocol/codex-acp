@@ -74,8 +74,8 @@ describe("CodexACPAgent - loadSession", () => {
                     itemsView: "full",
                     status: "completed",
                     error: null,
-                    startedAt: null,
-                    completedAt: null,
+                    startedAt: 1710000000,
+                    completedAt: 1710000005,
                     durationMs: null,
                     items: [
                         {
