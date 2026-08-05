@@ -65,12 +65,15 @@ import type {
     TurnSteerResponse,
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
+    DynamicToolCallParams,
+    DynamicToolCallResponse,
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
     ItemCompletedNotification,
 } from "./app-server/v2";
+import {handleDynamicToolCall} from "./WorkspaceDependencies";
 
 export interface ApprovalHandler {
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
@@ -123,6 +126,12 @@ const ToolRequestUserInputRequest = new RequestType<
     ToolRequestUserInputResponse,
     void
 >('item/tool/requestUserInput');
+
+const DynamicToolCallRequest = new RequestType<
+    DynamicToolCallParams,
+    DynamicToolCallResponse,
+    void
+>('item/tool/call');
 
 const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
 
@@ -245,6 +254,10 @@ export class CodexAppServerClient {
                 return { answers: {} };
             }
             return await handler.handleUserInput(params);
+        });
+
+        this.connection.onRequest(DynamicToolCallRequest, async (params) => {
+            return handleDynamicToolCall(params);
         });
     }
 
