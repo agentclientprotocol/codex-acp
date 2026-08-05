@@ -704,7 +704,7 @@ export class CodexAcpClient {
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
-            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            sandboxPolicy: createTurnSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories, this.config),
             summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
@@ -1059,6 +1059,28 @@ function addAdditionalDirectoriesToSandboxPolicy(
     return {
         ...sandboxPolicy,
         writableRoots: uniqueStrings([...sandboxPolicy.writableRoots, ...additionalDirectories]),
+    };
+}
+
+function createTurnSandboxPolicy(
+    sandboxPolicy: SandboxPolicy,
+    additionalDirectories: string[],
+    config: JsonObject,
+): SandboxPolicy {
+    const policy = addAdditionalDirectoriesToSandboxPolicy(sandboxPolicy, additionalDirectories);
+    const workspaceWriteConfig = config["sandbox_workspace_write"];
+
+    if (
+        policy.type !== "workspaceWrite" ||
+        !isJsonObject(workspaceWriteConfig) ||
+        workspaceWriteConfig["network_access"] !== true
+    ) {
+        return policy;
+    }
+
+    return {
+        ...policy,
+        networkAccess: true,
     };
 }
 
