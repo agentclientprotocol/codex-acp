@@ -8,6 +8,8 @@ import {
     createTestFixture,
     createTestModel,
     createTestSessionState,
+    setupPromptTestSession,
+    TEST_PERMISSION_PROFILE_CONFIG,
     type TestFixture
 } from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
@@ -405,8 +407,40 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    it('selects external permission profiles without losing workspace roots', async () => {
+        const mockFixture = createCodexMockTestFixture(TEST_PERMISSION_PROFILE_CONFIG);
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        const session = await codexAcpClient.newSession({
+            cwd: "/workspace",
+            additionalDirectories: ["/workspace/extra"],
+            mcpServers: [],
+        });
+
+        const request = threadStartSpy.mock.calls[0]![0];
+        expect(request).toMatchObject({
+            approvalPolicy: "on-request",
+            permissions: "external-agent",
+            runtimeWorkspaceRoots: ["/workspace", "/workspace/extra"],
+        });
+    });
+
     it('applies ACP additional directories to resumed and loaded sessions explicitly', async () => {
-        const mockFixture = createCodexMockTestFixture();
+        const mockFixture = createCodexMockTestFixture(TEST_PERMISSION_PROFILE_CONFIG);
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
 
@@ -440,6 +474,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         expect(resumed.additionalDirectories).toEqual(["/workspace/resume-extra"]);
         expect(loaded.additionalDirectories).toEqual(["/workspace/load-extra"]);
+        expect(threadResumeSpy.mock.calls[0]![0]).toMatchObject({
+            permissions: "external-agent",
+            runtimeWorkspaceRoots: ["/workspace", "/workspace/resume-extra"],
+        });
+        expect(threadResumeSpy.mock.calls[1]![0]).toMatchObject({
+            permissions: "external-agent",
+            runtimeWorkspaceRoots: ["/workspace", "/workspace/load-extra"],
+        });
         expect(threadResumeSpy.mock.calls[0]![0].config?.["projects"]).toEqual({
             "/workspace": {trust_level: "trusted"},
             "/workspace/resume-extra": {trust_level: "trusted"},
@@ -846,6 +888,24 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             type: "workspaceWrite",
             writableRoots: ["/workspace/extra"],
         });
+    });
+
+    it('keeps the external profile sticky instead of sending a legacy turn sandbox policy', async () => {
+        const {mockFixture, turnStartSpy} = setupPromptTestSession({
+            cwd: "/workspace",
+            additionalDirectories: ["/workspace/extra"],
+        }, TEST_PERMISSION_PROFILE_CONFIG);
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Hello"}],
+        });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            runtimeWorkspaceRoots: ["/workspace", "/workspace/extra"],
+        }));
+        expect(turnStartSpy.mock.calls[0]![0]).not.toHaveProperty("permissions");
+        expect(turnStartSpy.mock.calls[0]![0]).not.toHaveProperty("sandboxPolicy");
     });
 
     function loadNotifications(){

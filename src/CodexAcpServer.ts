@@ -734,7 +734,7 @@ export class CodexAcpServer {
         const sessionState = this.sessions.get(_params.sessionId);
         if (!sessionState) throw new Error(`Session ${_params.sessionId} not found`);
 
-        this.applyModeChange(sessionState, _params.modeId);
+        await this.applyModeChange(sessionState, _params.modeId);
         return {};
     }
 
@@ -759,7 +759,7 @@ export class CodexAcpServer {
                 this.applyFastModeChange(sessionState, params);
                 break;
             case MODE_CONFIG_ID:
-                this.applyModeChange(sessionState, this.stringConfigValue(params));
+                await this.applyModeChange(sessionState, this.stringConfigValue(params));
                 break;
             case COLLABORATION_MODE_CONFIG_ID:
                 await this.applyCollaborationModeChange(sessionState, this.stringConfigValue(params));
@@ -794,11 +794,15 @@ export class CodexAcpServer {
         return params.value;
     }
 
-    private applyModeChange(sessionState: SessionState, value: string): void {
+    private async applyModeChange(sessionState: SessionState, value: string): Promise<void> {
         const newMode = AgentMode.find(value);
         if (!newMode) {
             throw RequestError.invalidParams();
         }
+        await this.codexAcpClient.setAgentMode(
+            sessionState.sessionId,
+            newMode,
+        );
         sessionState.agentMode = newMode;
     }
 
