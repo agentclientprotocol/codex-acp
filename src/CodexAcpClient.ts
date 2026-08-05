@@ -1070,17 +1070,24 @@ function createTurnSandboxPolicy(
     const policy = addAdditionalDirectoriesToSandboxPolicy(sandboxPolicy, additionalDirectories);
     const workspaceWriteConfig = config["sandbox_workspace_write"];
 
-    if (
-        policy.type !== "workspaceWrite" ||
-        !isJsonObject(workspaceWriteConfig) ||
-        workspaceWriteConfig["network_access"] !== true
-    ) {
+    if (policy.type !== "workspaceWrite" || !isJsonObject(workspaceWriteConfig)) {
         return policy;
     }
 
+    const configuredWritableRoots = Array.isArray(workspaceWriteConfig["writable_roots"])
+        ? workspaceWriteConfig["writable_roots"].filter(
+            (value): value is string => typeof value === "string" && path.isAbsolute(value)
+        )
+        : [];
+    const writableRoots = uniqueStrings([...policy.writableRoots, ...configuredWritableRoots]);
+    const networkAccess = workspaceWriteConfig["network_access"] === true
+        ? true
+        : policy.networkAccess;
+
     return {
         ...policy,
-        networkAccess: true,
+        writableRoots,
+        networkAccess,
     };
 }
 

@@ -887,6 +887,58 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    it('applies explicit absolute workspace-write roots to every turn', async () => {
+        const turnStart = await promptWithSandboxConfig({
+            sandbox_workspace_write: {
+                network_access: true,
+                writable_roots: [
+                    "/broker/requests",
+                    "/workspace/extra",
+                    "relative/path",
+                    7,
+                ],
+            },
+        });
+
+        expect(turnStart.sandboxPolicy).toEqual({
+            type: "workspaceWrite",
+            writableRoots: ["/workspace/extra", "/broker/requests"],
+            networkAccess: true,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false,
+        });
+    });
+
+    it('applies configured workspace-write roots without enabling network implicitly', async () => {
+        const turnStart = await promptWithSandboxConfig({
+            sandbox_workspace_write: {writable_roots: ["/broker/requests"]},
+        });
+
+        expect(turnStart.sandboxPolicy).toMatchObject({
+            type: "workspaceWrite",
+            writableRoots: ["/workspace/extra", "/broker/requests"],
+            networkAccess: false,
+        });
+    });
+
+    it('ignores malformed or non-absolute configured workspace-write roots', async () => {
+        const malformed = await promptWithSandboxConfig({
+            sandbox_workspace_write: {writable_roots: "/too-broad"},
+        });
+        const relative = await promptWithSandboxConfig({
+            sandbox_workspace_write: {writable_roots: ["relative/path"]},
+        });
+
+        expect(malformed.sandboxPolicy).toMatchObject({
+            type: "workspaceWrite",
+            writableRoots: ["/workspace/extra"],
+        });
+        expect(relative.sandboxPolicy).toMatchObject({
+            type: "workspaceWrite",
+            writableRoots: ["/workspace/extra"],
+        });
+    });
+
     it.each([
         ["missing", undefined],
         ["false", {sandbox_workspace_write: {network_access: false}}],
@@ -906,7 +958,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         ["full-access", AgentMode.AgentFullAccess, {type: "dangerFullAccess"}],
     ] as const)('does not alter %s mode for workspace-write network config', async (_label, agentMode, expectedPolicy) => {
         const turnStart = await promptWithSandboxConfig({
-            sandbox_workspace_write: {network_access: true},
+            sandbox_workspace_write: {
+                network_access: true,
+                writable_roots: ["/broker/requests"],
+            },
         }, agentMode);
 
         expect(turnStart.sandboxPolicy).toEqual(expectedPolicy);
