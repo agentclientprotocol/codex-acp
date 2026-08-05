@@ -30,8 +30,13 @@ describe('Token Usage Events', () => {
         vi.clearAllMocks();
     });
     describe('PromptResponse usage', () => {
-        function setupPromptWithTokenUsage(notifications: ServerNotification[], turnStatus: string = "completed") {
+        function setupPromptsWithTokenUsage(
+            notificationsByPrompt: ServerNotification[][],
+            turnStatuses: string[] = [],
+            sessionState = createTestSessionState({ sessionId }),
+        ) {
             const codexAcpAgent = mockFixture.getCodexAcpAgent();
+            let promptIndex = 0;
 
             mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
                 turn: { id: "turn-id", items: [], status: "inProgress", error: null }
@@ -40,25 +45,35 @@ describe('Token Usage Events', () => {
             // awaitTurnCompleted sends notifications before resolving
             mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation(async () => {
                 // Send notifications during turn (after handler is registered)
-                for (const notification of notifications) {
+                const currentPromptIndex = promptIndex++;
+                for (const notification of notificationsByPrompt[currentPromptIndex] ?? []) {
                     mockFixture.sendServerNotification(notification);
                 }
                 return {
                     threadId: sessionId,
-                    turn: { id: "turn-id", items: [], status: turnStatus, error: null }
+                    turn: {
+                        id: "turn-id",
+                        items: [],
+                        status: turnStatuses[currentPromptIndex] ?? "completed",
+                        error: null,
+                    }
                 };
             });
 
-            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(createTestSessionState({ sessionId }));
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
 
             return codexAcpAgent;
+        }
+
+        function setupPromptWithTokenUsage(notifications: ServerNotification[], turnStatus: string = "completed") {
+            return setupPromptsWithTokenUsage([notifications], [turnStatus]);
         }
 
         it('should include token_count in PromptResponse on end_turn', async () => {
             const tokenUsageNotification = createTokenUsageNotification(sessionId, {
                 total: {
                     totalTokens: 5000,
-                    inputTokens: 4000,
+                    inputTokens: 4100,
                     cachedInputTokens: 1000,
                     cacheWriteInputTokens: 0,
                     outputTokens: 900,
@@ -133,7 +148,31 @@ describe('Token Usage Events', () => {
             );
         });
 
-        it('should use last token usage from multiple updates', async () => {
+        it('should subtract cumulative usage replayed before prompt subscription', async () => {
+            mockFixture.sendServerNotification(createTokenUsageNotification(sessionId, {
+                total: { totalTokens: 2000, inputTokens: 1600, cachedInputTokens: 400, cacheWriteInputTokens: 0, outputTokens: 400, reasoningOutputTokens: 50 },
+                last: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 200, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 25 },
+                modelContextWindow: 128000,
+            }));
+            const codexAcpAgent = setupPromptWithTokenUsage([
+                createTokenUsageNotification(sessionId, {
+                    total: { totalTokens: 3500, inputTokens: 2800, cachedInputTokens: 700, cacheWriteInputTokens: 0, outputTokens: 700, reasoningOutputTokens: 100 },
+                    last: { totalTokens: 1500, inputTokens: 1200, cachedInputTokens: 300, cacheWriteInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 50 },
+                    modelContextWindow: 128000,
+                }),
+            ]);
+
+            const response = await codexAcpAgent.prompt({
+                sessionId,
+                prompt: [{ type: 'text', text: 'test prompt' }],
+            });
+
+            await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
+                'data/token-usage-replayed-baseline.json'
+            );
+        });
+
+        it('should report cumulative usage from multiple updates within one prompt', async () => {
             const notifications: ServerNotification[] = [
                 createTokenUsageNotification(sessionId, {
                     total: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
@@ -146,8 +185,8 @@ describe('Token Usage Events', () => {
                     modelContextWindow: 128000,
                 }),
                 createTokenUsageNotification(sessionId, {
-                    total: { totalTokens: 3500, inputTokens: 2800, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 600, reasoningOutputTokens: 100 },
-                    last: { totalTokens: 1500, inputTokens: 1200, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 100 },
+                    total: { totalTokens: 3500, inputTokens: 2900, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 600, reasoningOutputTokens: 100 },
+                    last: { totalTokens: 1500, inputTokens: 1300, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 100 },
                     modelContextWindow: 128000,
                 }),
             ];
@@ -161,6 +200,43 @@ describe('Token Usage Events', () => {
 
             await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
                 'data/token-usage-multiple-updates.json'
+            );
+        });
+
+        it('should report only the cumulative usage added by a second prompt', async () => {
+            const codexAcpAgent = setupPromptsWithTokenUsage([
+                [
+                    createTokenUsageNotification(sessionId, {
+                        total: { totalTokens: 3500, inputTokens: 2900, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 600, reasoningOutputTokens: 100 },
+                        last: { totalTokens: 1500, inputTokens: 1300, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 100 },
+                        modelContextWindow: 128000,
+                    }),
+                ],
+                [
+                    createTokenUsageNotification(sessionId, {
+                        total: { totalTokens: 4800, inputTokens: 3900, cachedInputTokens: 900, cacheWriteInputTokens: 0, outputTokens: 900, reasoningOutputTokens: 180 },
+                        last: { totalTokens: 1300, inputTokens: 1000, cachedInputTokens: 400, cacheWriteInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 80 },
+                        modelContextWindow: 128000,
+                    }),
+                    createTokenUsageNotification(sessionId, {
+                        total: { totalTokens: 6400, inputTokens: 5200, cachedInputTokens: 1400, cacheWriteInputTokens: 0, outputTokens: 1200, reasoningOutputTokens: 250 },
+                        last: { totalTokens: 1600, inputTokens: 1300, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 70 },
+                        modelContextWindow: 128000,
+                    }),
+                ],
+            ]);
+
+            await codexAcpAgent.prompt({
+                sessionId,
+                prompt: [{ type: 'text', text: 'first prompt' }],
+            });
+            const response = await codexAcpAgent.prompt({
+                sessionId,
+                prompt: [{ type: 'text', text: 'second prompt' }],
+            });
+
+            await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
+                'data/token-usage-second-prompt.json'
             );
         });
     });

@@ -1,0 +1,33 @@
+{
+  "stopReason": "end_turn",
+  "usage": {
+    "totalTokens": 1500,
+    "inputTokens": 900,
+    "cachedReadTokens": 300,
+    "outputTokens": 300,
+    "thoughtTokens": 50
+  },
+  "_meta": {
+    "quota": {
+      "token_count": {
+        "totalTokens": 1500,
+        "inputTokens": 900,
+        "cachedInputTokens": 300,
+        "outputTokens": 300,
+        "reasoningOutputTokens": 50
+      },
+      "model_usage": [
+        {
+          "model": "model-id",
+          "token_count": {
+            "totalTokens": 1500,
+            "inputTokens": 900,
+            "cachedInputTokens": 300,
+            "outputTokens": 300,
+            "reasoningOutputTokens": 50
+          }
+        }
+      ]
+    }
+  }
+}

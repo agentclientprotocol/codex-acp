@@ -36,6 +36,7 @@ import type {
     ThreadGoal,
     ThreadGoalStatus,
     ThreadSourceKind,
+    ThreadTokenUsage,
     TurnCompletedNotification,
     TurnSteerResponse,
     UserInput,
@@ -654,6 +655,10 @@ export class CodexAcpClient {
                 return await elicitationHandler.handleUserInput(params);
             },
         });
+    }
+
+    getThreadTokenUsage(sessionId: string): ThreadTokenUsage | null {
+        return this.codexClient.getThreadTokenUsage(sessionId);
     }
 
     async waitForSessionNotifications(sessionId: string): Promise<void> {

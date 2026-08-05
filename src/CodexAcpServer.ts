@@ -35,7 +35,7 @@ import {
     REASONING_EFFORT_CONFIG_ID,
 } from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
-import {toPromptUsage} from "./TokenCount";
+import {subtractTokenCounts, toPromptUsage, toTokenCount} from "./TokenCount";
 import {CodexCommands} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
@@ -1878,6 +1878,12 @@ export class CodexAcpServer {
             prompt: params.prompt,
         });
         const sessionState = this.getSessionState(params.sessionId);
+        const latestThreadTokenUsage = this.codexAcpClient.getThreadTokenUsage(params.sessionId);
+        if (latestThreadTokenUsage != null) {
+            sessionState.totalTokenUsage = toTokenCount(latestThreadTokenUsage.total);
+            sessionState.modelContextWindow = latestThreadTokenUsage.modelContextWindow;
+        }
+        const promptStartTokenUsage = sessionState.totalTokenUsage;
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
         const activePrompt = this.trackActivePrompt(params.sessionId);
@@ -1915,7 +1921,7 @@ export class CodexAcpServer {
                 elicitationHandler);
 
             if (activePrompt.signal.aborted) {
-                return this.cancelledPromptResponse(sessionState);
+                return this.cancelledPromptResponse(sessionState, promptStartTokenUsage);
             }
 
             const commandPromise = this.availableCommands.tryHandleCommand(params.prompt, sessionState, {
@@ -1957,28 +1963,32 @@ export class CodexAcpServer {
                 this.cancelBeforeTurnStarted(activePrompt),
             ]);
             if (commandResult === null) {
-                return this.cancelledPromptResponse(sessionState);
+                return this.cancelledPromptResponse(sessionState, promptStartTokenUsage);
             }
             if (commandResult.handled) {
                 logger.log("Prompt handled by a command");
                 await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                 if (commandResult.turnCompleted?.turn.status === "interrupted") {
-                    return this.cancelledPromptResponse(sessionState);
+                    return this.cancelledPromptResponse(sessionState, promptStartTokenUsage);
                 }
                 const error = eventHandler.getFailure();
                 if (error) {
                     // noinspection ExceptionCaughtLocallyJS
                     throw error;
                 }
+                const promptTokenUsage = subtractTokenCounts(
+                    sessionState.totalTokenUsage,
+                    promptStartTokenUsage,
+                );
                 return {
                     stopReason: "end_turn",
-                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                    _meta: this.buildQuotaMeta(sessionState),
+                    usage: this.buildPromptUsage(promptTokenUsage),
+                    _meta: this.buildQuotaMeta(sessionState, promptTokenUsage),
                 };
             }
 
             if (this.sessionIsClosing(params.sessionId)) {
-                return this.cancelledPromptResponse(sessionState);
+                return this.cancelledPromptResponse(sessionState, promptStartTokenUsage);
             }
 
             const modelId = ModelId.fromString(sessionState.currentModelId);
@@ -2036,14 +2046,14 @@ export class CodexAcpServer {
             ]);
 
             if (turnCompleted === null) {
-                return this.cancelledPromptResponse(sessionState);
+                return this.cancelledPromptResponse(sessionState, promptStartTokenUsage);
             }
 
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
 
             if (turnCompleted.turn.status === "interrupted") {
                 await eventHandler.flushPendingPlanUpdates();
-                return this.cancelledPromptResponse(sessionState);
+                return this.cancelledPromptResponse(sessionState, promptStartTokenUsage);
             }
 
             const error = eventHandler.getFailure();
@@ -2065,7 +2075,7 @@ export class CodexAcpServer {
                     activePrompt.signal,
                 );
                 if (this.promptShouldStop(params.sessionId, activePrompt)) {
-                    return this.cancelledPromptResponse(sessionState);
+                    return this.cancelledPromptResponse(sessionState, promptStartTokenUsage);
                 }
                 if (approved && !this.promptShouldStop(params.sessionId, activePrompt)) {
                     await this.applyCollaborationModeChange(sessionState, DEFAULT_COLLABORATION_MODE);
@@ -2113,13 +2123,13 @@ export class CodexAcpServer {
                     ]);
 
                     if (turnCompleted === null) {
-                        return this.cancelledPromptResponse(sessionState);
+                        return this.cancelledPromptResponse(sessionState, promptStartTokenUsage);
                     }
 
                     await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                     if (turnCompleted.turn.status === "interrupted") {
                         await eventHandler.flushPendingPlanUpdates();
-                        return this.cancelledPromptResponse(sessionState);
+                        return this.cancelledPromptResponse(sessionState, promptStartTokenUsage);
                     }
 
                     const implementationError = eventHandler.getFailure();
@@ -2134,10 +2144,14 @@ export class CodexAcpServer {
                 this.createPromptFallbackTitle(params.prompt),
             );
 
+            const promptTokenUsage = subtractTokenCounts(
+                sessionState.totalTokenUsage,
+                promptStartTokenUsage,
+            );
             return {
                 stopReason: "end_turn",
-                usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                _meta: this.buildQuotaMeta(sessionState),
+                usage: this.buildPromptUsage(promptTokenUsage),
+                _meta: this.buildQuotaMeta(sessionState, promptTokenUsage),
             };
         } catch (err) {
             logger.error(`Prompt for session ${params.sessionId} failed`, err);
@@ -2215,38 +2229,46 @@ export class CodexAcpServer {
         }
     }
 
-    private cancelledPromptResponse(sessionState: SessionState): acp.PromptResponse {
+    private cancelledPromptResponse(
+        sessionState: SessionState,
+        promptStartTokenUsage: TokenCount | null,
+    ): acp.PromptResponse {
+        const promptTokenUsage = subtractTokenCounts(
+            sessionState.totalTokenUsage,
+            promptStartTokenUsage,
+        );
         return {
             stopReason: "cancelled",
-            usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-            _meta: this.buildQuotaMeta(sessionState),
+            usage: this.buildPromptUsage(promptTokenUsage),
+            _meta: this.buildQuotaMeta(sessionState, promptTokenUsage),
         };
     }
 
-    private buildQuotaMeta(sessionState: SessionState): { quota: QuotaMeta } {
-        const lastTokenUsage = sessionState.lastTokenUsage;
-
+    private buildQuotaMeta(
+        sessionState: SessionState,
+        promptTokenUsage: TokenCount | null,
+    ): { quota: QuotaMeta } {
         // Remove the "[reasoning-level]" suffix from currentModelId if present
         const modelName = sessionState.currentModelId.replace(/\[.*?]$/, '');
 
         // FIXME: currently all tokens are reported for the current model
-        const modelUsage = (lastTokenUsage != null)
-            ? [{ model: modelName, token_count: lastTokenUsage }]
+        const modelUsage = (promptTokenUsage != null)
+            ? [{ model: modelName, token_count: promptTokenUsage }]
             : [];
 
         return {
             quota: {
-                token_count: sessionState.lastTokenUsage,
+                token_count: promptTokenUsage,
                 model_usage: modelUsage
             }
         };
     }
 
-    private buildPromptUsage(lastTokenUsage: TokenCount | null): acp.Usage | null {
-        if (lastTokenUsage == null) {
+    private buildPromptUsage(promptTokenUsage: TokenCount | null): acp.Usage | null {
+        if (promptTokenUsage == null) {
             return null;
         }
-        return toPromptUsage(lastTokenUsage);
+        return toPromptUsage(promptTokenUsage);
     }
 
     private async runWithProcessCheck<T>(operation: () => Promise<T>): Promise<T> {
