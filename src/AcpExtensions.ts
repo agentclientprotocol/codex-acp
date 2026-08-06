@@ -13,6 +13,7 @@ import {
 } from "./GoalExtension";
 
 export {
+    GOAL_CONTROL_ACTIONS,
     GOAL_CONTROL_METHOD,
     GOAL_EXTENSION_VERSION,
     LEGACY_GOAL_CONTROL_METHOD,

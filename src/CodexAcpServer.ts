@@ -42,6 +42,7 @@ import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
 import {
+    GOAL_CONTROL_ACTIONS,
     GOAL_CONTROL_METHOD,
     GOAL_EXTENSION_VERSION,
     isExtMethodRequest,
@@ -254,7 +255,7 @@ export class CodexAcpServer {
                 goal: {
                     version: GOAL_EXTENSION_VERSION,
                     controlMethod: GOAL_CONTROL_METHOD,
-                    actions: ["pause", "clear"],
+                    actions: [...GOAL_CONTROL_ACTIONS],
                 },
             },
         };
