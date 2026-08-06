@@ -727,47 +727,70 @@ describe('Elicitation Events', () => {
                 },
             });
 
-            const [elicitationEvent] = fixture.getAcpConnectionEvents(['_meta']);
-            expect(elicitationEvent).toMatchObject({
+            expect(fixture.getAcpConnectionEvents([])).toEqual([{
                 method: 'createElicitation',
                 args: [{
                     sessionId,
                     toolCallId: 'request-user-input-1',
                     mode: 'form',
-                    message: 'Input requested',
+                    message: 'Codex needs your input to continue.',
                     requestedSchema: {
                         type: 'object',
-                        required: ['notes'],
+                        properties: {
+                            next_step: {
+                                type: 'string',
+                                title: 'What should I do next?',
+                                description: 'Next step',
+                                oneOf: [
+                                    { const: 'Run tests', title: 'Run tests', description: 'Run the focused test suite.' },
+                                    { const: 'Stop', title: 'Stop', description: 'Stop and report current status.' },
+                                    {
+                                        const: 'None of the above',
+                                        title: 'None of the above',
+                                        description: 'Provide a different answer in the note field.',
+                                    },
+                                ],
+                                _meta: {
+                                    codex: { isOther: true, isSecret: false },
+                                },
+                            },
+                            next_step_note: {
+                                type: 'string',
+                                title: 'Additional answer or note',
+                                _meta: {
+                                    codex: { questionId: 'next_step', role: 'user_note', isSecret: false },
+                                },
+                            },
+                            notes: {
+                                type: 'string',
+                                title: 'Any extra instructions?',
+                                description: 'Notes',
+                                _meta: {
+                                    codex: { isOther: false, isSecret: false },
+                                },
+                            },
+                        },
+                        required: ['next_step', 'notes'],
+                    },
+                    _meta: {
+                        codex: { autoResolutionMs: 60000 },
                     },
                 }],
-            });
-            expect(elicitationEvent!.args[0].requestedSchema.properties.next_step.oneOf).toEqual([
-                { const: 'Run tests', title: 'Run tests', description: 'Run the focused test suite.' },
-                { const: 'Stop', title: 'Stop', description: 'Stop and report current status.' },
-            ]);
-            expect(elicitationEvent!.args[0].requestedSchema.properties.next_step__other).toMatchObject({
-                type: 'string',
-                title: 'Other',
-            });
-            expect(elicitationEvent!.args[0].requestedSchema.properties.notes).toMatchObject({
-                type: 'string',
-                title: 'Notes',
-                description: 'Any extra instructions?',
-            });
+            }]);
 
             completeTurn();
             await promptPromise;
         });
 
-        it('should prefer free-form Other answers over fixed choices', async () => {
+        it('should return the Other choice and its note using Codex answer conventions', async () => {
             const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
                 elicitation: { form: {} },
             });
             fixture.setElicitationResponse({
                 action: 'accept',
                 content: {
-                    next_step: 'Run tests',
-                    next_step__other: 'Inspect flaky logs',
+                    next_step: 'None of the above',
+                    next_step_note: 'Inspect flaky logs',
                 },
             });
 
@@ -792,7 +815,7 @@ describe('Elicitation Events', () => {
             const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
             expect(response).toEqual({
                 answers: {
-                    next_step: { answers: ['Inspect flaky logs'] },
+                    next_step: { answers: ['None of the above', 'user_note: Inspect flaky logs'] },
                 },
             });
 
