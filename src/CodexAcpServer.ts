@@ -4,18 +4,17 @@ import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./CodexAuthMethod";
-import {CodexAcpClient, type SessionMetadata, type SessionMetadataWithThread} from "./CodexAcpClient";
+import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
+import {
+    CodexAcpClient,
+    type SessionMetadata,
+    type SessionMetadataWithThread,
+    type UrlElicitationRequester
+} from "./CodexAcpClient";
 import type {McpStartupResult} from "./CodexAppServerClient";
-import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
+import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort} from "./app-server";
-import type {
-    Account,
-    Model,
-    ReasoningEffortOption,
-    Thread,
-    ThreadItem,
-    UserInput
-} from "./app-server/v2";
+import type {Account, Model, ReasoningEffortOption, Thread, ThreadItem, UserInput} from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
@@ -43,24 +42,27 @@ import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
 import {
+    GOAL_CONTROL_ACTIONS,
+    GOAL_CONTROL_METHOD,
+    GOAL_EXTENSION_VERSION,
+    isExtMethodRequest,
+    LEGACY_GOAL_CONTROL_METHOD,
+    LEGACY_SET_SESSION_MODEL_METHOD,
     type LegacyLoadSessionResponse,
     type LegacyNewSessionResponse,
     type LegacyResumeSessionResponse,
     type LegacySessionModelState,
     type LegacySetSessionModelRequest,
     type LegacySetSessionModelResponse,
-    type SessionSteerRequest,
-    type SessionSteeringResponse,
-    GOAL_CONTROL_METHOD,
-    isExtMethodRequest,
-    LEGACY_SET_SESSION_MODEL_METHOD,
     SESSION_STEERING_METHOD,
+    type SessionSteeringResponse,
+    type SessionSteerRequest,
 } from "./AcpExtensions";
 import {
     createCollabAgentToolCallUpdate,
-    createCompletedContextCompactionUpdate,
     createCommandExecutionCompleteUpdate,
     createCommandExecutionUpdate,
+    createCompletedContextCompactionUpdate,
     createDynamicToolCallUpdate,
     createFileChangeUpdate,
     createImageGenerationUpdate,
@@ -83,16 +85,12 @@ import {isJetBrains2026_1Client} from "./JBUtils";
 import {resolveTerminalOutputMode, type TerminalOutputMode} from "./TerminalOutputMode";
 import {clientSupportsPlanUpdates} from "./PlanCapabilities";
 import {
-    createCodexMessagePhaseMeta,
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
+    createCodexMessagePhaseMeta,
     createUserMessageChunk,
 } from "./ContentChunks";
-import {
-    sameThreadGoalSnapshot,
-    type ThreadGoalSnapshot,
-    toThreadGoalSnapshot,
-} from "./ThreadGoalSnapshot";
+import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot,} from "./ThreadGoalSnapshot";
 
 const IMPLEMENT_PLAN_OPTION_ID = "implement_plan";
 const REVISE_PLAN_OPTION_ID = "revise_plan";
@@ -261,6 +259,11 @@ export class CodexAcpServer {
                         writableRoots: true,
                     },
                 },
+                goal: {
+                    version: GOAL_EXTENSION_VERSION,
+                    controlMethod: GOAL_CONTROL_METHOD,
+                    actions: [...GOAL_CONTROL_ACTIONS],
+                },
             },
         };
     }
@@ -281,7 +284,8 @@ export class CodexAcpServer {
                 return await this.unstable_setSessionModel(this.parseLegacySetSessionModelParams(methodRequest.params));
             case SESSION_STEERING_METHOD:
                 return await this.executeOrQueueSteeringRequest(this.parseSessionSteerParams(methodRequest.params));
-            case GOAL_CONTROL_METHOD: {
+            case GOAL_CONTROL_METHOD:
+            case LEGACY_GOAL_CONTROL_METHOD: {
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
                 if (!sessionState) {
                     throw RequestError.invalidParams(undefined, `Unknown session: ${methodRequest.params.sessionId}`);
@@ -684,9 +688,11 @@ export class CodexAcpServer {
 
     async authenticate(
         _params: acp.AuthenticateRequest,
+        requestId?: acp.JsonRpcId,
     ): Promise<acp.AuthenticateResponse> {
         logger.log("Authenticate request received");
-        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params));
+        const elicitationRequester = this.createUrlElicitationRequester(requestId);
+        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
         if (!isAuthenticated) {
             logger.log("Authenticate request failed");
             throw RequestError.invalidParams();
@@ -694,6 +700,19 @@ export class CodexAcpServer {
         await this.refreshSessionsAuthState(this.getAuthProviderForAuthenticateRequest(_params));
         logger.log("Authenticate request completed");
         return { };
+    }
+
+    private createUrlElicitationRequester(requestId?: acp.JsonRpcId): UrlElicitationRequester | undefined {
+        if (requestId == null || !clientSupportsUrlElicitation(this.clientCapabilities)) {
+            return undefined;
+        }
+        return {
+            elicitUrl: (request) => this.connection.request(acp.methods.client.elicitation.create, {
+                mode: "url",
+                requestId,
+                ...request,
+            }),
+        };
     }
 
     async logout(_params: acp.LogoutRequest): Promise<void> {
@@ -1214,9 +1233,7 @@ export class CodexAcpServer {
         await session.update({
             sessionUpdate: "session_info_update",
             _meta: {
-                codex: {
-                    goal: snapshot,
-                },
+                goal: snapshot,
             },
         });
     }

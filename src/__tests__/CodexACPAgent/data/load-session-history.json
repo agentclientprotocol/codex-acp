@@ -92,15 +92,15 @@
       "update": {
         "sessionUpdate": "session_info_update",
         "_meta": {
-          "codex": {
-            "goal": {
-              "objective": "Keep the restored migration green",
-              "status": "paused",
-              "tokenBudget": null,
-              "timeUsedSeconds": 46,
-              "createdAt": 1710000000,
-              "controlMethod": "_codex/session/goal_control"
-            }
+          "goal": {
+            "objective": "Keep the restored migration green",
+            "status": "paused",
+            "tokenBudget": null,
+            "tokensUsed": 42,
+            "timeUsedSeconds": 46,
+            "createdAt": 1710000000000,
+            "updatedAt": 1710000046000,
+            "controlMethod": "_session/goal"
           }
         }
       }

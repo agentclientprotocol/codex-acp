@@ -6,9 +6,7 @@
       "update": {
         "sessionUpdate": "session_info_update",
         "_meta": {
-          "codex": {
-            "goal": null
-          }
+          "goal": null
         }
       }
     }

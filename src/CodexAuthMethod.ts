@@ -1,10 +1,11 @@
 
 import type {AuthenticateRequest, AuthMethod, ClientCapabilities} from "@agentclientprotocol/sdk";
+import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 
 export const CODEX_API_KEY_ENV_VAR = "CODEX_API_KEY";
 export const OPENAI_API_KEY_ENV_VAR = "OPENAI_API_KEY";
 
-interface ApiKeyAuthRequest extends AuthenticateRequest {
+export interface ApiKeyAuthRequest extends AuthenticateRequest {
     methodId: "api-key";
     _meta?: {
         "api-key"?: {
@@ -32,6 +33,16 @@ const ChatGptAuthMethod: AuthMethod = {
 
 export interface ChatGPTAuthRequest extends AuthenticateRequest {
     methodId: "chat-gpt";
+}
+
+const ChatGptDeviceCodeAuthMethod: AuthMethod = {
+    id: "chat-gpt-device-code",
+    name: "ChatGPT (device code)",
+    description: "Sign in to ChatGPT by opening a verification page and entering a one-time code"
+}
+
+export interface ChatGPTDeviceCodeAuthRequest extends AuthenticateRequest {
+    methodId: "chat-gpt-device-code";
 }
 
 export const GatewayAuthMethod = {
@@ -62,6 +73,9 @@ export function getCodexAuthMethods(clientCapabilities?: ClientCapabilities | nu
     if (!env["NO_BROWSER"]) {
         authMethods.push(ChatGptAuthMethod);
     }
+    if (clientSupportsUrlElicitation(clientCapabilities)) {
+        authMethods.push(ChatGptDeviceCodeAuthMethod);
+    }
     const supportsGatewayAuth = clientCapabilities?.auth?._meta?.["gateway"] === true;
     if (supportsGatewayAuth) {
         authMethods.push(GatewayAuthMethod);
@@ -69,8 +83,8 @@ export function getCodexAuthMethods(clientCapabilities?: ClientCapabilities | nu
     return authMethods;
 }
 
-export type CodexAuthRequest = ApiKeyAuthRequest | ChatGPTAuthRequest | GatewayAuthRequest;
+export type CodexAuthRequest = ApiKeyAuthRequest | ChatGPTAuthRequest | ChatGPTDeviceCodeAuthRequest | GatewayAuthRequest;
 
 export function isCodexAuthRequest(request: AuthenticateRequest): request is CodexAuthRequest {
-    return request.methodId === "api-key" || request.methodId === "chat-gpt" || request.methodId === "gateway";
+    return request.methodId === "api-key" || request.methodId === "chat-gpt" || request.methodId === "chat-gpt-device-code" || request.methodId === "gateway";
 }

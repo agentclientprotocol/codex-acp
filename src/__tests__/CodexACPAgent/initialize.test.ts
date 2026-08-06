@@ -72,6 +72,11 @@ describe('CodexACPAgent - initialize', () => {
                         writableRoots: true,
                     },
                 },
+                goal: {
+                    version: 1,
+                    controlMethod: "_session/goal",
+                    actions: ["pause", "clear"],
+                },
             },
         });
     });
@@ -129,6 +134,16 @@ describe('CodexACPAgent - initialize', () => {
             expect.objectContaining({id: "codex-api-key"}),
             expect.objectContaining({id: "openai-api-key"}),
         ]));
+    });
+
+    it('should advertise ChatGPT device code auth only when the client supports URL elicitation', () => {
+        const withUrlElicitation = getCodexAuthMethods({elicitation: {url: {}}})
+            .map((method) => method.id);
+        expect(withUrlElicitation).toContain("chat-gpt-device-code");
+
+        const withoutUrlElicitation = getCodexAuthMethods({elicitation: {form: {}}})
+            .map((method) => method.id);
+        expect(withoutUrlElicitation).not.toContain("chat-gpt-device-code");
     });
 
     it('should not advertise ChatGPT auth when browser auth is disabled', () => {
