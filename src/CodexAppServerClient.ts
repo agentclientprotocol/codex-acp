@@ -73,6 +73,7 @@ import type {
     PermissionsRequestApprovalResponse,
     ItemCompletedNotification,
 } from "./app-server/v2";
+import {GoalRunLifecycle} from "./GoalRunLifecycle";
 
 export interface ApprovalHandler {
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
@@ -323,21 +324,9 @@ export class CodexAppServerClient {
         runtimeEffectsGraceMs = GOAL_RUNTIME_EFFECTS_GRACE_MS,
         onGoalSet?: (goal: ThreadGoal) => void,
     ): Promise<TurnCompletedNotification | null> {
-        let goalTurnId: string | null = null;
-        const capturedCompletions: Array<TurnCompletedNotification> = [];
-        let resolveGoalTurnCompleted: (event: TurnCompletedNotification) => void = () => {};
-        const goalTurnCompleted = new Promise<TurnCompletedNotification>((resolve) => {
-            resolveGoalTurnCompleted = resolve;
-        });
+        const lifecycle = new GoalRunLifecycle();
         const releaseCompletionCapture = this.captureTurnCompletions(params.threadId, (event) => {
-            capturedCompletions.push(event);
-            if (goalTurnId === event.turn.id) {
-                resolveGoalTurnCompleted(event);
-            }
-        });
-        let resolveGoalTurnStarted: (turnId: string) => void = () => {};
-        const goalTurnStarted = new Promise<string>((resolve) => {
-            resolveGoalTurnStarted = resolve;
+            lifecycle.completeTurn(event);
         });
         let resolveGoalUpdateHandled: () => void = () => {};
         const matchingGoalUpdateHandled = new Promise<null>((resolve) => {
@@ -348,60 +337,62 @@ export class CodexAppServerClient {
         const noGoalTurnStarted = this.createNoGoalTurnStartedPromise(runtimeEffectsGraceMs);
         const capturedGoalUpdates: Array<ThreadGoalUpdatedNotification> = [];
         const releaseRoutingCapture = this.captureTurnRoutings(params.threadId, (turnId) => {
-            if (!goalUpdateHandled || goalTurnId !== null) {
+            if (!goalUpdateHandled || !lifecycle.routeTurn(turnId)) {
                 return;
             }
-            goalTurnId = turnId;
             onTurnStarted?.(turnId);
-            resolveGoalTurnStarted(turnId);
         });
-        const releaseGoalUpdateCapture = this.captureThreadGoalUpdates(params.threadId, (event) => {
-            capturedGoalUpdates.push(event);
+        const handleGoalUpdate = (event: ThreadGoalUpdatedNotification) => {
             if (expectedGoal !== null && goalsMatch(event.goal, expectedGoal)) {
                 goalUpdateHandled = true;
                 resolveGoalUpdateHandled();
                 noGoalTurnStarted.goalUpdated();
             }
+            if (goalUpdateHandled && event.goal.status !== "active") {
+                lifecycle.setGoalStatus(event.goal.status);
+            }
+        };
+        const releaseGoalUpdateCapture = this.captureThreadGoalUpdates(params.threadId, (event) => {
+            capturedGoalUpdates.push(event);
+            handleGoalUpdate(event);
+        });
+        const releaseGoalClearCapture = this.captureThreadGoalClears(params.threadId, () => {
+            lifecycle.clearGoal();
         });
         const releaseStatusCapture = this.captureThreadStatuses(params.threadId, (status) => {
-            if (!goalUpdateHandled || goalTurnId !== null) {
+            if (!goalUpdateHandled || lifecycle.activeTurnId !== null) {
                 return;
             }
             noGoalTurnStarted.threadStatusChanged(status);
         });
-
         try {
             const goalSetResponse = await this.threadGoalSet(params);
             expectedGoal = goalSetResponse.goal;
+            lifecycle.setGoalStatus(expectedGoal.status);
             onGoalSet?.(expectedGoal);
-            if (capturedGoalUpdates.some(event => goalsMatch(event.goal, expectedGoal!))) {
-                goalUpdateHandled = true;
-                resolveGoalUpdateHandled();
-                noGoalTurnStarted.goalUpdated();
+            const updatesBeforeResponse = capturedGoalUpdates.splice(0);
+            for (const event of updatesBeforeResponse) {
+                handleGoalUpdate(event);
             }
             if (expectedGoal.status !== "active") {
                 await matchingGoalUpdateHandled;
                 return null;
             }
-            const turnId = goalTurnId ?? await Promise.race([goalTurnStarted, noGoalTurnStarted.promise]);
+            const routedOrNoTurn = await Promise.race([lifecycle.waitForInitialTurn(), noGoalTurnStarted.promise]);
+            const turnId = lifecycle.activeTurnId ?? routedOrNoTurn;
             noGoalTurnStarted.release();
-            releaseRoutingCapture();
             releaseStatusCapture();
-            releaseGoalUpdateCapture();
             if (turnId === null) {
                 return null;
             }
-            const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnId);
-            if (earlyCompletion) {
-                return earlyCompletion;
-            }
-            return await goalTurnCompleted;
+            return await lifecycle.waitForCompletion();
         } finally {
             noGoalTurnStarted.release();
             releaseCompletionCapture();
             releaseRoutingCapture();
             releaseStatusCapture();
             releaseGoalUpdateCapture();
+            releaseGoalClearCapture();
         }
     }
 
