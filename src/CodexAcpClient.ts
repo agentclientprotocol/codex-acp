@@ -20,6 +20,7 @@ import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
     ReasoningEffort,
+    ReasoningSummary,
     ServiceTier,
     ServerNotification
 } from "./app-server";
@@ -764,7 +765,7 @@ export class CodexAcpClient {
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
-            summary: disableSummary ? "none" : "auto",
+            summary: disableSummary ? "none" : (resolveConfiguredSummary(this.config) ?? "auto"),
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,
@@ -964,6 +965,16 @@ export type SessionMetadata = {
 
 export type SessionMetadataWithThread = SessionMetadata & {
     thread: Thread,
+}
+
+const validReasoningSummaries: ReadonlySet<string> = new Set<ReasoningSummary>(["auto", "concise", "detailed", "none"]);
+
+function resolveConfiguredSummary(config: JsonObject): ReasoningSummary | undefined {
+    const value = config["model_reasoning_summary"];
+    if (typeof value === "string" && validReasoningSummaries.has(value)) {
+        return value as ReasoningSummary;
+    }
+    return undefined;
 }
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
