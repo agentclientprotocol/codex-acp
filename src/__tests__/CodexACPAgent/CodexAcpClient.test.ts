@@ -2534,7 +2534,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         // @ts-expect-error - registering local session state for the extension request path
         mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
         const pausedGoal = createThreadGoal({status: "paused", timeUsedSeconds: 12});
-        const setStatusSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "setGoalStatus").mockResolvedValue(pausedGoal);
+        const activeGoal = createThreadGoal({status: "active", timeUsedSeconds: 12});
+        const setStatusSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "setGoalStatus")
+            .mockResolvedValueOnce(pausedGoal)
+            .mockResolvedValueOnce(activeGoal);
         const clearGoalSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "clearGoal").mockResolvedValue(undefined);
         const getGoalSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal");
         mockFixture.clearAcpConnectionDump();
@@ -2545,10 +2548,15 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         })).resolves.toEqual({});
         await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
             sessionId: "session-id",
+            action: "resume",
+        })).resolves.toEqual({});
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
             action: "clear",
         })).resolves.toEqual({});
 
-        expect(setStatusSpy).toHaveBeenCalledWith("session-id", "paused");
+        expect(setStatusSpy).toHaveBeenNthCalledWith(1, "session-id", "paused");
+        expect(setStatusSpy).toHaveBeenNthCalledWith(2, "session-id", "active");
         expect(clearGoalSpy).toHaveBeenCalledWith("session-id");
         expect(getGoalSpy).not.toHaveBeenCalled();
         const goalUpdates = mockFixture.getAcpConnectionEvents([]).filter(event =>
@@ -2561,6 +2569,13 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 args: [expect.objectContaining({
                     update: expect.objectContaining({
                         _meta: {goal: expect.objectContaining({status: "paused"})},
+                    }),
+                })],
+            }),
+            expect.objectContaining({
+                args: [expect.objectContaining({
+                    update: expect.objectContaining({
+                        _meta: {goal: expect.objectContaining({status: "active"})},
                     }),
                 })],
             }),
