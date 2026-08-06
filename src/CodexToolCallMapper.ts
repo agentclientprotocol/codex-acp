@@ -1,6 +1,5 @@
-import type { ContentBlock, ToolCallContent } from "@agentclientprotocol/sdk";
-import { applyPatch, parsePatch, reversePatch } from "diff";
-import { readFile } from "node:fs/promises";
+import type { ContentBlock, ToolCallContent, ToolCallLocation } from "@agentclientprotocol/sdk";
+import { parsePatch, type StructuredPatchHunk } from "diff";
 import path from "node:path";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
 import { stripShellPrefix } from "./CommandUtils";
@@ -13,6 +12,7 @@ import type {
     CommandAction,
     CommandExecutionStatus,
     DynamicToolCallStatus,
+    FileChangePatchUpdatedNotification,
     FileUpdateChange,
     GuardianApprovalReview,
     GuardianApprovalReviewAction,
@@ -42,6 +42,7 @@ type WebSearchItem = ThreadItem & { type: "webSearch" };
 type CollabAgentToolCallItem = ThreadItem & { type: "collabAgentToolCall" };
 type SubAgentActivityItem = ThreadItem & { type: "subAgentActivity" };
 type CommandExecutionItem = ThreadItem & { type: "commandExecution" };
+type FileChangeItem = ThreadItem & { type: "fileChange" };
 type ContextCompactionItem = ThreadItem & { type: "contextCompaction" };
 type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
 
@@ -60,21 +61,41 @@ function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
 }
 
 export async function createFileChangeUpdate(
-    item: ThreadItem & { type: "fileChange" }
+    item: FileChangeItem
 ): Promise<UpdateSessionEvent> {
-    const patches: ToolCallContent[] = [];
-    for (const change of item.changes) {
-        const content = await createPatchContent(change);
-        if (content) patches.push(content);
-        // ignore unparseable diffs
-    }
+    const rawOutput = createFileChangeRawOutput(item);
     return {
         sessionUpdate: "tool_call",
         toolCallId: item.id,
         title: "Editing files",
         kind: "edit",
         status: toAcpStatus(item.status),
-        content: patches,
+        content: await createFileChangeContent(item.changes),
+        locations: createFileChangeLocations(item.changes),
+        rawInput: createFileChangeRawInput(item.changes),
+        ...(rawOutput === undefined ? {} : { rawOutput }),
+    };
+}
+
+export async function createFileChangePatchUpdate(
+    notification: FileChangePatchUpdatedNotification,
+): Promise<UpdateSessionEvent> {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: notification.itemId,
+        status: "in_progress",
+        content: await createFileChangeContent(notification.changes),
+        locations: createFileChangeLocations(notification.changes),
+        rawInput: createFileChangeRawInput(notification.changes),
+    };
+}
+
+export function createFileChangeCompleteUpdate(item: FileChangeItem): UpdateSessionEvent {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId: item.id,
+        status: toAcpStatus(item.status),
+        rawOutput: createFileChangeRawOutput(item),
     };
 }
 
@@ -810,23 +831,31 @@ function createContent(content: ContentBlock): ToolCallContent {
     };
 }
 
-async function createPatchContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
+async function createFileChangeContent(changes: FileUpdateChange[]): Promise<ToolCallContent[]> {
+    const content: ToolCallContent[] = [];
+    for (const change of changes) {
+        content.push(...await createPatchContent(change));
+    }
+    return content;
+}
+
+async function createPatchContent(change: FileUpdateChange): Promise<ToolCallContent[]> {
     try {
         switch (change.kind.type) {
             case "add":
-                return await createAddFileContent(change);
+                return [createAddFileContent(change)];
             case "delete":
-                return await createDeleteFileContent(change);
+                return [createDeleteFileContent(change)];
             case "update":
-                return await createUpdateFileContent(change);
+                return createUpdateFileContent(change);
         }
     } catch (error) {
         logger.log(`Error processing file update change: ${error}`);
-        return null;
+        return [];
     }
 }
 
-async function createAddFileContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
+function createAddFileContent(change: FileUpdateChange): ToolCallContent {
     return {
         type: "diff",
         oldText: null,
@@ -838,63 +867,46 @@ async function createAddFileContent(change: FileUpdateChange): Promise<ToolCallC
     };
 }
 
-async function createUpdateFileContent(change: FileUpdateChange): Promise<ToolCallContent | null> {
-    if (change.kind.type !== "update") return null;
+function createUpdateFileContent(change: FileUpdateChange): ToolCallContent[] {
+    if (change.kind.type !== "update") return [];
 
-    const unifiedDiff = recoverCorruptedDiff(change.diff);
-    const movePath = change.kind.move_path;
-
-    const oldContent = await readFileContent(change.path);
-    if (oldContent !== null) {
-        const patchedContent = applyPatch(oldContent, unifiedDiff);
-        if (patchedContent === false) {
-            // If Codex runs in full access mode, the file might already be patched.
-            // we can verify this by checking if the reverted patch applies.
-            const revertedPatch = revertPatch(unifiedDiff);
-            if (revertedPatch) {
-                const revertedContent = applyPatch(oldContent, revertedPatch);
-                if (revertedContent !== false) {
-                    return createUpdateDiffContent(change.path, revertedContent, oldContent);
-                }
-            }
-            return null;
-        }
-        return createUpdateDiffContent(movePath ?? change.path, oldContent, patchedContent);
-    }
-
-    if (!movePath) return null;
-    const newContent = await readFileContent(movePath);
-    if (newContent === null) return null;
-
-    const revertedPatch = revertPatch(unifiedDiff);
-    if (!revertedPatch) return null;
-
-    const revertedContent = applyPatch(newContent, revertedPatch);
-    if (revertedContent === false) return null;
-
-    return createUpdateDiffContent(movePath, revertedContent, newContent);
+    const patches = parsePatch(recoverCorruptedDiff(change.diff));
+    const targetPath = change.kind.move_path ?? change.path;
+    return patches.flatMap((patch) => patch.hunks.map((hunk) => createUpdateDiffContent(targetPath, hunk)));
 }
 
-function revertPatch(unifiedDiff: string) {
-    const [patch] = parsePatch(unifiedDiff);
-    if (!patch) return null;
-
-    return reversePatch(patch);
-}
-
-function createUpdateDiffContent(path: string, oldText: string, newText: string): ToolCallContent {
+function createUpdateDiffContent(path: string, hunk: StructuredPatchHunk): ToolCallContent {
     return {
         type: "diff",
-        oldText,
-        newText,
+        oldText: createHunkText(hunk, "old"),
+        newText: createHunkText(hunk, "new"),
         path,
         _meta: {
             kind: "update",
+            old_start: hunk.oldStart,
+            new_start: hunk.newStart,
         },
     };
 }
 
-async function createDeleteFileContent(change: FileUpdateChange): Promise<ToolCallContent> {
+function createHunkText(hunk: StructuredPatchHunk, side: "old" | "new"): string {
+    return hunk.lines.flatMap((line): string[] => {
+        switch (line[0]) {
+            case " ":
+                return [line.slice(1)];
+            case "-":
+                return side === "old" ? [line.slice(1)] : [];
+            case "+":
+                return side === "new" ? [line.slice(1)] : [];
+            case "\\":
+                return [];
+            default:
+                return [];
+        }
+    }).join("\n");
+}
+
+function createDeleteFileContent(change: FileUpdateChange): ToolCallContent {
     return {
         type: "diff",
         oldText: change.diff, // app-server always returns file content instead of diff
@@ -906,8 +918,56 @@ async function createDeleteFileContent(change: FileUpdateChange): Promise<ToolCa
     }
 }
 
-async function readFileContent(filePath: string): Promise<string | null> {
-    return await readFile(filePath, { encoding: "utf8" }).catch(() => null);
+function createFileChangeLocations(changes: FileUpdateChange[]): ToolCallLocation[] {
+    const locations = new Map<string, ToolCallLocation>();
+    const addLocation = (filePath: string, line?: number) => {
+        const current = locations.get(filePath);
+        if (current?.line !== undefined || (current && line === undefined)) {
+            return;
+        }
+        locations.set(filePath, line === undefined ? { path: filePath } : { path: filePath, line });
+    };
+
+    for (const change of changes) {
+        switch (change.kind.type) {
+            case "add":
+            case "delete":
+                addLocation(change.path);
+                break;
+            case "update": {
+                const firstHunk = firstUpdateHunk(change);
+                if (change.kind.move_path && change.kind.move_path !== change.path) {
+                    addLocation(change.path, firstHunk?.oldStart);
+                }
+                addLocation(change.kind.move_path ?? change.path, firstHunk?.newStart);
+                break;
+            }
+        }
+    }
+
+    return [...locations.values()];
+}
+
+function firstUpdateHunk(change: FileUpdateChange): StructuredPatchHunk | undefined {
+    try {
+        return parsePatch(recoverCorruptedDiff(change.diff))[0]?.hunks[0];
+    } catch {
+        return undefined;
+    }
+}
+
+function createFileChangeRawInput(changes: FileUpdateChange[]) {
+    return { changes };
+}
+
+function createFileChangeRawOutput(item: FileChangeItem): Record<string, unknown> | undefined {
+    if (item.status === "inProgress") {
+        return undefined;
+    }
+    return {
+        status: item.status,
+        success: item.status === "completed",
+    };
 }
 
 /**
