@@ -68,7 +68,7 @@ describe('CodexACPAgent - initialize', () => {
                 goal: {
                     version: 1,
                     controlMethod: "_session/goal",
-                    actions: ["pause", "clear"],
+                    actions: ["pause", "resume", "clear"],
                 },
             },
         });

@@ -12,7 +12,7 @@ An agent advertises support in its `initialize` response:
     "goal": {
       "version": 1,
       "controlMethod": "_session/goal",
-      "actions": ["pause", "clear"]
+      "actions": ["pause", "resume", "clear"]
     }
   }
 }

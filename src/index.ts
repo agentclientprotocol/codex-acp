@@ -34,7 +34,7 @@ const sessionSteerParamsParser = z.object({
 
 const goalControlParamsParser = z.object({
     sessionId: z.string(),
-    action: z.enum(["pause", "clear"]),
+    action: z.enum(["pause", "resume", "clear"]),
 }).passthrough();
 
 if (process.argv.includes("--version")) {

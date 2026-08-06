@@ -284,8 +284,9 @@ export class CodexAcpServer {
                     throw RequestError.invalidParams(undefined, `Unknown session: ${methodRequest.params.sessionId}`);
                 }
                 const sessionGeneration = this.getSessionGeneration(sessionState.sessionId);
-                if (methodRequest.params.action === "pause") {
-                    const goal = await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionState.sessionId, "paused"));
+                if (methodRequest.params.action === "pause" || methodRequest.params.action === "resume") {
+                    const status = methodRequest.params.action === "pause" ? "paused" : "active";
+                    const goal = await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionState.sessionId, status));
                     if (this.goalPublishIsCurrent(sessionState, sessionGeneration)) {
                         await this.publishGoalSnapshot(sessionState, toThreadGoalSnapshot(goal), false);
                     }
