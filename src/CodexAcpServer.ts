@@ -43,7 +43,9 @@ import {sanitizeMcpServerName} from "./McpServerName";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
 import {
     GOAL_CONTROL_METHOD,
+    GOAL_EXTENSION_VERSION,
     isExtMethodRequest,
+    LEGACY_GOAL_CONTROL_METHOD,
     LEGACY_SET_SESSION_MODEL_METHOD,
     type LegacyLoadSessionResponse,
     type LegacyNewSessionResponse,
@@ -249,6 +251,11 @@ export class CodexAcpServer {
                 steering: {
                     supported: true,
                 },
+                goal: {
+                    version: GOAL_EXTENSION_VERSION,
+                    controlMethod: GOAL_CONTROL_METHOD,
+                    actions: ["pause", "clear"],
+                },
             },
         };
     }
@@ -269,7 +276,8 @@ export class CodexAcpServer {
                 return await this.unstable_setSessionModel(this.parseLegacySetSessionModelParams(methodRequest.params));
             case SESSION_STEERING_METHOD:
                 return await this.executeOrQueueSteeringRequest(this.parseSessionSteerParams(methodRequest.params));
-            case GOAL_CONTROL_METHOD: {
+            case GOAL_CONTROL_METHOD:
+            case LEGACY_GOAL_CONTROL_METHOD: {
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
                 if (!sessionState) {
                     throw RequestError.invalidParams(undefined, `Unknown session: ${methodRequest.params.sessionId}`);
@@ -1217,9 +1225,7 @@ export class CodexAcpServer {
         await session.update({
             sessionUpdate: "session_info_update",
             _meta: {
-                codex: {
-                    goal: snapshot,
-                },
+                goal: snapshot,
             },
         });
     }

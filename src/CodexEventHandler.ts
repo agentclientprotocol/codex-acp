@@ -64,7 +64,7 @@ import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
 } from "./ContentChunks";
-import {sameThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
+import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
 import {logger} from "./Logger";
 
 export { stripShellPrefix };
@@ -324,9 +324,7 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = goalSnapshot;
 
-        return this.createCodexSessionInfoUpdate({
-            goal: goalSnapshot,
-        });
+        return this.createGoalSessionInfoUpdate(goalSnapshot);
     }
 
     private createThreadGoalClearedEvent(_event: ThreadGoalClearedNotification): UpdateSessionEvent | null {
@@ -336,9 +334,14 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = null;
 
-        return this.createCodexSessionInfoUpdate({
-            goal: null,
-        });
+        return this.createGoalSessionInfoUpdate(null);
+    }
+
+    private createGoalSessionInfoUpdate(goal: ThreadGoalSnapshot | null): UpdateSessionEvent {
+        return {
+            sessionUpdate: "session_info_update",
+            _meta: {goal},
+        };
     }
 
     private createReasoningDeltaEvent(

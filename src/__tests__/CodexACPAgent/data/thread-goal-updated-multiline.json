@@ -6,15 +6,15 @@
       "update": {
         "sessionUpdate": "session_info_update",
         "_meta": {
-          "codex": {
-            "goal": {
-              "objective": "First task\nSecond task",
-              "status": "budgetLimited",
-              "tokenBudget": 1000,
-              "timeUsedSeconds": 30,
-              "createdAt": 1710000000,
-              "controlMethod": "_codex/session/goal_control"
-            }
+          "goal": {
+            "objective": "First task\nSecond task",
+            "status": "limited",
+            "tokenBudget": 1000,
+            "tokensUsed": 1000,
+            "timeUsedSeconds": 30,
+            "createdAt": 1710000000000,
+            "updatedAt": 1710000030000,
+            "controlMethod": "_session/goal"
           }
         }
       }

@@ -6,15 +6,15 @@
       "update": {
         "sessionUpdate": "session_info_update",
         "_meta": {
-          "codex": {
-            "goal": {
-              "objective": "Ship the goal update",
-              "status": "active",
-              "tokenBudget": null,
-              "timeUsedSeconds": 12,
-              "createdAt": 1710000000,
-              "controlMethod": "_codex/session/goal_control"
-            }
+          "goal": {
+            "objective": "Ship the goal update",
+            "status": "active",
+            "tokenBudget": null,
+            "tokensUsed": 42,
+            "timeUsedSeconds": 12,
+            "createdAt": 1710000000000,
+            "updatedAt": 1710000012000,
+            "controlMethod": "_session/goal"
           }
         }
       }

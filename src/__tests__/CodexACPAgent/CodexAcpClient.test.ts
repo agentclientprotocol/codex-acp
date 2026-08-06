@@ -1748,17 +1748,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
 
-        await flushAsyncWork();
-        expect(promptResolved).toBe(false);
-        mockFixture.sendServerNotification({
-            method: "thread/goal/updated",
-            params: {
-                threadId: "session-id",
-                turnId: null,
-                goal: createThreadGoal({status: "complete", updatedAt: 1710000001}),
-            },
-        });
-
         await vi.waitFor(() => {
             expect(promptResolved).toBe(true);
         });
@@ -1813,15 +1802,15 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 update: {
                     sessionUpdate: "session_info_update",
                     _meta: {
-                        codex: {
-                            goal: {
+                        goal: {
                             objective: "Ship the migration and keep tests green",
                             status: "active",
                             tokenBudget: null,
+                            tokensUsed: 0,
                             timeUsedSeconds: 0,
-                            createdAt: 1710000000,
-                            controlMethod: "_codex/session/goal_control",
-                            },
+                            createdAt: 1710000000000,
+                            updatedAt: 1710000100000,
+                            controlMethod: "_session/goal",
                         },
                     },
                 },
@@ -1883,17 +1872,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(promptResolved).toBe(false);
 
         mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
-
-        await flushAsyncWork();
-        expect(promptResolved).toBe(false);
-        mockFixture.sendServerNotification({
-            method: "thread/goal/updated",
-            params: {
-                threadId: "session-id",
-                turnId: null,
-                goal: createThreadGoal({status: "complete", updatedAt: 1710000151}),
-            },
-        });
 
         await expect(promptPromise).resolves.toEqual(expect.objectContaining({
             stopReason: "end_turn",
@@ -2052,15 +2030,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
             mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
             await vi.advanceTimersByTimeAsync(0);
-            expect(resultSettled).toBe(false);
-            mockFixture.sendServerNotification({
-                method: "thread/goal/updated",
-                params: {
-                    threadId: "session-id",
-                    turnId: null,
-                    goal: createThreadGoal({status: "complete", updatedAt: 1710000201}),
-                },
-            });
             await expect(resultPromise).resolves.toMatchObject({
                 threadId: "session-id",
                 turn: {
@@ -2129,16 +2098,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(resultSettled).toBe(false);
 
         mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
-        await flushAsyncWork();
-        expect(resultSettled).toBe(false);
-        mockFixture.sendServerNotification({
-            method: "thread/goal/updated",
-            params: {
-                threadId: "session-id",
-                turnId: null,
-                goal: createThreadGoal({status: "complete", updatedAt: 1710000201}),
-            },
-        });
         await expect(resultPromise).resolves.toMatchObject({
             threadId: "session-id",
             turn: {
@@ -2147,67 +2106,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             },
         });
         expect(awaitTurnCompletedSpy).not.toHaveBeenCalled();
-    });
-
-    it('keeps an active goal prompt open across automatic turns', async () => {
-        const mockFixture = createCodexMockTestFixture();
-        const codexAppServerClient = mockFixture.getCodexAppServerClient();
-        const goal = createThreadGoal({updatedAt: 1710000210});
-        vi.spyOn(codexAppServerClient, "threadGoalSet").mockResolvedValue({goal});
-        const onTurnStarted = vi.fn();
-        let resultSettled = false;
-
-        const resultPromise = codexAppServerClient.runGoalSet({
-            threadId: "session-id",
-            objective: "Finish over several turns",
-            status: "active",
-        }, onTurnStarted).finally(() => {
-            resultSettled = true;
-        });
-
-        await vi.waitFor(() => expect(codexAppServerClient.threadGoalSet).toHaveBeenCalled());
-        mockFixture.sendServerNotification({
-            method: "thread/goal/updated",
-            params: {threadId: "session-id", turnId: null, goal},
-        });
-        mockFixture.sendServerNotification({
-            method: "turn/started",
-            params: {
-                threadId: "session-id",
-                turn: createTurn("goal-turn-1", "inProgress"),
-            },
-        });
-        mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-1"));
-
-        await flushAsyncWork();
-        expect(resultSettled).toBe(false);
-        mockFixture.sendServerNotification({
-            method: "turn/started",
-            params: {
-                threadId: "session-id",
-                turn: createTurn("goal-turn-2", "inProgress"),
-            },
-        });
-        mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-2"));
-
-        await flushAsyncWork();
-        expect(resultSettled).toBe(false);
-        expect(onTurnStarted).toHaveBeenNthCalledWith(1, "goal-turn-1");
-        expect(onTurnStarted).toHaveBeenNthCalledWith(2, "goal-turn-2");
-
-        mockFixture.sendServerNotification({
-            method: "thread/goal/updated",
-            params: {
-                threadId: "session-id",
-                turnId: null,
-                goal: createThreadGoal({status: "complete", updatedAt: 1710000211}),
-            },
-        });
-
-        await expect(resultPromise).resolves.toMatchObject({
-            threadId: "session-id",
-            turn: {id: "goal-turn-2", status: "completed"},
-        });
     });
 
     it('keeps goal set pending while the thread is active before a turn routes', async () => {
@@ -2281,15 +2179,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
             mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
             await vi.advanceTimersByTimeAsync(0);
-            expect(resultSettled).toBe(false);
-            mockFixture.sendServerNotification({
-                method: "thread/goal/updated",
-                params: {
-                    threadId: "session-id",
-                    turnId: null,
-                    goal: createThreadGoal({status: "complete", updatedAt: 1710000226}),
-                },
-            });
             await expect(resultPromise).resolves.toMatchObject({
                 threadId: "session-id",
                 turn: {
@@ -2373,15 +2262,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
             mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
             await vi.advanceTimersByTimeAsync(0);
-            expect(resultSettled).toBe(false);
-            mockFixture.sendServerNotification({
-                method: "thread/goal/updated",
-                params: {
-                    threadId: "session-id",
-                    turnId: null,
-                    goal: createThreadGoal({status: "complete", updatedAt: 1710000236}),
-                },
-            });
             await expect(resultPromise).resolves.toMatchObject({
                 threadId: "session-id",
                 turn: {
@@ -2679,14 +2559,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             expect.objectContaining({
                 args: [expect.objectContaining({
                     update: expect.objectContaining({
-                        _meta: {codex: {goal: expect.objectContaining({status: "paused"})}},
+                        _meta: {goal: expect.objectContaining({status: "paused"})},
                     }),
                 })],
             }),
             expect.objectContaining({
                 args: [expect.objectContaining({
                     update: expect.objectContaining({
-                        _meta: {codex: {goal: null}},
+                        _meta: {goal: null},
                     }),
                 })],
             }),
@@ -2717,14 +2597,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         staleResponse.resolve(staleGoal);
         await stalePublish;
 
-        expect(sessionState.currentGoal).toMatchObject({objective: "current", createdAt: 200});
+        expect(sessionState.currentGoal).toMatchObject({objective: "current", createdAt: 200000});
         const goalUpdates = mockFixture.getAcpConnectionEvents([]).filter(event =>
             event.method === "sessionUpdate"
             && event.args[0]?.update?.sessionUpdate === "session_info_update"
         );
         expect(goalUpdates).toHaveLength(1);
         expect(goalUpdates[0]?.args[0]?.update?._meta).toEqual({
-            codex: {goal: expect.objectContaining({objective: "current", createdAt: 200})},
+            goal: expect.objectContaining({objective: "current", createdAt: 200000}),
         });
     });
 
@@ -2880,15 +2760,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
             mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "goal-turn-id"));
             await vi.advanceTimersByTimeAsync(0);
-            expect(resultSettled).toBe(false);
-            mockFixture.sendServerNotification({
-                method: "thread/goal/updated",
-                params: {
-                    threadId: "session-id",
-                    turnId: null,
-                    goal: createThreadGoal({status: "complete", updatedAt: 1710000401}),
-                },
-            });
             await expect(resultPromise).resolves.toMatchObject({
                 threadId: "session-id",
                 turn: {
