@@ -92,6 +92,32 @@ import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot,} 
 const IMPLEMENT_PLAN_OPTION_ID = "implement_plan";
 const REVISE_PLAN_OPTION_ID = "revise_plan";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseSessionSteerMeta(value: unknown): SessionSteerRequest["_meta"] {
+    if (value === undefined || value === null) {
+        return value;
+    }
+    if (!isRecord(value)) {
+        throw RequestError.invalidParams();
+    }
+
+    const steering = value["steering"];
+    if (steering === undefined) {
+        return value as SessionSteerRequest["_meta"];
+    }
+    if (
+        !isRecord(steering) ||
+        (steering["idleBehavior"] !== undefined && steering["idleBehavior"] !== "promptRequired")
+    ) {
+        throw RequestError.invalidParams();
+    }
+
+    return value as SessionSteerRequest["_meta"];
+}
+
 export interface SessionState {
     sessionId: string,
     currentModelId: string,
@@ -908,8 +934,9 @@ export class CodexAcpServer {
      * check guards against deleting a queue a later request has since reused).
      *
      * @param params The target session id and the prompt to steer with.
-     * @returns Whether the prompt joined the active turn ("injected"), started a
-     *     new one ("startedNewTurn"), or could not be applied ("failed"); see
+     * @returns Whether the prompt joined the active turn ("injected"), requires
+     *     a normal prompt ("promptRequired"), started a new one
+     *     ("startedNewTurn"), or could not be applied ("failed"); see
      *     {@link performSteeringRequest}.
      */
     async executeOrQueueSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
@@ -947,11 +974,13 @@ export class CodexAcpServer {
 
     /**
      * Delivers a steering prompt to the session: injects it into the live turn
-     * when there is one, otherwise starts a new turn.
+     * when there is one, otherwise either asks the client to send a normal
+     * prompt or starts a new turn.
      *
      * @param params The target session id and the prompt to steer with.
-     * @returns "injected" when the prompt joined an existing turn, otherwise the
-     *     outcome of starting a new turn.
+     * @returns "injected" when the prompt joined an existing turn,
+     *     "promptRequired" when the opted-in client must send a normal prompt,
+     *     otherwise the outcome of starting a new turn.
      */
     private async performSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
         logger.log("Steering session requested", {
@@ -968,6 +997,10 @@ export class CodexAcpServer {
                 logger.log("Steering session injected", {sessionId: params.sessionId, turnId});
                 return {outcome: "injected"};
             }
+        }
+        if (params._meta?.steering?.idleBehavior === "promptRequired") {
+            await this.waitForSessionToBeReadyForPrompt(params.sessionId);
+            return {outcome: "promptRequired", reason: "noRunningTurn"};
         }
         return await this.startNewTurnFromSteering(params);
     }
@@ -1029,15 +1062,7 @@ export class CodexAcpServer {
      *     fails or is cancelled before the turn starts.
      */
     private async startNewTurnFromSteering(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
-        // A prompt can outlive its turn (post-turn cleanup runs before it leaves
-        // activePrompts), so a steer can miss the turn while the prompt is still
-        // winding down. Starting a new turn now would run a second prompt on the
-        // same session, so wait for the current one to drain first (a no-op when idle).
-        const previousPrompt = this.activePrompts.get(params.sessionId);
-        await previousPrompt?.completion;
-        if (this.sessionIsClosing(params.sessionId)) {
-            throw RequestError.invalidRequest(`Session ${params.sessionId} is closing`);
-        }
+        await this.waitForSessionToBeReadyForPrompt(params.sessionId);
 
         return await new Promise<SessionSteeringResponse>((resolve, reject) => {
             let turnStarted = false;
@@ -1079,6 +1104,18 @@ export class CodexAcpServer {
         });
     }
 
+    private async waitForSessionToBeReadyForPrompt(sessionId: SessionId): Promise<void> {
+        // A prompt can outlive its turn (post-turn cleanup runs before it leaves
+        // activePrompts), so a steer can miss the turn while the prompt is still
+        // winding down. Starting a new turn now would run a second prompt on the
+        // same session, so wait for the current one to drain first (a no-op when idle).
+        const previousPrompt = this.activePrompts.get(sessionId);
+        await previousPrompt?.completion;
+        if (this.sessionIsClosing(sessionId)) {
+            throw RequestError.invalidRequest(`Session ${sessionId} is closing`);
+        }
+    }
+
     private isNoActiveTurnToSteerError(error: unknown): boolean {
         const messages = error instanceof Error ? [error.message] : [];
         if (typeof error === "object" && error !== null && "data" in error) {
@@ -1113,12 +1150,15 @@ export class CodexAcpServer {
     private parseSessionSteerParams(params: Record<string, unknown>): SessionSteerRequest {
         const sessionId = params["sessionId"];
         const prompt = params["prompt"];
+        const meta = parseSessionSteerMeta(params["_meta"]);
         if (typeof sessionId !== "string" || !Array.isArray(prompt)) {
             throw RequestError.invalidParams();
         }
+
         return {
             sessionId: sessionId,
             prompt: prompt as acp.ContentBlock[],
+            ...(meta === undefined ? {} : {_meta: meta}),
         };
     }
 

@@ -70,11 +70,23 @@ const steeringPrompt = [
 type SteeringRequest = {
     sessionId: acp.SessionId;
     prompt: acp.ContentBlock[];
+    _meta?: {
+        steering?: {
+            idleBehavior?: "promptRequired";
+        };
+    };
 };
 
-type SteeringResponse = {
-    outcome: "injected" | "startedNewTurn";
-};
+/**
+ * `startedNewTurn` is the default idle behavior when `promptRequired` is not
+ * requested. This example requests `promptRequired`, so adapters that honor
+ * the option return `promptRequired` instead. The `startedNewTurn` branch
+ * remains for compatibility with adapters that do not honor the opt-in.
+ */
+type SteeringResponse =
+    | {outcome: "injected"}
+    | {outcome: "promptRequired"; reason: "noRunningTurn"}
+    | {outcome: "startedNewTurn"};
 
 type ThreadStatusType = "active" | "idle" | "systemError";
 type StateListener = () => void;
@@ -273,19 +285,31 @@ function printBanner(text: string): void {
     lastChannel = null;
 }
 
-function printSummary(clueCount: number, cluesAtSteer: number, stopReason: string, steered: boolean): void {
+function printSummary(
+    clueCount: number,
+    cluesAtSteer: number,
+    stopReason: string,
+    steeringOutcome: SteeringResponse["outcome"] | null,
+): void {
     const line = "─".repeat(66);
     const stoppedEarly = toolCallsSeen.size < clueCount;
     console.log(`\n\n${c.bold(line)}`);
     console.log(c.bold("  Summary"));
     console.log(line);
     console.log(`  tool calls total : ${toolCallsSeen.size} of up to ${clueCount} clues`);
-    console.log(`  steered after    : ${steered ? `${cluesAtSteer} clue(s)` : "not steered"}`);
+    console.log(`  attempted after  : ${steeringOutcome ? `${cluesAtSteer} clue(s)` : "not attempted"}`);
+    console.log(`  steering outcome : ${steeringOutcome ?? "not sent"}`);
     console.log(`  stop reason      : ${stopReason}`);
     console.log(line);
-    if (!steered) {
+    if (steeringOutcome === null) {
         console.log(c.yellow("  • The turn finished before we could steer. Lower STEER_AFTER_TOOL_CALLS"));
         console.log(c.yellow("    or use a slower model to catch the turn while it is still running."));
+    } else if (steeringOutcome === "promptRequired") {
+        console.log(c.green("  ✔ The turn ended before the adapter could apply the message, so the"));
+        console.log(c.green("    client submitted the same message through session/prompt."));
+    } else if (steeringOutcome === "startedNewTurn") {
+        console.log(c.yellow("  • The adapter started a new turn with the message, so the client did"));
+        console.log(c.yellow("    not submit the message again."));
     } else if (stoppedEarly) {
         console.log(c.green("  ✔ The agent stopped BEFORE reading every clue — the steering message"));
         console.log(c.green("    was picked up mid-turn and changed its course."));
@@ -387,6 +411,7 @@ async function main(): Promise<void> {
                     promptDone = true;
                     notifyStateListeners();
                 });
+                let promptResponsePromise = promptPromise;
                 promptPromise.catch(() => {});
 
                 // Let the agent work through a couple of clues, then steer mid-turn.
@@ -400,12 +425,11 @@ async function main(): Promise<void> {
 
                 const cluesAtSteer = toolCallsSeen.size;
                 const turnAlreadyFinished = promptDone || finishedTransitions > 0;
-                let steered = false;
+                let steeringOutcome: SteeringResponse["outcome"] | null = null;
 
                 if (turnAlreadyFinished) {
                     writeEvent(c.red("⚠ The turn finished before we could steer — skipping the steering step."));
                 } else {
-                    steered = true;
                     printBanner(`Injecting steering message after ${cluesAtSteer} clue(s)`);
                     process.stdout.write(`${c.magenta(`✋ steer → ${steeringPrompt}`)}\n`);
                     lastChannel = null;
@@ -413,20 +437,34 @@ async function main(): Promise<void> {
                     const steeringResponse = await agent.request<SteeringResponse, SteeringRequest>(STEERING_METHOD, {
                         sessionId: trackedSessionId,
                         prompt: [{type: "text", text: steeringPrompt}],
+                        _meta: {steering: {idleBehavior: "promptRequired"}},
                     });
-                    if (steeringResponse.outcome !== "injected" && steeringResponse.outcome !== "startedNewTurn") {
-                        throw new Error(`Unexpected steering response: ${JSON.stringify(steeringResponse)}`);
-                    }
+                    steeringOutcome = steeringResponse.outcome;
                     writeEvent(c.magenta(c.bold(`   outcome: ${steeringResponse.outcome}`)));
-                    if (steeringResponse.outcome === "injected") {
-                        writeEvent(c.dim("   → injected into the running turn; the agent picks it up at its next step."));
-                    } else {
-                        writeEvent(c.dim("   → the turn had already ended, so this started a fresh turn."));
+                    switch (steeringResponse.outcome) {
+                        case "injected":
+                            writeEvent(c.dim("   → the adapter added the message to the running turn."));
+                            break;
+                        case "promptRequired":
+                            if (steeringResponse.reason !== "noRunningTurn") {
+                                throw new Error(`Unexpected steering response: ${JSON.stringify(steeringResponse)}`);
+                            }
+                            writeEvent(c.dim("   → the turn ended before the adapter could apply the message; the client is now submitting it through session/prompt."));
+                            promptResponsePromise = agent.request(acp.methods.agent.session.prompt, {
+                                sessionId: trackedSessionId,
+                                prompt: [{type: "text", text: steeringPrompt}],
+                            });
+                            break;
+                        case "startedNewTurn":
+                            writeEvent(c.dim("   → the adapter started a new turn with the message; the client will not submit it again."));
+                            break;
+                        default:
+                            throw new Error(`Unexpected steering response: ${JSON.stringify(steeringResponse)}`);
                     }
                 }
 
-                const promptResponse = await promptPromise;
-                printSummary(clueCount, cluesAtSteer, promptResponse.stopReason, steered);
+                const promptResponse = await promptResponsePromise;
+                printSummary(clueCount, cluesAtSteer, promptResponse.stopReason, steeringOutcome);
 
                 await agent.request(acp.methods.agent.session.close, {
                     sessionId: trackedSessionId,
