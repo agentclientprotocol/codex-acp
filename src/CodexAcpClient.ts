@@ -20,6 +20,7 @@ import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
     ReasoningEffort,
+    ReasoningSummary,
     ServiceTier,
     ServerNotification
 } from "./app-server";
@@ -764,7 +765,8 @@ export class CodexAcpClient {
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
-            summary: disableSummary ? "none" : "auto",
+            // Preserve safety overrides while honoring CODEX_CONFIG.
+            summary: resolveReasoningSummary(this.config, disableSummary),
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,
@@ -951,6 +953,22 @@ export class CodexAcpClient {
 }
 
 export type JsonObject = { [key in string]?: JsonValue }
+
+function resolveReasoningSummary(config: JsonObject, disableSummary: boolean): ReasoningSummary {
+    if (disableSummary) {
+        return "none";
+    }
+
+    switch (config["model_reasoning_summary"]) {
+        case "auto":
+        case "concise":
+        case "detailed":
+        case "none":
+            return config["model_reasoning_summary"];
+        default:
+            return "auto";
+    }
+}
 
 export type SessionMetadata = {
     sessionId: string,
