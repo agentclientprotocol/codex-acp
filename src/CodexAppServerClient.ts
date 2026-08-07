@@ -54,6 +54,7 @@ import type {
     ThreadSettings,
     ThreadStartParams,
     ThreadStartResponse,
+    ThreadTokenUsage,
     ThreadUnsubscribeParams,
     ThreadUnsubscribeResponse,
     ToolRequestUserInputParams,
@@ -147,6 +148,7 @@ export class CodexAppServerClient {
     private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
+    private readonly threadTokenUsage = new Map<string, ThreadTokenUsage>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
 
     constructor(connection: MessageConnection) {
@@ -187,6 +189,9 @@ export class CodexAppServerClient {
             this.recordTurnRouting(routing);
             if (this.handleStaleTurnNotification(serverNotification, routing)) {
                 return;
+            }
+            if (serverNotification.method === "thread/tokenUsage/updated") {
+                this.threadTokenUsage.set(serverNotification.params.threadId, serverNotification.params.tokenUsage);
             }
             this.notify(serverNotification);
             for (const callback of this.codexEventHandlers) {
@@ -262,6 +267,7 @@ export class CodexAppServerClient {
         this.notificationHandlers.delete(threadId);
         this.approvalHandlers.delete(threadId);
         this.elicitationHandlers.delete(threadId);
+        this.threadTokenUsage.delete(threadId);
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
@@ -532,6 +538,10 @@ export class CodexAppServerClient {
 
     getThreadSettings(threadId: string): ThreadSettings | undefined {
         return this.threadSettings.get(threadId);
+    }
+
+    getThreadTokenUsage(threadId: string): ThreadTokenUsage | null {
+        return this.threadTokenUsage.get(threadId) ?? null;
     }
 
     async threadSettingsUpdate(params: ExperimentalThreadSettingsUpdateParams): Promise<void> {
