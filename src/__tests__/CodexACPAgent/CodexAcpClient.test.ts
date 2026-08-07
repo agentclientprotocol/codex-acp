@@ -2880,7 +2880,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         fixture.clearAcpConnectionDump();
         const prompt: acp.ContentBlock[] = [{ type: "text", text: "/logout " }];
         await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: prompt });
-        await expect(fixture.getAcpConnectionDump(["sessionId"])).toMatchFileSnapshot("data/command-logout.json");
+        const logoutEvent = fixture.getAcpConnectionEvents(["sessionId"]).find(event =>
+            event.args[0]?.update?.sessionUpdate === "agent_message_chunk"
+        );
+        await expect(JSON.stringify(logoutEvent, null, 2)).toMatchFileSnapshot("data/command-logout.json");
     });
 
     it('clears active session auth state when logout command signs out', async () => {

@@ -287,6 +287,7 @@ describe('Elicitation Events', () => {
                         status: "inProgress",
                         arguments: { argument: "example" },
                         appContext: null,
+                        readOnlyHint: null,
                         pluginId: null,
                         result: null,
                         error: null,
@@ -467,6 +468,7 @@ describe('Elicitation Events', () => {
                         status: "inProgress",
                         arguments: { argument: "example" },
                         appContext: null,
+                        readOnlyHint: null,
                         pluginId: null,
                         result: null,
                         error: null,
@@ -488,6 +490,7 @@ describe('Elicitation Events', () => {
                         status: "completed",
                         arguments: { argument: "example" },
                         appContext: null,
+                        readOnlyHint: null,
                         pluginId: null,
                         result: { content: [], structuredContent: null, _meta: null },
                         error: null,
@@ -537,6 +540,7 @@ describe('Elicitation Events', () => {
                         status: "inProgress",
                         arguments: { argument: "example" },
                         appContext: null,
+                        readOnlyHint: null,
                         pluginId: null,
                         result: null,
                         error: null,
@@ -696,6 +700,7 @@ describe('Elicitation Events', () => {
                 turnId: 'turn-1',
                 itemId: 'request-user-input-1',
                 autoResolutionMs: 60000,
+                isBlocking: true,
                 questions: [
                     {
                         id: 'next_step',
@@ -776,6 +781,7 @@ describe('Elicitation Events', () => {
                 turnId: 'turn-1',
                 itemId: 'request-user-input-1',
                 autoResolutionMs: null,
+                isBlocking: true,
                 questions: [{
                     id: 'next_step',
                     header: 'Next step',
@@ -811,6 +817,7 @@ describe('Elicitation Events', () => {
                 turnId: 'turn-1',
                 itemId: 'request-user-input-1',
                 autoResolutionMs: 1,
+                isBlocking: true,
                 questions: [{
                     id: 'next_step',
                     header: 'Next step',
@@ -846,6 +853,7 @@ describe('Elicitation Events', () => {
                 turnId: 'turn-1',
                 itemId: 'request-user-input-1',
                 autoResolutionMs: null,
+                isBlocking: true,
                 questions: [{
                     id: 'next_step',
                     header: 'Next step',
