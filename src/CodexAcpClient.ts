@@ -968,7 +968,7 @@ export type SessionMetadata = {
     models: Model[],
     collaborationMode: ModeKind,
     modelProvider?: string | null,
-    currentServiceTier?: ServiceTier | null,
+    currentServiceTier?: string | null,
     additionalDirectories: string[],
 }
 
