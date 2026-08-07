@@ -3,6 +3,83 @@ import type { SessionState } from "../../CodexAcpServer";
 import type { ServerNotification } from "../../app-server";
 import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from "../acp-test-utils";
 import { AgentMode } from "../../AgentMode";
+import {
+    createImageGenerationCompleteUpdate,
+    createImageGenerationUpdate,
+} from "../../CodexToolCallMapper";
+import type { ThreadItem } from "../../app-server/v2";
+
+describe("image generation updates", () => {
+    const imageGenerationItem = (
+        overrides: Partial<ThreadItem & { type: "imageGeneration" }> = {},
+    ): ThreadItem & { type: "imageGeneration" } => ({
+        type: "imageGeneration",
+        id: "image-generation-1",
+        status: "completed",
+        revisedPrompt: null,
+        result: "iVBORw0KGgo=",
+        savedPath: "/tmp/codex/generated-blue-square.png",
+        ...overrides,
+    });
+
+    it.each([
+        ["completion", createImageGenerationCompleteUpdate],
+        ["completed-only/replay", createImageGenerationUpdate],
+    ])("maps the canonical saved path to matching image URI and locations for %s", (_, createUpdate) => {
+        const update = createUpdate(imageGenerationItem()) as Extract<
+            ReturnType<typeof createImageGenerationUpdate>,
+            { sessionUpdate: "tool_call" | "tool_call_update" }
+        >;
+
+        expect(update).toMatchObject({
+            status: "completed",
+            locations: [{ path: "/tmp/codex/generated-blue-square.png" }],
+            content: [{
+                type: "content",
+                content: {
+                    type: "image",
+                    uri: "/tmp/codex/generated-blue-square.png",
+                },
+            }],
+        });
+    });
+
+    it.each([
+        ["missing", undefined],
+        ["empty", ""],
+        ["whitespace-only", "   "],
+    ])("omits locations and the image URI when savedPath is %s", (_, savedPath) => {
+        const item = imageGenerationItem();
+        if (savedPath === undefined) {
+            delete item.savedPath;
+        } else {
+            item.savedPath = savedPath;
+        }
+        const update = createImageGenerationCompleteUpdate(item) as Extract<
+            ReturnType<typeof createImageGenerationCompleteUpdate>,
+            { sessionUpdate: "tool_call_update" }
+        >;
+
+        expect(update.locations).toBeUndefined();
+        expect(update.content).toEqual([{
+            type: "content",
+            content: {
+                type: "image",
+                data: "iVBORw0KGgo=",
+                mimeType: "image/png",
+            },
+        }]);
+    });
+
+    it("preserves failed status while reporting the saved image location", () => {
+        const update = createImageGenerationCompleteUpdate(imageGenerationItem({ status: "failed" }));
+
+        expect(update).toMatchObject({
+            status: "failed",
+            locations: [{ path: "/tmp/codex/generated-blue-square.png" }],
+        });
+    });
+});
 
 describe("CodexEventHandler - image events", () => {
     let mockFixture: CodexMockTestFixture;
@@ -74,6 +151,7 @@ describe("CodexEventHandler - image events", () => {
                     status: "generating",
                     revisedPrompt: null,
                     result: "iVBORw0KGgo=",
+                    savedPath: "/tmp/codex/generated-completed-only.png",
                 },
             },
         };

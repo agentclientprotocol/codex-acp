@@ -43,6 +43,11 @@
             }
           }
         ],
+        "locations": [
+          {
+            "path": "/tmp/codex/generated-blue-square.png"
+          }
+        ],
         "rawOutput": {
           "status": "generating",
           "revisedPrompt": "A tiny blue square",

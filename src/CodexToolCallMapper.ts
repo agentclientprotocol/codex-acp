@@ -198,11 +198,13 @@ export function createImageGenerationStartUpdate(
 export function createImageGenerationCompleteUpdate(
     item: ThreadItem & { type: "imageGeneration" }
 ): UpdateSessionEvent {
+    const locations = imageGenerationLocations(item);
     return {
         sessionUpdate: "tool_call_update",
         toolCallId: item.id,
         status: imageGenerationTerminalStatus(item.status),
         content: imageGenerationContent(item),
+        ...(locations ? { locations } : {}),
         rawOutput: imageGenerationRawOutput(item),
     };
 }
@@ -211,6 +213,7 @@ export function createImageGenerationUpdate(
     item: ThreadItem & { type: "imageGeneration" },
     options?: { terminalStatus?: boolean },
 ): UpdateSessionEvent {
+    const locations = imageGenerationLocations(item);
     return {
         sessionUpdate: "tool_call",
         toolCallId: item.id,
@@ -220,6 +223,7 @@ export function createImageGenerationUpdate(
             ? imageGenerationTerminalStatus(item.status)
             : imageGenerationToolStatus(item.status),
         content: imageGenerationContent(item),
+        ...(locations ? { locations } : {}),
         rawOutput: imageGenerationRawOutput(item),
     };
 }
@@ -758,6 +762,14 @@ function imageGenerationTerminalStatus(status: string): AcpToolCallStatus {
     }
 }
 
+function imageGenerationSavedPath(
+    item: ThreadItem & { type: "imageGeneration" }
+): string | undefined {
+    return item.savedPath && item.savedPath.trim() !== ""
+        ? item.savedPath
+        : undefined;
+}
+
 function imageGenerationContent(
     item: ThreadItem & { type: "imageGeneration" }
 ): ToolCallContent[] {
@@ -771,12 +783,13 @@ function imageGenerationContent(
     }
 
     if (item.result.trim() !== "") {
-        const image: ContentBlock = item.savedPath && item.savedPath.trim() !== ""
+        const savedPath = imageGenerationSavedPath(item);
+        const image: ContentBlock = savedPath
             ? {
                 type: "image",
                 data: item.result,
                 mimeType: "image/png",
-                uri: item.savedPath,
+                uri: savedPath,
             }
             : {
                 type: "image",
@@ -787,6 +800,13 @@ function imageGenerationContent(
     }
 
     return content;
+}
+
+function imageGenerationLocations(
+    item: ThreadItem & { type: "imageGeneration" }
+): { path: string }[] | undefined {
+    const savedPath = imageGenerationSavedPath(item);
+    return savedPath ? [{ path: savedPath }] : undefined;
 }
 
 function imageGenerationRawOutput(

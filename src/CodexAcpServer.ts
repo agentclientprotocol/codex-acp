@@ -1485,7 +1485,7 @@ export class CodexAcpServer {
             case "imageView":
                 return [createImageViewUpdate(item)];
             case "imageGeneration":
-                return [createImageGenerationUpdate(item)];
+                return [createImageGenerationUpdate(item, { terminalStatus: true })];
             case "enteredReviewMode":
                 return [this.createReviewModeUpdate(item, true)];
             case "exitedReviewMode":
