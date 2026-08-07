@@ -51,6 +51,7 @@ import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
 import {createCodexCollaborationMode} from "./CollaborationModeConfig";
 import type {ModeKind} from "./app-server/ModeKind";
+import type {SupportedServiceTier} from "./FastModeConfig";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -404,7 +405,7 @@ export class CodexAcpClient {
             models: codexModels,
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
-            currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            currentServiceTier: response.serviceTier as SupportedServiceTier ?? null,
             additionalDirectories,
         }
     }
@@ -432,7 +433,7 @@ export class CodexAcpClient {
             models: codexModels,
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
-            currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            currentServiceTier: response.serviceTier as SupportedServiceTier ?? null,
             thread: historyResponse.thread,
             additionalDirectories,
         };
@@ -459,7 +460,7 @@ export class CodexAcpClient {
             models: codexModels,
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
-            currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            currentServiceTier: response.serviceTier as SupportedServiceTier ?? null,
             additionalDirectories,
         };
     }
@@ -958,7 +959,7 @@ export type SessionMetadata = {
     models: Model[],
     collaborationMode: ModeKind,
     modelProvider?: string | null,
-    currentServiceTier?: ServiceTier | null,
+    currentServiceTier?: SupportedServiceTier | null,
     additionalDirectories: string[],
 }
 
