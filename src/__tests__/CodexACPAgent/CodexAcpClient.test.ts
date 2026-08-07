@@ -927,6 +927,72 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    describe('workspace-write network access configuration', () => {
+        async function promptWithConfig(
+            networkAccess: boolean | string,
+            sessionOverrides: Partial<SessionState> = {},
+        ) {
+            const {mockFixture, turnStartSpy} = setupPromptFixture(
+                {additionalDirectories: ["/workspace/extra"], ...sessionOverrides},
+                {sandbox_workspace_write: {network_access: networkAccess}},
+            );
+
+            await mockFixture.getCodexAcpAgent().prompt({
+                sessionId: "session-id",
+                prompt: [{type: "text", text: "Hello"}],
+            });
+
+            return turnStartSpy.mock.calls[0]![0].sandboxPolicy;
+        }
+
+        it('enables network access when configured', async () => {
+            await expect(promptWithConfig(true)).resolves.toEqual({
+                type: "workspaceWrite",
+                writableRoots: ["/workspace/extra"],
+                networkAccess: true,
+                excludeTmpdirEnvVar: false,
+                excludeSlashTmp: false,
+            });
+        });
+
+        it('keeps the false default when the setting is absent', async () => {
+            const {mockFixture, turnStartSpy} = setupPromptFixture({additionalDirectories: ["/workspace/extra"]});
+
+            await mockFixture.getCodexAcpAgent().prompt({
+                sessionId: "session-id",
+                prompt: [{type: "text", text: "Hello"}],
+            });
+
+            expect(turnStartSpy.mock.calls[0]![0].sandboxPolicy).toEqual({
+                type: "workspaceWrite",
+                writableRoots: ["/workspace/extra"],
+                networkAccess: false,
+                excludeTmpdirEnvVar: false,
+                excludeSlashTmp: false,
+            });
+        });
+
+        it('ignores non-boolean network access values', async () => {
+            await expect(promptWithConfig("true")).resolves.toMatchObject({
+                type: "workspaceWrite",
+                networkAccess: false,
+            });
+        });
+
+        it('preserves an explicit false setting', async () => {
+            await expect(promptWithConfig(false)).resolves.toMatchObject({
+                type: "workspaceWrite",
+                networkAccess: false,
+            });
+        });
+
+        it('leaves Agent Full Access policy unchanged', async () => {
+            await expect(promptWithConfig(true, {agentMode: AgentMode.AgentFullAccess})).resolves.toEqual({
+                type: "dangerFullAccess",
+            });
+        });
+    });
+
     function loadNotifications(){
         //TODO collect logs form dev run and then load them from file to speedup
         const serverNotifications: ServerNotification[] = [
@@ -3422,8 +3488,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
      * Sets up a mock fixture with turnStart/awaitTurnCompleted spied on,
      * and a given session state. Returns the fixture and turnStart spy.
      */
-    function setupPromptFixture(sessionOverrides?: Partial<SessionState>) {
-        const mockFixture = createCodexMockTestFixture();
+    function setupPromptFixture(sessionOverrides?: Partial<SessionState>, codexConfig?: Parameters<typeof createCodexMockTestFixture>[0]) {
+        const mockFixture = createCodexMockTestFixture(codexConfig);
         const sessionState = createTestSessionState(sessionOverrides);
         const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart").mockResolvedValue({
             turn: {
