@@ -2651,6 +2651,80 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         }));
     });
 
+    it('starts goal work when resume routes no app-server turn', async () => {
+        const {mockFixture, sessionState, turnStartSpy} = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const goal = createThreadGoal({objective: "Finish the migration", status: "active"});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "resumeGoal")
+            .mockImplementation(async (_sessionId, _onTurnStarted, onGoalSet) => {
+                onGoalSet?.(goal);
+                return null;
+            });
+        vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal").mockResolvedValue(goal);
+
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "resume",
+        })).resolves.toEqual({});
+
+        expect(turnStartSpy).toHaveBeenCalledTimes(1);
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            input: [expect.objectContaining({text: "Continue working toward the active goal."})],
+        }));
+    });
+
+    it('starts only the latest goal replacement after an active turn', async () => {
+        const {mockFixture, sessionState, turnStartSpy} = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const activeTurnCompleted = deferred<TurnCompletedNotification>();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReset()
+            .mockReturnValueOnce(activeTurnCompleted.promise)
+            .mockResolvedValue({
+                threadId: "session-id",
+                turn: createTurn("goal-work-turn", "completed"),
+            });
+        const firstGoal = createThreadGoal({objective: "First replacement", createdAt: 1});
+        const latestGoal = createThreadGoal({objective: "Latest replacement", createdAt: 2});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "setGoal")
+            .mockImplementation(async (_sessionId, objective, _onTurnStarted, onGoalSet) => {
+                onGoalSet?.(objective === firstGoal.objective ? firstGoal : latestGoal);
+                return null;
+            });
+        const getGoal = vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal").mockResolvedValue(latestGoal);
+
+        const activePrompt = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Work already in progress"}],
+        });
+        await vi.waitFor(() => expect(turnStartSpy).toHaveBeenCalledTimes(1));
+        const firstSet = mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: firstGoal.objective,
+        });
+        const latestSet = mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: latestGoal.objective,
+        });
+        await flushAsyncWork();
+        expect(turnStartSpy).toHaveBeenCalledTimes(1);
+
+        activeTurnCompleted.resolve({
+            threadId: "session-id",
+            turn: createTurn("turn-id", "completed"),
+        });
+        await expect(activePrompt).resolves.toMatchObject({stopReason: "end_turn"});
+        await expect(firstSet).resolves.toEqual({});
+        await expect(latestSet).resolves.toEqual({});
+
+        expect(turnStartSpy).toHaveBeenCalledTimes(2);
+        expect(getGoal).toHaveBeenCalledTimes(1);
+    });
+
     it('does not start queued goal work after the goal is paused', async () => {
         const {mockFixture, sessionState, turnStartSpy} = setupPromptFixture();
         // @ts-expect-error - registering local session state for the extension request path
