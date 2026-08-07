@@ -32,10 +32,17 @@ const sessionSteerParamsParser = z.object({
     prompt: z.array(z.any()),
 }).passthrough();
 
-const goalControlParamsParser = z.object({
-    sessionId: z.string(),
-    action: z.enum(["pause", "resume", "clear"]),
-}).passthrough();
+const goalControlParamsParser = z.discriminatedUnion("action", [
+    z.object({
+        sessionId: z.string(),
+        action: z.literal("set"),
+        objective: z.string().trim().min(1),
+    }).passthrough(),
+    z.object({
+        sessionId: z.string(),
+        action: z.enum(["pause", "resume", "clear"]),
+    }).passthrough(),
+]);
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);

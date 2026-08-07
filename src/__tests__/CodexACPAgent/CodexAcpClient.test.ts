@@ -2535,6 +2535,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
         const pausedGoal = createThreadGoal({status: "paused", timeUsedSeconds: 12});
         const activeGoal = createThreadGoal({status: "active", timeUsedSeconds: 12});
+        const setGoalSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "setGoal").mockResolvedValue(null);
         const setStatusSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "setGoalStatus")
             .mockResolvedValueOnce(pausedGoal)
             .mockResolvedValueOnce(activeGoal);
@@ -2542,6 +2543,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const getGoalSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal");
         mockFixture.clearAcpConnectionDump();
 
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: "Replace the objective",
+        })).resolves.toEqual({});
         await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
             sessionId: "session-id",
             action: "pause",
@@ -2555,6 +2561,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             action: "clear",
         })).resolves.toEqual({});
 
+        expect(setGoalSpy).toHaveBeenCalledWith("session-id", "Replace the objective");
         expect(setStatusSpy).toHaveBeenNthCalledWith(1, "session-id", "paused");
         expect(setStatusSpy).toHaveBeenNthCalledWith(2, "session-id", "active");
         expect(clearGoalSpy).toHaveBeenCalledWith("session-id");

@@ -12,13 +12,13 @@ An agent advertises support in its `initialize` response:
     "goal": {
       "version": 1,
       "controlMethod": "_session/goal",
-      "actions": ["pause", "resume", "clear"]
+      "actions": ["set", "pause", "resume", "clear"]
     }
   }
 }
 ```
 
-`actions` is the implementation-supported subset of `set`, `pause`, `resume`, and `clear`. Clients must not infer support for an action that is not advertised. The control request contains `sessionId` and `action`; a future version may add action-specific fields such as an objective for `set`.
+`actions` is the implementation-supported subset of `set`, `pause`, `resume`, and `clear`. Clients must not infer support for an action that is not advertised. The control request contains `sessionId` and `action`; `set` additionally requires a non-blank `objective`.
 
 ## Session state
 

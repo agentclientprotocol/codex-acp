@@ -4,7 +4,7 @@ export const GOAL_EXTENSION_VERSION = 1;
 export const GOAL_CONTROL_METHOD = "_session/goal";
 export const LEGACY_GOAL_CONTROL_METHOD = "_codex/session/goal_control";
 
-export const GOAL_CONTROL_ACTIONS = ["pause", "resume", "clear"] as const;
+export const GOAL_CONTROL_ACTIONS = ["set", "pause", "resume", "clear"] as const;
 export type GoalControlAction = typeof GOAL_CONTROL_ACTIONS[number];
 
 export type GoalCapability = {
@@ -28,7 +28,6 @@ export type GoalSnapshot = {
     controlMethod: typeof GOAL_CONTROL_METHOD;
 }
 
-export type GoalControlRequest = {
-    sessionId: SessionId;
-    action: GoalControlAction;
-}
+export type GoalControlRequest =
+    | { sessionId: SessionId; action: "set"; objective: string }
+    | { sessionId: SessionId; action: Exclude<GoalControlAction, "set"> }
