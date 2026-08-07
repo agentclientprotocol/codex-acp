@@ -1,0 +1,29 @@
+{
+  "eventType": "request",
+  "method": "thread/fork",
+  "params": {
+    "config": {
+      "projects": {
+        "/workspace": {
+          "trust_level": "trusted"
+        },
+        "/shared": {
+          "trust_level": "trusted"
+        }
+      },
+      "sandbox_workspace_write": {
+        "writable_roots": [
+          "/shared"
+        ]
+      }
+    },
+    "cwd": "/workspace",
+    "ephemeral": false,
+    "modelProvider": "openai",
+    "threadId": "parent-session"
+  }
+}
+{
+  "eventType": "response",
+  "placeholder": "thread/fork"
+}

@@ -438,6 +438,38 @@ export class CodexAcpClient {
         };
     }
 
+    async forkSession(
+        request: acp.ForkSessionRequest,
+        onSubscribed: (sessionId: string) => void
+    ): Promise<SessionMetadata> {
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        await this.refreshSkills(request.cwd, additionalDirectories);
+
+        const response = await this.codexClient.threadFork({
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+            cwd: request.cwd,
+            ephemeral: false,
+            modelProvider: await this.getResumeModelProvider(),
+            threadId: request.sessionId,
+        });
+        if (response.thread.id === request.sessionId) {
+            throw new Error("Codex thread/fork did not return a child session id");
+        }
+        // Codex has subscribed to the child now, so the caller must be able to clean it up if later work fails.
+        onSubscribed(response.thread.id);
+        const codexModels = await this.fetchAvailableModels();
+        const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
+        return {
+            sessionId: response.thread.id,
+            currentModelId: currentModelId,
+            models: codexModels,
+            collaborationMode: this.getCollaborationMode(response.thread.id),
+            modelProvider: response.modelProvider,
+            currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            additionalDirectories,
+        };
+    }
+
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);

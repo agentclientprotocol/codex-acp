@@ -43,6 +43,8 @@ import type {
     ThreadGoalGetResponse,
     ThreadGoalSetParams,
     ThreadGoalSetResponse,
+    ThreadForkParams,
+    ThreadForkResponse,
     ThreadLoadedListParams,
     ThreadLoadedListResponse,
     ThreadListParams,
@@ -528,6 +530,10 @@ export class CodexAppServerClient {
 
     async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
+    }
+
+    async threadFork(params: ThreadForkParams): Promise<ThreadForkResponse> {
+        return await this.sendRequest({ method: "thread/fork", params: params });
     }
 
     getThreadSettings(threadId: string): ThreadSettings | undefined {
