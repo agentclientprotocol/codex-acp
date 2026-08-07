@@ -71,6 +71,11 @@ export async function createAuthenticatedFixture(initialMode?: AgentMode, mcpSer
     }, extraEnv, mcpServers);
 }
 
+/** A fixture that only initializes — for tests that need no authentication. */
+export async function createUnauthenticatedFixture(): Promise<SpawnedAgentFixture> {
+    return await createSpawnedFixture(async () => {});
+}
+
 export async function createGatewayFixture(
     baseUrl: string,
     headers: Record<string, string>,
