@@ -1075,7 +1075,7 @@ function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[
         .filter(value => value.length > 0));
 }
 
-function readMetaSystemPrompt(meta?: Record<string, unknown> | null): string | undefined {
+export function readMetaSystemPrompt(meta?: Record<string, unknown> | null): string | undefined {
     const rawSystemPrompt = meta?.["systemPrompt"];
     if (rawSystemPrompt === undefined) {
         return undefined;
@@ -1083,13 +1083,13 @@ function readMetaSystemPrompt(meta?: Record<string, unknown> | null): string | u
     if (typeof rawSystemPrompt !== "string") {
         throw RequestError.invalidParams(undefined, "systemPrompt must be a string");
     }
+    if (new TextEncoder().encode(rawSystemPrompt).byteLength > 256 * 1024) {
+        throw RequestError.invalidParams(undefined, "systemPrompt must not exceed 262144 UTF-8 bytes");
+    }
 
     const systemPrompt = rawSystemPrompt.trim();
     if (systemPrompt.length === 0) {
         return undefined;
-    }
-    if (new TextEncoder().encode(systemPrompt).byteLength > 256 * 1024) {
-        throw RequestError.invalidParams(undefined, "systemPrompt must not exceed 262144 UTF-8 bytes");
     }
     return systemPrompt;
 }
