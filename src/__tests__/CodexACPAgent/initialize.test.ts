@@ -62,6 +62,9 @@ describe('CodexACPAgent - initialize', () => {
             },
             authMethods: getCodexAuthMethods(),
             _meta: {
+                capabilities: {
+                    persistentSystemPrompt: true,
+                },
                 steering: {
                     supported: true,
                 },
