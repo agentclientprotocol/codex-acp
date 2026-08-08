@@ -774,7 +774,7 @@ export class CodexAcpClient {
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
-            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            sandboxPolicy: createTurnSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories, this.config),
             summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
@@ -1128,6 +1128,35 @@ function addAdditionalDirectoriesToSandboxPolicy(
     return {
         ...sandboxPolicy,
         writableRoots: uniqueStrings([...sandboxPolicy.writableRoots, ...additionalDirectories]),
+    };
+}
+
+function createTurnSandboxPolicy(
+    sandboxPolicy: SandboxPolicy,
+    additionalDirectories: string[],
+    config: JsonObject,
+): SandboxPolicy {
+    const policy = addAdditionalDirectoriesToSandboxPolicy(sandboxPolicy, additionalDirectories);
+    const workspaceWriteConfig = config["sandbox_workspace_write"];
+
+    if (policy.type !== "workspaceWrite" || !isJsonObject(workspaceWriteConfig)) {
+        return policy;
+    }
+
+    const configuredWritableRoots = Array.isArray(workspaceWriteConfig["writable_roots"])
+        ? workspaceWriteConfig["writable_roots"].filter(
+            (value): value is string => typeof value === "string" && path.isAbsolute(value)
+        )
+        : [];
+    const writableRoots = uniqueStrings([...policy.writableRoots, ...configuredWritableRoots]);
+    const networkAccess = workspaceWriteConfig["network_access"] === true
+        ? true
+        : policy.networkAccess;
+
+    return {
+        ...policy,
+        writableRoots,
+        networkAccess,
     };
 }
 

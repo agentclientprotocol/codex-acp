@@ -254,6 +254,13 @@ export class CodexAcpServer {
                 steering: {
                     supported: true,
                 },
+                codex: {
+                    workspaceWriteConfig: {
+                        version: 1,
+                        networkAccess: true,
+                        writableRoots: true,
+                    },
+                },
                 goal: {
                     version: GOAL_EXTENSION_VERSION,
                     controlMethod: GOAL_CONTROL_METHOD,

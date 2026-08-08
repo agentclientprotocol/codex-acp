@@ -8,6 +8,7 @@ import {
     createTestFixture,
     createTestModel,
     createTestSessionState,
+    mockPromptTurn,
     type TestFixture
 } from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
@@ -17,6 +18,7 @@ import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, 
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 import {GOAL_CONTROL_METHOD} from "../../AcpExtensions";
+import type {JsonObject} from "../../CodexAcpClient";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -925,6 +927,123 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             type: "workspaceWrite",
             writableRoots: ["/workspace/extra"],
         });
+    });
+
+    async function promptWithSandboxConfig(
+        codexConfig: JsonObject | undefined,
+        agentMode: AgentMode = AgentMode.Agent,
+    ): Promise<TurnStartParams> {
+        const mockFixture = createCodexMockTestFixture(codexConfig);
+        const sessionState = createTestSessionState({
+            sessionId: "session-id",
+            cwd: "/workspace",
+            additionalDirectories: ["/workspace/extra"],
+            agentMode,
+        });
+        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
+        const turnStartSpy = mockPromptTurn(mockFixture, sessionState.sessionId);
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: sessionState.sessionId,
+            prompt: [{type: "text", text: "Hello"}],
+        });
+
+        return turnStartSpy.mock.calls[0]![0];
+    }
+
+    it('enables workspace-write network access for an explicit true config', async () => {
+        const turnStart = await promptWithSandboxConfig({
+            sandbox_workspace_write: {network_access: true},
+        });
+
+        expect(turnStart.approvalPolicy).toBe("on-request");
+        expect(turnStart.sandboxPolicy).toEqual({
+            type: "workspaceWrite",
+            writableRoots: ["/workspace/extra"],
+            networkAccess: true,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false,
+        });
+    });
+
+    it('applies explicit absolute workspace-write roots to every turn', async () => {
+        const turnStart = await promptWithSandboxConfig({
+            sandbox_workspace_write: {
+                network_access: true,
+                writable_roots: [
+                    "/broker/requests",
+                    "/workspace/extra",
+                    "relative/path",
+                    7,
+                ],
+            },
+        });
+
+        expect(turnStart.sandboxPolicy).toEqual({
+            type: "workspaceWrite",
+            writableRoots: ["/workspace/extra", "/broker/requests"],
+            networkAccess: true,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false,
+        });
+    });
+
+    it('applies configured workspace-write roots without enabling network implicitly', async () => {
+        const turnStart = await promptWithSandboxConfig({
+            sandbox_workspace_write: {writable_roots: ["/broker/requests"]},
+        });
+
+        expect(turnStart.sandboxPolicy).toMatchObject({
+            type: "workspaceWrite",
+            writableRoots: ["/workspace/extra", "/broker/requests"],
+            networkAccess: false,
+        });
+    });
+
+    it('ignores malformed or non-absolute configured workspace-write roots', async () => {
+        const malformed = await promptWithSandboxConfig({
+            sandbox_workspace_write: {writable_roots: "/too-broad"},
+        });
+        const relative = await promptWithSandboxConfig({
+            sandbox_workspace_write: {writable_roots: ["relative/path"]},
+        });
+
+        expect(malformed.sandboxPolicy).toMatchObject({
+            type: "workspaceWrite",
+            writableRoots: ["/workspace/extra"],
+        });
+        expect(relative.sandboxPolicy).toMatchObject({
+            type: "workspaceWrite",
+            writableRoots: ["/workspace/extra"],
+        });
+    });
+
+    it.each([
+        ["missing", undefined],
+        ["false", {sandbox_workspace_write: {network_access: false}}],
+        ["non-boolean", {sandbox_workspace_write: {network_access: "true"}}],
+    ] as const)('keeps workspace-write network access disabled when config is %s', async (_label, codexConfig) => {
+        const turnStart = await promptWithSandboxConfig(codexConfig);
+
+        expect(turnStart.sandboxPolicy).toMatchObject({
+            type: "workspaceWrite",
+            writableRoots: ["/workspace/extra"],
+            networkAccess: false,
+        });
+    });
+
+    it.each([
+        ["read-only", AgentMode.ReadOnly, {type: "readOnly", networkAccess: false}],
+        ["full-access", AgentMode.AgentFullAccess, {type: "dangerFullAccess"}],
+    ] as const)('does not alter %s mode for workspace-write network config', async (_label, agentMode, expectedPolicy) => {
+        const turnStart = await promptWithSandboxConfig({
+            sandbox_workspace_write: {
+                network_access: true,
+                writable_roots: ["/broker/requests"],
+            },
+        }, agentMode);
+
+        expect(turnStart.sandboxPolicy).toEqual(expectedPolicy);
     });
 
     function loadNotifications(){
