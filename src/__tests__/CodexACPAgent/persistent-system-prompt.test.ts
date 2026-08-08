@@ -1,4 +1,5 @@
 import {describe, expect, it, vi} from "vitest";
+import type {CodexAcpServer} from "../../CodexAcpServer";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 
 function setupSessionMocks() {
@@ -28,6 +29,57 @@ function setupSessionMocks() {
     }) as never);
 
     return {client, threadStart, threadResume};
+}
+
+function setupServerValidationMocks() {
+    const fixture = createCodexMockTestFixture();
+    const agent = fixture.getCodexAcpAgent();
+    const client = fixture.getCodexAcpClient();
+    const appServer = fixture.getCodexAppServerClient();
+
+    const authRequired = vi.spyOn(client, "authRequired").mockResolvedValue(false);
+    const getAccount = vi.spyOn(client, "getAccount");
+    const clientNewSession = vi.spyOn(client, "newSession");
+    const clientResumeSession = vi.spyOn(client, "resumeSession");
+    const clientLoadSession = vi.spyOn(client, "loadSession");
+    const listSkills = vi.spyOn(appServer, "listSkills").mockResolvedValue({data: []});
+    const threadStart = vi.spyOn(appServer, "threadStart");
+    const threadResume = vi.spyOn(appServer, "threadResume");
+    const threadRead = vi.spyOn(appServer, "threadRead");
+
+    return {
+        agent,
+        authRequired,
+        getAccount,
+        clientNewSession,
+        clientResumeSession,
+        clientLoadSession,
+        listSkills,
+        threadStart,
+        threadResume,
+        threadRead,
+    };
+}
+
+function invokeSessionRoute(
+    agent: CodexAcpServer,
+    route: "new" | "resume" | "load",
+    systemPrompt: unknown,
+) {
+    const _meta = {systemPrompt};
+    switch (route) {
+        case "new":
+            return agent.newSession({cwd: "/workspace", mcpServers: [], _meta});
+        case "resume":
+            return agent.resumeSession({sessionId: "resume-thread", cwd: "/workspace", _meta});
+        case "load":
+            return agent.loadSession({sessionId: "load-thread", cwd: "/workspace", mcpServers: [], _meta});
+    }
+}
+
+function getPendingSessionOpenCount(agent: CodexAcpServer): number {
+    return (agent as unknown as {sessionOpenGenerations: Map<string, number>})
+        .sessionOpenGenerations.size;
 }
 
 describe("persistent system prompt metadata", () => {
@@ -104,4 +156,58 @@ describe("persistent system prompt metadata", () => {
 
         expect(threadStart).not.toHaveBeenCalled();
     });
+
+    it("applies the byte limit to raw UTF-8 metadata before trimming", async () => {
+        const {client, threadStart} = setupSessionMocks();
+        const exactlyAtLimit = "é".repeat(128 * 1024);
+
+        await client.newSession({
+            cwd: "/workspace",
+            mcpServers: [],
+            _meta: {systemPrompt: exactlyAtLimit},
+        });
+        await expect(client.newSession({
+            cwd: "/workspace",
+            mcpServers: [],
+            _meta: {systemPrompt: `${exactlyAtLimit}a`},
+        })).rejects.toThrow("systemPrompt must not exceed 262144 UTF-8 bytes");
+        await expect(client.newSession({
+            cwd: "/workspace",
+            mcpServers: [],
+            _meta: {systemPrompt: `${" ".repeat(256 * 1024)}x`},
+        })).rejects.toThrow("systemPrompt must not exceed 262144 UTF-8 bytes");
+
+        expect(threadStart).toHaveBeenCalledTimes(1);
+        expect(threadStart).toHaveBeenCalledWith(expect.objectContaining({
+            developerInstructions: exactlyAtLimit,
+        }));
+    });
+
+    it.each(["new", "resume", "load"] as const)(
+        "rejects invalid metadata before public %s-session side effects",
+        async (route) => {
+            const invalidCases: Array<[unknown, string]> = [
+                [42, "systemPrompt must be a string"],
+                [`${" ".repeat(256 * 1024)}x`, "systemPrompt must not exceed 262144 UTF-8 bytes"],
+            ];
+
+            for (const [systemPrompt, expectedMessage] of invalidCases) {
+                const mocks = setupServerValidationMocks();
+
+                await expect(invokeSessionRoute(mocks.agent, route, systemPrompt))
+                    .rejects.toThrow(expectedMessage);
+
+                expect(mocks.authRequired).not.toHaveBeenCalled();
+                expect(mocks.getAccount).not.toHaveBeenCalled();
+                expect(mocks.clientNewSession).not.toHaveBeenCalled();
+                expect(mocks.clientResumeSession).not.toHaveBeenCalled();
+                expect(mocks.clientLoadSession).not.toHaveBeenCalled();
+                expect(mocks.listSkills).not.toHaveBeenCalled();
+                expect(mocks.threadStart).not.toHaveBeenCalled();
+                expect(mocks.threadResume).not.toHaveBeenCalled();
+                expect(mocks.threadRead).not.toHaveBeenCalled();
+                expect(getPendingSessionOpenCount(mocks.agent)).toBe(0);
+            }
+        },
+    );
 });
