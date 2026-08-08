@@ -387,6 +387,7 @@ export class CodexAcpClient {
     }
 
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
+        const developerInstructions = readMetaSystemPrompt(request._meta);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -395,6 +396,7 @@ export class CodexAcpClient {
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
+            ...(developerInstructions === undefined ? {} : {developerInstructions}),
         });
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
@@ -411,6 +413,7 @@ export class CodexAcpClient {
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+        const developerInstructions = readMetaSystemPrompt(request._meta);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -419,6 +422,7 @@ export class CodexAcpClient {
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
+            ...(developerInstructions === undefined ? {} : {developerInstructions}),
         });
         onSubscribed?.();
         const historyResponse = await this.codexClient.threadRead({
@@ -440,6 +444,7 @@ export class CodexAcpClient {
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
+        const developerInstructions = readMetaSystemPrompt(request._meta);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -447,6 +452,7 @@ export class CodexAcpClient {
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
+            ...(developerInstructions === undefined ? {} : {developerInstructions}),
         });
 
         const codexModels = await this.fetchAvailableModels();
@@ -1067,6 +1073,25 @@ function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[
         .filter((value): value is string => typeof value === "string")
         .map(value => value.trim())
         .filter(value => value.length > 0));
+}
+
+function readMetaSystemPrompt(meta?: Record<string, unknown> | null): string | undefined {
+    const rawSystemPrompt = meta?.["systemPrompt"];
+    if (rawSystemPrompt === undefined) {
+        return undefined;
+    }
+    if (typeof rawSystemPrompt !== "string") {
+        throw RequestError.invalidParams(undefined, "systemPrompt must be a string");
+    }
+
+    const systemPrompt = rawSystemPrompt.trim();
+    if (systemPrompt.length === 0) {
+        return undefined;
+    }
+    if (new TextEncoder().encode(systemPrompt).byteLength > 256 * 1024) {
+        throw RequestError.invalidParams(undefined, "systemPrompt must not exceed 262144 UTF-8 bytes");
+    }
+    return systemPrompt;
 }
 
 function readAdditionalDirectories(cwd: string, additionalDirectories?: string[],  meta?: Record<string, unknown> | null): string[] {

@@ -251,6 +251,9 @@ export class CodexAcpServer {
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
             _meta: {
+                capabilities: {
+                    persistentSystemPrompt: true,
+                },
                 steering: {
                     supported: true,
                 },
