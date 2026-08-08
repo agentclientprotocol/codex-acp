@@ -449,6 +449,8 @@ export class CodexAcpClient {
             cwd: request.cwd,
         });
 
+        const sessionTitle = await this.applySessionTitle(response.thread.id, request._meta);
+
         const codexModels = await this.fetchAvailableModels();
         if (codexModels.length === 0) {
             throw new Error("Codex did not return any models");
@@ -462,7 +464,31 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            sessionTitle,
         };
+    }
+
+    /**
+     * Name the thread from `_meta.sessionTitle`, supplied out of band by the
+     * client so the title never enters the prompt.
+     *
+     * Returns the applied title, or `null` when none was requested or the
+     * naming request failed. Naming is cosmetic: a failure must not fail
+     * session creation, so errors are logged and swallowed.
+     */
+    private async applySessionTitle(
+        threadId: string,
+        meta?: Record<string, unknown> | null,
+    ): Promise<string | null> {
+        const title = readMetaSessionTitle(meta);
+        if (!title) return null;
+        try {
+            await this.codexClient.threadSetName({threadId, name: title});
+            return title;
+        } catch (err) {
+            logger.error(`Failed to set thread name for ${threadId}`, err);
+            return null;
+        }
     }
 
     async closeSession(sessionId: string): Promise<void> {
@@ -970,6 +996,12 @@ export type SessionMetadata = {
     modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,
     additionalDirectories: string[],
+    /**
+     * Title applied to the thread from `_meta.sessionTitle`, or `null` when
+     * none was requested. Reported back so the caller can seed its title state
+     * synchronously and not let a fallback title overwrite an explicit one.
+     */
+    sessionTitle?: string | null,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
@@ -1067,6 +1099,41 @@ function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[
         .filter((value): value is string => typeof value === "string")
         .map(value => value.trim())
         .filter(value => value.length > 0));
+}
+
+/** Upper bound on the length of a title requested through `_meta`. */
+const SESSION_TITLE_MAX_CHARS = 80;
+
+/**
+ * Read and sanitize the title requested in `_meta.sessionTitle`.
+ *
+ * Whitespace collapses to single spaces, control and format characters are
+ * dropped, and the result is capped at [`SESSION_TITLE_MAX_CHARS`] code points.
+ * Returns `null` when the value is absent, not a string, or has nothing
+ * printable left.
+ *
+ * This is the ACP boundary for arbitrary clients, and Codex's own thread-name
+ * normalization only trims: without a cap and a control-character filter an
+ * unbounded or invisible-character title would be persisted verbatim into the
+ * Codex thread store.
+ */
+function readMetaSessionTitle(meta?: Record<string, unknown> | null): string | null {
+    const rawTitle = meta?.["sessionTitle"];
+    if (typeof rawTitle !== "string") {
+        return null;
+    }
+    const collapsed = rawTitle
+        // Whitespace controls become spaces before the control filter runs, so
+        // a newline separates words instead of joining them.
+        .replace(/\s/gu, " ")
+        // Cc/Cf/Cs carry no printable meaning; Cf covers zero-width spaces and
+        // bidi overrides, Cs covers lone surrogates.
+        .replace(/[\p{Cc}\p{Cf}\p{Cs}]/gu, "")
+        .replace(/ +/g, " ")
+        .trim();
+    // Slice by code point, not by UTF-16 unit, so the cap can't split a pair.
+    const title = Array.from(collapsed).slice(0, SESSION_TITLE_MAX_CHARS).join("").trimEnd();
+    return title.length > 0 ? title : null;
 }
 
 function readAdditionalDirectories(cwd: string, additionalDirectories?: string[],  meta?: Record<string, unknown> | null): string[] {
