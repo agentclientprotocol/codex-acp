@@ -4,12 +4,14 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR, type CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
+    createBaseTestFixture,
     createCodexMockTestFixture,
     createTestFixture,
     createTestModel,
     createTestSessionState,
     type TestFixture
 } from "../acp-test-utils";
+import type {MessageConnection} from "vscode-jsonrpc/node";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
@@ -577,6 +579,45 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(threadReadSpy).toHaveBeenCalledWith({
             threadId: "thread-id",
             includeTurns: true,
+        });
+    });
+
+    it('sends excludeTurns through the app-server transport', async () => {
+        const sendRequest = vi.fn().mockResolvedValue({
+            thread: {id: "thread-id"},
+            model: "gpt-5",
+            modelProvider: "openai",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        });
+        const connection = {
+            sendRequest,
+            onUnhandledNotification: () => {},
+            onNotification: () => {},
+            onRequest: () => {},
+            end: () => {},
+        } as unknown as MessageConnection;
+        const transportFixture = createBaseTestFixture({
+            connection,
+            getExitCode: () => null,
+        });
+
+        await transportFixture.getCodexAppServerClient().threadResume({
+            threadId: "thread-id",
+            excludeTurns: true,
+        });
+
+        expect(sendRequest).toHaveBeenCalledWith("thread/resume", {
+            threadId: "thread-id",
+            excludeTurns: true,
+        });
+        expect(transportFixture.getCodexConnectionEvents([])[0]).toEqual({
+            eventType: "request",
+            method: "thread/resume",
+            params: {
+                threadId: "thread-id",
+                excludeTurns: true,
+            },
         });
     });
 

@@ -974,7 +974,11 @@ export type CompactionCompletedNotification =
     | { method: "thread/compacted", params: Extract<ServerNotification, { method: "thread/compacted" }>["params"] }
     | { method: "item/completed", params: ItemCompletedNotification & { item: Extract<ItemCompletedNotification["item"], { type: "contextCompaction" }> } };
 
-type CodexRequest = DistributiveOmit<ClientRequest, "id">
+type StableCodexRequest = DistributiveOmit<ClientRequest, "id">
+
+type CodexRequest =
+    | Exclude<StableCodexRequest, { method: "thread/resume" }>
+    | { method: "thread/resume", params: ExperimentalThreadResumeParams }
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>
@@ -993,7 +997,7 @@ export interface ExperimentalThreadSettingsUpdateParams {
 }
 
 // The adapter opts into app-server's experimental API, while the checked-in
-// generated bindings intentionally contain only stable fields.
+// generated bindings currently contain only stable fields.
 type ExperimentalThreadResumeParams = ThreadResumeParams & {
     excludeTurns?: boolean;
 };
