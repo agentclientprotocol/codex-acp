@@ -2388,7 +2388,19 @@ function mergeHistoryUpdates(
 ): UpdateSessionEvent[] {
     const merged: UpdateSessionEvent[] = [];
     const seen = new Set<string>();
+    const fallbackIndicesByKey = new Map<string, number[]>();
+    const fallbackIndicesByContentKey = new Map<string, number[]>();
     let fallbackIndex = 0;
+
+    for (let index = 0; index < responseItemFallbackUpdates.length; index += 1) {
+        const update = responseItemFallbackUpdates[index]!;
+        indexHistoryUpdate(fallbackIndicesByKey, historyUpdateKey(update), index);
+        indexHistoryUpdate(
+            fallbackIndicesByContentKey,
+            historyUpdateContentKey(update),
+            index,
+        );
+    }
 
     const pushUpdate = (update: UpdateSessionEvent) => {
         const key = historyUpdateKey(update);
@@ -2408,13 +2420,15 @@ function mergeHistoryUpdates(
             return;
         }
 
-        const matchIndex = responseItemFallbackUpdates.findIndex((update, index) => (
-            index >= fallbackIndex
-            && (
-                (targetKey !== null && historyUpdateKey(update) === targetKey)
-                || (targetContentKey !== null && historyUpdateContentKey(update) === targetContentKey)
-            )
-        ));
+        const keyMatchIndex = nextHistoryUpdateIndex(
+            fallbackIndicesByKey.get(targetKey ?? ""),
+            fallbackIndex,
+        );
+        const contentMatchIndex = nextHistoryUpdateIndex(
+            fallbackIndicesByContentKey.get(targetContentKey ?? ""),
+            fallbackIndex,
+        );
+        const matchIndex = minHistoryUpdateIndex(keyMatchIndex, contentMatchIndex);
         if (matchIndex === -1) {
             return;
         }
@@ -2437,6 +2451,41 @@ function mergeHistoryUpdates(
     }
 
     return merged;
+}
+
+function indexHistoryUpdate(
+    target: Map<string, number[]>,
+    key: string | null,
+    index: number,
+): void {
+    if (key === null) return;
+    const indices = target.get(key);
+    if (indices) {
+        indices.push(index);
+    } else {
+        target.set(key, [index]);
+    }
+}
+
+function nextHistoryUpdateIndex(indices: number[] | undefined, minimum: number): number {
+    if (!indices || indices.length === 0) return -1;
+    let low = 0;
+    let high = indices.length;
+    while (low < high) {
+        const middle = low + Math.floor((high - low) / 2);
+        if (indices[middle]! < minimum) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    return low < indices.length ? indices[low]! : -1;
+}
+
+function minHistoryUpdateIndex(left: number, right: number): number {
+    if (left === -1) return right;
+    if (right === -1) return left;
+    return Math.min(left, right);
 }
 
 function historyUpdateKey(update: UpdateSessionEvent): string | null {
