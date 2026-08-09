@@ -533,6 +533,53 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    it('excludes unused app-server turns when resuming and loading sessions', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        const threadResumeSpy = vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            modelProvider: "openai",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        const threadReadSpy = vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+        });
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        await codexAcpClient.resumeSession({
+            sessionId: "resume-id",
+            cwd: "/workspace",
+        });
+        await codexAcpClient.loadSession({
+            sessionId: "load-id",
+            cwd: "/workspace",
+            mcpServers: [],
+        });
+
+        expect(threadResumeSpy).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            threadId: "resume-id",
+            excludeTurns: true,
+        }));
+        expect(threadResumeSpy).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            threadId: "load-id",
+            excludeTurns: true,
+        }));
+        expect(threadReadSpy).toHaveBeenCalledOnce();
+        expect(threadReadSpy).toHaveBeenCalledWith({
+            threadId: "thread-id",
+            includeTurns: true,
+        });
+    });
+
     it('restores collaboration mode for resumed and loaded sessions', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();

@@ -393,6 +393,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
+            excludeTurns: true,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
@@ -417,6 +418,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
+            excludeTurns: true,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });

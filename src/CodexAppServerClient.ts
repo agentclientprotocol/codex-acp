@@ -526,7 +526,7 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
-    async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
+    async threadResume(params: ExperimentalThreadResumeParams): Promise<ThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
     }
 
@@ -991,6 +991,12 @@ export interface ExperimentalThreadSettingsUpdateParams {
         };
     };
 }
+
+// The adapter opts into app-server's experimental API, while the checked-in
+// generated bindings intentionally contain only stable fields.
+type ExperimentalThreadResumeParams = ThreadResumeParams & {
+    excludeTurns?: boolean;
+};
 
 type McpServerStartupSnapshot = {
     status: McpServerStartupState;
