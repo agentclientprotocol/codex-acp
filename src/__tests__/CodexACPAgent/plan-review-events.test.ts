@@ -13,7 +13,24 @@ type TurnCompletion = {
         id: string;
         items: never[];
         itemsView: "notLoaded";
-        status: "completed";
+        status: "completed" | "failed";
+        error: null | {
+            message: string;
+            codexErrorInfo: "serverOverloaded";
+            additionalDetails: string | null;
+        };
+        startedAt: null;
+        completedAt: null;
+        durationMs: null;
+    };
+};
+
+type TurnStartResponse = {
+    turn: {
+        id: string;
+        items: never[];
+        itemsView: "notLoaded";
+        status: "inProgress";
         error: null;
         startedAt: null;
         completedAt: null;
@@ -38,14 +55,27 @@ describe("CodexACPAgent - plan review", () => {
         vi.clearAllMocks();
     });
 
-    async function startPlanPrompt(permissionOptionId: string | null) {
+    async function startPlanPrompt(
+        permissionOptionId: string | null,
+        options: {
+            typedFailures?: boolean;
+            emitCompletionNotification?: boolean;
+            implementationStart?: Promise<TurnStartResponse>;
+            permissionResponse?: acp.RequestPermissionResponse | Promise<acp.RequestPermissionResponse>;
+        } = {},
+    ) {
         await fixture.getCodexAcpAgent().initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: {plan: {}},
+            clientCapabilities: {
+                plan: {},
+                ...(options.typedFailures
+                    ? {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}}
+                    : {}),
+            },
         });
-        fixture.setPermissionResponse(permissionOptionId === null
+        fixture.setPermissionResponse(options.permissionResponse ?? (permissionOptionId === null
             ? {outcome: {outcome: "cancelled"}}
-            : {outcome: {outcome: "selected", optionId: permissionOptionId}});
+            : {outcome: {outcome: "selected", optionId: permissionOptionId}}));
 
         const sessionState = createTestSessionState({
             sessionId,
@@ -68,7 +98,7 @@ describe("CodexACPAgent - plan review", () => {
                     durationMs: null,
                 },
             })
-            .mockResolvedValueOnce({
+            .mockImplementationOnce(() => options.implementationStart ?? Promise.resolve({
                 turn: {
                     id: "implementation-turn",
                     items: [],
@@ -79,7 +109,7 @@ describe("CodexACPAgent - plan review", () => {
                     completedAt: null,
                     durationMs: null,
                 },
-            });
+            }));
         vi.spyOn(fixture.getCodexAppServerClient(), "awaitTurnCompleted")
             .mockImplementation((_threadId, turnId) => turnId === "plan-turn"
                 ? planTurn.promise
@@ -113,7 +143,7 @@ describe("CodexACPAgent - plan review", () => {
                 },
             },
         });
-        planTurn.resolve({
+        const completion: TurnCompletion = {
             threadId: sessionId,
             turn: {
                 id: "plan-turn",
@@ -125,7 +155,11 @@ describe("CodexACPAgent - plan review", () => {
                 completedAt: null,
                 durationMs: null,
             },
-        });
+        };
+        if (options.emitCompletionNotification) {
+            fixture.sendServerNotification({method: "turn/completed", params: completion});
+        }
+        planTurn.resolve(completion);
 
         return {promptPromise, sessionState, turnStart, implementationTurn};
     }
@@ -207,5 +241,237 @@ describe("CodexACPAgent - plan review", () => {
         await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
         expect(turnStart).toHaveBeenCalledTimes(1);
         expect(sessionState.collaborationMode).toBe(PLAN_COLLABORATION_MODE);
+    });
+
+    it("routes a terminal error during plan approval as a session-scoped failure", async () => {
+        const permission = deferred<acp.RequestPermissionResponse>();
+        const {promptPromise, sessionState, turnStart} = await startPlanPrompt(null, {
+            typedFailures: true,
+            emitCompletionNotification: true,
+            permissionResponse: permission.promise,
+        });
+        await vi.waitFor(() => {
+            expect(fixture.getAcpConnectionEvents([])).toContainEqual({
+                method: "requestPermission",
+                args: [expect.objectContaining({sessionId})],
+            });
+        });
+        fixture.clearAcpConnectionDump();
+
+        fixture.sendServerNotification({
+            method: "error",
+            params: {
+                threadId: sessionId,
+                turnId: "plan-turn",
+                willRetry: false,
+                error: {
+                    message: "raw post-turn approval error",
+                    codexErrorInfo: "serverOverloaded",
+                    additionalDetails: "secret approval detail",
+                },
+            },
+        });
+        await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update);
+        expect(updates).toEqual([{
+            sessionUpdate: "session_info_update",
+            _meta: {
+                jetbrains: {
+                    air: {
+                        version: 1,
+                        sessionFailure: {
+                            id: expect.stringMatching(/^plan-review-session:error:[0-9a-f-]+$/),
+                            revision: 1,
+                            phase: "active",
+                            category: "overloaded",
+                            source: "codex",
+                            safeMessage: "Codex is temporarily overloaded.",
+                            retryable: true,
+                            actions: ["retry"],
+                        },
+                    },
+                },
+            },
+        }]);
+        expect(JSON.stringify(updates)).not.toContain("raw post-turn approval error");
+        expect(JSON.stringify(updates)).not.toContain("secret approval detail");
+        expect(turnStart).toHaveBeenCalledTimes(1);
+
+        permission.resolve({outcome: {outcome: "cancelled"}});
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
+        expect(sessionState.sessionFailure).toMatchObject({phase: "active", revision: 1});
+    });
+
+    it("clears an unchanged plan-approval failure after successful implementation", async () => {
+        const permission = deferred<acp.RequestPermissionResponse>();
+        const {promptPromise, sessionState, turnStart, implementationTurn} = await startPlanPrompt(null, {
+            typedFailures: true,
+            emitCompletionNotification: true,
+            permissionResponse: permission.promise,
+        });
+        await vi.waitFor(() => expect(fixture.getAcpConnectionEvents([])
+            .some(event => event.method === "requestPermission")).toBe(true));
+        fixture.clearAcpConnectionDump();
+
+        fixture.sendServerNotification({
+            method: "error",
+            params: {
+                threadId: sessionId,
+                turnId: "plan-turn",
+                willRetry: false,
+                error: {
+                    message: "late plan failure",
+                    codexErrorInfo: "serverOverloaded",
+                    additionalDetails: null,
+                },
+            },
+        });
+        await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+        const activeId = sessionState.sessionFailure!.id;
+
+        permission.resolve({outcome: {outcome: "selected", optionId: "implement_plan"}});
+        await vi.waitFor(() => expect(turnStart).toHaveBeenCalledTimes(2));
+        implementationTurn.resolve({
+            threadId: sessionId,
+            turn: {
+                id: "implementation-turn",
+                items: [],
+                itemsView: "notLoaded",
+                status: "completed",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            },
+        });
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
+
+        const failures = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update?._meta?.jetbrains?.air?.sessionFailure)
+            .filter(Boolean);
+        expect(failures).toEqual([
+            expect.objectContaining({id: activeId, phase: "active", revision: 1}),
+            expect.objectContaining({id: activeId, phase: "cleared", revision: 2}),
+        ]);
+        expect(sessionState.sessionFailure).toMatchObject({id: activeId, phase: "cleared", revision: 2});
+    });
+
+    it("keeps an implementation failure terminal on the prompt response", async () => {
+        const {promptPromise, sessionState, turnStart, implementationTurn} = await startPlanPrompt("implement_plan", {
+            typedFailures: true,
+            emitCompletionNotification: true,
+        });
+        await vi.waitFor(() => expect(turnStart).toHaveBeenCalledTimes(2));
+        fixture.clearAcpConnectionDump();
+        const implementationError = {
+            message: "raw implementation failure",
+            codexErrorInfo: "serverOverloaded" as const,
+            additionalDetails: "secret implementation detail",
+        };
+        fixture.sendServerNotification({
+            method: "error",
+            params: {
+                threadId: sessionId,
+                turnId: "implementation-turn",
+                willRetry: false,
+                error: implementationError,
+            },
+        });
+        const failedCompletion: TurnCompletion = {
+            threadId: sessionId,
+            turn: {
+                id: "implementation-turn",
+                items: [],
+                itemsView: "notLoaded",
+                status: "failed",
+                error: implementationError,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            },
+        };
+        fixture.sendServerNotification({method: "turn/completed", params: failedCompletion});
+        implementationTurn.resolve(failedCompletion);
+
+        const response = await promptPromise;
+        expect(response).toMatchObject({
+            stopReason: "end_turn",
+            _meta: {jetbrains: {air: {sessionFailure: {
+                id: "implementation-turn:error",
+                phase: "active",
+                category: "overloaded",
+                turnId: "implementation-turn",
+            }}}},
+        });
+        expect(JSON.stringify(response)).not.toContain("raw implementation failure");
+        expect(JSON.stringify(response)).not.toContain("secret implementation detail");
+        expect(sessionState.sessionFailure).toMatchObject({phase: "active", revision: 1});
+        expect(JSON.stringify(fixture.getAcpConnectionEvents([]))).not.toContain('"phase":"cleared"');
+    });
+
+    it("keeps the approval-to-implementation-start gap session-scoped", async () => {
+        const permission = deferred<acp.RequestPermissionResponse>();
+        const implementationStart = deferred<TurnStartResponse>();
+        const {promptPromise, sessionState, turnStart, implementationTurn} = await startPlanPrompt(null, {
+            typedFailures: true,
+            emitCompletionNotification: true,
+            permissionResponse: permission.promise,
+            implementationStart: implementationStart.promise,
+        });
+        await vi.waitFor(() => expect(fixture.getAcpConnectionEvents([])
+            .some(event => event.method === "requestPermission")).toBe(true));
+        permission.resolve({outcome: {outcome: "selected", optionId: "implement_plan"}});
+        await vi.waitFor(() => expect(turnStart).toHaveBeenCalledTimes(2));
+        expect(sessionState.currentTurnId).toBeNull();
+        fixture.clearAcpConnectionDump();
+
+        fixture.sendServerNotification({
+            method: "error",
+            params: {
+                threadId: sessionId,
+                turnId: "implementation-turn",
+                willRetry: false,
+                error: {
+                    message: "failure before implementation start",
+                    codexErrorInfo: "serverOverloaded",
+                    additionalDetails: null,
+                },
+            },
+        });
+        await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+        expect(sessionState.sessionFailure).toMatchObject({phase: "active", revision: 1});
+        expect(sessionState.sessionFailure).not.toHaveProperty("turnId");
+
+        implementationStart.resolve({
+            turn: {
+                id: "implementation-turn",
+                items: [],
+                itemsView: "notLoaded",
+                status: "inProgress",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            },
+        });
+        implementationTurn.resolve({
+            threadId: sessionId,
+            turn: {
+                id: "implementation-turn",
+                items: [],
+                itemsView: "notLoaded",
+                status: "completed",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            },
+        });
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
+        expect(sessionState.sessionFailure).toMatchObject({phase: "cleared", revision: 2});
     });
 });

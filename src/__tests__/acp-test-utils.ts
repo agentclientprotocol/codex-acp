@@ -244,7 +244,7 @@ export function removeDirectoryWithRetry(directory: string): void {
 export interface CodexMockTestFixture extends TestFixture {
     sendServerNotification(notification: ServerNotification | Record<string, unknown>): void,
     sendServerRequest<T>(method: string, params: unknown): Promise<T>,
-    setPermissionResponse(response: RequestPermissionResponse): void,
+    setPermissionResponse(response: RequestPermissionResponse | Promise<RequestPermissionResponse>): void,
     setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void,
 }
 
@@ -260,7 +260,7 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
 
     // State for controlling permission responses
-    const permissionState: { response: RequestPermissionResponse } = {
+    const permissionState: { response: RequestPermissionResponse | Promise<RequestPermissionResponse> } = {
         response: { outcome: { outcome: 'cancelled' } }
     };
     const elicitationState: { response: CreateElicitationResponse | Promise<CreateElicitationResponse> } = {
@@ -324,7 +324,7 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
             }
             return await handler(params) as T;
         },
-        setPermissionResponse(response: RequestPermissionResponse): void {
+        setPermissionResponse(response: RequestPermissionResponse | Promise<RequestPermissionResponse>): void {
             permissionState.response = response;
         },
         setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void {

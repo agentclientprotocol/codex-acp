@@ -3,7 +3,11 @@ import type {
     FuzzyFileSearchSessionUpdatedNotification,
     ServerNotification
 } from "./app-server";
-import type {SessionState} from "./CodexAcpServer";
+import type {
+    SessionFailureAction,
+    SessionFailureCategory,
+    SessionState,
+} from "./CodexAcpServer";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
@@ -27,6 +31,7 @@ import type {
     ThreadGoalClearedNotification,
     ThreadGoalUpdatedNotification,
     ThreadTokenUsageUpdatedNotification,
+    Turn,
     TurnPlanUpdatedNotification,
     WarningNotification
 } from "./app-server/v2";
@@ -66,6 +71,7 @@ import {
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
 import {logger} from "./Logger";
+import {randomUUID} from "node:crypto";
 
 export { stripShellPrefix };
 
@@ -74,12 +80,33 @@ export type CompletedPlan = {
     text: string;
 };
 
+const SESSION_FAILURE_PRESENTATION: Record<SessionFailureCategory, {
+    message: string;
+    retryable: boolean;
+    actions: SessionFailureAction[];
+}> = {
+    transport_lost: {message: "Connection to Codex was lost.", retryable: true, actions: ["reconnect", "retry"]},
+    auth_required: {message: "Sign in to continue using Codex.", retryable: false, actions: ["login"]},
+    rate_limited: {message: "The Codex rate limit was reached.", retryable: true, actions: ["retry"]},
+    quota_exhausted: {message: "The Codex usage quota is exhausted.", retryable: false, actions: ["new_session"]},
+    overloaded: {message: "Codex is temporarily overloaded.", retryable: true, actions: ["retry"]},
+    context_exhausted: {message: "This conversation has reached its context limit.", retryable: false, actions: ["new_turn"]},
+    budget_exhausted: {message: "This session has reached its usage budget.", retryable: false, actions: ["new_session"]},
+    policy_denied: {message: "The request was blocked by provider policy.", retryable: false, actions: []},
+    bad_request: {message: "Codex could not process this request.", retryable: false, actions: ["new_turn"]},
+    provider_error: {message: "The model provider reported an error.", retryable: true, actions: ["retry"]},
+    internal_error: {message: "Codex encountered an internal error.", retryable: true, actions: ["retry"]},
+};
+
 export class CodexEventHandler {
 
     private static readonly PLAN_UPDATE_INTERVAL_MS = 150;
 
     private readonly sessionState: SessionState;
     private readonly supportsPlanUpdates: boolean;
+    private readonly supportsTypedSessionFailures: boolean;
+    private readonly sessionFailureEpoch: string;
+    private readonly pendingErrors: ErrorNotification[] = [];
     private failure: RequestError | null = null;
     private completedPlan: CompletedPlan | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
@@ -103,14 +130,121 @@ export class CodexEventHandler {
         connection: AcpClientConnection,
         sessionState: SessionState,
         supportsPlanUpdates = false,
+        supportsTypedSessionFailures = false,
+        sessionFailureEpoch: string = randomUUID(),
     ) {
         this.sessionState = sessionState;
         this.supportsPlanUpdates = supportsPlanUpdates;
+        this.supportsTypedSessionFailures = supportsTypedSessionFailures;
+        this.sessionFailureEpoch = sessionFailureEpoch;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
     }
 
     getFailure(): RequestError | null {
         return this.failure;
+    }
+
+    getTerminalSessionFailureMeta(
+        turnId: string | null,
+        allowUnattributed = false,
+    ): Record<string, unknown> | null {
+        const failure = this.sessionState.sessionFailure;
+        if (!this.supportsTypedSessionFailures
+            || failure?.phase !== "active"
+            || (failure.turnId === undefined
+                ? !allowUnattributed
+                : turnId === null || failure.turnId !== turnId)) {
+            return null;
+        }
+        return this.createSessionFailureMeta(failure);
+    }
+
+    recordSyntheticTerminalFailure(category: SessionFailureCategory, turnId: string | null): void {
+        this.recordSessionFailure(category, turnId ?? undefined);
+    }
+
+    /**
+     * Handles notifications after the prompt-local handler has been disposed. The app-server subscription
+     * remains installed until the ACP session closes, so terminal errors need a durable session-level path
+     * instead of entering a turn buffer that will never be flushed.
+     */
+    async handleSessionScopedNotification(notification: ServerNotification): Promise<void> {
+        if (notification.method !== "error") {
+            await this.handleNotification(notification);
+            return;
+        }
+        if (!this.supportsTypedSessionFailures) {
+            // Preserve the legacy behavior for clients that did not negotiate typed failures.
+            await this.handleNotification(notification);
+            return;
+        }
+        if (notification.params.willRetry) {
+            await this.session.update(this.createSafeErrorDiagnostic(notification.params));
+            return;
+        }
+        const failure = this.recordSessionFailure(
+            this.sessionFailureCategory(notification.params.error.codexErrorInfo),
+            undefined,
+        );
+        await this.session.update(this.createSessionFailureUpdate(failure));
+    }
+
+    async flushPendingErrors(): Promise<void> {
+        if (this.sessionState.currentTurnId === null || this.pendingErrors.length === 0) {
+            return;
+        }
+        const errors = this.pendingErrors.splice(0);
+        for (const error of errors) {
+            const update = await this.createErrorEvent(error);
+            if (update) {
+                await this.session.update(update);
+            }
+        }
+    }
+
+    async flushPendingErrorsAsSessionScoped(): Promise<void> {
+        if (!this.supportsTypedSessionFailures || this.pendingErrors.length === 0) {
+            return;
+        }
+        const errors = this.pendingErrors.splice(0);
+        for (const error of errors) {
+            await this.handleSessionScopedNotification({method: "error", params: error});
+        }
+    }
+
+    async clearSessionFailure(): Promise<void> {
+        const active = this.sessionState.sessionFailure;
+        if (!this.supportsTypedSessionFailures || active?.phase !== "active") {
+            return;
+        }
+        const cleared = {
+            ...active,
+            revision: active.revision + 1,
+            phase: "cleared" as const,
+        };
+        await this.session.update(this.createSessionFailureUpdate(cleared));
+        this.sessionState.sessionFailure = cleared;
+    }
+
+    async handleFailedTurn(turn: Turn): Promise<void> {
+        const activeFailure = this.sessionState.sessionFailure;
+        if (!this.supportsTypedSessionFailures
+            || turn.status !== "failed"
+            || this.failure !== null
+            || (activeFailure?.phase === "active" && activeFailure.turnId === turn.id)) {
+            return;
+        }
+        const error = turn.error ?? {
+            message: "Turn failed",
+            codexErrorInfo: null,
+            additionalDetails: null,
+        };
+        this.recordTypedSessionFailure({
+            threadId: this.sessionState.sessionId,
+            turnId: turn.id,
+            willRetry: false,
+            error,
+        });
     }
 
     takeCompletedPlan(): CompletedPlan | null {
@@ -120,6 +254,7 @@ export class CodexEventHandler {
     }
 
     async handleNotification(notification: ServerNotification) {
+        await this.flushPendingErrors();
         const updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
             await this.session.update(updateEvent);
@@ -144,6 +279,14 @@ export class CodexEventHandler {
     async dispose(): Promise<void> {
         if (this.disposed) return;
         await this.flushPendingPlanUpdates();
+        if (this.pendingErrors.length > 0) {
+            logger.log("Discarding app-server errors that arrived before a turn started", {
+                sessionId: this.sessionState.sessionId,
+                count: this.pendingErrors.length,
+                turnIds: this.pendingErrors.map(error => error.turnId),
+            });
+            this.pendingErrors.splice(0);
+        }
         this.disposed = true;
         this.cancelPlanUpdateTimer();
         this.pendingPlanItemIds.clear();
@@ -174,6 +317,7 @@ export class CodexEventHandler {
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
                 this.sessionState.currentTurnId = notification.params.turn.id;
+                await this.flushPendingErrors();
                 return null;
             case "turn/completed":
                 await this.flushPendingPlanUpdates();
@@ -713,9 +857,29 @@ export class CodexEventHandler {
         }
     }
 
-    private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent> {
+    private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent | null> {
         const error = params.error.codexErrorInfo;
+        if (this.sessionState.currentTurnId === null) {
+            this.pendingErrors.push(params);
+            logger.log("Buffered app-server error until the active turn is known", {
+                sessionId: this.sessionState.sessionId,
+                turnId: params.turnId,
+                willRetry: params.willRetry,
+            });
+            return null;
+        }
+        if (params.turnId !== this.sessionState.currentTurnId) {
+            if (this.supportsTypedSessionFailures) {
+                return this.createSafeErrorDiagnostic(params);
+            }
+            return this.createCodexSessionInfoUpdate({
+                error: {...params.error, turnId: params.turnId, willRetry: params.willRetry},
+            });
+        }
         if (params.willRetry) {
+            if (this.supportsTypedSessionFailures) {
+                return this.createSafeErrorDiagnostic(params);
+            }
             return this.createCodexSessionInfoUpdate({
                 error: {
                     ...params.error,
@@ -723,7 +887,14 @@ export class CodexEventHandler {
                     willRetry: true,
                 },
             });
-        } else if (error === "usageLimitExceeded") {
+        }
+        if (this.supportsTypedSessionFailures) {
+            // app-server guarantees willRetry=false interrupts this turn; the terminal failure is
+            // returned once on PromptResponse._meta rather than duplicated as a session update.
+            this.recordTypedSessionFailure(params);
+            return null;
+        }
+        if (error === "usageLimitExceeded") {
             this.failure = RequestError.internalError(
                 this.createTurnErrorData(params.error),
             );
@@ -733,6 +904,93 @@ export class CodexEventHandler {
                 : RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message);
         }
         return createAgentTextMessageChunk(`${params.error.message}\n\n`);
+    }
+
+    private createSafeErrorDiagnostic(params: ErrorNotification): UpdateSessionEvent {
+        const category = this.sessionFailureCategory(params.error.codexErrorInfo);
+        return this.createCodexSessionInfoUpdate({
+            error: {
+                category,
+                message: SESSION_FAILURE_PRESENTATION[category].message,
+                turnId: params.turnId,
+                willRetry: params.willRetry,
+            },
+        });
+    }
+
+    private recordTypedSessionFailure(params: ErrorNotification): void {
+        const category = this.sessionFailureCategory(params.error.codexErrorInfo);
+        this.recordSessionFailure(category, params.turnId);
+    }
+
+    private recordSessionFailure(
+        category: SessionFailureCategory,
+        turnId: string | undefined,
+    ): NonNullable<SessionState["sessionFailure"]> {
+        const presentation = SESSION_FAILURE_PRESENTATION[category];
+        const previous = this.sessionState.sessionFailure;
+        const id = previous?.phase === "active"
+            ? previous.id
+            : turnId === undefined
+                ? `${this.sessionState.sessionId}:error:${this.sessionFailureEpoch}`
+                : `${turnId}:error`;
+        const failure: NonNullable<SessionState["sessionFailure"]> = {
+            id,
+            revision: previous?.id === id ? previous.revision + 1 : 1,
+            phase: "active" as const,
+            category,
+            source: "codex",
+            safeMessage: presentation.message,
+            retryable: presentation.retryable,
+            actions: presentation.actions,
+            ...(turnId === undefined ? {} : {turnId}),
+        };
+        this.sessionState.sessionFailure = failure;
+        return failure;
+    }
+
+    private createSessionFailureMeta(
+        failure: NonNullable<SessionState["sessionFailure"]>,
+    ): Record<string, unknown> {
+        return {
+            jetbrains: {
+                air: {
+                    version: 1,
+                    sessionFailure: failure,
+                },
+            },
+        };
+    }
+
+    private createSessionFailureUpdate(
+        failure: NonNullable<SessionState["sessionFailure"]>,
+    ): UpdateSessionEvent {
+        return {
+            sessionUpdate: "session_info_update",
+            _meta: this.createSessionFailureMeta(failure),
+        };
+    }
+
+    private sessionFailureCategory(error: CodexErrorInfo | null): SessionFailureCategory {
+        if (this.isAuthenticationRequiredError(error)) return "auth_required";
+        if (this.getHttpStatusCode(error) === 429) return "rate_limited";
+        if (typeof error === "object" && error !== null) {
+            if ("httpConnectionFailed" in error || "responseStreamConnectionFailed" in error ||
+                "responseStreamDisconnected" in error || "responseTooManyFailedAttempts" in error) {
+                return "transport_lost";
+            }
+            return "provider_error";
+        }
+        switch (error) {
+            case "usageLimitExceeded": return "quota_exhausted";
+            case "serverOverloaded": return "overloaded";
+            case "contextWindowExceeded": return "context_exhausted";
+            case "sessionBudgetExceeded": return "budget_exhausted";
+            case "cyberPolicy": return "policy_denied";
+            case "badRequest": return "bad_request";
+            case "internalServerError": return "internal_error";
+            default: return "provider_error";
+        }
     }
 
     private isAuthenticationRequiredError(error: CodexErrorInfo | null): boolean {
