@@ -2382,7 +2382,7 @@ export class CodexAcpServer {
     }
 }
 
-function mergeHistoryUpdates(
+export function mergeHistoryUpdates(
     responseItemFallbackUpdates: UpdateSessionEvent[],
     threadUpdates: UpdateSessionEvent[],
 ): UpdateSessionEvent[] {
