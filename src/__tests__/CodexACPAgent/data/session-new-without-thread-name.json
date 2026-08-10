@@ -1,0 +1,12 @@
+{
+  "eventType": "request",
+  "method": "skills/list",
+  "params": {
+    "cwds": [
+      ""
+    ]
+  }
+}
+{
+  "eventType": "response"
+}
