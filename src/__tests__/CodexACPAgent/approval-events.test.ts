@@ -42,6 +42,19 @@ function threadStarted(threadId: string, rootSessionId: string, parentThreadId: 
         },
     };
 }
+
+function approvalHandler(decision: 'accept' | 'decline') {
+    return {
+        handleCommandExecution: async () => ({ decision }),
+        handleFileChange: async () => ({ decision }),
+        handlePermissionsRequest: async () => ({
+            permissions: {},
+            scope: 'turn' as const,
+            strictAutoReview: true,
+        }),
+    };
+}
+
 describe('Approval Events', () => {
     let fixture: CodexMockTestFixture;
     const sessionId = 'test-session-id';
@@ -860,6 +873,98 @@ describe('Approval Events', () => {
 
             replacementPrompt.completeTurn();
             await replacementPrompt.promptPromise;
+        });
+
+        it('ignores a delayed child notification after its root session closes', async () => {
+            const firstPrompt = setupSessionWithPendingPrompt();
+            firstPrompt.completeTurn();
+            await firstPrompt.promptPromise;
+            await fixture.getCodexAcpClient().closeSession(sessionId);
+            fixture.sendServerNotification(threadStarted('delayed-child', sessionId, sessionId));
+
+            const replacementPrompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                {
+                    threadId: 'delayed-child',
+                    turnId: 'replacement-turn',
+                    startedAtMs: 0,
+                    environmentId: null,
+                    itemId: 'delayed-child-command',
+                    reason: 'Delayed notification from a closed session',
+                    proposedExecpolicyAmendment: null,
+                } satisfies CommandExecutionRequestApprovalParams
+            );
+
+            expect(response).toEqual({ decision: 'cancel' });
+
+            replacementPrompt.completeTurn();
+            await replacementPrompt.promptPromise;
+        });
+
+        it('prefers a child exact handler over its recorded root handler', async () => {
+            const appServerClient = fixture.getCodexAppServerClient();
+            appServerClient.onServerNotification(sessionId, () => {});
+            appServerClient.onApprovalRequest(sessionId, approvalHandler('accept'));
+            fixture.sendServerNotification(threadStarted('direct-child', sessionId, sessionId));
+            appServerClient.onApprovalRequest('direct-child', approvalHandler('decline'));
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                {
+                    threadId: 'direct-child',
+                    turnId: 'direct-turn',
+                    startedAtMs: 0,
+                    environmentId: null,
+                    itemId: 'direct-command',
+                    reason: 'Use the direct child policy',
+                    proposedExecpolicyAmendment: null,
+                } satisfies CommandExecutionRequestApprovalParams
+            );
+
+            expect(response).toEqual({ decision: 'decline' });
+        });
+
+        it('keeps child approval routing isolated between root sessions', async () => {
+            const appServerClient = fixture.getCodexAppServerClient();
+            appServerClient.onServerNotification('root-a', () => {});
+            appServerClient.onServerNotification('root-b', () => {});
+            appServerClient.onApprovalRequest('root-a', approvalHandler('accept'));
+            appServerClient.onApprovalRequest('root-b', approvalHandler('decline'));
+            fixture.sendServerNotification(threadStarted('child-a', 'root-a', 'root-a'));
+            fixture.sendServerNotification(threadStarted('child-b', 'root-b', 'root-b'));
+
+            const childAResponse = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                {
+                    threadId: 'child-a',
+                    turnId: 'turn-a',
+                    startedAtMs: 0,
+                    environmentId: null,
+                    itemId: 'command-a',
+                    reason: 'Use root A policy',
+                    proposedExecpolicyAmendment: null,
+                } satisfies CommandExecutionRequestApprovalParams
+            );
+            const childBResponse = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                {
+                    threadId: 'child-b',
+                    turnId: 'turn-b',
+                    startedAtMs: 0,
+                    environmentId: null,
+                    itemId: 'command-b',
+                    reason: 'Use root B policy',
+                    proposedExecpolicyAmendment: null,
+                } satisfies CommandExecutionRequestApprovalParams
+            );
+
+            expect(childAResponse).toEqual({ decision: 'accept' });
+            expect(childBResponse).toEqual({ decision: 'decline' });
         });
     });
 });

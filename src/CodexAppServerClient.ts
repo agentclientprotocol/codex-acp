@@ -154,7 +154,10 @@ export class CodexAppServerClient {
         this.connection = connection;
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
-            if (serverNotification.method === 'thread/started') {
+            if (
+                serverNotification.method === 'thread/started'
+                && this.notificationHandlers.has(serverNotification.params.thread.sessionId)
+            ) {
                 this.threadSessionIds.set(
                     serverNotification.params.thread.id,
                     serverNotification.params.thread.sessionId,
