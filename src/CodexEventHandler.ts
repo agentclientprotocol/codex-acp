@@ -164,6 +164,7 @@ export class CodexEventHandler {
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly activeSubAgentActivities = new Set<string>();
+    private emittedAssistantText = false;
 
     constructor(
         connection: AcpClientConnection,
@@ -181,6 +182,10 @@ export class CodexEventHandler {
 
     getFailure(): RequestError | null {
         return this.failure;
+    }
+
+    hasEmittedAssistantText(): boolean {
+        return this.emittedAssistantText;
     }
 
     getTerminalSessionFailureMeta(
@@ -482,6 +487,9 @@ export class CodexEventHandler {
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
+        if (event.delta.length > 0) {
+            this.emittedAssistantText = true;
+        }
         const phase = this.agentMessagePhases.get(event.itemId) ?? null;
         return createAgentTextMessageChunk(event.delta, event.itemId, createCodexMessagePhaseMeta(phase));
     }
@@ -748,6 +756,9 @@ export class CodexEventHandler {
     }
 
     private createPlanTextEvent(text: string, messageId: string): UpdateSessionEvent {
+        if (text.length > 0) {
+            this.emittedAssistantText = true;
+        }
         return createAgentTextMessageChunk(
             text,
             messageId,

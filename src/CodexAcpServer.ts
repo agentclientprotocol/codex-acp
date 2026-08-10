@@ -14,7 +14,7 @@ import {
 import type {McpStartupResult} from "./CodexAppServerClient";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort} from "./app-server";
-import type {Account, Model, ReasoningEffortOption, Thread, ThreadGoal, ThreadItem, UserInput} from "./app-server/v2";
+import type {Account, Model, ReasoningEffortOption, Thread, ThreadGoal, ThreadItem, Turn, UserInput} from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
@@ -93,6 +93,7 @@ import {
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot,} from "./ThreadGoalSnapshot";
 import {randomUUID} from "node:crypto";
 import {
+    AIR_COMPLETION_DETAILS_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
@@ -152,9 +153,18 @@ export interface SessionFailure {
     turnId?: string;
 }
 
+interface CompletionDetails {
+    turnId: string;
+    partial: boolean;
+    retryable: boolean;
+}
+
 const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;
 
-function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
+function clientSupportsAirCapability(
+    capabilities: acp.ClientCapabilities | null,
+    capability: string,
+): boolean {
     const jetbrains = capabilities?._meta?.[JETBRAINS_META_KEY] as Record<string, unknown> | undefined;
     const air = jetbrains?.[AIR_META_KEY] as Record<string, unknown> | undefined;
     const version = air?.[AIR_EXTENSION_VERSION_KEY];
@@ -163,7 +173,15 @@ function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities
         && Number.isInteger(version)
         && version >= AIR_EXTENSION_VERSION
         && Array.isArray(supported)
-        && supported.includes(AIR_SESSION_FAILURE_KEY);
+        && supported.includes(capability);
+}
+
+function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
+    return clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY);
+}
+
+function clientSupportsCompletionDetails(capabilities: acp.ClientCapabilities | null): boolean {
+    return clientSupportsAirCapability(capabilities, AIR_COMPLETION_DETAILS_KEY);
 }
 
 interface ActiveAuthState {
@@ -307,7 +325,10 @@ export class CodexAcpServer {
                 [JETBRAINS_META_KEY]: {
                     [AIR_META_KEY]: {
                         [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
-                        [AIR_EXTENSION_CAPABILITIES_KEY]: [AIR_SESSION_FAILURE_KEY],
+                        [AIR_EXTENSION_CAPABILITIES_KEY]: [
+                            AIR_SESSION_FAILURE_KEY,
+                            AIR_COMPLETION_DETAILS_KEY,
+                        ],
                     },
                 },
             },
@@ -2154,6 +2175,8 @@ export class CodexAcpServer {
                     sessionState,
                     eventHandler,
                     commandResult.turnCompleted?.turn.id ?? sessionState.currentTurnId,
+                    false,
+                    commandResult.turnCompleted?.turn,
                 );
                 if (terminalFailure) {
                     return terminalFailure;
@@ -2251,6 +2274,8 @@ export class CodexAcpServer {
                 sessionState,
                 eventHandler,
                 turnCompleted.turn.id,
+                false,
+                turnCompleted.turn,
             );
             if (terminalFailure) {
                 return terminalFailure;
@@ -2342,6 +2367,8 @@ export class CodexAcpServer {
                         sessionState,
                         eventHandler,
                         turnCompleted.turn.id,
+                        false,
+                        turnCompleted.turn,
                     );
                     if (implementationFailure) {
                         return implementationFailure;
@@ -2474,17 +2501,41 @@ export class CodexAcpServer {
         eventHandler: CodexEventHandler,
         turnId: string | null,
         allowUnattributed = false,
+        turn?: Turn,
     ): acp.PromptResponse | null {
         const failureMeta = eventHandler.getTerminalSessionFailureMeta(turnId, allowUnattributed);
         if (failureMeta === null) {
             return null;
         }
+        const completionDetails = turnId !== null
+            && clientSupportsCompletionDetails(this.clientCapabilities)
+            && (eventHandler.hasEmittedAssistantText()
+                || turn?.items.some(item => item.type === "agentMessage" && item.text.length > 0))
+            ? {
+                turnId,
+                partial: true,
+                retryable: false,
+            } satisfies CompletionDetails
+            : null;
+        const jetbrainsMeta = failureMeta[JETBRAINS_META_KEY] as Record<string, unknown> | undefined;
+        const airMeta = jetbrainsMeta?.[AIR_META_KEY] as Record<string, unknown> | undefined;
         return {
             stopReason: "end_turn",
             usage: this.buildPromptUsage(sessionState.lastTokenUsage),
             _meta: {
                 ...this.buildQuotaMeta(sessionState),
                 ...failureMeta,
+                ...(completionDetails && jetbrainsMeta && airMeta
+                    ? {
+                        [JETBRAINS_META_KEY]: {
+                            ...jetbrainsMeta,
+                            [AIR_META_KEY]: {
+                                ...airMeta,
+                                [AIR_COMPLETION_DETAILS_KEY]: completionDetails,
+                            },
+                        },
+                    }
+                    : {}),
             },
         };
     }

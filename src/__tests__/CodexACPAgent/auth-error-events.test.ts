@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import * as acp from "@agentclientprotocol/sdk";
-import type { ErrorNotification, TurnCompletedNotification } from "../../app-server/v2";
+import type { ErrorNotification, Turn, TurnCompletedNotification } from "../../app-server/v2";
 import type { SessionState } from "../../CodexAcpServer";
 import {
     createCodexMockTestFixture,
@@ -69,7 +69,7 @@ const configuredAuthFailureCases: Array<{
 ];
 
 const typedFailureCapabilities: acp.ClientCapabilities = {
-    _meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}},
+    _meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure", "completionDetails"]}}},
 };
 
 describe("CodexEventHandler - auth error events", () => {
@@ -423,6 +423,71 @@ describe("CodexEventHandler - auth error events", () => {
         expect(updates).toEqual([]);
         expect(JSON.stringify(result)).not.toContain("raw completion payload");
         expect(JSON.stringify(result)).not.toContain("secret completion details");
+    });
+
+    it("marks assistant output partial when a typed terminal failure ends the same turn", async () => {
+        const sessionState = createTestSessionState({
+            sessionId: "partial-failed-completion-session",
+            account: {type: "apiKey"},
+        });
+        const {result, updates} = await runPromptWithCompletedTurn(
+            sessionState,
+            typedFailureCapabilities,
+            createTurn("failed", "partial-failed-turn", {
+                message: "usage exhausted",
+                codexErrorInfo: "usageLimitExceeded",
+                additionalDetails: null,
+            }, [{
+                type: "agentMessage",
+                id: "partial-message",
+                text: "I updated the mapper, but",
+                phase: "final_answer",
+                memoryCitation: null,
+            }]),
+        );
+
+        expect(result).toMatchObject({
+            stopReason: "end_turn",
+            _meta: {jetbrains: {air: {
+                sessionFailure: {
+                    category: "quota_exhausted",
+                    turnId: "partial-failed-turn",
+                },
+                completionDetails: {
+                    turnId: "partial-failed-turn",
+                    partial: true,
+                    retryable: false,
+                },
+            }}},
+        });
+        expect(updates).toEqual([]);
+    });
+
+    it("omits completion details when only session failures were negotiated", async () => {
+        const sessionState = createTestSessionState({
+            sessionId: "session-failure-only-session",
+            account: {type: "apiKey"},
+        });
+        const {result} = await runPromptWithCompletedTurn(
+            sessionState,
+            {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}},
+            createTurn("failed", "session-failure-only-turn", {
+                message: "usage exhausted",
+                codexErrorInfo: "usageLimitExceeded",
+                additionalDetails: null,
+            }, [{
+                type: "agentMessage",
+                id: "partial-message",
+                text: "Partial answer",
+                phase: "final_answer",
+                memoryCitation: null,
+            }]),
+        );
+
+        expect(result).toMatchObject({
+            _meta: {jetbrains: {air: {sessionFailure: {category: "quota_exhausted"}}}},
+        });
+        expect(JSON.stringify(result)).not.toContain("completionDetails");
     });
 
     it("publishes a late idle error through the session-scoped subscription", async () => {
@@ -889,10 +954,11 @@ function createTurn(
     status: "inProgress" | "completed" | "failed",
     id = "turn-id",
     error: ErrorNotification["error"] | null = null,
+    items: Turn["items"] = [],
 ) {
     return {
         id,
-        items: [],
+        items,
         itemsView: "notLoaded" as const,
         status,
         error,
