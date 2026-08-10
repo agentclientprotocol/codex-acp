@@ -7,6 +7,39 @@ import { AgentMode } from "../../AgentMode";
 import { McpApprovalOptionId } from "../../McpApprovalOptionId";
 import type { ServerNotification } from "../../app-server";
 
+function threadStarted(threadId: string, rootSessionId: string, parentThreadId: string): ServerNotification {
+    return {
+        method: 'thread/started',
+        params: {
+            thread: {
+                id: threadId,
+                sessionId: rootSessionId,
+                forkedFromId: null,
+                parentThreadId,
+                preview: '',
+                ephemeral: false,
+                section: null,
+                sectionEnteredAt: null,
+                modelProvider: 'openai',
+                createdAt: 0,
+                updatedAt: 0,
+                recencyAt: null,
+                status: { type: 'idle' },
+                path: null,
+                cwd: '/workspace',
+                cliVersion: 'test',
+                source: 'unknown',
+                threadSource: null,
+                agentNickname: null,
+                agentRole: null,
+                gitInfo: null,
+                name: null,
+                turns: [],
+            },
+        },
+    };
+}
+
 describe('Elicitation Events', () => {
     let fixture: CodexMockTestFixture;
     const sessionId = 'test-session-id';
@@ -867,6 +900,88 @@ describe('Elicitation Events', () => {
             const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
             expect(response).toEqual({ answers: {} });
             expect(fixture.getAcpConnectionEvents(['_meta'])).toEqual([]);
+
+            completeTurn();
+            await promptPromise;
+        });
+    });
+
+    describe('Child thread routing', () => {
+        it('routes a child MCP elicitation to its root ACP session', async () => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+            });
+            fixture.setElicitationResponse({
+                action: 'accept',
+                content: { username: 'octocat' },
+                _meta: { source: 'client' },
+            });
+            fixture.sendServerNotification(threadStarted('child-elicitation', sessionId, sessionId));
+
+            const response = await fixture.sendServerRequest(
+                'mcpServer/elicitation/request',
+                {
+                    threadId: 'child-elicitation',
+                    turnId: 'child-turn',
+                    serverName: 'test-server',
+                    mode: 'form',
+                    _meta: null,
+                    message: 'Please provide your username',
+                    requestedSchema: {
+                        type: 'object',
+                        properties: { username: { type: 'string' } },
+                        required: ['username'],
+                    },
+                } satisfies McpServerElicitationRequestParams
+            );
+
+            expect(response).toEqual({
+                action: 'accept',
+                content: { username: 'octocat' },
+                _meta: { source: 'client' },
+            });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('routes child request_user_input to its root ACP session', async () => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+            });
+            fixture.setElicitationResponse({
+                action: 'accept',
+                content: { next_step: 'Run tests' },
+            });
+            fixture.sendServerNotification(threadStarted('child-user-input', sessionId, sessionId));
+
+            const response = await fixture.sendServerRequest(
+                'item/tool/requestUserInput',
+                {
+                    threadId: 'child-user-input',
+                    turnId: 'child-turn',
+                    itemId: 'child-request-user-input',
+                    autoResolutionMs: null,
+                    isBlocking: true,
+                    questions: [{
+                        id: 'next_step',
+                        header: 'Next step',
+                        question: 'What should I do next?',
+                        isOther: false,
+                        isSecret: false,
+                        options: [
+                            { label: 'Run tests', description: 'Run the focused test suite.' },
+                            { label: 'Stop', description: 'Stop and report current status.' },
+                        ],
+                    }],
+                } satisfies ToolRequestUserInputParams
+            );
+
+            expect(response).toEqual({
+                answers: {
+                    next_step: { answers: ['Run tests'] },
+                },
+            });
 
             completeTurn();
             await promptPromise;

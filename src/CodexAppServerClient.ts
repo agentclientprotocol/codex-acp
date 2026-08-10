@@ -238,7 +238,7 @@ export class CodexAppServerClient {
             if (this.isStaleTurn(params.threadId, params.turnId)) {
                 return { action: "cancel", content: null, _meta: null };
             }
-            const handler = this.elicitationHandlers.get(params.threadId);
+            const handler = this.resolveThreadHandler(this.elicitationHandlers, params.threadId);
             if (!handler) {
                 return { action: "cancel", content: null, _meta: null };
             }
@@ -249,7 +249,7 @@ export class CodexAppServerClient {
             if (this.isStaleTurn(params.threadId, params.turnId)) {
                 return { answers: {} };
             }
-            const handler = this.elicitationHandlers.get(params.threadId);
+            const handler = this.resolveThreadHandler(this.elicitationHandlers, params.threadId);
             if (!handler) {
                 return { answers: {} };
             }
@@ -278,6 +278,11 @@ export class CodexAppServerClient {
         this.notificationHandlers.delete(threadId);
         this.approvalHandlers.delete(threadId);
         this.elicitationHandlers.delete(threadId);
+        for (const [childThreadId, sessionId] of this.threadSessionIds) {
+            if (sessionId === threadId) {
+                this.threadSessionIds.delete(childThreadId);
+            }
+        }
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {

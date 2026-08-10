@@ -830,5 +830,36 @@ describe('Approval Events', () => {
             completeTurn();
             await promptPromise;
         });
+
+        it('does not route a closed session child to a replacement root handler', async () => {
+            const firstPrompt = setupSessionWithPendingPrompt();
+            fixture.sendServerNotification(threadStarted('closed-child', sessionId, sessionId));
+            firstPrompt.completeTurn();
+            await firstPrompt.promptPromise;
+            await fixture.getCodexAcpClient().closeSession(sessionId);
+
+            const replacementPrompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                {
+                    threadId: 'closed-child',
+                    turnId: 'replacement-turn',
+                    startedAtMs: 0,
+                    environmentId: null,
+                    itemId: 'closed-child-command',
+                    reason: 'Request from a closed session',
+                    proposedExecpolicyAmendment: null,
+                } satisfies CommandExecutionRequestApprovalParams
+            );
+
+            expect(response).toEqual({ decision: 'cancel' });
+
+            replacementPrompt.completeTurn();
+            await replacementPrompt.promptPromise;
+        });
     });
 });
