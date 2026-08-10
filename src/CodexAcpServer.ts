@@ -92,6 +92,14 @@ import {
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot,} from "./ThreadGoalSnapshot";
 import {randomUUID} from "node:crypto";
+import {
+    AIR_EXTENSION_CAPABILITIES_KEY,
+    AIR_EXTENSION_VERSION,
+    AIR_EXTENSION_VERSION_KEY,
+    AIR_META_KEY,
+    AIR_SESSION_FAILURE_KEY,
+    JETBRAINS_META_KEY,
+} from "./AirExtension";
 
 const IMPLEMENT_PLAN_OPTION_ID = "implement_plan";
 const REVISE_PLAN_OPTION_ID = "revise_plan";
@@ -147,15 +155,15 @@ export interface SessionFailure {
 const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;
 
 function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
-    const jetbrains = capabilities?._meta?.["jetbrains"] as Record<string, unknown> | undefined;
-    const air = jetbrains?.["air"] as Record<string, unknown> | undefined;
-    const version = air?.["version"];
-    const supported = air?.["capabilities"];
+    const jetbrains = capabilities?._meta?.[JETBRAINS_META_KEY] as Record<string, unknown> | undefined;
+    const air = jetbrains?.[AIR_META_KEY] as Record<string, unknown> | undefined;
+    const version = air?.[AIR_EXTENSION_VERSION_KEY];
+    const supported = air?.[AIR_EXTENSION_CAPABILITIES_KEY];
     return typeof version === "number"
         && Number.isInteger(version)
-        && version >= 1
+        && version >= AIR_EXTENSION_VERSION
         && Array.isArray(supported)
-        && supported.includes("sessionFailure");
+        && supported.includes(AIR_SESSION_FAILURE_KEY);
 }
 
 interface ActiveAuthState {
@@ -296,10 +304,10 @@ export class CodexAcpServer {
                     controlMethod: GOAL_CONTROL_METHOD,
                     actions: [...GOAL_CONTROL_ACTIONS],
                 },
-                jetbrains: {
-                    air: {
-                        version: 1,
-                        capabilities: ["sessionFailure"],
+                [JETBRAINS_META_KEY]: {
+                    [AIR_META_KEY]: {
+                        [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
+                        [AIR_EXTENSION_CAPABILITIES_KEY]: [AIR_SESSION_FAILURE_KEY],
                     },
                 },
             },

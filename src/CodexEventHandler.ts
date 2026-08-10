@@ -72,6 +72,13 @@ import {
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
 import {logger} from "./Logger";
 import {randomUUID} from "node:crypto";
+import {
+    AIR_EXTENSION_VERSION,
+    AIR_EXTENSION_VERSION_KEY,
+    AIR_META_KEY,
+    AIR_SESSION_FAILURE_KEY,
+    JETBRAINS_META_KEY,
+} from "./AirExtension";
 
 export { stripShellPrefix };
 
@@ -985,10 +992,10 @@ export class CodexEventHandler {
         failure: NonNullable<SessionState["sessionFailure"]>,
     ): Record<string, unknown> {
         return {
-            jetbrains: {
-                air: {
-                    version: 1,
-                    sessionFailure: failure,
+            [JETBRAINS_META_KEY]: {
+                [AIR_META_KEY]: {
+                    [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
+                    [AIR_SESSION_FAILURE_KEY]: failure,
                 },
             },
         };
