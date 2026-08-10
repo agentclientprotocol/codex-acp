@@ -98,6 +98,38 @@ const SESSION_FAILURE_PRESENTATION: Record<SessionFailureCategory, {
     internal_error: {message: "Codex encountered an internal error.", retryable: true, actions: ["retry"]},
 };
 
+type StringCodexErrorInfo = Extract<CodexErrorInfo, string>;
+type StructuredCodexErrorInfo = Exclude<CodexErrorInfo, string>;
+type KeysOfUnion<T> = T extends unknown ? keyof T : never;
+type StructuredCodexErrorKind = KeysOfUnion<StructuredCodexErrorInfo>;
+
+/**
+ * Exhaustive against the generated app-server union: a schema update cannot silently fall through
+ * to provider_error. The runtime lookup still has a fallback for a newer app-server talking to an
+ * older codex-acp build.
+ */
+const STRING_CODEX_ERROR_CATEGORIES = {
+    contextWindowExceeded: "context_exhausted",
+    sessionBudgetExceeded: "budget_exhausted",
+    usageLimitExceeded: "quota_exhausted",
+    serverOverloaded: "overloaded",
+    cyberPolicy: "policy_denied",
+    internalServerError: "internal_error",
+    unauthorized: "auth_required",
+    badRequest: "bad_request",
+    threadRollbackFailed: "provider_error",
+    sandboxError: "provider_error",
+    other: "provider_error",
+} satisfies Record<StringCodexErrorInfo, SessionFailureCategory>;
+
+const STRUCTURED_CODEX_ERROR_CATEGORIES = {
+    httpConnectionFailed: "transport_lost",
+    responseStreamConnectionFailed: "transport_lost",
+    responseStreamDisconnected: "transport_lost",
+    responseTooManyFailedAttempts: "transport_lost",
+    activeTurnNotSteerable: "provider_error",
+} satisfies Record<StructuredCodexErrorKind, SessionFailureCategory>;
+
 export class CodexEventHandler {
 
     private static readonly PLAN_UPDATE_INTERVAL_MS = 150;
@@ -974,23 +1006,17 @@ export class CodexEventHandler {
     private sessionFailureCategory(error: CodexErrorInfo | null): SessionFailureCategory {
         if (this.isAuthenticationRequiredError(error)) return "auth_required";
         if (this.getHttpStatusCode(error) === 429) return "rate_limited";
-        if (typeof error === "object" && error !== null) {
-            if ("httpConnectionFailed" in error || "responseStreamConnectionFailed" in error ||
-                "responseStreamDisconnected" in error || "responseTooManyFailedAttempts" in error) {
-                return "transport_lost";
+        if (typeof error === "string") {
+            return STRING_CODEX_ERROR_CATEGORIES[error] ?? "provider_error";
+        }
+        if (error !== null) {
+            for (const kind of Object.keys(STRUCTURED_CODEX_ERROR_CATEGORIES) as StructuredCodexErrorKind[]) {
+                if (kind in error) {
+                    return STRUCTURED_CODEX_ERROR_CATEGORIES[kind] ?? "provider_error";
+                }
             }
-            return "provider_error";
         }
-        switch (error) {
-            case "usageLimitExceeded": return "quota_exhausted";
-            case "serverOverloaded": return "overloaded";
-            case "contextWindowExceeded": return "context_exhausted";
-            case "sessionBudgetExceeded": return "budget_exhausted";
-            case "cyberPolicy": return "policy_denied";
-            case "badRequest": return "bad_request";
-            case "internalServerError": return "internal_error";
-            default: return "provider_error";
-        }
+        return "provider_error";
     }
 
     private isAuthenticationRequiredError(error: CodexErrorInfo | null): boolean {
@@ -998,18 +1024,10 @@ export class CodexEventHandler {
     }
 
     private getHttpStatusCode(error: CodexErrorInfo | null): number | null {
-        if (error !== null && typeof error === "object") {
-            if ("httpConnectionFailed" in error) {
-                return error.httpConnectionFailed.httpStatusCode;
-            } else if ("responseStreamConnectionFailed" in error) {
-                return error.responseStreamConnectionFailed.httpStatusCode;
-            } else if ("responseStreamDisconnected" in error) {
-                return error.responseStreamDisconnected.httpStatusCode;
-            } else if ("responseTooManyFailedAttempts" in error) {
-                return error.responseTooManyFailedAttempts.httpStatusCode;
-            }
-        }
-        return null;
+        if (error === null || typeof error !== "object") return null;
+        const details: unknown = Object.values(error)[0];
+        if (details === null || typeof details !== "object" || !("httpStatusCode" in details)) return null;
+        return typeof details.httpStatusCode === "number" ? details.httpStatusCode : null;
     }
 
     private createTurnErrorData(error: ErrorNotification["error"]): {

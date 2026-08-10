@@ -300,7 +300,13 @@ describe("CodexEventHandler - auth error events", () => {
         ["policy_denied", "cyberPolicy"],
         ["bad_request", "badRequest"],
         ["internal_error", "internalServerError"],
+        ["provider_error", "threadRollbackFailed"],
+        ["provider_error", "sandboxError"],
         ["provider_error", "other"],
+        ["transport_lost", {httpConnectionFailed: {httpStatusCode: null}}],
+        ["transport_lost", {responseStreamConnectionFailed: {httpStatusCode: 503}}],
+        ["transport_lost", {responseTooManyFailedAttempts: {httpStatusCode: 503}}],
+        ["provider_error", {activeTurnNotSteerable: {turnKind: "review"}}],
     ] as const)("maps a terminal Codex error to %s", async (category, codexErrorInfo) => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: `category-${category}`,
