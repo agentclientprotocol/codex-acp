@@ -4,11 +4,44 @@ import type {
     FileChangeRequestApprovalParams,
     PermissionsRequestApprovalParams,
 } from '../../app-server/v2';
+import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { SessionState } from '../../CodexAcpServer';
-import {AgentMode} from "../../AgentMode";
-import {ApprovalOptionId} from "../../ApprovalOptionId";
+import {AgentMode} from '../../AgentMode';
+import {ApprovalOptionId} from '../../ApprovalOptionId';
 
+function threadStarted(threadId: string, rootSessionId: string, parentThreadId: string): ServerNotification {
+    return {
+        method: 'thread/started',
+        params: {
+            thread: {
+                id: threadId,
+                sessionId: rootSessionId,
+                forkedFromId: null,
+                parentThreadId,
+                preview: '',
+                ephemeral: false,
+                section: null,
+                sectionEnteredAt: null,
+                modelProvider: 'openai',
+                createdAt: 0,
+                updatedAt: 0,
+                recencyAt: null,
+                status: { type: 'idle' },
+                path: null,
+                cwd: '/workspace',
+                cliVersion: 'test',
+                source: 'unknown',
+                threadSource: null,
+                agentNickname: null,
+                agentRole: null,
+                gitInfo: null,
+                name: null,
+                turns: [],
+            },
+        },
+    };
+}
 describe('Approval Events', () => {
     let fixture: CodexMockTestFixture;
     const sessionId = 'test-session-id';
@@ -267,6 +300,34 @@ describe('Approval Events', () => {
             );
 
             expect(response).toEqual({ decision: 'cancel' });
+        });
+
+        it('routes a child command approval to its root ACP session', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+            fixture.sendServerNotification(threadStarted('child-thread', sessionId, sessionId));
+
+            const params: CommandExecutionRequestApprovalParams = {
+                threadId: 'child-thread',
+                turnId: 'child-turn',
+                startedAtMs: 0,
+                environmentId: null,
+                itemId: 'child-command',
+                reason: 'Read a source file',
+                proposedExecpolicyAmendment: null,
+            };
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                params
+            );
+
+            expect(response).toEqual({ decision: 'accept' });
+
+            completeTurn();
+            await promptPromise;
         });
 
         it('should convert to ACP permission request format', async () => {
@@ -670,6 +731,101 @@ describe('Approval Events', () => {
             await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
                 'data/approval-permissions-request.json'
             );
+
+            completeTurn();
+            await promptPromise;
+        });
+    });
+
+    describe('Child thread routing', () => {
+        it('routes a nested child command approval to its root ACP session', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+            fixture.sendServerNotification(threadStarted('nested-child', sessionId, 'parent-child'));
+
+            const response = await fixture.sendServerRequest(
+                'item/commandExecution/requestApproval',
+                {
+                    threadId: 'nested-child',
+                    turnId: 'nested-turn',
+                    startedAtMs: 0,
+                    environmentId: null,
+                    itemId: 'nested-command',
+                    reason: 'Inspect nested work',
+                    proposedExecpolicyAmendment: null,
+                } satisfies CommandExecutionRequestApprovalParams
+            );
+
+            expect(response).toEqual({ decision: 'accept' });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('routes a child file-change approval to its root ACP session', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({
+                outcome: { outcome: 'selected', optionId: 'allow_once' }
+            });
+            fixture.sendServerNotification(threadStarted('child-file', sessionId, sessionId));
+
+            const response = await fixture.sendServerRequest(
+                'item/fileChange/requestApproval',
+                {
+                    threadId: 'child-file',
+                    turnId: 'child-turn',
+                    startedAtMs: 0,
+                    itemId: 'child-file-change',
+                    reason: 'Write a test fixture',
+                    grantRoot: null,
+                } satisfies FileChangeRequestApprovalParams
+            );
+
+            expect(response).toEqual({ decision: 'accept' });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('routes a child permissions approval to its root ACP session', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            const requestedPermissions = {
+                network: { enabled: true },
+                fileSystem: {
+                    read: ['/workspace'],
+                    write: ['/workspace/generated'],
+                    entries: [],
+                },
+            };
+            fixture.setPermissionResponse({
+                outcome: {
+                    outcome: 'selected',
+                    optionId: ApprovalOptionId.AllowPermissionsForTurn,
+                }
+            });
+            fixture.sendServerNotification(threadStarted('child-permissions', sessionId, sessionId));
+
+            const response = await fixture.sendServerRequest(
+                'item/permissions/requestApproval',
+                {
+                    threadId: 'child-permissions',
+                    turnId: 'child-turn',
+                    itemId: 'child-permissions-request',
+                    environmentId: null,
+                    startedAtMs: 0,
+                    cwd: '/workspace',
+                    reason: 'Build generated files',
+                    permissions: requestedPermissions,
+                } satisfies PermissionsRequestApprovalParams
+            );
+
+            expect(response).toEqual({
+                permissions: requestedPermissions,
+                scope: 'turn',
+                strictAutoReview: false,
+            });
 
             completeTurn();
             await promptPromise;

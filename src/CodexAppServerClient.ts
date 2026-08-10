@@ -136,6 +136,7 @@ export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
     private elicitationHandlers = new Map<string, ElicitationHandler>();
+    private readonly threadSessionIds = new Map<string, string>();
     private mcpServerStartupVersion = 0;
     private readonly mcpServerStartupStates = new Map<string, McpServerStartupSnapshot>();
     private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
@@ -153,6 +154,12 @@ export class CodexAppServerClient {
         this.connection = connection;
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
+            if (serverNotification.method === 'thread/started') {
+                this.threadSessionIds.set(
+                    serverNotification.params.thread.id,
+                    serverNotification.params.thread.sessionId,
+                );
+            }
             if (isMcpServerStatusUpdatedNotification(serverNotification)) {
                 this.mcpServerStartupVersion += 1;
                 this.mcpServerStartupStates.set(serverNotification.params.name, {
@@ -198,7 +205,7 @@ export class CodexAppServerClient {
             if (this.isStaleTurn(params.threadId, params.turnId)) {
                 return { decision: "cancel" };
             }
-            const handler = this.approvalHandlers.get(params.threadId);
+            const handler = this.resolveThreadHandler(this.approvalHandlers, params.threadId);
             if (!handler) {
                 return { decision: "cancel" };
             }
@@ -209,7 +216,7 @@ export class CodexAppServerClient {
             if (this.isStaleTurn(params.threadId, params.turnId)) {
                 return { decision: "cancel" };
             }
-            const handler = this.approvalHandlers.get(params.threadId);
+            const handler = this.resolveThreadHandler(this.approvalHandlers, params.threadId);
             if (!handler) {
                 return { decision: "cancel" };
             }
@@ -220,7 +227,7 @@ export class CodexAppServerClient {
             if (this.isStaleTurn(params.threadId, params.turnId)) {
                 return { permissions: {}, scope: "turn", strictAutoReview: true };
             }
-            const handler = this.approvalHandlers.get(params.threadId);
+            const handler = this.resolveThreadHandler(this.approvalHandlers, params.threadId);
             if (!handler) {
                 return { permissions: {}, scope: "turn", strictAutoReview: true };
             }
@@ -252,6 +259,15 @@ export class CodexAppServerClient {
 
     onApprovalRequest(threadId: string, handler: ApprovalHandler): void {
         this.approvalHandlers.set(threadId, handler);
+    }
+
+    private resolveThreadHandler<T>(handlers: Map<string, T>, threadId: string): T | undefined {
+        const exactHandler = handlers.get(threadId);
+        if (exactHandler) {
+            return exactHandler;
+        }
+        const sessionId = this.threadSessionIds.get(threadId);
+        return sessionId ? handlers.get(sessionId) : undefined;
     }
 
     onElicitationRequest(threadId: string, handler: ElicitationHandler): void {
