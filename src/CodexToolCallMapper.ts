@@ -45,6 +45,13 @@ type CommandExecutionItem = ThreadItem & { type: "commandExecution" };
 type ContextCompactionItem = ThreadItem & { type: "contextCompaction" };
 type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
 
+/**
+ * Resolves the skill whose `SKILL.md` sits at a path, or `undefined` when that file belongs to no known skill.
+ * Supplied by the session that owns Codex's skill registry; absent where no registry is available, such as when
+ * replaying history, in which case a skill read stays an ordinary file read.
+ */
+export type SkillFileLookup = (filePath: string) => { name: string; path: string } | undefined;
+
 const CONTEXT_COMPACTION_META = { contextCompaction: true };
 
 function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
@@ -78,10 +85,13 @@ export async function createFileChangeUpdate(
     };
 }
 
-export async function createCommandExecutionUpdate(item: CommandExecutionItem): Promise<UpdateSessionEvent> {
+export async function createCommandExecutionUpdate(
+    item: CommandExecutionItem,
+    skillForPath?: SkillFileLookup
+): Promise<UpdateSessionEvent> {
     const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
     if (commandAction) {
-        return createCommandActionEvent(item.id, item.status, item.cwd, commandAction);
+        return createCommandActionEvent(item.id, item.status, item.cwd, commandAction, skillForPath);
     }
     const command = stripShellPrefix(item.command);
     return createTerminalCommandEvent({
@@ -540,11 +550,26 @@ export function createCommandActionEvent(
     id: string,
     status: CommandExecutionStatus,
     cwd: string,
-    commandAction: CommandAction
+    commandAction: CommandAction,
+    skillForPath?: SkillFileLookup
 ): AcpToolCallEvent {
     const acpStatus = toAcpStatus(status);
     switch (commandAction.type) {
-        case "read":
+        case "read": {
+            // Codex has no skill tool: it loads a skill by reading that skill's SKILL.md. Naming the skill here,
+            // from Codex's own registry, lets clients render the load as such instead of as a plain file read.
+            const skill = skillForPath?.(commandAction.path);
+            if (skill) {
+                return {
+                    sessionUpdate: "tool_call",
+                    toolCallId: id,
+                    status: acpStatus,
+                    kind: "read",
+                    title: `Read skill '${skill.name}'`,
+                    locations: [{ path: skill.path }],
+                    _meta: { codex: { skill: skill.name, skillPath: skill.path } },
+                };
+            }
             return {
                 sessionUpdate: "tool_call",
                 toolCallId: id,
@@ -553,6 +578,7 @@ export function createCommandActionEvent(
                 title: `Read file '${commandAction.path}'`,
                 locations: [{ path: commandAction.path }],
             };
+        }
         case "search":
             return {
                 sessionUpdate: "tool_call",

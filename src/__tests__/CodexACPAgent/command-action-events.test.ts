@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createCommandActionEvent } from '../../CodexToolCallMapper';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
@@ -489,5 +490,59 @@ describe('CodexEventHandler - command action events', () => {
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/dynamic-tool-in-progress.json'
         );
+    });
+
+    describe('skill loads', () => {
+        // Codex has no skill tool: it loads a skill by reading that skill's SKILL.md, so the read of a path the
+        // skill registry knows is what identifies the load.
+        const skillPath = '/test/project/.agents/skills/commits/SKILL.md';
+        const readSkill = (path: string) => ({
+            type: 'read' as const,
+            command: `cat ${path}`,
+            name: 'cat',
+            path,
+        });
+
+        it('names the skill and carries its path when the read is a known skill file', () => {
+            const event = createCommandActionEvent(
+                'command-read-skill',
+                'inProgress',
+                '/test/project',
+                readSkill(skillPath),
+                path => (path === skillPath ? { name: 'commits', path } : undefined)
+            );
+
+            expect(event).toMatchObject({
+                kind: 'read',
+                title: "Read skill 'commits'",
+                locations: [{ path: skillPath }],
+                _meta: { codex: { skill: 'commits', skillPath } },
+            });
+        });
+
+        it('leaves a read of an unknown file as an ordinary file read', () => {
+            const event = createCommandActionEvent(
+                'command-read-file',
+                'inProgress',
+                '/test/project',
+                readSkill('/test/project/docs/SKILL.md'),
+                path => (path === skillPath ? { name: 'commits', path } : undefined)
+            );
+
+            expect(event.title).toBe("Read file '/test/project/docs/SKILL.md'");
+            expect(event._meta).toBeUndefined();
+        });
+
+        it('leaves reads alone when no skill registry is available', () => {
+            const event = createCommandActionEvent(
+                'command-read-no-registry',
+                'inProgress',
+                '/test/project',
+                readSkill(skillPath)
+            );
+
+            expect(event.title).toBe(`Read file '${skillPath}'`);
+            expect(event._meta).toBeUndefined();
+        });
     });
 });

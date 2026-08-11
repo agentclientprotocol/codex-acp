@@ -319,6 +319,36 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(newSessionResponse.sessionId).toBeDefined();
     });
 
+    it('should index skills by their SKILL.md path so a read of one can name the skill', async () => {
+        const skillFixture = createTestFixture();
+        const codexAcpAgent = skillFixture.getCodexAcpAgent();
+        const skillPath = '/test/project/.agents/skills/commits/SKILL.md';
+        vi.spyOn(skillFixture.getCodexAppServerClient(), 'listSkills').mockResolvedValue({
+            data: [{
+                cwd: '/test/project',
+                skills: [{
+                    name: 'commits',
+                    description: 'Write commit messages',
+                    path: skillPath,
+                    scope: 'repo',
+                    enabled: true,
+                }],
+                errors: [],
+            }],
+        });
+
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        await codexAcpAgent.authenticate({
+            methodId: "api-key",
+            _meta: { "api-key": { apiKey: "TOKEN" } },
+        } satisfies CodexAuthRequest);
+        await codexAcpAgent.newSession({cwd: '/test/project', mcpServers: []});
+
+        // Codex loads a skill by reading its SKILL.md, so the registry is what turns that read into a named load.
+        expect(skillFixture.getCodexAcpClient().skillForPath(skillPath)).toEqual({name: 'commits', path: skillPath});
+        expect(skillFixture.getCodexAcpClient().skillForPath('/test/project/docs/SKILL.md')).toBeUndefined();
+    });
+
     it('should show account in /status for api key auth and hide it for gateway auth', async () => {
         const authFixture = createTestFixture();
         const codexAcpAgent = authFixture.getCodexAcpAgent();

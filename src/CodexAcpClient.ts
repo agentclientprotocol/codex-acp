@@ -51,7 +51,7 @@ import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
 import {createCodexCollaborationMode} from "./CollaborationModeConfig";
 import type {ModeKind} from "./app-server/ModeKind";
-import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUtils";
+import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike, normalizePathForComparison} from "./PathUtils";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -96,6 +96,8 @@ export class CodexAcpClient {
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
     private skillExtraRoots: string[] = [];
+    /** `SKILL.md` path (normalized for comparison) to skill name, from the last `listSkills` Codex answered. */
+    private readonly skillNamesByPath = new Map<string, string>();
     private configPath: string | null = null;
 
 
@@ -630,10 +632,33 @@ export class CodexAcpClient {
             await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
             this.skillExtraRoots = skillExtraRoots;
         }
-        await this.codexClient.listSkills({
+        const response = await this.codexClient.listSkills({
             cwds: [cwd, ...additionalRoots],
             forceReload: true,
         });
+        this.rememberSkillPaths(response);
+    }
+
+    /**
+     * Index the skills Codex just reported by the path of their `SKILL.md`, so a later command that reads one can
+     * be recognized as a skill load and named from Codex's own registry rather than from the path's shape.
+     */
+    private rememberSkillPaths(response: SkillsListResponse | undefined): void {
+        this.skillNamesByPath.clear();
+        for (const entry of response?.data ?? []) {
+            for (const skill of entry.skills) {
+                this.skillNamesByPath.set(normalizePathForComparison(skill.path), skill.name);
+            }
+        }
+    }
+
+    /**
+     * The skill whose `SKILL.md` is at [filePath], or `undefined` when that file is not a known skill's. Reading a
+     * skill's file is how Codex loads it, so this is what turns such a read into a skill load for clients.
+     */
+    skillForPath(filePath: string): { name: string; path: string } | undefined {
+        const name = this.skillNamesByPath.get(normalizePathForComparison(filePath));
+        return name === undefined ? undefined : { name, path: filePath };
     }
 
     /**

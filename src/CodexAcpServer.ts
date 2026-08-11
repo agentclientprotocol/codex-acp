@@ -1599,7 +1599,7 @@ export class CodexAcpServer {
             case "fileChange":
                 return [await createFileChangeUpdate(item)];
             case "commandExecution": {
-                const updates = [await createCommandExecutionUpdate(item)];
+                const updates = [await createCommandExecutionUpdate(item, path => this.codexAcpClient.skillForPath(path))];
                 const completeUpdate = createCommandExecutionCompleteUpdate(item, sessionState.terminalOutputMode);
                 if (completeUpdate) {
                     updates.push(completeUpdate);
@@ -2060,6 +2060,7 @@ export class CodexAcpServer {
                 clientSupportsPlanUpdates(this.clientCapabilities),
                 clientSupportsTypedSessionFailures(this.clientCapabilities),
                 this.sessionFailureEpoch,
+                path => this.codexAcpClient.skillForPath(path),
             );
             eventHandler = promptEventHandler;
             const approvalHandler = new CodexApprovalHandler(this.connection, sessionState, activePrompt.signal);

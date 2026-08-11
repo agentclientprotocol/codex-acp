@@ -42,6 +42,7 @@ import {
     createCollabAgentToolCallCompleteUpdate,
     createCollabAgentToolCallUpdate,
     createCommandExecutionUpdate,
+    type SkillFileLookup,
     createContextCompactionCompleteUpdate,
     createContextCompactionStartUpdate,
     createDynamicToolCallUpdate,
@@ -145,6 +146,7 @@ export class CodexEventHandler {
     private readonly supportsPlanUpdates: boolean;
     private readonly supportsTypedSessionFailures: boolean;
     private readonly sessionFailureEpoch: string;
+    private readonly skillForPath: SkillFileLookup | undefined;
     private readonly pendingErrors: ErrorNotification[] = [];
     private failure: RequestError | null = null;
     private completedPlan: CompletedPlan | null = null;
@@ -171,11 +173,13 @@ export class CodexEventHandler {
         supportsPlanUpdates = false,
         supportsTypedSessionFailures = false,
         sessionFailureEpoch: string = randomUUID(),
+        skillForPath?: SkillFileLookup,
     ) {
         this.sessionState = sessionState;
         this.supportsPlanUpdates = supportsPlanUpdates;
         this.supportsTypedSessionFailures = supportsTypedSessionFailures;
         this.sessionFailureEpoch = sessionFailureEpoch;
+        this.skillForPath = skillForPath;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
     }
 
@@ -568,7 +572,7 @@ export class CodexEventHandler {
                     this.terminalCommandIds.delete(event.item.id);
                     this.terminalCommandOutputIds.delete(event.item.id);
                 }
-                return await createCommandExecutionUpdate(event.item);
+                return await createCommandExecutionUpdate(event.item, this.skillForPath);
             }
             case "mcpToolCall":
                 return await createMcpToolCallUpdate(event.item);
