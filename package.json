@@ -36,6 +36,7 @@
     "example:steering": "node --import tsx examples/steering.ts",
     "example:steering:multistep": "node --import tsx examples/steering.ts",
     "generate-types": "./node_modules/.bin/codex app-server generate-ts --out src/app-server",
+    "release:preflight": "bash scripts/release-preflight.sh",
     "test": "vitest run",
     "test:e2e": "npm run build && RUN_E2E_TESTS=true vitest run src/__tests__/CodexACPAgent/e2e",
     "test:watch": "vitest",

@@ -1,23 +1,82 @@
-name: Release
+name: Publish and Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+  # Recovery path for a release whose tag exists but whose npm publish or
+  # registry update did not land. See docs/RELEASES.md.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag or commit to publish
+        required: true
+        type: string
+      publish_npm:
+        description: Publish the package before updating the registry
+        required: true
+        default: true
+        type: boolean
 
 permissions: {}
 
 jobs:
-  verify:
+  # Every push to main re-computes the next version from the conventional commit
+  # messages and keeps a single release PR open. Merging that PR is what tags,
+  # releases and publishes; there is no manual release button.
+  release-please:
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     environment: release # Optional: for enhanced security
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      # Generating a GitHub token, so that PRs and tags created by
+      # the release-please-action can trigger actions workflows.
+      - name: Generate GitHub token
+        uses: actions/create-github-app-token@v3
+        id: generate-token
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          # Do not add release-type here. The action ignores config-file whenever
+          # release-type is set, which would silently drop
+          # include-component-in-tag and start tagging codex-acp-vX.Y.Z instead of
+          # vX.Y.Z. The node release type is declared in that config instead, so
+          # nothing is lost by leaving this out.
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+
+  # The gate for both paths: nothing is published unless this passes. Its `if`
+  # rather than `needs` alone decides whether a release is happening, because on
+  # workflow_dispatch the release-please job is skipped.
+  #
+  # Deliberately not in the `release` environment: OPENAI_API_KEY is a repository
+  # secret, so this needs nothing from it, and staying out keeps the job off the
+  # environment's deployment branch policy.
+  verify:
+    needs: [release-please]
+    if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.publish_npm) || needs.release-please.outputs.release_created == 'true') }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: "24"
       - name: Configure sandboxing
         run: |
           sudo apt-get update
@@ -34,43 +93,31 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm run test:e2e
 
-  publish-to-npm:
-    needs: verify
+  publish-npm:
+    name: Publish to npm
+    needs: [release-please, verify]
+    if: ${{ always() && needs.verify.result == 'success' }}
     runs-on: ubuntu-latest
     environment: release # Optional: for enhanced security
     permissions:
       contents: read
-      id-token: write
+      id-token: write # npm trusted publishing, so there is no npm token
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+      # Setup .npmrc file to publish to npm
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
       - run: npm ci
+      # prepublishOnly builds the bundle.
       - run: npm publish --access public
 
-  create-release:
-    needs: publish-to-npm
-    runs-on: ubuntu-latest
-    environment: release
-    permissions: {}
-    steps:
-      - name: Generate GitHub token
-        uses: actions/create-github-app-token@v3
-        id: generate-token
-        with:
-          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
-          private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
-
-      - name: Create Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          token: ${{ steps.generate-token.outputs.token }}
-          generate_release_notes: true
-
   trigger-registry-update:
-    needs: create-release
+    needs: publish-npm
+    if: ${{ always() && (needs.publish-npm.result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.publish_npm)) }}
     runs-on: ubuntu-latest
     environment: release
     permissions: {}
