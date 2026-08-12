@@ -32,9 +32,11 @@ import {sanitizeMcpServerName} from "./McpServerName";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
+    AskForApproval,
     GetAccountResponse,
     ListMcpServerStatusResponse,
     Model,
+    PermissionProfileSummary,
     ReviewTarget,
     SkillsListParams,
     SkillsListResponse,
@@ -406,6 +408,7 @@ export class CodexAcpClient {
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
+        const permissionProfiles = await this.fetchPermissionProfiles(request.cwd);
 
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
@@ -424,12 +427,16 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            activePermissionProfileId: readActivePermissionProfileId(response),
+            approvalPolicy: response.approvalPolicy,
+            permissionProfiles,
         }
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
+        const permissionProfiles = await this.fetchPermissionProfiles(request.cwd);
 
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
@@ -453,12 +460,16 @@ export class CodexAcpClient {
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             thread: historyResponse.thread,
             additionalDirectories,
+            activePermissionProfileId: readActivePermissionProfileId(response),
+            approvalPolicy: response.approvalPolicy,
+            permissionProfiles,
         };
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
+        const permissionProfiles = await this.fetchPermissionProfiles(request.cwd);
 
         const response = await this.codexClient.threadStart({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
@@ -479,6 +490,9 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            activePermissionProfileId: readActivePermissionProfileId(response),
+            approvalPolicy: response.approvalPolicy,
+            permissionProfiles,
         };
     }
 
@@ -622,6 +636,17 @@ export class CodexAcpClient {
             return new Set();
         }
         return new Set(configuredMcpServers.flatMap(server => Object.keys(server)));
+    }
+
+    private async fetchPermissionProfiles(projectPath: string): Promise<PermissionProfileSummary[]> {
+        const profiles: PermissionProfileSummary[] = [];
+        let cursor: string | null = null;
+        do {
+            const response = await this.codexClient.listPermissionProfiles({cwd: projectPath, cursor});
+            profiles.push(...(response?.data ?? []));
+            cursor = response?.nextCursor ?? null;
+        } while (cursor !== null);
+        return profiles;
     }
 
     getModelProvider(): string | null {
@@ -787,11 +812,17 @@ export class CodexAcpClient {
         if (shouldCancel?.()) {
             return null;
         }
+        const permissionProfileId = agentMode.permissionProfileId;
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
-            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            ...(permissionProfileId
+                ? {
+                    permissions: permissionProfileId,
+                    runtimeWorkspaceRoots: [cwd, ...additionalDirectories],
+                }
+                : {sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy!, additionalDirectories)}),
             summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
@@ -987,10 +1018,20 @@ export type SessionMetadata = {
     modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,
     additionalDirectories: string[],
+    activePermissionProfileId?: string | null,
+    approvalPolicy?: AskForApproval,
+    permissionProfiles?: PermissionProfileSummary[],
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
     thread: Thread,
+}
+
+function readActivePermissionProfileId(response: unknown): string | null {
+    const activePermissionProfile = (response as {
+        activePermissionProfile?: {id?: unknown} | null;
+    }).activePermissionProfile;
+    return typeof activePermissionProfile?.id === "string" ? activePermissionProfile.id : null;
 }
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {

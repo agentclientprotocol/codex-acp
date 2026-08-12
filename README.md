@@ -9,7 +9,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 ## Features
 
 - ChatGPT, API key, and client-provided custom gateway authentication.
-- Model, reasoning effort, fast mode, approval, and sandbox mode configuration.
+- Model, reasoning effort, fast mode, approval, sandbox mode, and configured Codex permission profile selection.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
 - Shell command, file change, permission request, MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, token usage, and review events.
 - Subagent launches as standard ACP tool calls, with Codex thread identity and activity details in namespaced `_meta.codex.subagent` metadata.
@@ -54,7 +54,7 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - `CODEX_CONFIG` - JSON object merged into the Codex session config.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
-- `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
+- `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, `agent-full-access`, or `permission-profile:<profile-id>`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
 
