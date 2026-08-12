@@ -2,6 +2,7 @@
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR, type CodexAuthRequest} from "../../CodexAuthMethod";
+import {RequestError} from "@agentclientprotocol/sdk";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
     createCodexMockTestFixture,
@@ -381,6 +382,74 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await expect(codexAcpAgent.extMethod("authentication/logout", {})).resolves.toEqual({});
         expect(logoutSpy).toHaveBeenCalledWith({});
+    });
+
+    it.each([
+        {
+            name: 'forwards ephemeral Codex session metadata to thread start',
+            meta: {codex: {ephemeral: true}},
+            expectedEphemeral: true,
+        },
+        {
+            name: 'keeps sessions persisted when Codex session metadata is absent',
+            meta: undefined,
+            expectedEphemeral: undefined,
+        },
+        {
+            name: 'keeps sessions persisted when ephemeral Codex session metadata is false',
+            meta: {codex: {ephemeral: false}},
+            expectedEphemeral: undefined,
+        },
+        {
+            name: 'ignores unrelated Codex session metadata',
+            meta: {codex: {custom: true}},
+            expectedEphemeral: undefined,
+        },
+    ])('$name', async ({meta, expectedEphemeral}) => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        await codexAcpClient.newSession({
+            cwd: "",
+            mcpServers: [],
+            ...(meta ? {_meta: meta} : {}),
+        });
+
+        const threadStartRequest = threadStartSpy.mock.calls[0]![0];
+        if (expectedEphemeral) {
+            expect(threadStartRequest.ephemeral).toBe(true);
+        } else {
+            expect(threadStartRequest).not.toHaveProperty("ephemeral");
+        }
+    });
+
+    it('rejects non-boolean ephemeral Codex session metadata', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const threadStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadStart");
+
+        const error = await codexAcpClient.newSession({
+            cwd: "",
+            mcpServers: [],
+            _meta: {codex: {ephemeral: "true"}},
+        } as unknown as acp.NewSessionRequest).catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(RequestError);
+        expect(error).toMatchObject({code: -32602});
+        expect((error as Error).message).toContain("_meta.codex.ephemeral must be a boolean");
+        expect(threadStartSpy).not.toHaveBeenCalled();
     });
 
     it('prefetches session additional skill roots before thread start', async () => {
