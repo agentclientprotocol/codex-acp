@@ -202,6 +202,48 @@ describe("typed session failures over ACP transport", () => {
         });
     });
 
+    it("surfaces a deprecation notice that used to be dropped outright", async () => {
+        const fixture = await createIdleFixture("wire-deprecation");
+
+        fixture.sendServerNotification({
+            method: "deprecationNotice",
+            params: {summary: "`--legacy-flag` is deprecated", details: "Use `--flag` instead."},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(1));
+
+        expect(fixture.updates[0]).toMatchObject({
+            update: {
+                sessionUpdate: "session_info_update",
+                _meta: {
+                    jetbrains: {
+                        air: {
+                            sessionFailure: {
+                                category: "advisory",
+                                severity: "warning",
+                                safeMessage: "`--legacy-flag` is deprecated\n\nUse `--flag` instead.",
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    });
+
+    it("still drops a deprecation notice when the capability is absent", async () => {
+        const fixture = await createIdleFixture("wire-legacy-deprecation", {});
+
+        fixture.sendServerNotification({
+            method: "deprecationNotice",
+            params: {summary: "`--legacy-flag` is deprecated", details: null},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+
+        // This notification produced nothing before typed records existed; a client that did not
+        // negotiate them must not suddenly start seeing it.
+        expect(fixture.updates).toEqual([]);
+    });
+
     it("keeps warnings as assistant text when the capability is absent", async () => {
         const fixture = await createIdleFixture("wire-legacy-warning", {});
 

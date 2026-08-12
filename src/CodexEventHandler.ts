@@ -17,6 +17,7 @@ import type {
     CodexErrorInfo,
     CommandExecutionOutputDeltaNotification,
     ConfigWarningNotification,
+    DeprecationNoticeNotification,
     ErrorNotification,
     ItemGuardianApprovalReviewCompletedNotification,
     ItemGuardianApprovalReviewStartedNotification,
@@ -108,6 +109,11 @@ const SESSION_FAILURE_PRESENTATION: Record<SessionFailureCategory, {
     // fallback for a notice recorded without one.
     advisory: {message: "Codex reported a warning.", retryable: false, actions: ["new_session"]},
 };
+
+/** Both `configWarning` and `deprecationNotice` carry a summary plus optional elaboration. */
+function joinSummaryAndDetails(summary: string, details: string | null): string {
+    return details ? `${summary}\n\n${details}` : summary;
+}
 
 /**
  * Records sharing an id form one logical banner whose revisions must increase; a new id restarts at 1.
@@ -414,6 +420,8 @@ export class CodexEventHandler {
                 return this.createWarningEvent(notification.params);
             case "guardianWarning":
                 return null;
+            case "deprecationNotice":
+                return this.createDeprecationNoticeEvent(notification.params);
             case "item/autoApprovalReview/started":
                 return this.handleGuardianApprovalReviewStarted(notification.params);
             case "item/autoApprovalReview/completed":
@@ -467,7 +475,6 @@ export class CodexEventHandler {
             case "windowsSandbox/setupCompleted":
             case "account/login/completed":
             case "skills/changed":
-            case "deprecationNotice":
             case "mcpServer/oauthLogin/completed":
             case "externalAgentConfig/import/completed":
             case "rawResponseItem/completed":
@@ -498,13 +505,23 @@ export class CodexEventHandler {
     }
 
     private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
-        const detailsText = event.details ? `\n\n${event.details}` : "";
+        const text = joinSummaryAndDetails(event.summary, event.details);
         if (this.supportsTypedSessionFailures) {
-            return this.createSessionFailureUpdate(
-                this.recordSessionNotice(`${event.summary}${detailsText}`),
-            );
+            return this.createSessionFailureUpdate(this.recordSessionNotice(text));
         }
-        return createAgentTextMessageChunk(`Config warning: ${event.summary}${detailsText}\n\n`);
+        return createAgentTextMessageChunk(`Config warning: ${text}\n\n`);
+    }
+
+    /**
+     * Unlike `warning` and `configWarning`, this notification was dropped outright, so there is no
+     * legacy rendering to preserve. It is surfaced only to clients that negotiated typed records;
+     * every other client keeps seeing exactly what it sees today, which is nothing.
+     */
+    private createDeprecationNoticeEvent(event: DeprecationNoticeNotification): UpdateSessionEvent | null {
+        if (!this.supportsTypedSessionFailures) return null;
+        return this.createSessionFailureUpdate(
+            this.recordSessionNotice(joinSummaryAndDetails(event.summary, event.details)),
+        );
     }
 
     private createWarningEvent(event: WarningNotification): UpdateSessionEvent {
