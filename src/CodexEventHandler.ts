@@ -4,6 +4,7 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
+    SessionFailure,
     SessionFailureAction,
     SessionFailureCategory,
     SessionState,
@@ -103,7 +104,17 @@ const SESSION_FAILURE_PRESENTATION: Record<SessionFailureCategory, {
     bad_request: {message: "Codex could not process this request.", retryable: false, actions: ["new_turn"]},
     provider_error: {message: "The model provider reported an error.", retryable: true, actions: ["retry"]},
     internal_error: {message: "Codex encountered an internal error.", retryable: true, actions: ["retry"]},
+    // Warning-severity advisories carry the app-server's own wording, so this message is only the
+    // fallback for a notice recorded without one.
+    advisory: {message: "Codex reported a warning.", retryable: false, actions: ["new_session"]},
 };
+
+/**
+ * Records sharing an id form one logical banner whose revisions must increase; a new id restarts at 1.
+ */
+function nextSessionFailureRevision(previous: SessionFailure | undefined, id: string): number {
+    return previous?.id === id ? previous.revision + 1 : 1;
+}
 
 type StringCodexErrorInfo = Extract<CodexErrorInfo, string>;
 type StructuredCodexErrorInfo = Exclude<CodexErrorInfo, string>;
@@ -488,10 +499,18 @@ export class CodexEventHandler {
 
     private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
         const detailsText = event.details ? `\n\n${event.details}` : "";
+        if (this.supportsTypedSessionFailures) {
+            return this.createSessionFailureUpdate(
+                this.recordSessionNotice(`${event.summary}${detailsText}`),
+            );
+        }
         return createAgentTextMessageChunk(`Config warning: ${event.summary}${detailsText}\n\n`);
     }
 
     private createWarningEvent(event: WarningNotification): UpdateSessionEvent {
+        if (this.supportsTypedSessionFailures) {
+            return this.createSessionFailureUpdate(this.recordSessionNotice(event.message));
+        }
         return createAgentTextMessageChunk(`Warning: ${event.message}\n\n`);
     }
 
@@ -975,7 +994,7 @@ export class CodexEventHandler {
                 : `${turnId}:error`;
         const failure: NonNullable<SessionState["sessionFailure"]> = {
             id,
-            revision: previous?.id === id ? previous.revision + 1 : 1,
+            revision: nextSessionFailureRevision(previous, id),
             phase: "active" as const,
             category,
             source: "codex",
@@ -986,6 +1005,32 @@ export class CodexEventHandler {
         };
         this.sessionState.sessionFailure = failure;
         return failure;
+    }
+
+    /**
+     * Records a warning-severity advisory in its own slot and under its own id namespace, so it
+     * shares the wire contract with terminal failures without competing for their revision counter.
+     *
+     * The advisory replaces whichever advisory preceded it: the app-server sends these as standalone
+     * hints, so only the newest one is worth a banner.
+     */
+    private recordSessionNotice(safeMessage: string): NonNullable<SessionState["sessionNotice"]> {
+        const presentation = SESSION_FAILURE_PRESENTATION.advisory;
+        const previous = this.sessionState.sessionNotice;
+        const id = `${this.sessionState.sessionId}:notice:${this.sessionFailureEpoch}`;
+        const notice: NonNullable<SessionState["sessionNotice"]> = {
+            id,
+            revision: nextSessionFailureRevision(previous, id),
+            phase: "active" as const,
+            category: "advisory",
+            source: "codex",
+            safeMessage,
+            retryable: presentation.retryable,
+            actions: presentation.actions,
+            severity: "warning",
+        };
+        this.sessionState.sessionNotice = notice;
+        return notice;
     }
 
     private createSessionFailureMeta(

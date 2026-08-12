@@ -131,14 +131,25 @@ export interface SessionState {
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
+    /**
+     * Warning-severity advisories, tracked separately from {@link SessionState.sessionFailure} so a
+     * non-fatal notice never overwrites the revision bookkeeping of an in-flight terminal failure.
+     */
+    sessionNotice?: SessionFailure;
 }
 
 export type SessionFailureCategory =
     | "transport_lost" | "auth_required" | "rate_limited" | "quota_exhausted" | "overloaded"
     | "context_exhausted" | "budget_exhausted" | "policy_denied" | "bad_request"
-    | "provider_error" | "internal_error";
+    | "provider_error" | "internal_error" | "advisory";
 
 export type SessionFailureAction = "retry" | "reconnect" | "login" | "new_turn" | "new_session";
+
+/**
+ * How loudly the client should render the record. Absent on the wire means `error`, so an AIR build
+ * that predates warning support keeps treating every record it receives as a failure.
+ */
+export type SessionFailureSeverity = "error" | "warning";
 
 export interface SessionFailure {
     id: string;
@@ -150,6 +161,7 @@ export interface SessionFailure {
     retryable: boolean;
     actions: SessionFailureAction[];
     turnId?: string;
+    severity?: SessionFailureSeverity;
 }
 
 const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;

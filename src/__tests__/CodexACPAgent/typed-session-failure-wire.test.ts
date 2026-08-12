@@ -134,7 +134,143 @@ describe("typed session failures over ACP transport", () => {
         expect(JSON.stringify(fixture.updates)).not.toContain("raw idle provider detail");
         expect(JSON.stringify(fixture.updates)).not.toContain("secret idle detail");
     });
+
+    it("delivers an app-server warning as a typed advisory instead of assistant text", async () => {
+        const fixture = await createIdleFixture("wire-warning");
+
+        fixture.sendServerNotification({
+            method: "warning",
+            params: {
+                threadId: fixture.sessionId,
+                message: "Heads up: Long threads and multiple compactions can cause the model to be less accurate.",
+            },
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(1));
+
+        expect(fixture.updates[0]).toMatchObject({
+            update: {
+                sessionUpdate: "session_info_update",
+                _meta: {
+                    jetbrains: {
+                        air: {
+                            sessionFailure: {
+                                id: expect.stringMatching(/^wire-warning:notice:[0-9a-f-]+$/),
+                                category: "advisory",
+                                severity: "warning",
+                                phase: "active",
+                                revision: 1,
+                                retryable: false,
+                                actions: ["new_session"],
+                                safeMessage:
+                                    "Heads up: Long threads and multiple compactions can cause the model to be less accurate.",
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        // The whole point of the change: it must not arrive as an agent message chunk.
+        expect(JSON.stringify(fixture.updates)).not.toContain("agent_message_chunk");
+        expect(JSON.stringify(fixture.updates)).not.toContain("Warning: ");
+    });
+
+    it("folds a config warning's details into the advisory message", async () => {
+        const fixture = await createIdleFixture("wire-config-warning");
+
+        fixture.sendServerNotification({
+            method: "configWarning",
+            params: {summary: "Unknown key `foo`", details: "in ~/.codex/config.toml"},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(1));
+
+        expect(fixture.updates[0]).toMatchObject({
+            update: {
+                _meta: {
+                    jetbrains: {
+                        air: {
+                            sessionFailure: {
+                                category: "advisory",
+                                severity: "warning",
+                                safeMessage: "Unknown key `foo`\n\nin ~/.codex/config.toml",
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    });
+
+    it("keeps warnings as assistant text when the capability is absent", async () => {
+        const fixture = await createIdleFixture("wire-legacy-warning", {});
+
+        fixture.sendServerNotification({
+            method: "warning",
+            params: {threadId: fixture.sessionId, message: "legacy advisory"},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(1));
+
+        expect(fixture.updates[0]!.update).toMatchObject({
+            sessionUpdate: "agent_message_chunk",
+            content: {type: "text", text: "Warning: legacy advisory\n\n"},
+        });
+    });
+
+    it("keeps an advisory in its own id namespace so it never bumps an active failure's revision", async () => {
+        const fixture = await createIdleFixture("wire-mixed");
+
+        fixture.sendServerNotification({
+            method: "error",
+            params: {
+                threadId: fixture.sessionId,
+                turnId: "turn-id",
+                willRetry: false,
+                error: {message: "provider blew up", codexErrorInfo: "serverOverloaded", additionalDetails: null},
+            },
+        });
+        fixture.sendServerNotification({
+            method: "warning",
+            params: {threadId: fixture.sessionId, message: "unrelated advisory"},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(2));
+
+        const records = fixture.updates.map(update => (update.update._meta as {
+            jetbrains: {air: {sessionFailure: {id: string; revision: number; severity?: string}}};
+        }).jetbrains.air.sessionFailure);
+        // Distinct ids, each starting its own revision sequence at 1.
+        expect(records[0]).toMatchObject({revision: 1, category: "overloaded"});
+        expect(records[1]).toMatchObject({revision: 1, category: "advisory", severity: "warning"});
+        expect(records[0]!.id).not.toEqual(records[1]!.id);
+        expect(records[0]).not.toHaveProperty("severity");
+    });
 });
+
+/** A fixture whose session already completed a turn, so notifications route to a live event handler. */
+async function createIdleFixture(
+    sessionId: string,
+    clientCapabilities: acp.ClientCapabilities = typedFailureCapabilities,
+) {
+    const fixture = createWireFixture();
+    await fixture.initialize(clientCapabilities);
+    const sessionState = createTestSessionState({sessionId, account: {type: "apiKey"}});
+    vi.spyOn(fixture.server, "getSessionState").mockReturnValue(sessionState);
+    vi.spyOn(fixture.appServer, "turnStart").mockResolvedValue({turn: createTurn("inProgress")});
+    vi.spyOn(fixture.appServer, "awaitTurnCompleted").mockResolvedValue({
+        threadId: sessionId,
+        turn: createTurn("completed"),
+    });
+
+    await fixture.client.prompt({
+        sessionId,
+        prompt: [{type: "text", text: "settle the session"}],
+    });
+    fixture.updates.splice(0);
+
+    return {...fixture, sessionId};
+}
 
 function createWireFixture(options: {exitCode?: number | null; stderr?: string} = {}) {
     const mockConnections = createMockConnections();
