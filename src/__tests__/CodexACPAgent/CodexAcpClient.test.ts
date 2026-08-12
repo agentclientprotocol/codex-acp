@@ -634,6 +634,47 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(threadResumeSpy.mock.calls[1]![0].modelProvider).toBe("azure");
     });
 
+    it('omits the model provider when none is configured so the thread keeps its model and effort', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAcpClient, "getModelProvider").mockReturnValue(null);
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config: {}} as any);
+        const threadResumeSpy = vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            reasoningEffort: "high",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+        });
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5", defaultReasoningEffort: "medium"})],
+            nextCursor: null,
+        });
+
+        const resumed = await codexAcpClient.resumeSession({
+            sessionId: "resume-id",
+            cwd: "/workspace",
+        });
+        const loaded = await codexAcpClient.loadSession({
+            sessionId: "load-id",
+            cwd: "/workspace",
+            mcpServers: [],
+        });
+
+        // Supplying a provider makes the app-server re-resolve model/effort from config,
+        // discarding the picks stored on the thread (issue #343).
+        expect(threadResumeSpy.mock.calls[0]![0]).not.toHaveProperty("modelProvider");
+        expect(threadResumeSpy.mock.calls[1]![0]).not.toHaveProperty("modelProvider");
+        expect(resumed.currentModelId).toBe("gpt-5[high]");
+        expect(loaded.currentModelId).toBe("gpt-5[high]");
+    });
+
     it('tracks configured model provider auth state for resumed and loaded sessions', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
