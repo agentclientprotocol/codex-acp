@@ -153,6 +153,31 @@ describe('Session config options over ACP v2', () => {
             .toMatchFileSnapshot('data/session-config-options-v2-set.json');
     });
 
+    it('lists and selects allowed custom permission profiles over v2', async () => {
+        const {connection, sessionState} = await connectV2Client();
+        closeClient = () => connection.close();
+        sessionState.availableAgentModes = AgentMode.all([
+            {id: ":workspace", description: "Built-in workspace", allowed: true},
+            {id: "blocked", description: "Blocked by requirements", allowed: false},
+            {id: "team-default", description: "Team default permissions", allowed: true},
+        ], "never", "user");
+
+        const response = await connection.agent.request(acpV2.methods.agent.session.setConfigOption, {
+            sessionId: sessionState.sessionId,
+            configId: MODE_CONFIG_ID,
+            type: "id",
+            value: "permission-profile:team-default",
+        });
+
+        expect(sessionState.agentMode).toMatchObject({
+            permissionProfileId: "team-default",
+            approvalPolicy: "never",
+            approvalsReviewer: "user",
+        });
+        await expect(dump(response.configOptions.find(option => option.configId === MODE_CONFIG_ID)))
+            .toMatchFileSnapshot('data/session-config-options-v2-permission-profile.json');
+    });
+
     it('rejects a set_config_option value that does not match its type', async () => {
         const {connection, sessionState} = await connectV2Client();
         closeClient = () => connection.close();

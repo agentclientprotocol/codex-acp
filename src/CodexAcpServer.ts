@@ -231,6 +231,7 @@ export interface SessionState extends SessionIndexTitleState {
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     supportedInputModalities: Array<InputModality>,
     agentMode: AgentMode,
+    availableAgentModes: AgentMode[],
     collaborationMode: ModeKind,
     /** The active turn: its completion, errors and stop reason are matched against this id. */
     currentTurnId: string | null;
@@ -1177,13 +1178,22 @@ export class CodexAcpServer {
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, operation === "resume");
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
+        const availableAgentModes = AgentMode.all(
+            sessionMetadata.permissionProfiles,
+            sessionMetadata.approvalPolicy,
+            sessionMetadata.approvalsReviewer,
+        );
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(),
+            agentMode: AgentMode.getInitialAgentMode(
+                availableAgentModes,
+                sessionMetadata.activePermissionProfileId,
+            ),
+            availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             interruptTurnId: null,
@@ -1268,7 +1278,10 @@ export class CodexAcpServer {
         }
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState =
-            sessionState.agentMode.toSessionModeState(sessionState.clientCapabilities.airClient);
+            sessionState.agentMode.toSessionModeState(
+                sessionState.clientCapabilities.airClient,
+                sessionState.availableAgentModes,
+            );
 
         return [sessionId, sessionModelState, sessionModeState];
     }
@@ -2571,7 +2584,7 @@ export class CodexAcpServer {
     }
 
     private applyModeChange(sessionState: SessionState, value: string): void {
-        const newMode = AgentMode.find(value);
+        const newMode = AgentMode.find(value, sessionState.availableAgentModes);
         if (!newMode) {
             throw RequestError.invalidParams();
         }
@@ -2969,7 +2982,10 @@ export class CodexAcpServer {
             ? sessionState.availableModels.find(model => model.isDefault)?.id
             : undefined;
         const configOptions = [
-            sessionState.agentMode.toConfigOption(sessionState.clientCapabilities.airClient),
+            sessionState.agentMode.toConfigOption(
+                sessionState.clientCapabilities.airClient,
+                sessionState.availableAgentModes,
+            ),
             createCollaborationModeConfigOption(sessionState.collaborationMode),
         ];
         // A gateway that lists none of the Codex models leaves no model to offer, so there is no model option at all.
@@ -3235,13 +3251,22 @@ export class CodexAcpServer {
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
+        const availableAgentModes = AgentMode.all(
+            sessionMetadata.permissionProfiles,
+            sessionMetadata.approvalPolicy,
+            sessionMetadata.approvalsReviewer,
+        );
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(),
+            agentMode: AgentMode.getInitialAgentMode(
+                availableAgentModes,
+                sessionMetadata.activePermissionProfileId,
+            ),
+            availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             interruptTurnId: null,
@@ -3307,7 +3332,10 @@ export class CodexAcpServer {
         await this.publishCurrentGoalBestEffort(sessionState, requestedSessionGeneration, true);
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState =
-            sessionState.agentMode.toSessionModeState(sessionState.clientCapabilities.airClient);
+            sessionState.agentMode.toSessionModeState(
+                sessionState.clientCapabilities.airClient,
+                sessionState.availableAgentModes,
+            );
 
         return {
             sessionId: sessionId,
