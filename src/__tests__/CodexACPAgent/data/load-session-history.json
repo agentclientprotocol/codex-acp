@@ -391,11 +391,13 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-context-compaction-1",
-        "kind": "other",
-        "title": "Context compacted",
+        "kind": "think",
+        "title": "Compact conversation",
         "status": "completed",
         "_meta": {
-          "contextCompaction": true
+          "contextCompaction": {
+            "version": 1
+          }
         }
       }
     }
