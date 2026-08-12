@@ -1,6 +1,14 @@
 import type {ModeKind} from "./app-server/ModeKind";
 import type {ServiceTier} from "./app-server/ServiceTier";
-import type {Model, Thread, ThreadItemEntry, ThreadStatus} from "./app-server/v2";
+import type {
+    ApprovalsReviewer,
+    AskForApproval,
+    Model,
+    PermissionProfileSummary,
+    Thread,
+    ThreadItemEntry,
+    ThreadStatus,
+} from "./app-server/v2";
 import type {SessionInstructions} from "./ClientSystemPrompt";
 
 export type SessionMetadata = {
@@ -15,6 +23,10 @@ export type SessionMetadata = {
     skippedMcpServers?: string[],
     instructions?: SessionInstructions,
     sessionTitle?: string | null,
+    activePermissionProfileId?: string | null,
+    approvalPolicy?: AskForApproval,
+    approvalsReviewer?: ApprovalsReviewer,
+    permissionProfiles?: PermissionProfileSummary[],
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {

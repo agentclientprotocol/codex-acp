@@ -101,6 +101,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             "account/updated",
             // The auth check of session/new. The session open reuses this read, so it reads the account once.
             "account/read",
+            "permissionProfile/list",
+            "config/read",
             "thread/start",
             "model/list",
             "thread/started",
@@ -606,6 +608,83 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         expect(threadStartRequest.config?.["features"]).toMatchObject({
             cwd_relative_turn_diffs: false,
+        });
+    });
+
+    it.each((["newSession", "loadSession", "resumeSession", "forkSession"] as const).flatMap(method => [
+        {
+            method, configCase: "absent approval defaults",
+            config: {},
+            lastTurn: {approvalPolicy: "on-request", approvalsReviewer: "auto_review"},
+            expected: {approvalPolicy: "on-request", approvalsReviewer: "user"},
+        },
+        {
+            method, configCase: "null approval defaults",
+            config: {approval_policy: null, approvals_reviewer: null},
+            lastTurn: {approvalPolicy: "never", approvalsReviewer: "user"},
+            expected: {approvalPolicy: "on-request", approvalsReviewer: "user"},
+        },
+        {
+            method, configCase: "configured user approvals",
+            config: {approval_policy: "on-request", approvals_reviewer: "user"},
+            lastTurn: {approvalPolicy: "never", approvalsReviewer: "auto_review"},
+            expected: {approvalPolicy: "on-request", approvalsReviewer: "user"},
+        },
+        {
+            method, configCase: "configured automatic approvals",
+            config: {approval_policy: "never", approvals_reviewer: "auto_review"},
+            lastTurn: {approvalPolicy: "on-request", approvalsReviewer: "user"},
+            expected: {approvalPolicy: "never", approvalsReviewer: "auto_review"},
+        },
+    ]))('restores a custom profile via $method using $configCase', async ({method, config, lastTurn, expected}) => {
+        vi.stubEnv("INITIAL_AGENT_MODE", undefined);
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        const configReadSpy = vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config} as any);
+        const listPermissionProfilesSpy = vi.spyOn(codexAppServerClient, "listPermissionProfiles")
+            .mockResolvedValueOnce({
+                data: [{id: ":workspace", description: null, allowed: true}],
+                nextCursor: "next-page",
+            })
+            .mockResolvedValueOnce({
+                data: [{id: "team-default", description: "Team default permissions", allowed: true}],
+                nextCursor: null,
+            });
+        const threadResponse = {
+            thread: {id: "thread-id", turns: [], status: {type: "idle"}},
+            model: "gpt-5",
+            modelProvider: "openai",
+            reasoningEffort: "medium",
+            serviceTier: null,
+            activePermissionProfile: {id: "team-default", extends: ":workspace"},
+            ...lastTurn,
+        };
+        vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue(threadResponse as any);
+        vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue(threadResponse as any);
+        vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue(threadResponse as any);
+        vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({thread: threadResponse.thread} as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        const session = await codexAcpAgent[method]({cwd: "/workspace", mcpServers: [], sessionId: "thread-id"});
+
+        expect(listPermissionProfilesSpy).toHaveBeenNthCalledWith(1, {cwd: "/workspace", cursor: null});
+        expect(listPermissionProfilesSpy).toHaveBeenNthCalledWith(2, {cwd: "/workspace", cursor: "next-page"});
+        expect(configReadSpy).toHaveBeenCalledWith({includeLayers: true, cwd: "/workspace"});
+        expect(session.modes?.currentModeId).toBe("permission-profile:team-default");
+        expect(session.configOptions?.find(option => option.id === "mode")?.currentValue)
+            .toBe("permission-profile:team-default");
+        expect(codexAcpAgent.getSessionState("thread-id").agentMode).toMatchObject({
+            permissionProfileId: "team-default",
+            ...expected,
         });
     });
 
@@ -1450,6 +1529,48 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             writableRoots: ["/workspace/extra"],
         });
         expect(turnStartSpy.mock.calls[0]![0].approvalsReviewer).toBe("auto_review");
+    });
+
+    it('uses a custom permission profile without a legacy sandbox policy', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const availableAgentModes = AgentMode.all([{
+            id: "team-default",
+            description: "Team default permissions",
+            allowed: true,
+        }]);
+        const permissionProfileMode = availableAgentModes.find(mode => mode.permissionProfileId === "team-default")!;
+
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        const turnStartSpy = vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({
+            turn: {id: "turn-id", items: [], status: "inProgress", error: null}
+        } as any);
+        vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
+            threadId: "session-id",
+            turn: {id: "turn-id", items: [], status: "completed", error: null}
+        } as any);
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(createTestSessionState({
+            sessionId: "session-id",
+            cwd: "/workspace",
+            additionalDirectories: ["/workspace/extra"],
+            agentMode: permissionProfileMode,
+            availableAgentModes,
+        }));
+
+        await codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Hello"}],
+        });
+
+        expect(turnStartSpy.mock.calls[0]![0]).toMatchObject({
+            approvalPolicy: "on-request",
+            approvalsReviewer: "user",
+            permissions: "team-default",
+            runtimeWorkspaceRoots: ["/workspace", "/workspace/extra"],
+        });
+        expect(turnStartSpy.mock.calls[0]![0]).not.toHaveProperty("sandboxPolicy");
     });
 
     function loadNotifications(){
