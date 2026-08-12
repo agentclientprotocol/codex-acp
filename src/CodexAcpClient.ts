@@ -126,6 +126,10 @@ export class CodexAcpClient {
         this.subagents = new CodexSubagentSubscriptions(codexClient);
     }
 
+    get appServerClient(): CodexAppServerClient {
+        return this.codexClient;
+    }
+
     private readonly defaultClientInfo: ClientInfo = {
         name: `${packageJson.name}`, title: "Codex ACP", version: `${packageJson.version}`
     };
@@ -578,6 +582,10 @@ export class CodexAcpClient {
 
     async deleteSession(sessionId: string): Promise<void> {
         await this.codexClient.threadArchive({threadId: sessionId});
+    }
+
+    async renameSession(sessionId: string, name: string): Promise<void> {
+        await this.codexClient.threadSetName({ threadId: sessionId, name });
     }
 
     async runReview(
