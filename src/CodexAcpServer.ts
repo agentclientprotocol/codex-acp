@@ -92,6 +92,7 @@ import {
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot,} from "./ThreadGoalSnapshot";
 import {randomUUID} from "node:crypto";
+import {TitleGenerator} from "./TitleGenerator";
 import {
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
@@ -131,6 +132,7 @@ export interface SessionState {
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
+    titleGen?: TitleGenerator;
 }
 
 export type SessionFailureCategory =
@@ -577,6 +579,12 @@ export class CodexAcpServer {
             sessionTitle: null,
             sessionTitleSource: "sessionId" in request ? "unknown" : "unset",
         };
+        sessionState.titleGen = new TitleGenerator(
+            this.codexAcpClient.appServerClient,
+            sessionId,
+            sessionState.cwd,
+            () => sessionState.sessionTitleSource,
+        );
         this.sessions.set(sessionId, sessionState);
         resumeSubscribed = false;
 
@@ -1466,6 +1474,12 @@ export class CodexAcpServer {
             sessionTitle: null,
             sessionTitleSource: "unset",
         };
+        sessionState.titleGen = new TitleGenerator(
+            this.codexAcpClient.appServerClient,
+            sessionId,
+            sessionState.cwd,
+            () => sessionState.sessionTitleSource,
+        );
         this.sessions.set(sessionId, sessionState);
         subscribed = false;
 
@@ -1524,6 +1538,7 @@ export class CodexAcpServer {
         if (explicitTitle) {
             sessionState.sessionTitle = explicitTitle;
             sessionState.sessionTitleSource = "explicit";
+            sessionState.titleGen?.markExistingTitle();
             await session.update({
                 sessionUpdate: "session_info_update",
                 title: explicitTitle,
@@ -2350,6 +2365,19 @@ export class CodexAcpServer {
             }
 
             await clearRecoveredSessionFailure(eventHandler);
+
+            // Fire-and-forget: generate an AI title from the first turn.
+            // Never await — must not block the prompt response.
+            // Note: turn.items contains only agent output, not the user message —
+            // extract prompt text from params instead.
+            if (sessionState.titleGen) {
+                const promptText = params.prompt
+                    .filter((b): b is Extract<acp.ContentBlock, { type: "text" }> => b.type === "text")
+                    .map(b => b.text)
+                    .join(" ")
+                    .trim();
+                sessionState.titleGen.onTurnCompleted(promptText);
+            }
 
             await this.publishFallbackSessionTitle(
                 sessionState,

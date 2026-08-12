@@ -166,6 +166,11 @@ export class CodexCommands {
                 },
             },
             {
+                name: "rename",
+                description: "Rename the current session.",
+                input: { hint: "new name" }
+            },
+            {
                 name: "logout",
                 description: "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
                 input: null
@@ -254,6 +259,14 @@ export class CodexCommands {
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 const message = this.buildStatusMessage(sessionState);
                 await session.update(createAgentTextMessageChunk(message));
+                return { handled: true };
+            }
+            case "rename": {
+                if (command.rest.length === 0) {
+                    await this.sendCommandUsageMessage(commandName, "new name", sessionId);
+                    return { handled: true };
+                }
+                await this.runWithProcessCheck(() => this.codexAcpClient.renameSession(sessionId, command.rest));
                 return { handled: true };
             }
             case "logout": {
