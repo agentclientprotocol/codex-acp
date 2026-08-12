@@ -32,6 +32,8 @@ import {sanitizeMcpServerName} from "./McpServerName";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
+    ApprovalsReviewer,
+    AskForApproval,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
     ListMcpServerStatusResponse,
@@ -39,6 +41,7 @@ import type {
     McpServerOauthLoginParams,
     McpServerOauthLoginResponse,
     Model,
+    PermissionProfileSummary,
     ReviewTarget,
     SkillsListParams,
     SkillsListResponse,
@@ -74,6 +77,9 @@ type ResumedThread = {
     modelProvider: string;
     reasoningEffort: ReasoningEffort | null;
     serviceTier: string | null;
+    activePermissionProfileId: string | null;
+    approvalPolicy: AskForApproval | undefined;
+    approvalsReviewer: ApprovalsReviewer | undefined;
     itemsBackwardsCursor: string | null;
     materialized: boolean;
     /** The mode that the resume response reports. Null when the thread has no rollout yet. */
@@ -556,6 +562,9 @@ export class CodexAcpClient {
                 modelProvider: response.modelProvider,
                 reasoningEffort: response.reasoningEffort,
                 serviceTier: response.serviceTier,
+                activePermissionProfileId: readActivePermissionProfileId(response),
+                approvalPolicy: response.approvalPolicy,
+                approvalsReviewer: response.approvalsReviewer,
                 itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
                 materialized: true,
                 collaborationMode: response.collaborationMode?.mode ?? null,
@@ -577,6 +586,9 @@ export class CodexAcpClient {
                 modelProvider: response.thread.modelProvider,
                 reasoningEffort: response.thread.reasoningEffort,
                 serviceTier: null,
+                activePermissionProfileId: null,
+                approvalPolicy: undefined,
+                approvalsReviewer: undefined,
                 // An unmaterialized thread has no persisted history to hydrate:
                 // `thread/turns/list` rejects it outright ("not materialized
                 // yet"), and there is nothing to list either way.
@@ -590,6 +602,7 @@ export class CodexAcpClient {
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
+        const permissionProfiles = await this.fetchPermissionProfiles(request.cwd);
 
         const response = await this.resumeThread({
             excludeTurns: true,
@@ -610,6 +623,10 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            activePermissionProfileId: response.activePermissionProfileId,
+            ...(response.approvalPolicy === undefined ? {} : {approvalPolicy: response.approvalPolicy}),
+            ...(response.approvalsReviewer === undefined ? {} : {approvalsReviewer: response.approvalsReviewer}),
+            permissionProfiles,
         }
     }
 
@@ -631,6 +648,7 @@ export class CodexAcpClient {
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
+        const permissionProfiles = await this.fetchPermissionProfiles(request.cwd);
 
         const response = await this.resumeThread({
             excludeTurns: true,
@@ -667,6 +685,10 @@ export class CodexAcpClient {
             thread,
             history,
             additionalDirectories,
+            activePermissionProfileId: response.activePermissionProfileId,
+            ...(response.approvalPolicy === undefined ? {} : {approvalPolicy: response.approvalPolicy}),
+            ...(response.approvalsReviewer === undefined ? {} : {approvalsReviewer: response.approvalsReviewer}),
+            permissionProfiles,
         };
     }
 
@@ -699,6 +721,7 @@ export class CodexAcpClient {
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
+        const permissionProfiles = await this.fetchPermissionProfiles(request.cwd);
 
         const response = await this.codexClient.threadStart({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
@@ -719,6 +742,10 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            activePermissionProfileId: readActivePermissionProfileId(response),
+            approvalPolicy: response.approvalPolicy,
+            approvalsReviewer: response.approvalsReviewer,
+            permissionProfiles,
         };
     }
 
@@ -900,6 +927,17 @@ export class CodexAcpClient {
         return new Set(configuredMcpServers.flatMap(server => Object.keys(server)));
     }
 
+    private async fetchPermissionProfiles(projectPath: string): Promise<PermissionProfileSummary[]> {
+        const profiles: PermissionProfileSummary[] = [];
+        let cursor: string | null = null;
+        do {
+            const response = await this.codexClient.listPermissionProfiles({cwd: projectPath, cursor});
+            profiles.push(...(response?.data ?? []));
+            cursor = response?.nextCursor ?? null;
+        } while (cursor !== null);
+        return profiles;
+    }
+
     getModelProvider(): string | null {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
     }
@@ -1054,12 +1092,18 @@ export class CodexAcpClient {
         if (shouldCancel?.()) {
             return null;
         }
+        const permissionProfileId = agentMode.permissionProfileId;
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             approvalsReviewer: agentMode.approvalsReviewer,
-            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            ...(permissionProfileId
+                ? {
+                    permissions: permissionProfileId,
+                    runtimeWorkspaceRoots: [cwd, ...additionalDirectories],
+                }
+                : {sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy!, additionalDirectories)}),
             summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
@@ -1234,6 +1278,13 @@ export class CodexAcpClient {
 }
 
 export type JsonObject = { [key in string]?: JsonValue }
+
+function readActivePermissionProfileId(response: unknown): string | null {
+    const activePermissionProfile = (response as {
+        activePermissionProfile?: {id?: unknown} | null;
+    }).activePermissionProfile;
+    return typeof activePermissionProfile?.id === "string" ? activePermissionProfile.id : null;
+}
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
     return prompt.map((block): UserInput | null => {
