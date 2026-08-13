@@ -1,6 +1,9 @@
 import type { CodexAppServerClient } from "./CodexAppServerClient";
 import type { Turn } from "./app-server/v2";
 
+// Use cheap model to generate a title
+const TITLE_MODEL = "gpt-5.6-luna";
+
 const TITLE_OUTPUT_SCHEMA = {
     type: "object",
     properties: { title: { type: "string" } },
@@ -72,6 +75,7 @@ export class TitleGenerator {
                 text_elements: [],
             }],
             outputSchema: TITLE_OUTPUT_SCHEMA,
+            model: TITLE_MODEL,
         });
 
         const title = extractTitle(turnResult.turn);
