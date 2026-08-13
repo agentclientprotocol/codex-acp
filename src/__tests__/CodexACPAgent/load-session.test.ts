@@ -7,6 +7,7 @@ import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
+    // @spec: restored-sub-agent-tool-call-parity#replay-sub-agent-activity-with-live-structure
     it("should replay history during loadSession", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
