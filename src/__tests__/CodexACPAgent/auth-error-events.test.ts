@@ -92,13 +92,10 @@ describe("CodexEventHandler - auth error events", () => {
                         sessionFailure: {
                             id: "turn-id:error",
                             revision: 1,
-                            phase: "active",
-                            category: "overloaded",
-                            source: "codex",
-                            safeMessage: "Codex is temporarily overloaded.",
-                            retryable: true,
+                            category: "service",
+                            severity: "error",
+                            title: "Codex is temporarily overloaded.",
                             actions: ["retry"],
-                            turnId: "turn-id",
                         },
                     },
                 },
@@ -110,7 +107,7 @@ describe("CodexEventHandler - auth error events", () => {
 
         const wire = JSON.parse(JSON.stringify({jsonrpc: "2.0", id: 1, result}));
         expect(wire.result._meta.jetbrains.air.sessionFailure).toEqual(
-            expect.objectContaining({id: "turn-id:error", category: "overloaded"}),
+            expect.objectContaining({id: "turn-id:error", category: "service"}),
         );
     });
 
@@ -125,22 +122,16 @@ describe("CodexEventHandler - auth error events", () => {
         }, false, typedFailureCapabilities, "foreign-turn");
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(JSON.stringify(updates)).not.toContain("sessionFailure");
         expect(JSON.stringify(updates)).not.toContain("another turn failed");
         expect(JSON.stringify(updates)).not.toContain("secret foreign-turn details");
-        expect(updates).toEqual([{
+        expect(updates).toEqual([expect.objectContaining({
             sessionUpdate: "session_info_update",
-            _meta: {
-                codex: {
-                    error: {
-                        category: "overloaded",
-                        message: "Codex is temporarily overloaded.",
-                        turnId: "foreign-turn",
-                        willRetry: false,
-                    },
-                },
-            },
-        }]);
+            _meta: {jetbrains: {air: expect.objectContaining({sessionFailure: expect.objectContaining({
+                id: "foreign-turn:error",
+                category: "service",
+                severity: "error",
+            })})}},
+        })]);
     });
 
     it("does not attach a foreign error that arrives before the active turn id", async () => {
@@ -154,7 +145,13 @@ describe("CodexEventHandler - auth error events", () => {
         }, false, typedFailureCapabilities, "foreign-turn", true);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(JSON.stringify(updates)).not.toContain("sessionFailure");
+        expect(updates).toEqual([expect.objectContaining({
+            sessionUpdate: "session_info_update",
+            _meta: {jetbrains: {air: expect.objectContaining({sessionFailure: expect.objectContaining({
+                id: "foreign-turn:error",
+                category: "service",
+            })})}},
+        })]);
     });
 
     it("buffers a current-turn error until the active turn id is known", async () => {
@@ -170,7 +167,7 @@ describe("CodexEventHandler - auth error events", () => {
 
         expect(result).toMatchObject({
             stopReason: "end_turn",
-            _meta: {jetbrains: {air: {sessionFailure: {turnId: "turn-id", category: "overloaded"}}}},
+            _meta: {jetbrains: {air: {sessionFailure: {id: "turn-id:error", category: "service"}}}},
         });
         expect(updates).toEqual([]);
         const logText = JSON.stringify(log.mock.calls);
@@ -179,7 +176,7 @@ describe("CodexEventHandler - auth error events", () => {
         log.mockRestore();
     });
 
-    it("does not publish a terminal failure while Codex will retry", async () => {
+    it("publishes an inline warning while Codex will retry", async () => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: "typed-retrying-session",
             account: { type: "apiKey" },
@@ -190,18 +187,22 @@ describe("CodexEventHandler - auth error events", () => {
         }, true, typedFailureCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(JSON.stringify(updates)).not.toContain("sessionFailure");
         expect(JSON.stringify(updates)).not.toContain("raw retry payload");
         expect(JSON.stringify(updates)).not.toContain("secret retry details");
         expect(updates).toEqual([{
             sessionUpdate: "session_info_update",
             _meta: {
-                codex: {
-                    error: {
-                        category: "overloaded",
-                        message: "Codex is temporarily overloaded.",
-                        turnId: "turn-id",
-                        willRetry: true,
+                jetbrains: {
+                    air: {
+                        version: 1,
+                        sessionFailure: {
+                            id: "turn-id:error",
+                            revision: 1,
+                            category: "service",
+                            severity: "warning",
+                            title: "Codex is temporarily overloaded. Trying again, attempt 1.",
+                            actions: [],
+                        },
                     },
                 },
             },
@@ -224,12 +225,17 @@ describe("CodexEventHandler - auth error events", () => {
         expect(updates).toEqual([{
             sessionUpdate: "session_info_update",
             _meta: {
-                codex: {
-                    error: {
-                        category: "rate_limited",
-                        message: "The Codex rate limit was reached.",
-                        turnId: "turn-id",
-                        willRetry: true,
+                jetbrains: {
+                    air: {
+                        version: 1,
+                        sessionFailure: {
+                            id: "turn-id:error",
+                            revision: 1,
+                            category: "limit",
+                            severity: "warning",
+                            title: "The Codex rate limit was reached. Trying again, attempt 1.",
+                            actions: [],
+                        },
                     },
                 },
             },
@@ -249,7 +255,7 @@ describe("CodexEventHandler - auth error events", () => {
 
         expect(result).toMatchObject({
             stopReason: "end_turn",
-            _meta: {jetbrains: {air: {sessionFailure: {category: "auth_required"}}}},
+            _meta: {jetbrains: {air: {sessionFailure: {category: "access"}}}},
         });
         expect(JSON.stringify(result)).not.toContain("raw authentication payload");
         expect(JSON.stringify(result)).not.toContain("secret authentication details");
@@ -268,7 +274,7 @@ describe("CodexEventHandler - auth error events", () => {
 
         expect(result).toMatchObject({
             stopReason: "end_turn",
-            _meta: {jetbrains: {air: {version: 1, sessionFailure: {category: "overloaded"}}}},
+            _meta: {jetbrains: {air: {version: 1, sessionFailure: {category: "service"}}}},
         });
         expect(JSON.stringify(result)).not.toContain("raw newer-version error");
         expect(updates).toEqual([]);
@@ -290,23 +296,23 @@ describe("CodexEventHandler - auth error events", () => {
     });
 
     it.each([
-        ["transport_lost", {responseStreamDisconnected: {httpStatusCode: 503}}],
-        ["auth_required", "unauthorized"],
-        ["rate_limited", {responseStreamDisconnected: {httpStatusCode: 429}}],
-        ["quota_exhausted", "usageLimitExceeded"],
-        ["overloaded", "serverOverloaded"],
-        ["context_exhausted", "contextWindowExceeded"],
-        ["budget_exhausted", "sessionBudgetExceeded"],
-        ["policy_denied", "cyberPolicy"],
-        ["bad_request", "badRequest"],
-        ["internal_error", "internalServerError"],
-        ["provider_error", "threadRollbackFailed"],
-        ["provider_error", "sandboxError"],
-        ["provider_error", "other"],
-        ["transport_lost", {httpConnectionFailed: {httpStatusCode: null}}],
-        ["transport_lost", {responseStreamConnectionFailed: {httpStatusCode: 503}}],
-        ["transport_lost", {responseTooManyFailedAttempts: {httpStatusCode: 503}}],
-        ["provider_error", {activeTurnNotSteerable: {turnKind: "review"}}],
+        ["connection", {responseStreamDisconnected: {httpStatusCode: 503}}],
+        ["access", "unauthorized"],
+        ["limit", {responseStreamDisconnected: {httpStatusCode: 429}}],
+        ["limit", "usageLimitExceeded"],
+        ["service", "serverOverloaded"],
+        ["limit", "contextWindowExceeded"],
+        ["limit", "sessionBudgetExceeded"],
+        ["request", "cyberPolicy"],
+        ["request", "badRequest"],
+        ["service", "internalServerError"],
+        ["service", "threadRollbackFailed"],
+        ["service", "sandboxError"],
+        ["service", "other"],
+        ["connection", {httpConnectionFailed: {httpStatusCode: null}}],
+        ["connection", {responseStreamConnectionFailed: {httpStatusCode: 503}}],
+        ["connection", {responseTooManyFailedAttempts: {httpStatusCode: 503}}],
+        ["service", {activeTurnNotSteerable: {turnKind: "review"}}],
     ] as const)("maps a terminal Codex error to %s", async (category, codexErrorInfo) => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: `category-${category}`,
@@ -323,45 +329,28 @@ describe("CodexEventHandler - auth error events", () => {
         expect(updates).toEqual([]);
     });
 
-    it("clears the active failure with the same id and a greater revision after recovery", async () => {
+    it("keeps a historical failure and clears only producer runtime state after recovery", async () => {
         const sessionState = createTestSessionState({
             sessionId: "recovered-session",
             account: { type: "apiKey" },
             sessionFailure: {
                 id: "failed-turn:error",
                 revision: 3,
-                phase: "active",
-                category: "overloaded",
-                source: "codex",
-                safeMessage: "Codex is temporarily overloaded.",
-                retryable: true,
+                category: "service",
+                severity: "error",
+                title: "Codex is temporarily overloaded.",
                 actions: ["retry"],
-                turnId: "failed-turn",
             },
         });
 
         const {result, updates} = await runSuccessfulPrompt(sessionState, typedFailureCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(updates).toHaveLength(1);
-        expect(updates[0]).toMatchObject({
-            sessionUpdate: "session_info_update",
-            _meta: {
-                jetbrains: {
-                    air: {
-                        sessionFailure: {
-                            id: "failed-turn:error",
-                            revision: 4,
-                            phase: "cleared",
-                        },
-                    },
-                },
-            },
-        });
-        expect(sessionState.sessionFailure).toMatchObject({revision: 4, phase: "cleared"});
+        expect(updates).toEqual([]);
+        expect(sessionState.sessionFailure).toBeUndefined();
     });
 
-    it("keeps one failure id across failed retry turns and clears it after recovery", async () => {
+    it("uses a new failure id for each failed turn", async () => {
         const sessionState = createTestSessionState({
             sessionId: "retry-chain-session",
             account: {type: "apiKey"},
@@ -380,21 +369,17 @@ describe("CodexEventHandler - auth error events", () => {
         const recovered = await runSuccessfulPrompt(sessionState, typedFailureCapabilities, "turn-3");
 
         expect(first.result).toMatchObject({
-            _meta: {jetbrains: {air: {sessionFailure: {id: "turn-1:error", revision: 1, phase: "active"}}}},
+            _meta: {jetbrains: {air: {sessionFailure: {id: "turn-1:error", revision: 1}}}},
         });
         expect(second.result).toMatchObject({
             _meta: {jetbrains: {air: {sessionFailure: {
-                id: "turn-1:error",
-                revision: 2,
-                phase: "active",
-                turnId: "turn-2",
+                id: "turn-2:error",
+                revision: 1,
             }}}},
         });
         expect(first.updates).toEqual([]);
         expect(second.updates).toEqual([]);
-        expect(recovered.updates[0]).toMatchObject({
-            _meta: {jetbrains: {air: {sessionFailure: {id: "turn-1:error", revision: 3, phase: "cleared"}}}},
-        });
+        expect(recovered.updates).toEqual([]);
     });
 
     it("publishes a typed failure when a failed completion has no error notification", async () => {
@@ -416,8 +401,7 @@ describe("CodexEventHandler - auth error events", () => {
             stopReason: "end_turn",
             _meta: {jetbrains: {air: {sessionFailure: {
                 id: "failed-turn:error",
-                category: "overloaded",
-                turnId: "failed-turn",
+                category: "service",
             }}}},
         });
         expect(updates).toEqual([]);
@@ -475,13 +459,11 @@ describe("CodexEventHandler - auth error events", () => {
                     air: {
                         version: 1,
                         sessionFailure: {
-                            id: expect.stringMatching(/^idle-error-session:error:[0-9a-f-]+$/),
+                            id: expect.stringMatching(/^idle-error-session:error:[0-9a-f-]+:1$/),
                             revision: 1,
-                            phase: "active",
-                            category: "overloaded",
-                            source: "codex",
-                            safeMessage: "Codex is temporarily overloaded.",
-                            retryable: true,
+                            category: "service",
+                            severity: "error",
+                            title: "Codex is temporarily overloaded.",
                             actions: ["retry"],
                         },
                     },
@@ -492,7 +474,7 @@ describe("CodexEventHandler - auth error events", () => {
         expect(JSON.stringify(updates)).not.toContain("secret late details");
     });
 
-    it("keeps a retrying late idle error diagnostic-only", async () => {
+    it("publishes a retrying late idle error as a typed warning", async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
@@ -537,17 +519,22 @@ describe("CodexEventHandler - auth error events", () => {
         expect(updates).toEqual([{
             sessionUpdate: "session_info_update",
             _meta: {
-                codex: {
-                    error: {
-                        category: "overloaded",
-                        message: "Codex is temporarily overloaded.",
-                        turnId: "completed-turn",
-                        willRetry: true,
+                jetbrains: {
+                    air: {
+                        version: 1,
+                        sessionFailure: {
+                            id: "completed-turn:error",
+                            revision: 1,
+                            category: "service",
+                            severity: "warning",
+                            title: "Codex is temporarily overloaded. Trying again, attempt 1.",
+                            actions: [],
+                        },
                     },
                 },
             },
         }]);
-        expect(sessionState.sessionFailure).toBeUndefined();
+        expect(sessionState.sessionFailure).toMatchObject({id: "completed-turn:error", severity: "warning"});
         expect(JSON.stringify(updates)).not.toContain("raw retry detail");
         expect(JSON.stringify(updates)).not.toContain("secret retry detail");
     });
@@ -601,21 +588,18 @@ describe("CodexEventHandler - auth error events", () => {
                         air: {
                             version: 1,
                             sessionFailure: {
-                                id: expect.stringMatching(/^local-command-error-session:error:[0-9a-f-]+$/),
+                                id: expect.stringMatching(/^local-command-error-session:error:[0-9a-f-]+:1$/),
                                 revision: 1,
-                                phase: "active",
-                                category: "overloaded",
-                                source: "codex",
-                                safeMessage: "Codex is temporarily overloaded.",
-                                retryable: true,
+                                category: "service",
+                                severity: "error",
+                                title: "Codex is temporarily overloaded.",
                                 actions: ["retry"],
                             },
                         },
                     },
                 },
             }]);
-            expect(sessionState.sessionFailure).toMatchObject({phase: "active", revision: 1});
-            expect(sessionState.sessionFailure).not.toHaveProperty("turnId");
+            expect(sessionState.sessionFailure).toMatchObject({severity: "error", revision: 1});
             expect(JSON.stringify(updates)).not.toContain("raw slash command failure");
             expect(JSON.stringify(updates)).not.toContain("secret slash command detail");
         } finally {
@@ -657,8 +641,8 @@ describe("CodexEventHandler - auth error events", () => {
         const firstId = await createFailureId();
         const restartedId = await createFailureId();
 
-        expect(firstId).toMatch(/^restored-session:error:[0-9a-f-]+$/);
-        expect(restartedId).toMatch(/^restored-session:error:[0-9a-f-]+$/);
+        expect(firstId).toMatch(/^restored-session:error:[0-9a-f-]+:1$/);
+        expect(restartedId).toMatch(/^restored-session:error:[0-9a-f-]+:1$/);
         expect(restartedId).not.toBe(firstId);
     });
 

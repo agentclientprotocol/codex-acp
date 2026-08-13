@@ -89,31 +89,64 @@ export type CompletedPlan = {
     text: string;
 };
 
-const SESSION_FAILURE_PRESENTATION: Record<SessionFailureCategory, {
-    message: string;
-    retryable: boolean;
+type CodexFailureKind =
+    | "transport_lost" | "auth_required" | "rate_limited" | "quota_exhausted" | "overloaded"
+    | "context_exhausted" | "budget_exhausted" | "policy_denied" | "bad_request"
+    | "provider_error" | "internal_error";
+
+type SessionFailurePresentation = {
+    category: SessionFailureCategory;
+    title: string;
     actions: SessionFailureAction[];
-}> = {
-    transport_lost: {message: "Connection to Codex was lost.", retryable: true, actions: ["reconnect", "retry"]},
-    auth_required: {message: "Sign in to continue using Codex.", retryable: false, actions: ["login"]},
-    rate_limited: {message: "The Codex rate limit was reached.", retryable: true, actions: ["retry"]},
-    quota_exhausted: {message: "The Codex usage quota is exhausted.", retryable: false, actions: ["new_session"]},
-    overloaded: {message: "Codex is temporarily overloaded.", retryable: true, actions: ["retry"]},
-    context_exhausted: {message: "This conversation has reached its context limit.", retryable: false, actions: ["new_turn"]},
-    budget_exhausted: {message: "This session has reached its usage budget.", retryable: false, actions: ["new_session"]},
-    policy_denied: {message: "The request was blocked by provider policy.", retryable: false, actions: []},
-    bad_request: {message: "Codex could not process this request.", retryable: false, actions: ["new_turn"]},
-    provider_error: {message: "The model provider reported an error.", retryable: true, actions: ["retry"]},
-    internal_error: {message: "Codex encountered an internal error.", retryable: true, actions: ["retry"]},
-    // Warning-severity advisories carry the app-server's own wording, so this message is only the
-    // fallback for a notice recorded without one.
-    advisory: {message: "Codex reported a warning.", retryable: false, actions: ["new_session"]},
 };
 
-/** Both `configWarning` and `deprecationNotice` carry a summary plus optional elaboration. */
-function joinSummaryAndDetails(summary: string, details: string | null): string {
-    return details ? `${summary}\n\n${details}` : summary;
-}
+const MAX_SESSION_FAILURE_TITLE_LENGTH = 240;
+
+const SESSION_FAILURE_PRESENTATION: Record<CodexFailureKind, SessionFailurePresentation> = {
+    transport_lost: {
+        category: "connection", title: "Connection to Codex was lost.",
+        actions: ["retry", "new_session"],
+    },
+    auth_required: {
+        category: "access", title: "Sign in to continue using Codex.",
+        actions: ["login"],
+    },
+    rate_limited: {
+        category: "limit", title: "The Codex rate limit was reached.",
+        actions: ["retry"],
+    },
+    quota_exhausted: {
+        category: "limit", title: "The Codex usage quota is exhausted.",
+        actions: ["new_session"],
+    },
+    overloaded: {
+        category: "service", title: "Codex is temporarily overloaded.",
+        actions: ["retry"],
+    },
+    context_exhausted: {
+        category: "limit", title: "This conversation has reached its context limit.",
+        actions: ["new_session"],
+    },
+    budget_exhausted: {
+        category: "limit", title: "This session has reached its usage budget.",
+        actions: ["new_session"],
+    },
+    policy_denied: {
+        category: "request", title: "The request was blocked by provider policy.",
+        actions: [],
+    },
+    bad_request: {
+        category: "request", title: "Codex could not process this request.", actions: [],
+    },
+    provider_error: {
+        category: "service", title: "The model provider reported an error.",
+        actions: ["retry"],
+    },
+    internal_error: {
+        category: "service", title: "Codex encountered an internal error.",
+        actions: ["retry", "new_session"],
+    },
+};
 
 /**
  * Records sharing an id form one logical banner whose revisions must increase; a new id restarts at 1.
@@ -144,7 +177,7 @@ const STRING_CODEX_ERROR_CATEGORIES = {
     threadRollbackFailed: "provider_error",
     sandboxError: "provider_error",
     other: "provider_error",
-} satisfies Record<StringCodexErrorInfo, SessionFailureCategory>;
+} satisfies Record<StringCodexErrorInfo, CodexFailureKind>;
 
 const STRUCTURED_CODEX_ERROR_CATEGORIES = {
     httpConnectionFailed: "transport_lost",
@@ -152,7 +185,7 @@ const STRUCTURED_CODEX_ERROR_CATEGORIES = {
     responseStreamDisconnected: "transport_lost",
     responseTooManyFailedAttempts: "transport_lost",
     activeTurnNotSteerable: "provider_error",
-} satisfies Record<StructuredCodexErrorKind, SessionFailureCategory>;
+} satisfies Record<StructuredCodexErrorKind, CodexFailureKind>;
 
 export class CodexEventHandler {
 
@@ -163,6 +196,10 @@ export class CodexEventHandler {
     private readonly supportsTypedSessionFailures: boolean;
     private readonly sessionFailureEpoch: string;
     private readonly pendingErrors: ErrorNotification[] = [];
+    private readonly retryAttemptsByTurnId = new Map<string, number>();
+    private readonly failuresById = new Map<string, SessionFailure>();
+    private lastSessionNotice: {key: string; failure: SessionFailure} | undefined;
+    private nextNoticeId = 1;
     private failure: RequestError | null = null;
     private completedPlan: CompletedPlan | null = null;
     private readonly activeFuzzyFileSearchSessions = new Set<string>();
@@ -194,6 +231,9 @@ export class CodexEventHandler {
         this.supportsTypedSessionFailures = supportsTypedSessionFailures;
         this.sessionFailureEpoch = sessionFailureEpoch;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
+        if (sessionState.sessionFailure !== undefined) {
+            this.failuresById.set(sessionState.sessionFailure.id, sessionState.sessionFailure);
+        }
     }
 
     getFailure(): RequestError | null {
@@ -206,17 +246,17 @@ export class CodexEventHandler {
     ): Record<string, unknown> | null {
         const failure = this.sessionState.sessionFailure;
         if (!this.supportsTypedSessionFailures
-            || failure?.phase !== "active"
-            || (failure.turnId === undefined
+            || failure === undefined
+            || (failure.id.includes(":error:")
                 ? !allowUnattributed
-                : turnId === null || failure.turnId !== turnId)) {
+                : turnId === null || failure.id !== this.turnFailureId(turnId))) {
             return null;
         }
         return this.createSessionFailureMeta(failure);
     }
 
-    recordSyntheticTerminalFailure(category: SessionFailureCategory, turnId: string | null): void {
-        this.recordSessionFailure(category, turnId ?? undefined);
+    recordSyntheticTerminalFailure(kind: "transport_lost" | "internal_error", turnId: string | null): void {
+        this.recordSessionFailure(kind, turnId ?? undefined, "error");
     }
 
     /**
@@ -235,12 +275,13 @@ export class CodexEventHandler {
             return;
         }
         if (notification.params.willRetry) {
-            await this.session.update(this.createSafeErrorDiagnostic(notification.params));
+            await this.session.update(this.createSessionFailureUpdate(this.recordRetryWarning(notification.params)));
             return;
         }
         const failure = this.recordSessionFailure(
-            this.sessionFailureCategory(notification.params.error.codexErrorInfo),
+            this.sessionFailureKind(notification.params.error.codexErrorInfo),
             undefined,
+            "error",
         );
         await this.session.update(this.createSessionFailureUpdate(failure));
     }
@@ -269,17 +310,28 @@ export class CodexEventHandler {
     }
 
     async clearSessionFailure(): Promise<void> {
+        delete this.sessionState.sessionFailure;
+    }
+
+    async completeSuccessfulTurn(turnId: string | null): Promise<void> {
+        this.lastSessionNotice = undefined;
+        if (!this.supportsTypedSessionFailures || turnId === null) return;
         const active = this.sessionState.sessionFailure;
-        if (!this.supportsTypedSessionFailures || active?.phase !== "active") {
-            return;
-        }
-        const cleared = {
+        if (active?.id !== this.turnFailureId(turnId) || active.severity !== "warning") return;
+        const attempts = this.retryAttemptsByTurnId.get(turnId) ?? 0;
+        const recovered: SessionFailure = {
             ...active,
             revision: active.revision + 1,
-            phase: "cleared" as const,
+            title: attempts > 0
+                ? `${active.category === "connection" ? "Connection restored" : "Codex recovered"} after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}.`
+                : active.category === "connection" ? "Connection restored." : "Codex recovered.",
+            actions: [],
         };
-        await this.session.update(this.createSessionFailureUpdate(cleared));
-        this.sessionState.sessionFailure = cleared;
+        delete recovered.details;
+        await this.session.update(this.createSessionFailureUpdate(recovered));
+        this.failuresById.set(recovered.id, recovered);
+        delete this.sessionState.sessionFailure;
+        this.retryAttemptsByTurnId.delete(turnId);
     }
 
     async handleFailedTurn(turn: Turn): Promise<void> {
@@ -287,7 +339,7 @@ export class CodexEventHandler {
         if (!this.supportsTypedSessionFailures
             || turn.status !== "failed"
             || this.failure !== null
-            || (activeFailure?.phase === "active" && activeFailure.turnId === turn.id)) {
+            || activeFailure?.id === this.turnFailureId(turn.id) && activeFailure.severity === "error") {
             return;
         }
         const error = turn.error ?? {
@@ -505,10 +557,10 @@ export class CodexEventHandler {
     }
 
     private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
-        const text = joinSummaryAndDetails(event.summary, event.details);
         if (this.supportsTypedSessionFailures) {
-            return this.createSessionFailureUpdate(this.recordSessionNotice(text));
+            return this.createSessionFailureUpdate(this.recordSessionNotice(...this.sessionNoticeContent(event.summary, event.details)));
         }
+        const text = event.details ? `${event.summary}\n\n${event.details}` : event.summary;
         return createAgentTextMessageChunk(`Config warning: ${text}\n\n`);
     }
 
@@ -520,7 +572,7 @@ export class CodexEventHandler {
     private createDeprecationNoticeEvent(event: DeprecationNoticeNotification): UpdateSessionEvent | null {
         if (!this.supportsTypedSessionFailures) return null;
         return this.createSessionFailureUpdate(
-            this.recordSessionNotice(joinSummaryAndDetails(event.summary, event.details)),
+            this.recordSessionNotice(...this.sessionNoticeContent(event.summary, event.details)),
         );
     }
 
@@ -945,7 +997,10 @@ export class CodexEventHandler {
         }
         if (params.turnId !== this.sessionState.currentTurnId) {
             if (this.supportsTypedSessionFailures) {
-                return this.createSafeErrorDiagnostic(params);
+                const failure = params.willRetry
+                    ? this.recordRetryWarning(params)
+                    : this.recordSessionFailure(this.sessionFailureKind(params.error.codexErrorInfo), params.turnId, "error");
+                return this.createSessionFailureUpdate(failure);
             }
             return this.createCodexSessionInfoUpdate({
                 error: {...params.error, turnId: params.turnId, willRetry: params.willRetry},
@@ -953,7 +1008,7 @@ export class CodexEventHandler {
         }
         if (params.willRetry) {
             if (this.supportsTypedSessionFailures) {
-                return this.createSafeErrorDiagnostic(params);
+                return this.createSessionFailureUpdate(this.recordRetryWarning(params));
             }
             return this.createCodexSessionInfoUpdate({
                 error: {
@@ -981,73 +1036,90 @@ export class CodexEventHandler {
         return createAgentTextMessageChunk(`${params.error.message}\n\n`);
     }
 
-    private createSafeErrorDiagnostic(params: ErrorNotification): UpdateSessionEvent {
-        const category = this.sessionFailureCategory(params.error.codexErrorInfo);
-        return this.createCodexSessionInfoUpdate({
-            error: {
-                category,
-                message: SESSION_FAILURE_PRESENTATION[category].message,
-                turnId: params.turnId,
-                willRetry: params.willRetry,
-            },
-        });
-    }
-
     private recordTypedSessionFailure(params: ErrorNotification): void {
-        const category = this.sessionFailureCategory(params.error.codexErrorInfo);
-        this.recordSessionFailure(category, params.turnId);
+        const kind = this.sessionFailureKind(params.error.codexErrorInfo);
+        this.recordSessionFailure(kind, params.turnId, "error");
     }
 
     private recordSessionFailure(
-        category: SessionFailureCategory,
+        kind: CodexFailureKind,
         turnId: string | undefined,
+        severity: "warning" | "error",
+        titleOverride?: string,
+        actionsOverride?: SessionFailureAction[],
     ): NonNullable<SessionState["sessionFailure"]> {
-        const presentation = SESSION_FAILURE_PRESENTATION[category];
-        const previous = this.sessionState.sessionFailure;
-        const id = previous?.phase === "active"
-            ? previous.id
-            : turnId === undefined
-                ? `${this.sessionState.sessionId}:error:${this.sessionFailureEpoch}`
-                : `${turnId}:error`;
+        const presentation = SESSION_FAILURE_PRESENTATION[kind];
+        const id = turnId === undefined
+            ? `${this.sessionState.sessionId}:error:${this.sessionFailureEpoch}:${this.nextNoticeId++}`
+            : this.turnFailureId(turnId);
+        const previous = this.failuresById.get(id);
+        const retryAttempts = turnId === undefined ? 0 : this.retryAttemptsByTurnId.get(turnId) ?? 0;
+        const title = titleOverride
+            ?? (severity === "error" && kind === "transport_lost" && retryAttempts > 0
+                ? `Connection to Codex was lost after ${retryAttempts} ${retryAttempts === 1 ? "attempt" : "attempts"}.`
+                : presentation.title);
         const failure: NonNullable<SessionState["sessionFailure"]> = {
             id,
             revision: nextSessionFailureRevision(previous, id),
-            phase: "active" as const,
-            category,
-            source: "codex",
-            safeMessage: presentation.message,
-            retryable: presentation.retryable,
-            actions: presentation.actions,
-            ...(turnId === undefined ? {} : {turnId}),
+            category: presentation.category,
+            severity,
+            title,
+            actions: actionsOverride ?? presentation.actions,
         };
+        this.failuresById.set(id, failure);
         this.sessionState.sessionFailure = failure;
+        this.lastSessionNotice = undefined;
+        if (severity === "error" && turnId !== undefined) this.retryAttemptsByTurnId.delete(turnId);
         return failure;
     }
 
-    /**
-     * Records a warning-severity advisory in its own slot and under its own id namespace, so it
-     * shares the wire contract with terminal failures without competing for their revision counter.
-     *
-     * The advisory replaces whichever advisory preceded it: the app-server sends these as standalone
-     * hints, so only the newest one is worth a banner.
-     */
-    private recordSessionNotice(safeMessage: string): NonNullable<SessionState["sessionNotice"]> {
-        const presentation = SESSION_FAILURE_PRESENTATION.advisory;
-        const previous = this.sessionState.sessionNotice;
-        const id = `${this.sessionState.sessionId}:notice:${this.sessionFailureEpoch}`;
-        const notice: NonNullable<SessionState["sessionNotice"]> = {
+    private recordRetryWarning(params: ErrorNotification): SessionFailure {
+        const attempt = (this.retryAttemptsByTurnId.get(params.turnId) ?? 0) + 1;
+        this.retryAttemptsByTurnId.set(params.turnId, attempt);
+        const kind = this.sessionFailureKind(params.error.codexErrorInfo);
+        const presentation = SESSION_FAILURE_PRESENTATION[kind];
+        const title = kind === "transport_lost"
+            ? `Reconnecting to Codex, attempt ${attempt}.`
+            : `${presentation.title} Trying again, attempt ${attempt}.`;
+        return this.recordSessionFailure(
+            kind,
+            params.turnId,
+            "warning",
+            title,
+            [],
+        );
+    }
+
+    private recordSessionNotice(title: string, details?: string): SessionFailure {
+        const key = `${title}\u0000${details ?? ""}`;
+        const previous = this.lastSessionNotice?.key === key
+            ? this.lastSessionNotice.failure
+            : undefined;
+        const id = previous?.id
+            ?? `${this.sessionState.sessionId}:notice:${this.sessionFailureEpoch}:${this.nextNoticeId++}`;
+        const notice: SessionFailure = {
             id,
             revision: nextSessionFailureRevision(previous, id),
-            phase: "active" as const,
-            category: "advisory",
-            source: "codex",
-            safeMessage,
-            retryable: presentation.retryable,
-            actions: presentation.actions,
+            category: "unknown",
             severity: "warning",
+            title,
+            ...(details === undefined ? {} : {details}),
+            actions: [],
         };
-        this.sessionState.sessionNotice = notice;
+        this.lastSessionNotice = {key, failure: notice};
         return notice;
+    }
+
+    private sessionNoticeContent(summary: string, details: string | null): [title: string, details?: string] {
+        if (details === null) return [summary];
+        const combinedTitle = `${summary} — ${details}`;
+        return combinedTitle.length <= MAX_SESSION_FAILURE_TITLE_LENGTH
+            ? [combinedTitle]
+            : [summary, details];
+    }
+
+    private turnFailureId(turnId: string): string {
+        return `${turnId}:error`;
     }
 
     private createSessionFailureMeta(
@@ -1072,7 +1144,7 @@ export class CodexEventHandler {
         };
     }
 
-    private sessionFailureCategory(error: CodexErrorInfo | null): SessionFailureCategory {
+    private sessionFailureKind(error: CodexErrorInfo | null): CodexFailureKind {
         if (this.isAuthenticationRequiredError(error)) return "auth_required";
         if (this.getHttpStatusCode(error) === 429) return "rate_limited";
         if (typeof error === "string") {

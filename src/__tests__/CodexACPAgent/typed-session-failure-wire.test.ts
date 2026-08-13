@@ -38,10 +38,10 @@ describe("typed session failures over ACP transport", () => {
                     air: {
                         version: 1,
                         sessionFailure: {
-                            category: "transport_lost",
-                            safeMessage: "Connection to Codex was lost.",
-                            retryable: true,
-                            actions: ["reconnect", "retry"],
+                            category: "connection",
+                            severity: "error",
+                            title: "Connection to Codex was lost.",
+                            actions: ["retry", "new_session"],
                         },
                     },
                 },
@@ -118,9 +118,10 @@ describe("typed session failures over ACP transport", () => {
                     jetbrains: {
                         air: {
                             sessionFailure: {
-                                id: expect.stringMatching(/^wire-idle-error:error:[0-9a-f-]+$/),
-                                category: "overloaded",
-                                safeMessage: "Codex is temporarily overloaded.",
+                                id: expect.stringMatching(/^wire-idle-error:error:[0-9a-f-]+:1$/),
+                                category: "service",
+                                severity: "error",
+                                title: "Codex is temporarily overloaded.",
                             },
                         },
                     },
@@ -131,6 +132,7 @@ describe("typed session failures over ACP transport", () => {
             jetbrains: {air: {sessionFailure: Record<string, unknown>}};
         }).jetbrains.air.sessionFailure;
         expect(wireFailure).not.toHaveProperty("turnId");
+        expect(wireFailure).not.toHaveProperty("safeMessage");
         expect(JSON.stringify(fixture.updates)).not.toContain("raw idle provider detail");
         expect(JSON.stringify(fixture.updates)).not.toContain("secret idle detail");
     });
@@ -155,14 +157,12 @@ describe("typed session failures over ACP transport", () => {
                     jetbrains: {
                         air: {
                             sessionFailure: {
-                                id: expect.stringMatching(/^wire-warning:notice:[0-9a-f-]+$/),
-                                category: "advisory",
+                                id: expect.stringMatching(/^wire-warning:notice:[0-9a-f-]+:1$/),
+                                category: "unknown",
                                 severity: "warning",
-                                phase: "active",
                                 revision: 1,
-                                retryable: false,
-                                actions: ["new_session"],
-                                safeMessage:
+                                actions: [],
+                                title:
                                     "Heads up: Long threads and multiple compactions can cause the model to be less accurate.",
                             },
                         },
@@ -191,9 +191,9 @@ describe("typed session failures over ACP transport", () => {
                     jetbrains: {
                         air: {
                             sessionFailure: {
-                                category: "advisory",
+                                category: "unknown",
                                 severity: "warning",
-                                safeMessage: "Unknown key `foo`\n\nin ~/.codex/config.toml",
+                                title: "Unknown key `foo` — in ~/.codex/config.toml",
                             },
                         },
                     },
@@ -219,9 +219,9 @@ describe("typed session failures over ACP transport", () => {
                     jetbrains: {
                         air: {
                             sessionFailure: {
-                                category: "advisory",
+                                category: "unknown",
                                 severity: "warning",
-                                safeMessage: "`--legacy-flag` is deprecated\n\nUse `--flag` instead.",
+                                title: "`--legacy-flag` is deprecated — Use `--flag` instead.",
                             },
                         },
                     },
@@ -242,6 +242,25 @@ describe("typed session failures over ACP transport", () => {
         // This notification produced nothing before typed records existed; a client that did not
         // negotiate them must not suddenly start seeing it.
         expect(fixture.updates).toEqual([]);
+    });
+
+    it("uses details only when a notice is too large for the title", async () => {
+        const fixture = await createIdleFixture("wire-long-warning");
+        const details = "A".repeat(300);
+
+        fixture.sendServerNotification({
+            method: "configWarning",
+            params: {summary: "Configuration requires attention", details},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(1));
+
+        expect(fixture.updates[0]!.update).toMatchObject({
+            _meta: {jetbrains: {air: {sessionFailure: {
+                title: "Configuration requires attention",
+                details,
+            }}}},
+        });
     });
 
     it("keeps warnings as assistant text when the capability is absent", async () => {
@@ -283,10 +302,47 @@ describe("typed session failures over ACP transport", () => {
             jetbrains: {air: {sessionFailure: {id: string; revision: number; severity?: string}}};
         }).jetbrains.air.sessionFailure);
         // Distinct ids, each starting its own revision sequence at 1.
-        expect(records[0]).toMatchObject({revision: 1, category: "overloaded"});
-        expect(records[1]).toMatchObject({revision: 1, category: "advisory", severity: "warning"});
+        expect(records[0]).toMatchObject({revision: 1, category: "service", severity: "error"});
+        expect(records[1]).toMatchObject({revision: 1, category: "unknown", severity: "warning"});
         expect(records[0]!.id).not.toEqual(records[1]!.id);
-        expect(records[0]).not.toHaveProperty("severity");
+    });
+
+    it("reuses id and advances revision for a repeated warning", async () => {
+        const fixture = await createIdleFixture("wire-repeated-warning");
+        const notification = {
+            method: "warning" as const,
+            params: {threadId: fixture.sessionId, message: "Same warning"},
+        };
+
+        fixture.sendServerNotification(notification);
+        fixture.sendServerNotification(notification);
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(2));
+
+        const records = fixture.updates.map(update => (update.update._meta as {
+            jetbrains: {air: {sessionFailure: {id: string; revision: number}}};
+        }).jetbrains.air.sessionFailure);
+        expect(records[1]!.id).toBe(records[0]!.id);
+        expect(records.map(record => record.revision)).toEqual([1, 2]);
+    });
+
+    it("uses a new id when the same warning occurs again after another incident", async () => {
+        const fixture = await createIdleFixture("wire-recurring-warning");
+
+        for (const message of ["Recurring warning", "Different warning", "Recurring warning"]) {
+            fixture.sendServerNotification({
+                method: "warning",
+                params: {threadId: fixture.sessionId, message},
+            });
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(3));
+
+        const records = fixture.updates.map(update => (update.update._meta as {
+            jetbrains: {air: {sessionFailure: {id: string; revision: number}}};
+        }).jetbrains.air.sessionFailure);
+        expect(records.map(record => record.revision)).toEqual([1, 1, 1]);
+        expect(records[2]!.id).not.toBe(records[0]!.id);
     });
 });
 
