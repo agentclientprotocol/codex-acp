@@ -37,6 +37,7 @@ export interface SpawnedAgentFixture {
         sessionId: string,
         toolCallKind: acp.ToolKind,
     ): acp.RequestPermissionRequest[];
+    readAgentMessageIds(sessionId: string): string[];
     dispose(): Promise<void>;
 }
 
@@ -106,6 +107,7 @@ class RecordingClient implements acp.Client {
     private readonly textBySessionId = new Map<string, string>();
     private readonly availableCommandsBySessionId = new Map<string, acp.AvailableCommand[]>();
     private readonly permissionRequestsBySessionId = new Map<string, acp.RequestPermissionRequest[]>();
+    private readonly agentMessageIdsBySessionId = new Map<string, string[]>();
     private permissionResponder: PermissionResponder = () => ({
         outcome: {outcome: "cancelled"},
     });
@@ -125,6 +127,12 @@ class RecordingClient implements acp.Client {
     }
 
     async sessionUpdate(params: acp.SessionNotification): Promise<void> {
+        if (params.update.sessionUpdate === "agent_message_chunk" && params.update.messageId) {
+            const messageIds = this.agentMessageIdsBySessionId.get(params.sessionId) ?? [];
+            this.agentMessageIdsBySessionId.set(params.sessionId, messageIds);
+            messageIds.push(params.update.messageId);
+        }
+
         if (params.update.sessionUpdate === "available_commands_update") {
             this.availableCommandsBySessionId.set(params.sessionId, params.update.availableCommands);
             return;
@@ -152,6 +160,10 @@ class RecordingClient implements acp.Client {
     ): acp.RequestPermissionRequest[] {
         const requests = this.permissionRequestsBySessionId.get(sessionId) ?? [];
         return requests.filter((request) => request.toolCall.kind === toolCallKind);
+    }
+
+    readAgentMessageIds(sessionId: string): string[] {
+        return this.agentMessageIdsBySessionId.get(sessionId) ?? [];
     }
 }
 
@@ -254,6 +266,10 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         toolCallKind: acp.ToolKind,
     ): acp.RequestPermissionRequest[] {
         return this.client.readPermissionRequests(sessionId, toolCallKind);
+    }
+
+    readAgentMessageIds(sessionId: string): string[] {
+        return this.client.readAgentMessageIds(sessionId);
     }
 
     async dispose(): Promise<void> {

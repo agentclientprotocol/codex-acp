@@ -287,6 +287,7 @@ export class CodexAcpServer {
                     close: { },
                     delete: { },
                     additionalDirectories: {},
+                    fork: {},
                 },
                 mcpCapabilities: {
                     acp: false,
@@ -412,6 +413,13 @@ export class CodexAcpServer {
 
     async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
         try {
+            if ("sessionId" in request) {
+                const {sessionId, ...params} = request;
+                return await this.tryCreateSession(
+                    {...params, mcpServers: params.mcpServers ?? []},
+                    {resume: sessionId},
+                );
+            }
             return await this.tryCreateSession(request);
         } catch (e) {
             const error = e instanceof Error ? e : new Error(String(e));
@@ -501,9 +509,15 @@ export class CodexAcpServer {
         return generation;
     }
 
-    async tryCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
-        const requestedSessionGeneration = "sessionId" in request
-            ? this.beginSessionOpen(request.sessionId)
+    async tryCreateSession(
+        request: acp.NewSessionRequest,
+        creationOpts: {resume?: string; forkSession?: boolean} = {},
+    ): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
+        const resumeSessionId = creationOpts.resume;
+        const isFork = creationOpts.forkSession === true;
+        const isResume = resumeSessionId !== undefined && !isFork;
+        const requestedSessionGeneration = isResume
+            ? this.beginSessionOpen(resumeSessionId)
             : null;
         await this.checkAuthorization();
         const requestedMcpServers = request.mcpServers ?? [];
@@ -513,17 +527,22 @@ export class CodexAcpServer {
 
         let sessionMetadata: SessionMetadata;
         let resumeSubscribed = false;
-        if ("sessionId" in request) {
-            logger.log(`Resume existing session: ${request.sessionId}...`);
+        if (isFork && resumeSessionId !== undefined) {
+            logger.log(`Fork existing session: ${resumeSessionId}...`);
+            sessionMetadata = await this.runWithProcessCheck(() =>
+                this.codexAcpClient.forkSession({...request, sessionId: resumeSessionId})
+            );
+        } else if (resumeSessionId !== undefined) {
+            logger.log(`Resume existing session: ${resumeSessionId}...`);
             try {
                 sessionMetadata = await this.runWithProcessCheck(() =>
-                    this.codexAcpClient.resumeSession(request, () => {
+                    this.codexAcpClient.resumeSession({...request, sessionId: resumeSessionId}, () => {
                         resumeSubscribed = true;
                     })
                 );
             } catch (err) {
                 if (resumeSubscribed && requestedSessionGeneration !== null) {
-                    await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
+                    await this.cleanupStaleSessionOpen(resumeSessionId, requestedSessionGeneration);
                 }
                 throw err;
             }
@@ -548,7 +567,7 @@ export class CodexAcpServer {
             resumeSubscribed = false;
             await this.closeStaleSessionOpen(sessionId, sessionGeneration);
         }
-        const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, "sessionId" in request);
+        const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, isResume);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
         const sessionState: SessionState = {
@@ -575,7 +594,7 @@ export class CodexAcpServer {
             terminalOutputMode: this.terminalOutputMode,
             goalRevision: 0,
             sessionTitle: null,
-            sessionTitleSource: "sessionId" in request ? "unknown" : "unset",
+            sessionTitleSource: resumeSessionId === undefined ? "unset" : "unknown",
         };
         this.sessions.set(sessionId, sessionState);
         resumeSubscribed = false;
@@ -585,11 +604,15 @@ export class CodexAcpServer {
                 requestedServers: new Set(getRequestedMcpServerNames(requestedMcpServers)),
                 afterVersion: mcpServerStartupVersion,
             });
-            this.publishMcpStartupStatusAsync(sessionId);
+            if (!isFork) {
+                this.publishMcpStartupStatusAsync(sessionId);
+            }
         }
 
-        this.publishAvailableCommandsAsync(sessionState);
-        if ("sessionId" in request) {
+        if (!isFork) {
+            this.publishAvailableCommandsAsync(sessionState);
+        }
+        if (isResume) {
             this.publishCurrentGoalAsync(sessionState, sessionGeneration);
         }
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
@@ -667,6 +690,43 @@ export class CodexAcpServer {
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
         };
+    }
+
+    async unstable_forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+        try {
+            const {sessionId: sourceSessionId, ...request} = params;
+            const [sessionId, , modes] = await this.tryCreateSession(
+                {...request, mcpServers: request.mcpServers ?? []},
+                {
+                    resume: sourceSessionId,
+                    forkSession: true,
+                },
+            );
+            const sessionState = this.getSessionState(sessionId);
+            const sessionGeneration = this.getSessionGeneration(sessionId);
+
+            setTimeout(() => {
+                if (
+                    this.sessions.get(sessionId) === sessionState
+                    && this.getSessionGeneration(sessionId) === sessionGeneration
+                    && !this.sessionIsClosing(sessionId)
+                ) {
+                    this.publishAvailableCommandsAsync(sessionState);
+                    this.publishMcpStartupStatusAsync(sessionId);
+                    this.publishCurrentGoalAsync(sessionState, sessionGeneration);
+                }
+            }, 0);
+
+            return {
+                sessionId,
+                modes,
+                ...this.createSessionConfigOptionsResponse(sessionState),
+            };
+        } catch (e) {
+            const error = e instanceof Error ? e : new Error(String(e));
+            await this.handleError(error);
+            throw e;
+        }
     }
 
     async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {

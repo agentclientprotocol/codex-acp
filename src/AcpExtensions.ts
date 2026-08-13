@@ -6,6 +6,7 @@ import type {
     ResumeSessionResponse,
     SessionId,
 } from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk";
 import {
     GOAL_CONTROL_METHOD,
     LEGACY_GOAL_CONTROL_METHOD,
@@ -55,6 +56,31 @@ export type LegacyLoadSessionResponse = LoadSessionResponse & {
 
 export type LegacyResumeSessionResponse = ResumeSessionResponse & {
     models?: LegacySessionModelState | null;
+}
+
+export function readSessionForkMessageId(meta?: Record<string, unknown> | null): string | null {
+    const sessionFork = meta?.["sessionFork"];
+    if (sessionFork === undefined) {
+        return null;
+    }
+    if (typeof sessionFork !== "object" || sessionFork === null || Array.isArray(sessionFork)) {
+        throw RequestError.invalidParams(
+            {sessionFork},
+            "_meta.sessionFork must be an object",
+        );
+    }
+
+    const messageId = Reflect.get(sessionFork, "messageId");
+    if (messageId === undefined) {
+        return null;
+    }
+    if (typeof messageId !== "string" || messageId.length === 0) {
+        throw RequestError.invalidParams(
+            {sessionFork},
+            "_meta.sessionFork.messageId must be a non-empty string",
+        );
+    }
+    return messageId;
 }
 
 export type ExtMethodRequest =
