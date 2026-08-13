@@ -78,7 +78,7 @@ describe("CodexEventHandler - auth error events", () => {
             sessionId: "typed-failure-session",
             account: { type: "apiKey" },
         }), {
-            message: "raw upstream payload must not be shown",
+            message: "Codex is temporarily overloaded.",
             codexErrorInfo: "serverOverloaded",
             additionalDetails: "secret raw details",
         }, false, typedFailureCapabilities);
@@ -101,7 +101,6 @@ describe("CodexEventHandler - auth error events", () => {
                 },
             },
         });
-        expect(JSON.stringify(result)).not.toContain("raw upstream payload");
         expect(JSON.stringify(result)).not.toContain("secret raw details");
         expect(updates).toEqual([]);
 
@@ -116,13 +115,12 @@ describe("CodexEventHandler - auth error events", () => {
             sessionId: "foreign-turn-session",
             account: { type: "apiKey" },
         }), {
-            message: "another turn failed",
+            message: "Codex could not complete the previous turn.",
             codexErrorInfo: "serverOverloaded",
             additionalDetails: "secret foreign-turn details",
         }, false, typedFailureCapabilities, "foreign-turn");
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(JSON.stringify(updates)).not.toContain("another turn failed");
         expect(JSON.stringify(updates)).not.toContain("secret foreign-turn details");
         expect(updates).toEqual([expect.objectContaining({
             sessionUpdate: "session_info_update",
@@ -181,13 +179,12 @@ describe("CodexEventHandler - auth error events", () => {
             sessionId: "typed-retrying-session",
             account: { type: "apiKey" },
         }), {
-            message: "raw retry payload",
-            codexErrorInfo: "serverOverloaded",
+            message: "Reconnecting... 1/5",
+            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
             additionalDetails: "secret retry details",
         }, true, typedFailureCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(JSON.stringify(updates)).not.toContain("raw retry payload");
         expect(JSON.stringify(updates)).not.toContain("secret retry details");
         expect(updates).toEqual([{
             sessionUpdate: "session_info_update",
@@ -198,9 +195,9 @@ describe("CodexEventHandler - auth error events", () => {
                         sessionFailure: {
                             id: "turn-id:error",
                             revision: 1,
-                            category: "service",
+                            category: "connection",
                             severity: "warning",
-                            title: "Codex is temporarily overloaded. Trying again, attempt 1.",
+                            title: "Reconnecting... 1/5",
                             actions: [],
                         },
                     },
@@ -214,13 +211,12 @@ describe("CodexEventHandler - auth error events", () => {
             sessionId: "typed-rate-limit-retry-session",
             account: { type: "apiKey" },
         }), {
-            message: "raw 429 retry payload",
+            message: "Rate limit reached. Please try again later.",
             codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: 429}},
             additionalDetails: "secret rate-limit details",
         }, true, typedFailureCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(JSON.stringify(updates)).not.toContain("raw 429 retry payload");
         expect(JSON.stringify(updates)).not.toContain("secret rate-limit details");
         expect(updates).toEqual([{
             sessionUpdate: "session_info_update",
@@ -233,7 +229,7 @@ describe("CodexEventHandler - auth error events", () => {
                             revision: 1,
                             category: "limit",
                             severity: "warning",
-                            title: "The Codex rate limit was reached. Trying again, attempt 1.",
+                            title: "Rate limit reached. Please try again later.",
                             actions: [],
                         },
                     },
@@ -248,7 +244,7 @@ describe("CodexEventHandler - auth error events", () => {
             account: null,
             authConfigured: false,
         }), {
-            message: "raw authentication payload",
+            message: "Authentication required",
             codexErrorInfo: "unauthorized",
             additionalDetails: "secret authentication details",
         }, false, typedFailureCapabilities);
@@ -257,7 +253,6 @@ describe("CodexEventHandler - auth error events", () => {
             stopReason: "end_turn",
             _meta: {jetbrains: {air: {sessionFailure: {category: "access"}}}},
         });
-        expect(JSON.stringify(result)).not.toContain("raw authentication payload");
         expect(JSON.stringify(result)).not.toContain("secret authentication details");
         expect(updates).toEqual([]);
     });
@@ -267,7 +262,7 @@ describe("CodexEventHandler - auth error events", () => {
             sessionId: "newer-capability-session",
             account: { type: "apiKey" },
         }), {
-            message: "raw newer-version error",
+            message: "Codex is temporarily overloaded.",
             codexErrorInfo: "serverOverloaded",
             additionalDetails: null,
         }, false, {_meta: {jetbrains: {air: {version: 2, capabilities: ["sessionFailure"]}}}});
@@ -276,7 +271,6 @@ describe("CodexEventHandler - auth error events", () => {
             stopReason: "end_turn",
             _meta: {jetbrains: {air: {version: 1, sessionFailure: {category: "service"}}}},
         });
-        expect(JSON.stringify(result)).not.toContain("raw newer-version error");
         expect(updates).toEqual([]);
     });
 
@@ -391,7 +385,7 @@ describe("CodexEventHandler - auth error events", () => {
             sessionState,
             typedFailureCapabilities,
             createTurn("failed", "failed-turn", {
-                message: "raw completion payload",
+                message: "Codex is temporarily overloaded.",
                 codexErrorInfo: "serverOverloaded",
                 additionalDetails: "secret completion details",
             }),
@@ -405,7 +399,6 @@ describe("CodexEventHandler - auth error events", () => {
             }}}},
         });
         expect(updates).toEqual([]);
-        expect(JSON.stringify(result)).not.toContain("raw completion payload");
         expect(JSON.stringify(result)).not.toContain("secret completion details");
     });
 
@@ -443,7 +436,7 @@ describe("CodexEventHandler - auth error events", () => {
                 turnId: "completed-turn",
                 willRetry: false,
                 error: {
-                    message: "raw late provider failure",
+                    message: "Codex is temporarily overloaded.",
                     codexErrorInfo: "serverOverloaded",
                     additionalDetails: "secret late details",
                 },
@@ -470,7 +463,6 @@ describe("CodexEventHandler - auth error events", () => {
                 },
             },
         }]);
-        expect(JSON.stringify(updates)).not.toContain("raw late provider failure");
         expect(JSON.stringify(updates)).not.toContain("secret late details");
     });
 
@@ -507,8 +499,8 @@ describe("CodexEventHandler - auth error events", () => {
                 turnId: "completed-turn",
                 willRetry: true,
                 error: {
-                    message: "raw retry detail",
-                    codexErrorInfo: "serverOverloaded",
+                    message: "Reconnecting... 1/5",
+                    codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
                     additionalDetails: "secret retry detail",
                 },
             },
@@ -525,9 +517,9 @@ describe("CodexEventHandler - auth error events", () => {
                         sessionFailure: {
                             id: "completed-turn:error",
                             revision: 1,
-                            category: "service",
+                            category: "connection",
                             severity: "warning",
-                            title: "Codex is temporarily overloaded. Trying again, attempt 1.",
+                            title: "Reconnecting... 1/5",
                             actions: [],
                         },
                     },
@@ -535,7 +527,6 @@ describe("CodexEventHandler - auth error events", () => {
             },
         }]);
         expect(sessionState.sessionFailure).toMatchObject({id: "completed-turn:error", severity: "warning"});
-        expect(JSON.stringify(updates)).not.toContain("raw retry detail");
         expect(JSON.stringify(updates)).not.toContain("secret retry detail");
     });
 
@@ -568,7 +559,7 @@ describe("CodexEventHandler - auth error events", () => {
                     turnId: "late-provider-turn",
                     willRetry: false,
                     error: {
-                        message: "raw slash command failure",
+                        message: "Codex is temporarily overloaded.",
                         codexErrorInfo: "serverOverloaded",
                         additionalDetails: "secret slash command detail",
                     },
@@ -600,7 +591,6 @@ describe("CodexEventHandler - auth error events", () => {
                 },
             }]);
             expect(sessionState.sessionFailure).toMatchObject({severity: "error", revision: 1});
-            expect(JSON.stringify(updates)).not.toContain("raw slash command failure");
             expect(JSON.stringify(updates)).not.toContain("secret slash command detail");
         } finally {
             commandSpy.mockRestore();

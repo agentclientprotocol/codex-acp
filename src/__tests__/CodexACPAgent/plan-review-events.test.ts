@@ -265,7 +265,7 @@ describe("CodexACPAgent - plan review", () => {
                 turnId: "plan-turn",
                 willRetry: false,
                 error: {
-                    message: "raw post-turn approval error",
+                    message: "Codex is temporarily overloaded.",
                     codexErrorInfo: "serverOverloaded",
                     additionalDetails: "secret approval detail",
                 },
@@ -294,7 +294,6 @@ describe("CodexACPAgent - plan review", () => {
                 },
             },
         }]);
-        expect(JSON.stringify(updates)).not.toContain("raw post-turn approval error");
         expect(JSON.stringify(updates)).not.toContain("secret approval detail");
         expect(turnStart).toHaveBeenCalledTimes(1);
 
@@ -365,7 +364,7 @@ describe("CodexACPAgent - plan review", () => {
         await vi.waitFor(() => expect(turnStart).toHaveBeenCalledTimes(2));
         fixture.clearAcpConnectionDump();
         const implementationError = {
-            message: "raw implementation failure",
+            message: "Codex is temporarily overloaded.",
             codexErrorInfo: "serverOverloaded" as const,
             additionalDetails: "secret implementation detail",
         };
@@ -403,7 +402,6 @@ describe("CodexACPAgent - plan review", () => {
                 severity: "error",
             }}}},
         });
-        expect(JSON.stringify(response)).not.toContain("raw implementation failure");
         expect(JSON.stringify(response)).not.toContain("secret implementation detail");
         expect(sessionState.sessionFailure).toMatchObject({severity: "error", revision: 1});
     });

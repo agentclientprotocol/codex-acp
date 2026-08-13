@@ -94,58 +94,62 @@ type CodexFailureKind =
     | "context_exhausted" | "budget_exhausted" | "policy_denied" | "bad_request"
     | "provider_error" | "internal_error";
 
-type SessionFailurePresentation = {
+type SessionFailurePolicy = {
     category: SessionFailureCategory;
-    title: string;
     actions: SessionFailureAction[];
 };
 
 const MAX_SESSION_FAILURE_TITLE_LENGTH = 240;
 
-const SESSION_FAILURE_PRESENTATION: Record<CodexFailureKind, SessionFailurePresentation> = {
+const SESSION_FAILURE_POLICY: Record<CodexFailureKind, SessionFailurePolicy> = {
     transport_lost: {
-        category: "connection", title: "Connection to Codex was lost.",
+        category: "connection",
         actions: ["retry", "new_session"],
     },
     auth_required: {
-        category: "access", title: "Sign in to continue using Codex.",
+        category: "access",
         actions: ["login"],
     },
     rate_limited: {
-        category: "limit", title: "The Codex rate limit was reached.",
+        category: "limit",
         actions: ["retry"],
     },
     quota_exhausted: {
-        category: "limit", title: "The Codex usage quota is exhausted.",
+        category: "limit",
         actions: ["new_session"],
     },
     overloaded: {
-        category: "service", title: "Codex is temporarily overloaded.",
+        category: "service",
         actions: ["retry"],
     },
     context_exhausted: {
-        category: "limit", title: "This conversation has reached its context limit.",
+        category: "limit",
         actions: ["new_session"],
     },
     budget_exhausted: {
-        category: "limit", title: "This session has reached its usage budget.",
+        category: "limit",
         actions: ["new_session"],
     },
     policy_denied: {
-        category: "request", title: "The request was blocked by provider policy.",
+        category: "request",
         actions: [],
     },
     bad_request: {
-        category: "request", title: "Codex could not process this request.", actions: [],
+        category: "request", actions: [],
     },
     provider_error: {
-        category: "service", title: "The model provider reported an error.",
+        category: "service",
         actions: ["retry"],
     },
     internal_error: {
-        category: "service", title: "Codex encountered an internal error.",
+        category: "service",
         actions: ["retry", "new_session"],
     },
+};
+
+const SYNTHETIC_FAILURE_TITLE: Record<"transport_lost" | "internal_error", string> = {
+    transport_lost: "Connection to Codex was lost.",
+    internal_error: "Codex encountered an internal error.",
 };
 
 /**
@@ -196,7 +200,6 @@ export class CodexEventHandler {
     private readonly supportsTypedSessionFailures: boolean;
     private readonly sessionFailureEpoch: string;
     private readonly pendingErrors: ErrorNotification[] = [];
-    private readonly retryAttemptsByTurnId = new Map<string, number>();
     private readonly failuresById = new Map<string, SessionFailure>();
     private lastSessionNotice: {key: string; failure: SessionFailure} | undefined;
     private nextNoticeId = 1;
@@ -256,7 +259,7 @@ export class CodexEventHandler {
     }
 
     recordSyntheticTerminalFailure(kind: "transport_lost" | "internal_error", turnId: string | null): void {
-        this.recordSessionFailure(kind, turnId ?? undefined, "error");
+        this.recordSessionFailure(kind, turnId ?? undefined, "error", SYNTHETIC_FAILURE_TITLE[kind]);
     }
 
     /**
@@ -282,6 +285,7 @@ export class CodexEventHandler {
             this.sessionFailureKind(notification.params.error.codexErrorInfo),
             undefined,
             "error",
+            notification.params.error.message,
         );
         await this.session.update(this.createSessionFailureUpdate(failure));
     }
@@ -318,20 +322,7 @@ export class CodexEventHandler {
         if (!this.supportsTypedSessionFailures || turnId === null) return;
         const active = this.sessionState.sessionFailure;
         if (active?.id !== this.turnFailureId(turnId) || active.severity !== "warning") return;
-        const attempts = this.retryAttemptsByTurnId.get(turnId) ?? 0;
-        const recovered: SessionFailure = {
-            ...active,
-            revision: active.revision + 1,
-            title: attempts > 0
-                ? `${active.category === "connection" ? "Connection restored" : "Codex recovered"} after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}.`
-                : active.category === "connection" ? "Connection restored." : "Codex recovered.",
-            actions: [],
-        };
-        delete recovered.details;
-        await this.session.update(this.createSessionFailureUpdate(recovered));
-        this.failuresById.set(recovered.id, recovered);
         delete this.sessionState.sessionFailure;
-        this.retryAttemptsByTurnId.delete(turnId);
     }
 
     async handleFailedTurn(turn: Turn): Promise<void> {
@@ -999,7 +990,12 @@ export class CodexEventHandler {
             if (this.supportsTypedSessionFailures) {
                 const failure = params.willRetry
                     ? this.recordRetryWarning(params)
-                    : this.recordSessionFailure(this.sessionFailureKind(params.error.codexErrorInfo), params.turnId, "error");
+                    : this.recordSessionFailure(
+                        this.sessionFailureKind(params.error.codexErrorInfo),
+                        params.turnId,
+                        "error",
+                        params.error.message,
+                    );
                 return this.createSessionFailureUpdate(failure);
             }
             return this.createCodexSessionInfoUpdate({
@@ -1038,54 +1034,42 @@ export class CodexEventHandler {
 
     private recordTypedSessionFailure(params: ErrorNotification): void {
         const kind = this.sessionFailureKind(params.error.codexErrorInfo);
-        this.recordSessionFailure(kind, params.turnId, "error");
+        this.recordSessionFailure(kind, params.turnId, "error", params.error.message);
     }
 
     private recordSessionFailure(
         kind: CodexFailureKind,
         turnId: string | undefined,
         severity: "warning" | "error",
-        titleOverride?: string,
+        title: string,
         actionsOverride?: SessionFailureAction[],
     ): NonNullable<SessionState["sessionFailure"]> {
-        const presentation = SESSION_FAILURE_PRESENTATION[kind];
+        const policy = SESSION_FAILURE_POLICY[kind];
         const id = turnId === undefined
             ? `${this.sessionState.sessionId}:error:${this.sessionFailureEpoch}:${this.nextNoticeId++}`
             : this.turnFailureId(turnId);
         const previous = this.failuresById.get(id);
-        const retryAttempts = turnId === undefined ? 0 : this.retryAttemptsByTurnId.get(turnId) ?? 0;
-        const title = titleOverride
-            ?? (severity === "error" && kind === "transport_lost" && retryAttempts > 0
-                ? `Connection to Codex was lost after ${retryAttempts} ${retryAttempts === 1 ? "attempt" : "attempts"}.`
-                : presentation.title);
         const failure: NonNullable<SessionState["sessionFailure"]> = {
             id,
             revision: nextSessionFailureRevision(previous, id),
-            category: presentation.category,
+            category: policy.category,
             severity,
             title,
-            actions: actionsOverride ?? presentation.actions,
+            actions: actionsOverride ?? policy.actions,
         };
         this.failuresById.set(id, failure);
         this.sessionState.sessionFailure = failure;
         this.lastSessionNotice = undefined;
-        if (severity === "error" && turnId !== undefined) this.retryAttemptsByTurnId.delete(turnId);
         return failure;
     }
 
     private recordRetryWarning(params: ErrorNotification): SessionFailure {
-        const attempt = (this.retryAttemptsByTurnId.get(params.turnId) ?? 0) + 1;
-        this.retryAttemptsByTurnId.set(params.turnId, attempt);
         const kind = this.sessionFailureKind(params.error.codexErrorInfo);
-        const presentation = SESSION_FAILURE_PRESENTATION[kind];
-        const title = kind === "transport_lost"
-            ? `Reconnecting to Codex, attempt ${attempt}.`
-            : `${presentation.title} Trying again, attempt ${attempt}.`;
         return this.recordSessionFailure(
             kind,
             params.turnId,
             "warning",
-            title,
+            params.error.message,
             [],
         );
     }

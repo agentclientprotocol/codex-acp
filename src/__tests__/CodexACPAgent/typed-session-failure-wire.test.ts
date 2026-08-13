@@ -101,7 +101,7 @@ describe("typed session failures over ACP transport", () => {
                 turnId: "turn-id",
                 willRetry: false,
                 error: {
-                    message: "raw idle provider detail",
+                    message: "Codex is temporarily overloaded.",
                     codexErrorInfo: "serverOverloaded",
                     additionalDetails: "secret idle detail",
                 },
@@ -133,7 +133,6 @@ describe("typed session failures over ACP transport", () => {
         }).jetbrains.air.sessionFailure;
         expect(wireFailure).not.toHaveProperty("turnId");
         expect(wireFailure).not.toHaveProperty("safeMessage");
-        expect(JSON.stringify(fixture.updates)).not.toContain("raw idle provider detail");
         expect(JSON.stringify(fixture.updates)).not.toContain("secret idle detail");
     });
 
