@@ -59,6 +59,8 @@ import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUt
  * the `gateway` auth method; it maps to a Codex `model_providers` entry.
  */
 export const CUSTOM_GATEWAY_PROVIDER_ID = "custom-gateway";
+export const OPENAI_PROVIDER_ID = "openai";
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 
 /**
  * The url-mode variant of the ACP `elicitation/create` request params.
@@ -332,21 +334,20 @@ export class CodexAcpClient {
     }
 
     /**
-     * `providers/list`: returns the single client-configurable custom gateway
-     * provider. `current` carries only non-secret routing (never headers), and is
-     * `null` when the provider is not configured/disabled.
+     * `providers/list`: returns Codex's OpenAI slot. With no ACP override, the
+     * slot reports native OpenAI routing; headers are never exposed.
      */
     listProviders(): acp.ProviderInfo[] {
         const gatewayConfig = this.gatewayConfig;
-        const current: acp.ProviderCurrentConfig | null = gatewayConfig
+        const current: acp.ProviderCurrentConfig = gatewayConfig
             ? {
                 apiType: gatewayApiTypeFromConfig(gatewayConfig),
                 baseUrl: gatewayConfig.config.base_url,
             }
-            : null;
+            : this.getNativeProviderConfig();
         return [
             {
-                providerId: CUSTOM_GATEWAY_PROVIDER_ID,
+                providerId: OPENAI_PROVIDER_ID,
                 supported: Object.keys(SUPPORTED_GATEWAY_PROTOCOLS),
                 required: false,
                 current,
@@ -354,15 +355,31 @@ export class CodexAcpClient {
         ];
     }
 
+    private getNativeProviderConfig(): acp.ProviderCurrentConfig {
+        const configuredProviderId = this.modelProvider ??
+            (typeof this.config["model_provider"] === "string" ? this.config["model_provider"] : null);
+        const configuredProviders = this.config["model_providers"];
+        if (configuredProviderId && configuredProviders && typeof configuredProviders === "object" && !Array.isArray(configuredProviders)) {
+            const configuredProvider = (configuredProviders as Record<string, unknown>)[configuredProviderId];
+            if (configuredProvider && typeof configuredProvider === "object" && !Array.isArray(configuredProvider)) {
+                const baseUrl = (configuredProvider as Record<string, unknown>)["base_url"];
+                if (typeof baseUrl === "string" && baseUrl.length > 0) {
+                    return {apiType: "openai", baseUrl};
+                }
+            }
+        }
+        return {apiType: "openai", baseUrl: DEFAULT_OPENAI_BASE_URL};
+    }
+
     /**
      * `providers/set`: replaces the full configuration for the custom gateway
      * provider. Rejects unknown provider ids with `invalid_params`.
      */
     setProvider(request: acp.SetProviderRequest): void {
-        if (request.providerId !== CUSTOM_GATEWAY_PROVIDER_ID) {
+        if (request.providerId !== OPENAI_PROVIDER_ID) {
             throw RequestError.invalidParams(
                 {providerId: request.providerId},
-                `Unknown providerId "${request.providerId}"; only "${CUSTOM_GATEWAY_PROVIDER_ID}" is configurable`,
+                `Unknown providerId "${request.providerId}"; only "${OPENAI_PROVIDER_ID}" is configurable`,
             );
         }
         this.applyGatewayConfig({
@@ -377,7 +394,7 @@ export class CodexAcpClient {
      * unknown provider id is idempotent success (RFD behavior §7).
      */
     disableProvider(request: acp.DisableProviderRequest): void {
-        if (request.providerId === CUSTOM_GATEWAY_PROVIDER_ID) {
+        if (request.providerId === OPENAI_PROVIDER_ID) {
             this.gatewayConfig = null;
         }
     }

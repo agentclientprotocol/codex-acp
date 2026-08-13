@@ -1,7 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk";
 import {createCodexMockTestFixture} from "../acp-test-utils";
-import {CUSTOM_GATEWAY_PROVIDER_ID} from "../../CodexAcpClient";
+import {CodexAcpClient, CUSTOM_GATEWAY_PROVIDER_ID, OPENAI_PROVIDER_ID} from "../../CodexAcpClient";
 
 function expectInvalidParams(fn: () => unknown): void {
     let caught: unknown;
@@ -23,18 +23,43 @@ describe("Configurable LLM providers (providers/*)", () => {
         expect(result.agentCapabilities?.providers).toEqual({});
     });
 
-    it("lists the custom gateway provider as unconfigured before any set", () => {
+    it("lists native OpenAI routing before any override", () => {
         const fixture = createCodexMockTestFixture();
         const response = fixture.getCodexAcpAgent().listProviders({});
         expect(response).toEqual({
             providers: [
                 {
-                    providerId: CUSTOM_GATEWAY_PROVIDER_ID,
+                    providerId: OPENAI_PROVIDER_ID,
                     supported: ["openai"],
                     required: false,
-                    current: null,
+                    current: {
+                        apiType: "openai",
+                        baseUrl: "https://api.openai.com/v1",
+                    },
                 },
             ],
+        });
+    });
+
+    it("restores the startup-configured proxy after the last override is disabled", () => {
+        const fixture = createCodexMockTestFixture();
+        const client = new CodexAcpClient(fixture.getCodexAppServerClient(), {
+            model_provider: "company-proxy",
+            model_providers: {
+                "company-proxy": {base_url: "https://proxy.example/openai/v1"},
+            },
+        });
+        client.setProvider({
+            providerId: OPENAI_PROVIDER_ID,
+            apiType: "openai",
+            baseUrl: "https://temporary.example/openai/v1",
+        });
+
+        client.disableProvider({providerId: OPENAI_PROVIDER_ID});
+
+        expect(client.listProviders()[0]!.current).toEqual({
+            apiType: "openai",
+            baseUrl: "https://proxy.example/openai/v1",
         });
     });
 
@@ -42,7 +67,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         agent.setProvider({
-            providerId: CUSTOM_GATEWAY_PROVIDER_ID,
+            providerId: OPENAI_PROVIDER_ID,
             apiType: "openai",
             baseUrl: "https://llm-gateway.corp.example.com/openai/v1",
             headers: {Authorization: "Bearer super-secret"},
@@ -61,7 +86,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         expectInvalidParams(() => agent.setProvider({
-            providerId: CUSTOM_GATEWAY_PROVIDER_ID,
+            providerId: OPENAI_PROVIDER_ID,
             apiType: "anthropic",
             baseUrl: "https://example.com",
         }));
@@ -81,24 +106,27 @@ describe("Configurable LLM providers (providers/*)", () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         expectInvalidParams(() => agent.setProvider({
-            providerId: CUSTOM_GATEWAY_PROVIDER_ID,
+            providerId: OPENAI_PROVIDER_ID,
             apiType: "openai",
             baseUrl: "   ",
         }));
     });
 
-    it("disables the custom gateway provider and encodes it as current: null", () => {
+    it("restores native OpenAI routing after disable", () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         agent.setProvider({
-            providerId: CUSTOM_GATEWAY_PROVIDER_ID,
+            providerId: OPENAI_PROVIDER_ID,
             apiType: "openai",
             baseUrl: "https://example.com",
         });
         expect(agent.listProviders({}).providers[0]!.current).not.toBeNull();
 
-        agent.disableProvider({providerId: CUSTOM_GATEWAY_PROVIDER_ID});
-        expect(agent.listProviders({}).providers[0]!.current).toBeNull();
+        agent.disableProvider({providerId: OPENAI_PROVIDER_ID});
+        expect(agent.listProviders({}).providers[0]!.current).toEqual({
+            apiType: "openai",
+            baseUrl: "https://api.openai.com/v1",
+        });
     });
 
     it("treats disabling an unknown providerId as idempotent success", () => {
@@ -106,7 +134,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         const agent = fixture.getCodexAcpAgent();
         expect(() => agent.disableProvider({providerId: "not-a-real-provider"})).not.toThrow();
         // The known provider remains discoverable.
-        expect(agent.listProviders({}).providers[0]!.providerId).toBe(CUSTOM_GATEWAY_PROVIDER_ID);
+        expect(agent.listProviders({}).providers[0]!.providerId).toBe(OPENAI_PROVIDER_ID);
     });
 
     it("applies the configured gateway to Codex config on session creation", async () => {
@@ -120,7 +148,7 @@ describe("Configurable LLM providers (providers/*)", () => {
             .mockRejectedValue(new Error("stop after capturing config"));
 
         agent.setProvider({
-            providerId: CUSTOM_GATEWAY_PROVIDER_ID,
+            providerId: OPENAI_PROVIDER_ID,
             apiType: "openai",
             baseUrl: "https://llm-gateway.corp.example.com/openai/v1",
             headers: {Authorization: "Bearer super-secret"},
