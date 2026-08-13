@@ -116,7 +116,7 @@ const SESSION_FAILURE_POLICY: Record<CodexFailureKind, SessionFailurePolicy> = {
     },
     quota_exhausted: {
         category: "limit",
-        actions: ["new_session"],
+        actions: [],
     },
     overloaded: {
         category: "service",
@@ -201,6 +201,9 @@ export class CodexEventHandler {
     private readonly sessionFailureEpoch: string;
     private readonly pendingErrors: ErrorNotification[] = [];
     private readonly failuresById = new Map<string, SessionFailure>();
+    private readonly activeFailureIdByScope = new Map<string, string>();
+    private readonly failureTurnIdById = new Map<string, string | undefined>();
+    private readonly allocatedFailureScopes = new Set<string>();
     private lastSessionNotice: {key: string; failure: SessionFailure} | undefined;
     private nextNoticeId = 1;
     private failure: RequestError | null = null;
@@ -250,9 +253,9 @@ export class CodexEventHandler {
         const failure = this.sessionState.sessionFailure;
         if (!this.supportsTypedSessionFailures
             || failure === undefined
-            || (failure.id.includes(":error:")
+            || (this.failureTurnIdById.get(failure.id) === undefined
                 ? !allowUnattributed
-                : turnId === null || failure.id !== this.turnFailureId(turnId))) {
+                : turnId === null || this.failureTurnIdById.get(failure.id) !== turnId)) {
             return null;
         }
         return this.createSessionFailureMeta(failure);
@@ -278,14 +281,16 @@ export class CodexEventHandler {
             return;
         }
         if (notification.params.willRetry) {
-            await this.session.update(this.createSessionFailureUpdate(this.recordRetryWarning(notification.params)));
+            await this.session.update(this.createSessionFailureUpdate(this.recordRetryWarning(notification.params, false)));
             return;
         }
         const failure = this.recordSessionFailure(
             this.sessionFailureKind(notification.params.error.codexErrorInfo),
-            undefined,
+            notification.params.turnId,
             "error",
             notification.params.error.message,
+            undefined,
+            false,
         );
         await this.session.update(this.createSessionFailureUpdate(failure));
     }
@@ -321,7 +326,8 @@ export class CodexEventHandler {
         this.lastSessionNotice = undefined;
         if (!this.supportsTypedSessionFailures || turnId === null) return;
         const active = this.sessionState.sessionFailure;
-        if (active?.id !== this.turnFailureId(turnId) || active.severity !== "warning") return;
+        if (active?.id !== this.activeFailureIdByScope.get(turnId) || active?.severity !== "warning") return;
+        this.activeFailureIdByScope.delete(turnId);
         delete this.sessionState.sessionFailure;
     }
 
@@ -330,7 +336,7 @@ export class CodexEventHandler {
         if (!this.supportsTypedSessionFailures
             || turn.status !== "failed"
             || this.failure !== null
-            || activeFailure?.id === this.turnFailureId(turn.id) && activeFailure.severity === "error") {
+            || this.failureTurnIdById.get(activeFailure?.id ?? "") === turn.id && activeFailure?.severity === "error") {
             return;
         }
         const error = turn.error ?? {
@@ -403,14 +409,19 @@ export class CodexEventHandler {
          */
         switch (notification.method) {
             case "item/agentMessage/delta":
+                this.completeRetryIncidentOnTurnProgress();
                 return await this.createTextEvent(notification.params);
             case "item/plan/delta":
+                this.completeRetryIncidentOnTurnProgress();
                 return this.createPlanDeltaEvent(notification.params);
             case "item/started":
+                this.completeRetryIncidentOnTurnProgress();
                 return await this.createItemEvent(notification.params);
             case "item/completed":
+                this.completeRetryIncidentOnTurnProgress();
                 return await this.completeItemEvent(notification.params);
             case "turn/plan/updated":
+                this.completeRetryIncidentOnTurnProgress();
                 return await this.updatePlan(notification.params);
             case "error":
                 return await this.createErrorEvent(notification.params);
@@ -451,8 +462,10 @@ export class CodexEventHandler {
                     closed: true,
                 });
             case "item/commandExecution/outputDelta":
+                this.completeRetryIncidentOnTurnProgress();
                 return this.createCommandOutputDeltaEvent(notification.params);
             case "item/mcpToolCall/progress":
+                this.completeRetryIncidentOnTurnProgress();
                 return this.createMcpToolProgressEvent(notification.params);
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
@@ -472,10 +485,13 @@ export class CodexEventHandler {
             case "thread/compacted":
                 return this.createContextCompactedEvent();
             case "item/reasoning/summaryTextDelta":
+                this.completeRetryIncidentOnTurnProgress();
                 return this.createReasoningDeltaEvent(notification.params);
             case "item/reasoning/textDelta":
+                this.completeRetryIncidentOnTurnProgress();
                 return this.createReasoningDeltaEvent(notification.params);
             case "item/reasoning/summaryPartAdded":
+                this.completeRetryIncidentOnTurnProgress();
                 return this.createReasoningSectionBreakEvent(notification.params);
             case "model/rerouted":
                 return this.createModelReroutedEvent(notification.params);
@@ -1043,11 +1059,12 @@ export class CodexEventHandler {
         severity: "warning" | "error",
         title: string,
         actionsOverride?: SessionFailureAction[],
+        attributeToTurn = true,
     ): NonNullable<SessionState["sessionFailure"]> {
         const policy = SESSION_FAILURE_POLICY[kind];
-        const id = turnId === undefined
-            ? `${this.sessionState.sessionId}:error:${this.sessionFailureEpoch}:${this.nextNoticeId++}`
-            : this.turnFailureId(turnId);
+        const scope = turnId ?? this.sessionState.sessionId;
+        const id = this.activeFailureIdByScope.get(scope)
+            ?? this.allocateFailureId(scope, turnId);
         const previous = this.failuresById.get(id);
         const failure: NonNullable<SessionState["sessionFailure"]> = {
             id,
@@ -1058,12 +1075,40 @@ export class CodexEventHandler {
             actions: actionsOverride ?? policy.actions,
         };
         this.failuresById.set(id, failure);
+        this.failureTurnIdById.set(id, attributeToTurn ? turnId : undefined);
+        this.activeFailureIdByScope.set(scope, id);
         this.sessionState.sessionFailure = failure;
         this.lastSessionNotice = undefined;
         return failure;
     }
 
-    private recordRetryWarning(params: ErrorNotification): SessionFailure {
+    private allocateFailureId(scope: string, turnId: string | undefined): string {
+        if (turnId !== undefined && !this.allocatedFailureScopes.has(scope)) {
+            this.allocatedFailureScopes.add(scope);
+            return `${turnId}:error`;
+        }
+        this.allocatedFailureScopes.add(scope);
+        return `${scope}:error:${this.sessionFailureEpoch}:${this.nextNoticeId++}`;
+    }
+
+    /**
+     * A retry warning remains the active incident until Codex produces turn content again. That content is
+     * the only positive signal available from app-server that the turn recovered; a later error then starts
+     * a new incident instead of overwriting the historical reconnect entry. Terminal errors remain active so
+     * duplicate late notifications cannot append duplicate transcript rows.
+     */
+    private completeRetryIncidentOnTurnProgress(): void {
+        const turnId = this.sessionState.currentTurnId;
+        if (turnId === null) return;
+        const activeId = this.activeFailureIdByScope.get(turnId);
+        if (activeId === undefined || this.failuresById.get(activeId)?.severity !== "warning") return;
+        this.activeFailureIdByScope.delete(turnId);
+        if (this.sessionState.sessionFailure?.id === activeId) {
+            delete this.sessionState.sessionFailure;
+        }
+    }
+
+    private recordRetryWarning(params: ErrorNotification, attributeToTurn = true): SessionFailure {
         const kind = this.sessionFailureKind(params.error.codexErrorInfo);
         return this.recordSessionFailure(
             kind,
@@ -1071,6 +1116,7 @@ export class CodexEventHandler {
             "warning",
             params.error.message,
             [],
+            attributeToTurn,
         );
     }
 
@@ -1100,10 +1146,6 @@ export class CodexEventHandler {
         return combinedTitle.length <= MAX_SESSION_FAILURE_TITLE_LENGTH
             ? [combinedTitle]
             : [summary, details];
-    }
-
-    private turnFailureId(turnId: string): string {
-        return `${turnId}:error`;
     }
 
     private createSessionFailureMeta(

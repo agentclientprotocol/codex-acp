@@ -283,7 +283,7 @@ describe("CodexACPAgent - plan review", () => {
                     air: {
                         version: 1,
                         sessionFailure: {
-                            id: expect.stringMatching(/^plan-review-session:error:[0-9a-f-]+:1$/),
+                            id: "plan-turn:error",
                             revision: 1,
                             category: "service",
                             severity: "error",

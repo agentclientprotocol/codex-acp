@@ -118,7 +118,7 @@ describe("typed session failures over ACP transport", () => {
                     jetbrains: {
                         air: {
                             sessionFailure: {
-                                id: expect.stringMatching(/^wire-idle-error:error:[0-9a-f-]+:1$/),
+                                id: "turn-id:error",
                                 category: "service",
                                 severity: "error",
                                 title: "Codex is temporarily overloaded.",
@@ -156,7 +156,7 @@ describe("typed session failures over ACP transport", () => {
                     jetbrains: {
                         air: {
                             sessionFailure: {
-                                id: expect.stringMatching(/^wire-warning:notice:[0-9a-f-]+:1$/),
+                                id: expect.stringMatching(/^wire-warning:notice:[0-9a-f-]+:\d+$/),
                                 category: "unknown",
                                 severity: "warning",
                                 revision: 1,
@@ -342,6 +342,48 @@ describe("typed session failures over ACP transport", () => {
         }).jetbrains.air.sessionFailure);
         expect(records.map(record => record.revision)).toEqual([1, 1, 1]);
         expect(records[2]!.id).not.toBe(records[0]!.id);
+    });
+
+    it("updates one late retry incident from warning attempts to terminal error", async () => {
+        const fixture = await createIdleFixture("wire-late-retry-chain");
+        const error = {
+            message: "Connection to Codex was lost.",
+            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
+            additionalDetails: null,
+        };
+
+        for (const [willRetry, message] of [
+            [true, "Reconnecting to Codex, attempt 1 of 2."],
+            [true, "Reconnecting to Codex, attempt 2 of 2."],
+            [false, "Connection to Codex was lost after 2 attempts."],
+        ] as const) {
+            fixture.sendServerNotification({
+                method: "error",
+                params: {threadId: fixture.sessionId, turnId: "turn-id", willRetry, error: {...error, message}},
+            });
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(3));
+
+        const records = fixture.updates.map(update => (update.update._meta as {
+            jetbrains: {air: {sessionFailure: {id: string; revision: number; severity: string; actions: string[]}}};
+        }).jetbrains.air.sessionFailure);
+        expect(new Set(records.map(record => record.id)).size).toBe(1);
+        expect(records.map(record => record.revision)).toEqual([1, 2, 3]);
+        expect(records.map(record => record.severity)).toEqual(["warning", "warning", "error"]);
+        expect(records.slice(0, 2).every(record => record.actions.length === 0)).toBe(true);
+
+        fixture.sendServerNotification({
+            method: "error",
+            params: {threadId: fixture.sessionId, turnId: "turn-id", willRetry: false, error},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(4));
+        const next = (fixture.updates[3]!.update._meta as {
+            jetbrains: {air: {sessionFailure: {id: string; revision: number}}};
+        }).jetbrains.air.sessionFailure;
+        expect(next.id).toBe(records[0]!.id);
+        expect(next.revision).toBe(4);
     });
 });
 

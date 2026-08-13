@@ -452,7 +452,7 @@ describe("CodexEventHandler - auth error events", () => {
                     air: {
                         version: 1,
                         sessionFailure: {
-                            id: expect.stringMatching(/^idle-error-session:error:[0-9a-f-]+:1$/),
+                            id: "completed-turn:error",
                             revision: 1,
                             category: "service",
                             severity: "error",
@@ -579,7 +579,7 @@ describe("CodexEventHandler - auth error events", () => {
                         air: {
                             version: 1,
                             sessionFailure: {
-                                id: expect.stringMatching(/^local-command-error-session:error:[0-9a-f-]+:1$/),
+                                id: "late-provider-turn:error",
                                 revision: 1,
                                 category: "service",
                                 severity: "error",
@@ -597,7 +597,7 @@ describe("CodexEventHandler - auth error events", () => {
         }
     });
 
-    it("uses a new session-scoped failure id after recreating the consumer", async () => {
+    it("preserves provider turn identity after recreating the consumer", async () => {
         const createFailureId = async (): Promise<string> => {
             const state = createTestSessionState({
                 sessionId: "restored-session",
@@ -631,9 +631,68 @@ describe("CodexEventHandler - auth error events", () => {
         const firstId = await createFailureId();
         const restartedId = await createFailureId();
 
-        expect(firstId).toMatch(/^restored-session:error:[0-9a-f-]+:1$/);
-        expect(restartedId).toMatch(/^restored-session:error:[0-9a-f-]+:1$/);
-        expect(restartedId).not.toBe(firstId);
+        expect(firstId).toBe("old-turn:error");
+        expect(restartedId).toBe(firstId);
+    });
+
+    it("does not recommend a new session for an exhausted account usage quota", async () => {
+        const {result} = await runPromptWithError(createTestSessionState({
+            sessionId: "usage-quota-actions-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "You have no usage left.",
+            codexErrorInfo: "usageLimitExceeded",
+            additionalDetails: null,
+        }, false, typedFailureCapabilities);
+
+        expect(result).toMatchObject({
+            _meta: {jetbrains: {air: {sessionFailure: {category: "limit", actions: []}}}},
+        });
+    });
+
+    it("starts a new incident when turn output proves a retry warning recovered", async () => {
+        const state = createTestSessionState({
+            sessionId: "two-reconnect-incidents",
+            currentTurnId: "turn-id",
+            account: {type: "apiKey"},
+        });
+        const updates: Array<{_meta?: Record<string, unknown>}> = [];
+        const connection = {
+            notify: vi.fn(async (_method: unknown, params: {update: {_meta?: Record<string, unknown>}}) => {
+                updates.push(params.update);
+            }),
+        } as unknown as AcpClientConnection;
+        const handler = new CodexEventHandler(connection, state, false, true, "test-epoch");
+        const retryError = (message: string) => ({
+            method: "error" as const,
+            params: {
+                threadId: state.sessionId,
+                turnId: "turn-id",
+                willRetry: true,
+                error: {
+                    message,
+                    codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
+                    additionalDetails: null,
+                },
+            },
+        });
+
+        await handler.handleNotification(retryError("First reconnect incident"));
+        await handler.handleNotification({
+            method: "item/agentMessage/delta",
+            params: {threadId: state.sessionId, turnId: "turn-id", itemId: "message", delta: "Recovered."},
+        });
+        await handler.handleNotification(retryError("Second reconnect incident"));
+
+        const failures = updates.flatMap(update => {
+            const air = (update._meta as {jetbrains?: {air?: {sessionFailure?: {id: string; revision: number}}}} | undefined)
+                ?.jetbrains?.air;
+            return air?.sessionFailure === undefined ? [] : [air.sessionFailure];
+        });
+        expect(failures).toHaveLength(2);
+        expect(failures[0]).toEqual(expect.objectContaining({id: "turn-id:error", revision: 1}));
+        expect(failures[1]).toEqual(expect.objectContaining({revision: 1}));
+        expect(failures[1]!.id).not.toBe(failures[0]!.id);
     });
 
     it("preserves negotiated prompt validation RequestErrors", async () => {
