@@ -2,6 +2,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./CodexApprovalHandler";
+import {CodexApprovalPresentationStore} from "./CodexApprovalPresentationStore";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./CodexAuthMethod";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
@@ -2280,7 +2281,13 @@ export class CodexAcpServer {
                 this.sessionFailureEpoch,
             );
             eventHandler = promptEventHandler;
-            const approvalHandler = new CodexApprovalHandler(this.connection, sessionState, activePrompt.signal);
+            const approvalPresentationStore = new CodexApprovalPresentationStore();
+            const approvalHandler = new CodexApprovalHandler(
+                this.connection,
+                sessionState,
+                approvalPresentationStore,
+                activePrompt.signal,
+            );
             const elicitationHandler = new CodexElicitationHandler(
                 this.connection,
                 sessionState,
@@ -2295,6 +2302,7 @@ export class CodexAcpServer {
                     }
                     const completesActiveTurn = event.method === "turn/completed"
                         && event.params.turn.id === sessionState.currentTurnId;
+                    approvalPresentationStore.handleNotification(event);
                     await elicitationHandler.handleNotification(event);
                     await promptEventHandler.handleNotification(event);
                     if (completesActiveTurn) {
