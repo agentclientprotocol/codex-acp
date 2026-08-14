@@ -11,4 +11,6 @@ export const AIR_META_KEY = "air";
 export const AIR_EXTENSION_VERSION_KEY = "version";
 export const AIR_EXTENSION_CAPABILITIES_KEY = "capabilities";
 export const AIR_SESSION_FAILURE_KEY = "sessionFailure";
+export const AIR_AGENT_FILE_CHANGE_REPORT_KEY = "agentFileChangeReport";
+export const AIR_AGENT_FILE_CHANGE_REPORT_REQUEST_KEY = "agentFileChangeReportRequest";
 export const AIR_EXTENSION_VERSION = 1;
