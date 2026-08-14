@@ -16,6 +16,7 @@ import {
     GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
+import {once} from "node:events";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -88,13 +89,16 @@ function startAcpServer() {
         defaultAuthRequest: defaultAuthRequest ?? null,
     });
 
-    const codexConnection = startCodexConnection(codexPath);
+    let codexConnection = startCodexConnection(codexPath);
 
     const maxStderrTailChars = 2 * 1024;
     let stderr = "";
-    codexConnection.process.stderr.addListener("data", (data: Buffer) => {
-        stderr = (stderr + data.toString()).slice(-maxStderrTailChars);
-    });
+    const captureStderr = () => {
+        codexConnection.process.stderr.addListener("data", (data: Buffer) => {
+            stderr = (stderr + data.toString()).slice(-maxStderrTailChars);
+        });
+    };
+    captureStderr();
 
     process.stdin.on("close", () => {
         codexConnection.process.stdin.end();
@@ -109,10 +113,38 @@ function startAcpServer() {
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
+    async function restartCodexClient(): Promise<CodexAcpClient> {
+        const previous = codexConnection;
+        const exited = previous.process.exitCode === null
+            ? once(previous.process, "exit")
+            : Promise.resolve();
+        previous.process.stdin.end();
+        const forceKill = setTimeout(() => {
+            if (previous.process.exitCode === null) {
+                logger.log("Codex still running 2s after provider restart; terminating process");
+                previous.process.kill();
+            }
+        }, 2000);
+        await exited;
+        clearTimeout(forceKill);
+
+        stderr = "";
+        codexConnection = startCodexConnection(codexPath);
+        captureStderr();
+        return new CodexAcpClient(new CodexAppServerClient(codexConnection.connection), config, modelProvider);
+    }
+
     function createAgent(connection: acp.AgentContext): CodexAcpServer {
         const appServerClient = new CodexAppServerClient(codexConnection.connection);
         const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
-        return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.process.exitCode, () => stderr);
+        return new CodexAcpServer(
+            connection,
+            codexClient,
+            defaultAuthRequest,
+            () => codexConnection.process.exitCode,
+            () => stderr,
+            restartCodexClient,
+        );
     }
 
     let codexAcpServer: CodexAcpServer | null = null;

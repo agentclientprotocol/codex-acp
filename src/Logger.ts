@@ -18,6 +18,7 @@ class Logger {
         try {
             fs.mkdirSync(logDir, {recursive: true});
             this.logFilePath = path.join(logDir, "app-server.log");
+            this.log("Logger initialized", {logFilePath: this.logFilePath});
         } catch (ex) {
             console.error("Failed to initialize logger directory", ex);
             this.logFilePath = null;
@@ -32,7 +33,7 @@ class Logger {
         if (!this.logFilePath) return;
         try {
             const timestamp = this.formatTimestamp(new Date());
-            const serializedContext = context ? ` ${JSON.stringify(context)}` : "";
+            const serializedContext = ` ${JSON.stringify({pid: process.pid, ...context})}`;
 
             if (!message.startsWith('[')) message = `[SYS] ${message}`;
             const line = `${timestamp} ${message}${serializedContext}`;

@@ -356,6 +356,12 @@ export class CodexAcpClient {
                 baseUrl: gatewayConfig.config.base_url,
             }
             : this.getNativeProviderConfig();
+        logger.log("providers/list", {
+            providerId: OPENAI_PROVIDER_ID,
+            overrideActive: gatewayConfig !== null,
+            apiType: current.apiType,
+            baseUrl: current.baseUrl,
+        });
         return [
             {
                 providerId: OPENAI_PROVIDER_ID,
@@ -398,6 +404,12 @@ export class CodexAcpClient {
             baseUrl: request.baseUrl,
             headers: request.headers,
         });
+        logger.log("providers/set applied", {
+            providerId: request.providerId,
+            apiType: request.apiType,
+            baseUrl: request.baseUrl,
+            headerNames: Object.keys(request.headers ?? {}),
+        });
     }
 
     /**
@@ -405,9 +417,24 @@ export class CodexAcpClient {
      * unknown provider id is idempotent success (RFD behavior §7).
      */
     disableProvider(request: acp.DisableProviderRequest): void {
+        const overrideWasActive = this.gatewayConfig !== null;
         if (request.providerId === OPENAI_PROVIDER_ID) {
             this.gatewayConfig = null;
         }
+        const current = this.gatewayConfig
+            ? {
+                apiType: gatewayApiTypeFromConfig(this.gatewayConfig),
+                baseUrl: this.gatewayConfig.config.base_url,
+            }
+            : this.getNativeProviderConfig();
+        logger.log("providers/disable applied", {
+            providerId: request.providerId,
+            knownProvider: request.providerId === OPENAI_PROVIDER_ID,
+            overrideWasActive,
+            overrideActive: this.gatewayConfig !== null,
+            restoredApiType: current.apiType,
+            restoredBaseUrl: current.baseUrl,
+        });
     }
 
     async getAccount(): Promise<GetAccountResponse> {
@@ -590,6 +617,19 @@ export class CodexAcpClient {
         mcpServers: Array<McpServer>
     ): Promise<JsonObject> {
         const sessionRoots = [projectPath, ...additionalDirectories];
+        const activeProvider = this.gatewayConfig
+            ? {
+                apiType: gatewayApiTypeFromConfig(this.gatewayConfig),
+                baseUrl: this.gatewayConfig.config.base_url,
+            }
+            : this.getNativeProviderConfig();
+        logger.log("Creating session config", {
+            projectPath,
+            overrideActive: this.gatewayConfig !== null,
+            modelProvider: this.getModelProvider(),
+            apiType: activeProvider.apiType,
+            baseUrl: activeProvider.baseUrl,
+        });
         const mergedConfig = {
             ...mergeGatewayConfig(this.config, this.gatewayConfig),
             projects: Object.fromEntries(sessionRoots.map(root => [root, {

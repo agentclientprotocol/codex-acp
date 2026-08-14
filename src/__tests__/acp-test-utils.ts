@@ -85,6 +85,7 @@ export interface ConnectionConfig {
     connection: MessageConnection;
     getExitCode: () => number | null;
     acpConnection?: AcpConnectionConfig;
+    restartCodexClient?: (() => Promise<CodexAcpClient>) | undefined;
 }
 
 export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
@@ -98,7 +99,14 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
 
     const codexAppServerClient = new CodexAppServerClient(config.connection);
     const codexAcpClient = new CodexAcpClient(codexAppServerClient);
-    const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient, undefined, config.getExitCode);
+    const codexAcpAgent = new CodexAcpServer(
+        acpConnection,
+        codexAcpClient,
+        undefined,
+        config.getExitCode,
+        undefined,
+        config.restartCodexClient,
+    );
 
     const transportEvents: CodexConnectionEvent[] = [];
     const codexEventHandlers: ((event: CodexConnectionEvent) => void)[] = [];
@@ -255,7 +263,9 @@ export interface CodexMockTestFixture extends TestFixture {
  * Provides `sendServerRequest()` to simulate server-initiated requests (e.g., approval requests).
  * Provides `setPermissionResponse()` to control ACP permission dialog responses.
  */
-export function createCodexMockTestFixture(): CodexMockTestFixture {
+export function createCodexMockTestFixture(
+    restartCodexClient?: () => Promise<CodexAcpClient>,
+): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
 
@@ -303,6 +313,7 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
     const baseFixture = createBaseTestFixture({
         connection: mockCodexConnection,
         getExitCode: () => null,
+        restartCodexClient,
         acpConnection: {
             connection: acpConnection,
             events: acpConnectionEvents,
