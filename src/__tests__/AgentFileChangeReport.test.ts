@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {describe, expect, it} from "vitest";
 import {
     AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH,
@@ -114,6 +117,34 @@ describe("agent file-change report", () => {
         expect(report.paths).toEqual(["\\\\server\\share\\folder\\file.txt"]);
         expect(report.declaredComplete).toBe(false);
         expect(report.truncated).toBe(true);
+    });
+
+    it("accepts canonical paths under a symlinked workspace root", () => {
+        if (process.platform === "win32") return;
+
+        const realRoot = fs.mkdtempSync(path.join(os.tmpdir(), "file-audit-real-"));
+        const linkedRoot = `${realRoot}-link`;
+        fs.symlinkSync(realRoot, linkedRoot, "dir");
+        try {
+            const canonicalPath = path.join(fs.realpathSync.native(realRoot), "generated.ts");
+            const report = createReportedAgentFileChangeReport(
+                "request-symlink-root",
+                completedReport({
+                    paths: [canonicalPath, path.join(linkedRoot, "generated.ts")],
+                    complete: true,
+                }),
+                {cwd: linkedRoot, additionalDirectories: []},
+            );
+
+            expect(report).toMatchObject({
+                paths: [canonicalPath],
+                declaredComplete: true,
+                truncated: false,
+            });
+        } finally {
+            fs.unlinkSync(linkedRoot);
+            fs.rmSync(realRoot, {recursive: true, force: true});
+        }
     });
 
     it("keeps valid paths when another path exceeds the per-path cap", () => {

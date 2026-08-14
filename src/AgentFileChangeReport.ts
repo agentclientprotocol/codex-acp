@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import type {Turn} from "./app-server/v2";
@@ -287,10 +288,16 @@ function normalizeWorkspaceRoot(value: string): NormalizedPath | null {
         return null;
     }
     if (isWindowsAbsolutePath(trimmed)) {
-        return {value: path.win32.normalize(trimmed.replace(/\//g, "\\")), flavor: "windows"};
+        return canonicalizeWorkspaceRoot({
+            value: path.win32.normalize(trimmed.replace(/\//g, "\\")),
+            flavor: "windows",
+        });
     }
     if (path.posix.isAbsolute(trimmed)) {
-        return {value: path.posix.normalize(trimmed.replace(/\\/g, "/")), flavor: "posix"};
+        return canonicalizeWorkspaceRoot({
+            value: path.posix.normalize(trimmed.replace(/\\/g, "/")),
+            flavor: "posix",
+        });
     }
     return null;
 }
@@ -327,7 +334,59 @@ function normalizeReportedPath(
         };
     }
 
+    candidate = canonicalizeReportedPath(candidate);
+
     return roots.some(root => pathIsStrictlyInside(root, candidate)) ? candidate : null;
+}
+
+/** Resolve native filesystem aliases such as macOS' /tmp -> /private/tmp. */
+function canonicalizeWorkspaceRoot(root: NormalizedPath): NormalizedPath {
+    if (!isNativePathFlavor(root.flavor)) {
+        return root;
+    }
+    return {...root, value: canonicalizeFromExistingAncestor(root.value)};
+}
+
+/**
+ * Canonicalize the parent but not the leaf itself. A changed path may be
+ * deleted, or it may be a symlink whose node (rather than target) changed.
+ */
+function canonicalizeReportedPath(candidate: NormalizedPath): NormalizedPath {
+    if (!isNativePathFlavor(candidate.flavor)) {
+        return candidate;
+    }
+    const parent = canonicalizeFromExistingAncestor(path.dirname(candidate.value));
+    return {...candidate, value: path.resolve(parent, path.basename(candidate.value))};
+}
+
+/** Resolve the nearest existing ancestor and retain any missing suffix. */
+function canonicalizeFromExistingAncestor(value: string): string {
+    const original = path.resolve(value);
+    let current = original;
+    const missingSegments: string[] = [];
+
+    while (true) {
+        try {
+            const canonical = fs.realpathSync.native(current);
+            return path.resolve(canonical, ...missingSegments.reverse());
+        } catch (error) {
+            if (!isMissingPathError(error)) return original;
+        }
+
+        const parent = path.dirname(current);
+        if (parent === current) return original;
+        missingSegments.push(path.basename(current));
+        current = parent;
+    }
+}
+
+function isMissingPathError(error: unknown): boolean {
+    if (typeof error !== "object" || error === null || !("code" in error)) return false;
+    return error.code === "ENOENT" || error.code === "ENOTDIR";
+}
+
+function isNativePathFlavor(flavor: PathFlavor): boolean {
+    return process.platform === "win32" ? flavor === "windows" : flavor === "posix";
 }
 
 function pathIsStrictlyInside(root: NormalizedPath, candidate: NormalizedPath): boolean {
