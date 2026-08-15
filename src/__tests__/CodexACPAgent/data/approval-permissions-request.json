@@ -47,6 +47,67 @@
           "name": "Allow for Session",
           "kind": "allow_always",
           "_meta": {
+            "permission": {
+              "version": 1,
+              "changes": [
+                {
+                  "type": "grant",
+                  "operation": "grant",
+                  "description": "Allow network access for this session",
+                  "lifetime": {
+                    "scope": "session"
+                  },
+                  "targets": [
+                    {
+                      "type": "network",
+                      "matcher": {
+                        "type": "any"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "grant",
+                  "operation": "grant",
+                  "description": "Allow read access to /home/user/project for this session",
+                  "lifetime": {
+                    "scope": "session"
+                  },
+                  "targets": [
+                    {
+                      "type": "filesystem",
+                      "access": [
+                        "read"
+                      ],
+                      "matcher": {
+                        "type": "exact_path",
+                        "path": "/home/user/project"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "grant",
+                  "operation": "grant",
+                  "description": "Allow write access to /home/user/project/tmp for this session",
+                  "lifetime": {
+                    "scope": "session"
+                  },
+                  "targets": [
+                    {
+                      "type": "filesystem",
+                      "access": [
+                        "write"
+                      ],
+                      "matcher": {
+                        "type": "exact_path",
+                        "path": "/home/user/project/tmp"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
             "codex": {
               "decision": "allowPermissionsForSession",
               "permissions": {
@@ -71,6 +132,67 @@
           "name": "Allow Once",
           "kind": "allow_once",
           "_meta": {
+            "permission": {
+              "version": 1,
+              "changes": [
+                {
+                  "type": "grant",
+                  "operation": "grant",
+                  "description": "Allow network access for this turn",
+                  "lifetime": {
+                    "scope": "turn"
+                  },
+                  "targets": [
+                    {
+                      "type": "network",
+                      "matcher": {
+                        "type": "any"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "grant",
+                  "operation": "grant",
+                  "description": "Allow read access to /home/user/project for this turn",
+                  "lifetime": {
+                    "scope": "turn"
+                  },
+                  "targets": [
+                    {
+                      "type": "filesystem",
+                      "access": [
+                        "read"
+                      ],
+                      "matcher": {
+                        "type": "exact_path",
+                        "path": "/home/user/project"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "grant",
+                  "operation": "grant",
+                  "description": "Allow write access to /home/user/project/tmp for this turn",
+                  "lifetime": {
+                    "scope": "turn"
+                  },
+                  "targets": [
+                    {
+                      "type": "filesystem",
+                      "access": [
+                        "write"
+                      ],
+                      "matcher": {
+                        "type": "exact_path",
+                        "path": "/home/user/project/tmp"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
             "codex": {
               "decision": "allowPermissionsForTurn",
               "permissions": {

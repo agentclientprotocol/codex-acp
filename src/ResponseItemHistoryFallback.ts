@@ -175,6 +175,7 @@ function toolCallIdFromThreadItem(item: ThreadItem): string | null {
         case "webSearch":
         case "imageView":
         case "imageGeneration":
+        case "contextCompaction":
             return item.id;
         case "userMessage":
         case "hookPrompt":
@@ -184,7 +185,6 @@ function toolCallIdFromThreadItem(item: ThreadItem): string | null {
         case "subAgentActivity":
         case "enteredReviewMode":
         case "exitedReviewMode":
-        case "contextCompaction":
         case "sleep":
             return null;
     }

@@ -126,15 +126,58 @@ describe("CodexEventHandler - thread goal events", () => {
         expect(events[0]!.args[0].update).toEqual({
             sessionUpdate: "session_info_update",
             _meta: {
-                codex: {
-                    goal: {
-                        objective: "Ship the goal update",
-                        status: "active",
-                        tokenBudget: null,
-                    },
+                goal: {
+                    objective: "Ship the goal update",
+                    status: "active",
+                    tokenBudget: null,
+                    tokensUsed: 42,
+                    timeUsedSeconds: 12,
+                    createdAt: 1710000000000,
+                    updatedAt: 1710000012000,
+                    controlMethod: "_session/goal",
                 },
             },
         });
+    });
+
+    it("should publish a replacement goal with the same contents and a different creation time", async () => {
+        const firstGoal: ServerNotification = {
+            method: "thread/goal/updated",
+            params: {
+                threadId: sessionId,
+                turnId: null,
+                goal: {
+                    threadId: sessionId,
+                    objective: "Ship the goal update",
+                    status: "active",
+                    tokenBudget: null,
+                    tokensUsed: 0,
+                    timeUsedSeconds: 0,
+                    createdAt: 1710000000,
+                    updatedAt: 1710000000,
+                },
+            },
+        };
+        const replacementGoal: ServerNotification = {
+            ...firstGoal,
+            params: {
+                ...firstGoal.params,
+                goal: {
+                    ...firstGoal.params.goal,
+                    createdAt: 1710000100,
+                    updatedAt: 1710000100,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, createSessionState(), [firstGoal, replacementGoal]);
+
+        const events = mockFixture.getAcpConnectionEvents([]);
+        expect(events).toHaveLength(2);
+        expect(events.map(event => event.args[0].update._meta?.goal?.createdAt)).toEqual([
+            1710000000000,
+            1710000100000,
+        ]);
     });
 
     it("should not append completed goal updates to preceding agent text", async () => {
@@ -182,12 +225,15 @@ describe("CodexEventHandler - thread goal events", () => {
         expect(events[1]!.args[0].update).toEqual({
             sessionUpdate: "session_info_update",
             _meta: {
-                codex: {
-                    goal: {
-                        objective: "tell me a joke",
-                        status: "complete",
-                        tokenBudget: null,
-                    },
+                goal: {
+                    objective: "tell me a joke",
+                    status: "complete",
+                    tokenBudget: null,
+                    tokensUsed: 42,
+                    timeUsedSeconds: 12,
+                    createdAt: 1710000000000,
+                    updatedAt: 1710000012000,
+                    controlMethod: "_session/goal",
                 },
             },
         });
@@ -211,9 +257,7 @@ describe("CodexEventHandler - thread goal events", () => {
         expect(events[0]!.args[0].update).toEqual({
             sessionUpdate: "session_info_update",
             _meta: {
-                codex: {
-                    goal: null,
-                },
+                goal: null,
             },
         });
     });

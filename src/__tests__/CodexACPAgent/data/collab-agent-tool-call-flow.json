@@ -21,7 +21,20 @@
               "message": "Checking weather"
             }
           },
+          "model": null,
+          "reasoningEffort": null,
           "status": "inProgress"
+        },
+        "_meta": {
+          "codex": {
+            "collaboration": {
+              "tool": "spawnAgent",
+              "senderThreadId": "thread-main",
+              "receiverThreadIds": [
+                "thread-paris"
+              ]
+            }
+          }
         }
       }
     }
@@ -49,7 +62,20 @@
               "message": null
             }
           },
+          "model": null,
+          "reasoningEffort": null,
           "status": "completed"
+        },
+        "_meta": {
+          "codex": {
+            "collaboration": {
+              "tool": "spawnAgent",
+              "senderThreadId": "thread-main",
+              "receiverThreadIds": [
+                "thread-paris"
+              ]
+            }
+          }
         }
       }
     }

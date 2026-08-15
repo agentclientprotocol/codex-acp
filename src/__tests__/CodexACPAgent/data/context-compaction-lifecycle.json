@@ -1,0 +1,39 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "context-compaction-id",
+        "kind": "think",
+        "title": "Compact conversation",
+        "status": "in_progress",
+        "_meta": {
+          "contextCompaction": {
+            "version": 1
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "context-compaction-id",
+        "title": "Compact conversation",
+        "status": "completed",
+        "_meta": {
+          "contextCompaction": {
+            "version": 1
+          }
+        }
+      }
+    }
+  ]
+}

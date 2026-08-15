@@ -11,6 +11,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import {AgentMode} from "../AgentMode";
+import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 
@@ -243,7 +244,7 @@ export function removeDirectoryWithRetry(directory: string): void {
 export interface CodexMockTestFixture extends TestFixture {
     sendServerNotification(notification: ServerNotification | Record<string, unknown>): void,
     sendServerRequest<T>(method: string, params: unknown): Promise<T>,
-    setPermissionResponse(response: RequestPermissionResponse): void,
+    setPermissionResponse(response: RequestPermissionResponse | Promise<RequestPermissionResponse>): void,
     setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void,
 }
 
@@ -259,7 +260,7 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
 
     // State for controlling permission responses
-    const permissionState: { response: RequestPermissionResponse } = {
+    const permissionState: { response: RequestPermissionResponse | Promise<RequestPermissionResponse> } = {
         response: { outcome: { outcome: 'cancelled' } }
     };
     const elicitationState: { response: CreateElicitationResponse | Promise<CreateElicitationResponse> } = {
@@ -323,7 +324,7 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
             }
             return await handler(params) as T;
         },
-        setPermissionResponse(response: RequestPermissionResponse): void {
+        setPermissionResponse(response: RequestPermissionResponse | Promise<RequestPermissionResponse>): void {
             permissionState.response = response;
         },
         setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void {
@@ -383,9 +384,13 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         supportedReasoningEfforts: [],
         supportedInputModalities: ["text", "image"],
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
+        collaborationMode: DEFAULT_COLLABORATION_MODE,
         fastModeEnabled: false,
         currentModelSupportsFast: false,
         terminalOutputMode: "terminal_output_delta",
+        goalRevision: 0,
+        sessionTitle: null,
+        sessionTitleSource: "unknown",
         ...overrides,
     };
 }
@@ -399,6 +404,7 @@ export function createTestModel(overrides?: Partial<Model>): Model {
         upgrade: null,
         upgradeInfo: null,
         availabilityNux: null,
+        modelSpecialty: null,
         displayName: id,
         description: `${id} model`,
         hidden: false,

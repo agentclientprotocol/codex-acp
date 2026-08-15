@@ -28,6 +28,8 @@ describe("CodexACPAgent - list sessions", () => {
             path: null,
             cwd: "/repo/project",
             cliVersion: "0.0.0",
+            section: null,
+            sectionEnteredAt: null,
             source: "cli",
             agentNickname: null,
             agentRole: null,
@@ -51,6 +53,8 @@ describe("CodexACPAgent - list sessions", () => {
             path: null,
             cwd: "/repo/other",
             cliVersion: "0.0.0",
+            section: null,
+            sectionEnteredAt: null,
             source: "cli",
             agentNickname: null,
             agentRole: null,
@@ -89,6 +93,72 @@ describe("CodexACPAgent - list sessions", () => {
         );
     });
 
+    it("normalizes Windows cwd filters before comparing absolute paths", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+
+        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+
+        const matchingThread: Thread = {
+            id: "sess-win",
+            sessionId: "sess-win",
+            parentThreadId: null,
+            threadSource: null,
+            forkedFromId: null,
+            preview: "Windows session",
+            ephemeral: false,
+            modelProvider: "openai",
+            createdAt: 100,
+            updatedAt: 200,
+            recencyAt: null,
+            status: { type: "idle" },
+            path: null,
+            cwd: "D:\\workspace\\sample-project\\",
+            cliVersion: "0.0.0",
+            section: null,
+            sectionEnteredAt: null,
+            source: "cli",
+            agentNickname: null,
+            agentRole: null,
+            gitInfo: null,
+            name: null,
+            turns: [],
+        };
+        const otherThread: Thread = {
+            ...matchingThread,
+            id: "sess-other",
+            sessionId: "sess-other",
+            preview: "Other session",
+            cwd: "D:\\workspace\\other-project",
+        };
+
+        codexAppServerClient.threadList = vi.fn().mockResolvedValue({
+            data: [matchingThread, otherThread],
+            nextCursor: null,
+        });
+
+        const response = await codexAcpAgent.listSessions({
+            cwd: "d:/workspace/sample-project",
+            cursor: null,
+        });
+
+        expect(response.sessions).toEqual([{
+            sessionId: "sess-win",
+            cwd: "D:\\workspace\\sample-project\\",
+            title: "Windows session",
+            updatedAt: "1970-01-01T00:03:20.000Z",
+        }]);
+
+        const basenameResponse = await codexAcpAgent.listSessions({
+            cwd: "sample-project",
+            cursor: null,
+        });
+
+        expect(basenameResponse.sessions.map(session => session.sessionId)).toEqual(["sess-win"]);
+    });
+
     it("should prefer the explicit thread name as the session title", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -113,6 +183,8 @@ describe("CodexACPAgent - list sessions", () => {
             path: null,
             cwd: "/repo/project",
             cliVersion: "0.0.0",
+            section: null,
+            sectionEnteredAt: null,
             source: "cli",
             agentNickname: null,
             agentRole: null,
@@ -156,6 +228,7 @@ describe("CodexACPAgent - list sessions", () => {
                 upgrade: null,
                 upgradeInfo: null,
                 availabilityNux: null,
+                modelSpecialty: null,
                 displayName: "gpt-5",
                 description: "test model",
                 hidden: false,
@@ -168,6 +241,7 @@ describe("CodexACPAgent - list sessions", () => {
                 defaultServiceTier: null,
                 isDefault: true,
             }],
+            collaborationMode: "default",
             currentServiceTier: null,
             additionalDirectories: ["/repo/extra"],
         });
@@ -187,6 +261,8 @@ describe("CodexACPAgent - list sessions", () => {
             path: null,
             cwd: "/repo/project",
             cliVersion: "0.0.0",
+            section: null,
+            sectionEnteredAt: null,
             source: "cli",
             agentNickname: null,
             agentRole: null,

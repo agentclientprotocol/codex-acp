@@ -79,7 +79,7 @@ jobs:
           npm install "$CODEX_PACKAGE@$VERSION"
           npm run generate-types
           git add package.json package-lock.json src/app-server
-          git commit -m "Update codex to $VERSION"
+          git commit -m "fix: update codex to $VERSION"
 
       - name: Finalize update with Codex
         id: codex-finalize
@@ -112,7 +112,7 @@ jobs:
 
           gh pr create \
             --base main \
-            --title "Update codex to $VERSION" \
+            --title "fix: update codex to $VERSION" \
             --body-file pr-body.md \
             --label "$CODEX_UPDATE_LABEL"
 

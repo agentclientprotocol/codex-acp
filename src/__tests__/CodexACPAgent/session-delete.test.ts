@@ -128,6 +128,7 @@ async function createSession(): Promise<{
         sessionId,
         currentModelId: "model-id[medium]",
         models: [model],
+        collaborationMode: "default",
         currentServiceTier: null,
         additionalDirectories: [],
     });

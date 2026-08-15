@@ -12,7 +12,10 @@ import packageJson from "../package.json";
 import {logger} from "./Logger";
 import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
-import {LEGACY_SET_SESSION_MODEL_METHOD} from "./AcpExtensions";
+import {
+    GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
+    SESSION_STEERING_METHOD,
+} from "./AcpExtensions";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -23,6 +26,23 @@ const legacySetSessionModelParamsParser = z.object({
     sessionId: z.string(),
     modelId: z.string(),
 }).passthrough();
+
+const sessionSteerParamsParser = z.object({
+    sessionId: z.string(),
+    prompt: z.array(z.any()),
+}).passthrough();
+
+const goalControlParamsParser = z.discriminatedUnion("action", [
+    z.object({
+        sessionId: z.string(),
+        action: z.literal("set"),
+        objective: z.string().trim().min(1),
+    }).passthrough(),
+    z.object({
+        sessionId: z.string(),
+        action: z.enum(["pause", "resume", "clear"]),
+    }).passthrough(),
+]);
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
@@ -122,7 +142,7 @@ function startAcpServer() {
         .onRequest(acp.methods.agent.session.close, (ctx) => getAgent().closeSession(ctx.params))
         .onRequest(acp.methods.agent.session.setMode, (ctx) => getAgent().setSessionMode(ctx.params))
         .onRequest(acp.methods.agent.session.setConfigOption, (ctx) => getAgent().setSessionConfigOption(ctx.params))
-        .onRequest(acp.methods.agent.authenticate, (ctx) => getAgent().authenticate(ctx.params))
+        .onRequest(acp.methods.agent.authenticate, (ctx) => getAgent().authenticate(ctx.params, ctx.requestId))
         .onRequest(acp.methods.agent.logout, (ctx) => getAgent().logout(ctx.params))
         .onRequest(acp.methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params))
         .onRequest(acp.methods.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params))
@@ -132,5 +152,7 @@ function startAcpServer() {
         .onRequest("authentication/status", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/status", ctx.params))
         .onRequest("authentication/logout", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/logout", ctx.params))
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
+        .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
+        .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .connect(acpJsonStream);
 }

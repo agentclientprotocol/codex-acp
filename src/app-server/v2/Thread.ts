@@ -4,6 +4,7 @@
 import type { AbsolutePathBuf } from "../AbsolutePathBuf";
 import type { GitInfo } from "./GitInfo";
 import type { SessionSource } from "./SessionSource";
+import type { ThreadSection } from "./ThreadSection";
 import type { ThreadSource } from "./ThreadSource";
 import type { ThreadStatus } from "./ThreadStatus";
 import type { Turn } from "./Turn";
@@ -27,6 +28,12 @@ preview: string, /**
  * Whether the thread is ephemeral and should not be materialized on disk.
  */
 ephemeral: boolean, /**
+ * The independently persisted section selected for this thread, if any.
+ */
+section: ThreadSection | null, /**
+ * Unix timestamp in seconds when the thread entered its current section.
+ */
+sectionEnteredAt: number | null, /**
  * Model provider used for this thread (for example, 'openai').
  */
 modelProvider: string, /**

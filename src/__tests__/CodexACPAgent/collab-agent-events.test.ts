@@ -84,4 +84,30 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             "data/collab-agent-tool-call-flow.json"
         );
     });
+
+    it("maps live subagent activity to an ACP tool call", async () => {
+        const notifications: ServerNotification[] = [
+            {
+                method: "item/completed",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    completedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "call-spawn-weather",
+                        kind: "started",
+                        agentThreadId: "thread-paris",
+                        agentPath: "/root/weather_research",
+                    },
+                },
+            },
+        ];
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+
+        await expect(`${mockFixture.getAcpConnectionDump([])}\n`).toMatchFileSnapshot(
+            "data/subagent-activity-flow.json"
+        );
+    });
 });
