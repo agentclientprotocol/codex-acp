@@ -65,6 +65,13 @@ describe('CodexACPAgent - initialize', () => {
                 steering: {
                     supported: true,
                 },
+                codex: {
+                    workspaceWriteConfig: {
+                        version: 1,
+                        networkAccess: true,
+                        writableRoots: true,
+                    },
+                },
                 goal: {
                     version: 1,
                     controlMethod: "_session/goal",
