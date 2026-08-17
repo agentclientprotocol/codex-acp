@@ -1,24 +1,33 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type {
+    AdditionalPermissionProfile,
     CommandAction,
     CommandExecutionRequestApprovalParams,
     FileChangeRequestApprovalParams,
     RequestPermissionProfile,
     ThreadItem,
-} from "./app-server/v2";
-import {stripShellPrefix} from "./CodexEventHandler";
-import type {CodexApprovalPresentationStore} from "./CodexApprovalPresentationStore";
+} from "../app-server/v2";
+import {stripShellPrefix} from "../CommandUtils";
+import type {CodexApprovalPresentationStore} from "./presentation-store";
 
 type FileChangeItem = ThreadItem & {type: "fileChange"};
+type CommandPresentationParams = CommandExecutionRequestApprovalParams & {
+    additionalPermissions?: AdditionalPermissionProfile | null;
+};
 
-export function commandToolCall(
-    params: CommandExecutionRequestApprovalParams,
-): acp.ToolCallUpdate {
+export function commandToolCall(params: CommandPresentationParams): acp.ToolCallUpdate {
     const network = params.networkApprovalContext;
     const rawInput = {
         ...(params.command ? {command: stripShellPrefix(params.command)} : {}),
         ...(params.cwd ? {cwd: params.cwd} : {}),
+        ...(network?.protocol === "http" || network?.protocol === "https"
+            ? {url: `${network.protocol}://${network.host}`}
+            : {}),
+        ...(params.additionalPermissions ? {additionalPermissions: params.additionalPermissions} : {}),
     };
+    const additionalPermissionContent = params.additionalPermissions
+        ? permissionProfileContent(params.additionalPermissions)
+        : [];
     return {
         toolCallId: params.itemId,
         kind: "execute",
@@ -27,8 +36,15 @@ export function commandToolCall(
             ? `${network.protocol} network access to ${network.host}`
             : commandTitle(params.commandActions),
         ...(Object.keys(rawInput).length > 0 ? {rawInput} : {}),
-        ...locationsField(commandActionPaths(params.commandActions)),
-        ...(network ? {content: [textContent(`${network.protocol} access to ${network.host}`)]} : {}),
+        ...locationsField(unique([
+            ...commandActionPaths(params.commandActions),
+            ...permissionProfilePaths(params.additionalPermissions),
+        ])),
+        ...(network
+            ? {content: [textContent(`${network.protocol} access to ${network.host}`), ...additionalPermissionContent]}
+            : additionalPermissionContent.length > 0
+                ? {content: additionalPermissionContent}
+                : {}),
     };
 }
 
@@ -97,17 +113,18 @@ function fileChangePaths(item?: FileChangeItem): string[] {
     return unique(item?.changes.map(change => change.path) ?? []);
 }
 
-function permissionProfilePaths(permissions: RequestPermissionProfile): string[] {
-    const fileSystem = permissions.fileSystem;
+function permissionProfilePaths(permissions?: RequestPermissionProfile | AdditionalPermissionProfile | null): string[] {
+    const fileSystem = permissions?.fileSystem;
     return unique([
         ...(fileSystem?.read ?? []),
         ...(fileSystem?.write ?? []),
-        ...(fileSystem?.entries ?? []).flatMap(entry =>
-            entry.path.type === "path" ? [entry.path.path] : []),
+        ...(fileSystem?.entries ?? []).flatMap(entry => entry.path.type === "path" ? [entry.path.path] : []),
     ]);
 }
 
-function permissionProfileContent(permissions: RequestPermissionProfile): acp.ToolCallContent[] {
+function permissionProfileContent(
+    permissions: RequestPermissionProfile | AdditionalPermissionProfile,
+): acp.ToolCallContent[] {
     const lines: string[] = [];
     const networkEnabled = permissions.network?.enabled;
     if (networkEnabled !== null && networkEnabled !== undefined) {

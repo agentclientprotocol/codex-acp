@@ -1,5 +1,6 @@
 import {beforeEach, describe, expect, it, vi} from "vitest";
 import type {
+    AdditionalPermissionProfile,
     CommandExecutionApprovalDecision,
     CommandExecutionRequestApprovalParams,
     FileChangeRequestApprovalParams,
@@ -8,9 +9,10 @@ import type {
 import {createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture} from "../acp-test-utils";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
-import {ApprovalOptionId} from "../../ApprovalOptionId";
+import {ApprovalOptionId} from "../../permissions/option-ids";
 
 type CommandParams = CommandExecutionRequestApprovalParams & {
+    additionalPermissions?: AdditionalPermissionProfile | null;
     availableDecisions?: unknown;
 };
 
@@ -89,7 +91,7 @@ describe("Approval Events", () => {
     describe("command approvals", () => {
         it("emits an autonomous ACP v1 snapshot and maps explicit reject to decline", async () => {
             const prompt = setupSessionWithPendingPrompt();
-            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.RejectOnce}});
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.Decline}});
             const params = commandParams(["accept", "acceptForSession", "decline", "cancel"], {
                 commandActions: [
                     {type: "read", command: "cat src/a.ts", name: "cat", path: "/workspace/src/a.ts"},
@@ -114,17 +116,18 @@ describe("Approval Events", () => {
                     locations: [{path: "/workspace/src/a.ts"}, {path: "/workspace/src"}],
                 },
                 options: [
-                    {optionId: "allow_once", name: "Allow once", kind: "allow_once"},
+                    {optionId: "allow_once", name: "Yes, proceed", kind: "allow_once"},
                     {
-                        optionId: "allow_always",
-                        name: "Allow for session",
+                        optionId: "allow_for_session",
+                        name: "Yes, and don't ask again for this command in this session",
                         kind: "allow_always",
-                        _meta: {permission: {
-                            version: 1,
-                            description: "Remember this approval until the Codex session ends",
-                        }},
                     },
-                    {optionId: "reject_once", name: "Reject", kind: "reject_once"},
+                    {optionId: "decline", name: "No, continue without running it", kind: "reject_once"},
+                    {
+                        optionId: "cancel",
+                        name: "No, and tell Codex what to do differently",
+                        kind: "reject_once",
+                    },
                 ],
                 _meta: {permission: {
                     version: 1,
@@ -153,7 +156,7 @@ describe("Approval Events", () => {
             await finish(prompt);
         });
 
-        it("retains and returns the exact proposed exec-policy payload without exposing argv in prose", async () => {
+        it("suppresses a multiline exec-policy option exactly like the Codex TUI", async () => {
             const prompt = setupSessionWithPendingPrompt();
             fixture.setPermissionResponse({
                 outcome: {outcome: "selected", optionId: ApprovalOptionId.AcceptWithExecpolicyAmendment},
@@ -167,20 +170,229 @@ describe("Approval Events", () => {
                     proposedExecpolicyAmendment: amendment,
                 }),
             );
-            expect(response).toEqual({decision});
+            expect(response).toEqual({decision: "cancel"});
             const option = permissionRequest().options.find(
                 (candidate: {optionId: string}) => candidate.optionId === ApprovalOptionId.AcceptWithExecpolicyAmendment,
             );
-            expect(option).toEqual({
-                optionId: ApprovalOptionId.AcceptWithExecpolicyAmendment,
-                name: "Allow command pattern",
-                kind: "allow_always",
-                _meta: {permission: {
-                    version: 1,
-                    description: "Add the proposed command-prefix rule to persistent Codex policy",
-                }},
+            expect(option).toBeUndefined();
+            await finish(prompt);
+        });
+
+        it("returns the exact single-line exec-policy amendment selected by optionId", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            const amendment = ["npm", "run", "test:unit"];
+            const decision = {acceptWithExecpolicyAmendment: {execpolicy_amendment: amendment}} as const;
+            fixture.setPermissionResponse({
+                outcome: {outcome: "selected", optionId: ApprovalOptionId.AcceptWithExecpolicyAmendment},
             });
-            expect(JSON.stringify(option)).not.toContain("secret");
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(["accept", decision, "cancel"], {proposedExecpolicyAmendment: amendment}),
+            )).toEqual({decision});
+            expect(permissionRequest().options[1]).toEqual({
+                optionId: ApprovalOptionId.AcceptWithExecpolicyAmendment,
+                name: "Yes, and don't ask again for commands that start with `npm run test:unit`",
+                kind: "allow_always",
+            });
+            await finish(prompt);
+        });
+
+        it("maps selected decline and cancel to their distinct provider decisions", async () => {
+            const declinePrompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.Decline}});
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(["accept", "decline", "cancel"]),
+            )).toEqual({decision: "decline"});
+            await finish(declinePrompt);
+
+            fixture = createCodexMockTestFixture();
+            const cancelPrompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.Cancel}});
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(["accept", "decline", "cancel"]),
+            )).toEqual({decision: "cancel"});
+            await finish(cancelPrompt);
+        });
+
+        it("supports the native accept-plus-cancel decision set without inventing decline", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowOnce}});
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(["accept", "cancel"]),
+            )).toEqual({decision: "accept"});
+            expect(permissionRequest().options.map((option: {optionId: string}) => option.optionId))
+                .toEqual([ApprovalOptionId.AllowOnce, ApprovalOptionId.Cancel]);
+            await finish(prompt);
+        });
+
+        it("orders native decisions as allow once, always allow, then deny", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowOnce}});
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(["decline", "acceptForSession", "cancel", "accept"]),
+            )).toEqual({decision: "accept"});
+            expect(permissionRequest().options.map((option: {optionId: string}) => option.optionId)).toEqual([
+                ApprovalOptionId.AllowOnce,
+                ApprovalOptionId.AllowForSession,
+                ApprovalOptionId.Decline,
+                ApprovalOptionId.Cancel,
+            ]);
+            await finish(prompt);
+        });
+
+        it.each([undefined, null])(
+            "uses the native backwards-compatible decisions when availableDecisions is %s",
+            async availableDecisions => {
+            const prompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowOnce}});
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(availableDecisions, {proposedExecpolicyAmendment: ["npm", "test"]}),
+            )).toEqual({decision: "accept"});
+            expect(permissionRequest().options.map((option: {optionId: string}) => option.optionId)).toEqual([
+                ApprovalOptionId.AllowOnce,
+                ApprovalOptionId.AcceptWithExecpolicyAmendment,
+                ApprovalOptionId.Cancel,
+            ]);
+            await finish(prompt);
+        });
+
+        it("uses only the first proposed allow amendment in the legacy network fallback", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            const deny = {host: "example.test", action: "deny" as const};
+            const firstAllow = {host: "example.test", action: "allow" as const};
+            const secondAllow = {host: "example.test", action: "allow" as const};
+            fixture.setPermissionResponse({
+                outcome: {outcome: "selected", optionId: `${ApprovalOptionId.ApplyNetworkPolicyAmendment}:0`},
+            });
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(undefined, {
+                    networkApprovalContext: {host: "example.test", protocol: "https"},
+                    proposedNetworkPolicyAmendments: [deny, firstAllow, secondAllow],
+                }),
+            )).toEqual({decision: {
+                applyNetworkPolicyAmendment: {network_policy_amendment: firstAllow},
+            }});
+            expect(permissionRequest().options.map((option: {name: string}) => option.name)).toEqual([
+                "Yes, just this once",
+                "Yes, and allow this host for this conversation",
+                "Yes, and allow this host in the future",
+                "No, and tell Codex what to do differently",
+            ]);
+            await finish(prompt);
+        });
+
+        it("limits the legacy additional-permissions fallback to accept and cancel", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            const additionalPermissions: AdditionalPermissionProfile = {
+                network: {enabled: true},
+                fileSystem: null,
+            };
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowOnce}});
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(undefined, {additionalPermissions}),
+            )).toEqual({decision: "accept"});
+            expect(permissionRequest().options.map((option: {optionId: string}) => option.optionId))
+                .toEqual([ApprovalOptionId.AllowOnce, ApprovalOptionId.Cancel]);
+            await finish(prompt);
+        });
+
+        it("cancels an unknown selected optionId instead of inferring a decision from kind", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: "future-option"}});
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(["accept", "cancel"]),
+            )).toEqual({decision: "cancel"});
+            await finish(prompt);
+        });
+
+        it("fails closed when a network decision does not match the proposed host action", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            const decision = {
+                applyNetworkPolicyAmendment: {
+                    network_policy_amendment: {host: "other.test", action: "allow" as const},
+                },
+            };
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(["accept", decision, "cancel"], {
+                    networkApprovalContext: {host: "example.test", protocol: "https"},
+                    proposedNetworkPolicyAmendments: [{host: "example.test", action: "allow"}],
+                }),
+            )).toEqual({decision: "cancel"});
+            expect(permissionRequest()).toBeUndefined();
+            await finish(prompt);
+        });
+
+        it("renders exec-policy prefixes with the same shlex quoting as the Codex TUI", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            const amendment = ["echo", "'foo bar'"];
+            const decision = {acceptWithExecpolicyAmendment: {execpolicy_amendment: amendment}} as const;
+            fixture.setPermissionResponse({
+                outcome: {outcome: "selected", optionId: ApprovalOptionId.AcceptWithExecpolicyAmendment},
+            });
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(["accept", decision, "cancel"], {proposedExecpolicyAmendment: amendment}),
+            )).toEqual({decision});
+            expect(permissionRequest().options[1].name).toBe(
+                `Yes, and don't ask again for commands that start with \`echo "'foo bar'"\``,
+            );
+            await finish(prompt);
+        });
+
+        it("uses Codex's case-sensitive recursive shell-name detection", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            const amendment = ["BASH", "-lc", "echo hi"];
+            const decision = {acceptWithExecpolicyAmendment: {execpolicy_amendment: amendment}} as const;
+            fixture.setPermissionResponse({
+                outcome: {outcome: "selected", optionId: ApprovalOptionId.AcceptWithExecpolicyAmendment},
+            });
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(["accept", decision, "cancel"], {proposedExecpolicyAmendment: amendment}),
+            )).toEqual({decision});
+            expect(permissionRequest().options[1].name).toBe(
+                "Yes, and don't ask again for commands that start with `BASH -lc 'echo hi'`",
+            );
+            await finish(prompt);
+        });
+
+        it("presents experimental per-command additional permissions without copying them into prose", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowForSession}});
+            const additionalPermissions: AdditionalPermissionProfile = {
+                network: {enabled: true},
+                fileSystem: {
+                    read: ["/outside/read"],
+                    write: [],
+                    entries: [{path: {type: "path", path: "/outside/read"}, access: "read"}],
+                },
+            };
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(["accept", "acceptForSession", "cancel"], {additionalPermissions}),
+            )).toEqual({decision: "acceptForSession"});
+            expect(permissionRequest()).toMatchObject({
+                toolCall: {
+                    rawInput: {command: "npm test", cwd: "/workspace", additionalPermissions},
+                    locations: [{path: "/outside/read"}],
+                    content: [{type: "content", content: {type: "text", text: "Enable network access"}}],
+                },
+                options: [
+                    {name: "Yes, proceed"},
+                    {name: "Yes, and allow these permissions for this session"},
+                    {name: "No, and tell Codex what to do differently"},
+                ],
+            });
+            expect(permissionRequest()._meta.permission.description).toBe("Needed to verify the changes.");
             await finish(prompt);
         });
 
@@ -209,6 +421,9 @@ describe("Approval Events", () => {
                 expect(permissionRequest().toolCall).toMatchObject({
                     title: `${protocol} network access to example.test`,
                     content: [{type: "content", content: {type: "text", text: `${protocol} access to example.test`}}],
+                    ...(protocol === "http" || protocol === "https"
+                        ? {rawInput: {url: `${protocol}://example.test`}}
+                        : {}),
                 });
                 const optionsJson = JSON.stringify(permissionRequest().options);
                 expect(optionsJson).not.toContain("example.test");
@@ -233,18 +448,16 @@ describe("Approval Events", () => {
             );
             expect(response).toEqual({decision});
             expect(permissionRequest().options[1]).toMatchObject({
-                name: "Block in future",
+                name: "No, and block this host in the future",
                 kind: "reject_always",
-                _meta: {permission: {description: "Add the proposed block rule to persistent Codex network policy"}},
             });
             await finish(prompt);
         });
 
         it.each([
-            ["missing", undefined],
             ["empty", []],
             ["unknown", ["accept", "futureDecision", "decline"]],
-            ["no explicit decline", ["accept", "cancel"]],
+            ["duplicate option id", ["accept", "accept", "cancel"]],
             ["mismatched amendment", [
                 "accept",
                 {acceptWithExecpolicyAmendment: {execpolicy_amendment: ["different"]}},
@@ -330,7 +543,7 @@ describe("Approval Events", () => {
             });
             await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
             fixture.clearAcpConnectionDump();
-            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowAlways}});
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowForSession}});
 
             const response = await fixture.sendServerRequest<{decision: unknown}>(
                 "item/fileChange/requestApproval",
@@ -359,9 +572,9 @@ describe("Approval Events", () => {
 
         it("distinguishes explicit file rejection from ACP cancellation", async () => {
             const rejectPrompt = setupSessionWithPendingPrompt();
-            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.RejectOnce}});
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.Cancel}});
             expect(await fixture.sendServerRequest("item/fileChange/requestApproval", fileParams()))
-                .toEqual({decision: "decline"});
+                .toEqual({decision: "cancel"});
             await finish(rejectPrompt);
 
             fixture = createCodexMockTestFixture();
@@ -403,8 +616,9 @@ describe("Approval Events", () => {
 
         it.each([
             [ApprovalOptionId.AllowPermissionsForTurn, "turn", false],
+            [ApprovalOptionId.AllowPermissionsForTurnWithStrictAutoReview, "turn", true],
             [ApprovalOptionId.AllowPermissionsForSession, "session", false],
-            [ApprovalOptionId.RejectPermissions, "turn", true],
+            [ApprovalOptionId.RejectPermissions, "turn", false],
         ] as const)("maps %s atomically", async (optionId, scope, strictAutoReview) => {
             const prompt = setupSessionWithPendingPrompt();
             fixture.setPermissionResponse({outcome: {outcome: "selected", optionId}});
@@ -438,17 +652,39 @@ describe("Approval Events", () => {
                         description: "The build needs generated output access.",
                     }},
                 });
+                expect(permissionRequest().options).toEqual([
+                    {
+                        optionId: ApprovalOptionId.AllowPermissionsForTurn,
+                        name: "Yes, grant these permissions for this turn",
+                        kind: "allow_once",
+                    },
+                    {
+                        optionId: ApprovalOptionId.AllowPermissionsForTurnWithStrictAutoReview,
+                        name: "Yes, grant for this turn with strict auto review",
+                        kind: "allow_once",
+                    },
+                    {
+                        optionId: ApprovalOptionId.AllowPermissionsForSession,
+                        name: "Yes, grant these permissions for this session",
+                        kind: "allow_always",
+                    },
+                    {
+                        optionId: ApprovalOptionId.RejectPermissions,
+                        name: "No, continue without permissions",
+                        kind: "reject_once",
+                    },
+                ]);
             }
             await finish(prompt);
         });
 
-        it("maps ACP cancellation to an empty strict profile", async () => {
+        it("maps ACP cancellation to the native empty non-strict profile", async () => {
             const prompt = setupSessionWithPendingPrompt();
             fixture.setPermissionResponse({outcome: {outcome: "cancelled"}});
             expect(await fixture.sendServerRequest("item/permissions/requestApproval", params())).toEqual({
                 permissions: {},
                 scope: "turn",
-                strictAutoReview: true,
+                strictAutoReview: false,
             });
             await finish(prompt);
         });

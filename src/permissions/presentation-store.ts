@@ -1,5 +1,5 @@
-import type {ServerNotification} from "./app-server";
-import type {ThreadItem} from "./app-server/v2";
+import type {ServerNotification} from "../app-server";
+import type {ThreadItem} from "../app-server/v2";
 
 type FileChangeItem = ThreadItem & {type: "fileChange"};
 

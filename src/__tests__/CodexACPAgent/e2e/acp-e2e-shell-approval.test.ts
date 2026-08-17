@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it, onTestFinished, vi} from "vitest";
 import {AgentMode} from "../../../AgentMode";
-import {ApprovalOptionId} from "../../../ApprovalOptionId";
+import {ApprovalOptionId} from "../../../permissions/option-ids";
 import {
     createAuthenticatedFixture,
     createPermissionResponder,
@@ -45,10 +45,10 @@ describeE2E("E2E shell approval tests", () => {
     }
 
     it("prompts for every command when allow_once is selected", async () => {
-        const responses = [ApprovalOptionId.AllowOnce, ApprovalOptionId.RejectOnce];
+        const responses = [ApprovalOptionId.AllowOnce, ApprovalOptionId.Cancel];
         fixture.setPermissionResponder((request) => createPermissionResponse(
             request.toolCall.kind === "execute"
-                ? responses.shift() ?? ApprovalOptionId.RejectOnce
+                ? responses.shift() ?? ApprovalOptionId.Cancel
                 : null
         ));
         await promptShellCommandTwice();
@@ -57,16 +57,16 @@ describeE2E("E2E shell approval tests", () => {
         expectPermissionRequests(fixture, sessionId, {execute: 2, edit: 0});
     });
 
-    it("skips subsequent approvals when allow_always is selected", async () => {
-        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowAlways));
+    it("skips subsequent approvals when allow_for_session is selected", async () => {
+        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowForSession));
         await promptShellCommandTwice();
         expect(fs.existsSync(path.join(fixture.workspaceDir, FIRST_FILE_NAME))).toBe(true);
         expect(fs.existsSync(path.join(fixture.workspaceDir, SECOND_FILE_NAME))).toBe(true);
         expectPermissionRequests(fixture, sessionId, {execute: 1, edit: 0});
     });
 
-    it("prompts for every command when reject_once is selected", async () => {
-        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.RejectOnce));
+    it("cancels every command when cancel is selected", async () => {
+        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.Cancel));
         await promptShellCommandTwice();
         expect(fs.existsSync(path.join(fixture.workspaceDir, FIRST_FILE_NAME))).toBe(false);
         expect(fs.existsSync(path.join(fixture.workspaceDir, SECOND_FILE_NAME))).toBe(false);
