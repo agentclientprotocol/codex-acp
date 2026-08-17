@@ -85,7 +85,6 @@ export interface ConnectionConfig {
     connection: MessageConnection;
     getExitCode: () => number | null;
     acpConnection?: AcpConnectionConfig;
-    restartCodexClient?: (() => Promise<CodexAcpClient>) | undefined;
 }
 
 export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
@@ -105,7 +104,6 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         undefined,
         config.getExitCode,
         undefined,
-        config.restartCodexClient,
     );
 
     const transportEvents: CodexConnectionEvent[] = [];
@@ -313,13 +311,16 @@ export function createCodexMockTestFixture(
     const baseFixture = createBaseTestFixture({
         connection: mockCodexConnection,
         getExitCode: () => null,
-        restartCodexClient,
         acpConnection: {
             connection: acpConnection,
             events: acpConnectionEvents,
             eventHandlers: acpEventHandlers,
         }
     });
+    if (restartCodexClient) {
+        vi.spyOn(baseFixture.getCodexAcpAgent() as any, "restartCodexClient")
+            .mockImplementation(restartCodexClient);
+    }
 
     return {
         ...baseFixture,
