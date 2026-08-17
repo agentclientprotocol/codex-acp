@@ -681,7 +681,9 @@ export class CodexAcpServer {
     }
 
     async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
-        await this.waitForProviderUpdate();
+        if (this.providerUpdate !== null) {
+            await this.providerUpdate;
+        }
         logger.log("Loading session...", {sessionId: params.sessionId});
         const {
             sessionId,
@@ -705,7 +707,9 @@ export class CodexAcpServer {
     }
 
     async resumeSession(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
-        await this.waitForProviderUpdate();
+        if (this.providerUpdate !== null) {
+            await this.providerUpdate;
+        }
         logger.log("Resuming session...", {sessionId: params.sessionId});
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -814,7 +818,9 @@ export class CodexAcpServer {
     async newSession(
         params: acp.NewSessionRequest,
     ): Promise<LegacyNewSessionResponse> {
-        await this.waitForProviderUpdate();
+        if (this.providerUpdate !== null) {
+            await this.providerUpdate;
+        }
         logger.log("Starting new session...");
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -979,13 +985,6 @@ export class CodexAcpServer {
             state.config,
             state.modelProvider,
         );
-    }
-
-    private async waitForProviderUpdate(): Promise<void> {
-        const update = this.providerUpdate;
-        if (update !== null) {
-            await update;
-        }
     }
 
     private async refreshSessionsAuthState(authProvider: string | null): Promise<void> {
@@ -2228,7 +2227,9 @@ export class CodexAcpServer {
         signal?: AbortSignal,
         onTurnStarted?: () => void,
     ): Promise<acp.PromptResponse> {
-        await this.waitForProviderUpdate();
+        if (this.providerUpdate !== null) {
+            await this.providerUpdate;
+        }
         logger.log("Prompt received", {
             sessionId: params.sessionId,
             prompt: params.prompt,
