@@ -871,5 +871,44 @@ describe('Elicitation Events', () => {
             completeTurn();
             await promptPromise;
         });
+
+        it('should wait for the client when autoResolutionMs is omitted instead of aborting immediately', async () => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+            });
+            fixture.setElicitationResponse(new Promise((resolve) => {
+                setTimeout(() => resolve({
+                    action: 'accept',
+                    content: { next_step: 'Go ahead' },
+                }), 200);
+            }));
+
+            const params = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'request-user-input-1',
+                isBlocking: true,
+                questions: [{
+                    id: 'next_step',
+                    header: 'Next step',
+                    question: 'Continue?',
+                    isOther: false,
+                    isSecret: false,
+                    options: null,
+                }],
+            } as unknown as ToolRequestUserInputParams;
+
+            const startedAt = Date.now();
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+            const elapsedMs = Date.now() - startedAt;
+
+            expect(response).toEqual({
+                answers: { next_step: { answers: ['Go ahead'] } },
+            });
+            expect(elapsedMs).toBeGreaterThanOrEqual(150);
+
+            completeTurn();
+            await promptPromise;
+        });
     });
 });
