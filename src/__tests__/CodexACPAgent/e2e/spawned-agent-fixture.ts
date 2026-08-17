@@ -21,6 +21,10 @@ export interface TestSkill {
 export interface SpawnedAgentFixture {
     readonly connection: acp.ClientSideConnection;
     readonly workspaceDir: string;
+    /** Pid of the spawned agent process, for tests that manage its process tree. */
+    readonly agentPid: number | undefined;
+    /** Resolves true if the agent process exits within the timeout. */
+    waitForAgentExit(timeoutMs: number): Promise<boolean>;
     createSession(mcpServers?: acp.McpServer[]): Promise<LegacyNewSessionResponse>;
     restart(): Promise<SpawnedAgentFixture>;
     writeSkill(skill: TestSkill, rootDir?: string): void;
@@ -176,6 +180,14 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
 
     get workspaceDir(): string {
         return this.paths.workspaceDir;
+    }
+
+    get agentPid(): number | undefined {
+        return this.agentProcess.pid;
+    }
+
+    async waitForAgentExit(timeoutMs: number): Promise<boolean> {
+        return await waitForProcessExit(this.agentProcess, timeoutMs);
     }
 
     async createSession(mcpServers: acp.McpServer[] = []): Promise<LegacyNewSessionResponse> {

@@ -96,7 +96,9 @@ function startAcpServer() {
         stderr = (stderr + data.toString()).slice(-maxStderrTailChars);
     });
 
+    let clientInitiatedShutdown = false;
     process.stdin.on("close", () => {
+        clientInitiatedShutdown = true;
         codexConnection.process.stdin.end();
         // Kill the codex process if it doesn't exit naturally
         setTimeout(() => {
@@ -106,6 +108,45 @@ function startAcpServer() {
             }
         }, 2000);
     });
+
+    // If the codex process dies, exit instead of leaving the client a
+    // connection that can never answer again; exiting surfaces the death as
+    // stdio EOF and rejects in-flight client requests at the transport layer.
+    // stdout EOF is watched too: the win32 spawn goes through a shell, so the
+    // child handle can outlive the real codex process. The diagnostic goes to
+    // stderr because clients surface an exited agent's stderr to the user.
+    let backendLossHandled = false;
+    const reportBackendLossAndExit = (reason: string) => {
+        const exitCode = codexConnection.process.exitCode;
+        const hint = exitCode === 3221225781 ? " — VC++ redistributable should be installed" : "";
+        const stderrTail = stderr.trim();
+        process.stderr.write(
+            `codex-acp: codex process died (${reason}, exit code ${exitCode ?? "unknown"})${hint}\n` +
+            (stderrTail ? stderrTail + "\n" : "")
+        );
+        logger.log("Codex process lost; exiting", {reason: reason, exitCode: exitCode, stderrTail: stderr});
+        // Grace period so stderr and any queued stdout responses flush.
+        setTimeout(() => process.exit(1), 50);
+    };
+    const exitOnBackendLoss = (reason: string) => {
+        if (backendLossHandled || clientInitiatedShutdown) {
+            return;
+        }
+        backendLossHandled = true;
+        if (codexConnection.process.exitCode === null) {
+            // stdout EOF usually precedes the exit event that carries the exit
+            // code (and with it the VC++ hint) — give it a moment to arrive.
+            const fallback = setTimeout(() => reportBackendLossAndExit(reason), 150);
+            codexConnection.process.once("exit", () => {
+                clearTimeout(fallback);
+                reportBackendLossAndExit(reason);
+            });
+        } else {
+            reportBackendLossAndExit(reason);
+        }
+    };
+    codexConnection.process.on("exit", () => exitOnBackendLoss("process-exit"));
+    codexConnection.process.stdout.on("end", () => exitOnBackendLoss("stdout-eof"));
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
