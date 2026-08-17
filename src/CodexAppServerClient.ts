@@ -56,6 +56,8 @@ import type {
     ThreadSettings,
     ThreadStartParams,
     ThreadStartResponse,
+    ThreadSetNameParams,
+    ThreadSetNameResponse,
     ThreadUnsubscribeParams,
     ThreadUnsubscribeResponse,
     ToolRequestUserInputParams,
@@ -526,6 +528,10 @@ export class CodexAppServerClient {
 
     async threadStart(params: ThreadStartParams): Promise<ThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
+    }
+
+    async threadSetName(params: ThreadSetNameParams): Promise<ThreadSetNameResponse> {
+        return await this.sendRequest({ method: "thread/name/set", params });
     }
 
     async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
