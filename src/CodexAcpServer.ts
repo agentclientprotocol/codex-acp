@@ -215,8 +215,6 @@ interface ActivePrompt {
     complete: () => void;
 }
 
-export type RestartCodexClient = () => Promise<CodexAcpClient>;
-
 export class CodexAcpServer {
     private static readonly MODEL_NAME_TOKEN_OVERRIDES: Record<string, string> = {
         gpt: "GPT",
@@ -245,7 +243,7 @@ export class CodexAcpServer {
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
     private readonly goalControlGenerations: Map<string, number>;
-    private readonly restartCodexClient: RestartCodexClient | null;
+    private readonly restartCodexClient: (() => Promise<CodexAcpClient>) | null;
     private initializeRequest: acp.InitializeRequest | null = null;
     private providerUpdate: Promise<void> | null = null;
 
@@ -255,7 +253,7 @@ export class CodexAcpServer {
         defaultAuthRequest?: CodexAuthRequest,
         getExitCode?: () => number | null,
         getRecentStderr?: () => string,
-        restartCodexClient?: RestartCodexClient,
+        restartCodexClient?: () => Promise<CodexAcpClient>,
     ) {
         this.sessions = new Map();
         this.pendingMcpStartupSessions = new Map();
