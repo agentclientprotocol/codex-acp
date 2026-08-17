@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it, onTestFinished, vi} from "vitest";
 import {AgentMode} from "../../../AgentMode";
-import {ApprovalOptionId} from "../../../ApprovalOptionId";
+import {ApprovalOptionId} from "../../../permissions/option-ids";
 import {
     createAuthenticatedFixture,
     createPermissionResponder,
@@ -37,7 +37,7 @@ describeE2E("E2E file approval tests", () => {
     });
 
     it("does not apply rejected file edits", async () => {
-        fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.RejectOnce));
+        fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.Cancel));
         const sessionId = await expectFileEditBlocked(fixture, newFilePathIn(fixture.workspaceDir));
         expect(fixture.readPermissionRequests(sessionId, "edit").length).toBeGreaterThanOrEqual(1);
         expect(fixture.readPermissionRequests(sessionId, "execute")).toHaveLength(0);

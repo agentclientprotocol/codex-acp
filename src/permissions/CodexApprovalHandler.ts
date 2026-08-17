@@ -1,6 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
-import type {SessionState} from "./CodexAcpServer";
-import type {ApprovalHandler} from "./CodexAppServerClient";
+import type {SessionState} from "../CodexAcpServer";
+import type {ApprovalHandler} from "../CodexAppServerClient";
 import type {
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
@@ -10,30 +10,26 @@ import type {
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
     RequestPermissionProfile,
-} from "./app-server/v2";
-import {logger} from "./Logger";
-import {ApprovalOptionId} from "./ApprovalOptionId";
-import type {AcpClientConnection} from "./ACPSessionConnection";
+} from "../app-server/v2";
+import {logger} from "../Logger";
+import type {AcpClientConnection} from "../ACPSessionConnection";
 import {
     commandDecisionOptions,
     fileChangeDecisionOptions,
     permissionProfileOptions,
     type CommandParamsWithAvailableDecisions,
     type DecisionOption,
-} from "./CodexApprovalOptions";
+} from "./options";
+import {ApprovalOptionId} from "./option-ids";
 import {
     CODEX_ADDITIONAL_PERMISSIONS_TITLE,
     CODEX_COMMAND_PERMISSION_TITLE,
     CODEX_FILE_CHANGE_PERMISSION_TITLE,
     CODEX_NETWORK_PERMISSION_TITLE,
     requestPermissionMeta,
-} from "./CodexPermissionMetadata";
-import {
-    additionalPermissionsToolCall,
-    commandToolCall,
-    fileChangeToolCall,
-} from "./CodexPermissionPresentation";
-import type {CodexApprovalPresentationStore} from "./CodexApprovalPresentationStore";
+} from "./metadata";
+import {additionalPermissionsToolCall, commandToolCall, fileChangeToolCall} from "./presentation";
+import type {CodexApprovalPresentationStore} from "./presentation-store";
 
 export class CodexApprovalHandler implements ApprovalHandler {
     constructor(
@@ -58,12 +54,10 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const response = await this.requestPermission({
                 sessionId: this.sessionState.sessionId,
-                toolCall: commandToolCall(params),
+                toolCall: commandToolCall(authoritativeParams),
                 options: decisions.map(({option}) => option),
                 _meta: requestPermissionMeta(
-                    params.networkApprovalContext
-                        ? CODEX_NETWORK_PERMISSION_TITLE
-                        : CODEX_COMMAND_PERMISSION_TITLE,
+                    params.networkApprovalContext ? CODEX_NETWORK_PERMISSION_TITLE : CODEX_COMMAND_PERMISSION_TITLE,
                     params.reason,
                 ),
             });
@@ -74,9 +68,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         }
     }
 
-    async handleFileChange(
-        params: FileChangeRequestApprovalParams,
-    ): Promise<FileChangeRequestApprovalResponse> {
+    async handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse> {
         if (this.isStale(params.turnId)) return {decision: "cancel"};
         const decisions = fileChangeDecisionOptions();
         try {
@@ -124,10 +116,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         );
     }
 
-    private selectedDecision<T>(
-        response: acp.RequestPermissionResponse,
-        decisions: DecisionOption<T>[],
-    ): T | undefined {
+    private selectedDecision<T>(response: acp.RequestPermissionResponse, decisions: DecisionOption<T>[]): T | undefined {
         if (response.outcome.outcome === "cancelled") return undefined;
         const optionId = response.outcome.optionId;
         return decisions.find(({option}) => option.optionId === optionId)?.decision;
@@ -140,9 +129,11 @@ export class CodexApprovalHandler implements ApprovalHandler {
         if (response.outcome.outcome === "cancelled") return this.rejectPermissionsResponse();
         switch (response.outcome.optionId) {
             case ApprovalOptionId.AllowPermissionsForTurn:
-                return this.grantedPermissionsResponse(permissions, "turn");
+                return this.grantedPermissionsResponse(permissions, "turn", false);
+            case ApprovalOptionId.AllowPermissionsForTurnWithStrictAutoReview:
+                return this.grantedPermissionsResponse(permissions, "turn", true);
             case ApprovalOptionId.AllowPermissionsForSession:
-                return this.grantedPermissionsResponse(permissions, "session");
+                return this.grantedPermissionsResponse(permissions, "session", false);
             case ApprovalOptionId.RejectPermissions:
             default:
                 return this.rejectPermissionsResponse();
@@ -152,16 +143,13 @@ export class CodexApprovalHandler implements ApprovalHandler {
     private grantedPermissionsResponse(
         permissions: RequestPermissionProfile,
         scope: "turn" | "session",
+        strictAutoReview: boolean,
     ): PermissionsRequestApprovalResponse {
-        return {
-            permissions: this.grantedPermissions(permissions),
-            scope,
-            strictAutoReview: false,
-        };
+        return {permissions: this.grantedPermissions(permissions), scope, strictAutoReview};
     }
 
     private rejectPermissionsResponse(): PermissionsRequestApprovalResponse {
-        return {permissions: {}, scope: "turn", strictAutoReview: true};
+        return {permissions: {}, scope: "turn", strictAutoReview: false};
     }
 
     private grantedPermissions(permissions: RequestPermissionProfile): GrantedPermissionProfile {

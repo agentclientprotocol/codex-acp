@@ -33,13 +33,8 @@ export function optionPermissionMeta(
     description?: string | null,
 ): acp.PermissionOption["_meta"] | undefined {
     const normalized = nonBlank(description);
-    if (!normalized) {
-        return undefined;
-    }
-    const permission: OptionPermissionMetadata = {
-        version: 1,
-        description: normalized,
-    };
+    if (!normalized) return undefined;
+    const permission: OptionPermissionMetadata = {version: 1, description: normalized};
     return {permission};
 }
 

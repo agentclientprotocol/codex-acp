@@ -1,8 +1,13 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
-import {CodexApprovalHandler} from "./CodexApprovalHandler";
-import {CodexApprovalPresentationStore} from "./CodexApprovalPresentationStore";
+import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
+import {CodexApprovalPresentationStore} from "./permissions/presentation-store";
+import {
+    planImplementationApproved,
+    planImplementationPermissionRequest,
+    planImplementationToolCallId,
+} from "./permissions/plan-review";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./CodexAuthMethod";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
@@ -114,8 +119,6 @@ import {
     parseAgentFileChangeReportRequest,
 } from "./AgentFileChangeReport";
 
-const IMPLEMENT_PLAN_OPTION_ID = "implement_plan";
-const REVISE_PLAN_OPTION_ID = "revise_plan";
 
 export interface SessionState {
     sessionId: string,
@@ -145,6 +148,7 @@ export interface SessionState {
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
+    permissionRequestSequence?: number;
 }
 
 export type SessionFailureCategory =
@@ -2673,42 +2677,14 @@ export class CodexAcpServer {
         plan: CompletedPlan,
         cancellationSignal: AbortSignal,
     ): Promise<boolean> {
-        const toolCallId = `plan-review:${plan.itemId}`;
+        const toolCallId = planImplementationToolCallId(plan);
         try {
             const response = await this.connection.request(
                 acp.methods.client.session.requestPermission,
-                {
-                    sessionId: sessionState.sessionId,
-                    toolCall: {
-                        toolCallId,
-                        title: "Implement this plan?",
-                        kind: "switch_mode",
-                        status: "pending",
-                        rawInput: {plan: plan.text},
-                    },
-                    options: [
-                        {
-                            optionId: IMPLEMENT_PLAN_OPTION_ID,
-                            name: "Yes, implement this plan",
-                            kind: "allow_once",
-                        },
-                        {
-                            optionId: REVISE_PLAN_OPTION_ID,
-                            name: "No, and tell Codex what to do differently",
-                            kind: "reject_once",
-                        },
-                    ],
-                    _meta: {
-                        codex: {
-                            kind: "plan_review",
-                            planItemId: plan.itemId,
-                        },
-                    },
-                },
+                planImplementationPermissionRequest(sessionState.sessionId, plan),
                 {cancellationSignal},
             );
-            const approved = response.outcome.outcome === "selected"
-                && response.outcome.optionId === IMPLEMENT_PLAN_OPTION_ID;
+            const approved = planImplementationApproved(response);
             await this.connection.notify(acp.methods.client.session.update, {
                 sessionId: sessionState.sessionId,
                 update: {
