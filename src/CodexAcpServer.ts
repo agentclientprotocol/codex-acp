@@ -7,6 +7,7 @@ import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 import {
     CodexAcpClient,
+    readMetaSystemPrompt,
     type SessionMetadata,
     type SessionMetadataWithThread,
     type UrlElicitationRequester
@@ -317,6 +318,9 @@ export class CodexAcpServer {
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
             _meta: {
+                capabilities: {
+                    persistentSystemPrompt: true,
+                },
                 steering: {
                     supported: true,
                 },
@@ -655,6 +659,7 @@ export class CodexAcpServer {
     }
 
     async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
+        readMetaSystemPrompt(params._meta);
         logger.log("Loading session...", {sessionId: params.sessionId});
         const {
             sessionId,
@@ -678,6 +683,7 @@ export class CodexAcpServer {
     }
 
     async resumeSession(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
+        readMetaSystemPrompt(params._meta);
         logger.log("Resuming session...", {sessionId: params.sessionId});
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -786,6 +792,7 @@ export class CodexAcpServer {
     async newSession(
         params: acp.NewSessionRequest,
     ): Promise<LegacyNewSessionResponse> {
+        readMetaSystemPrompt(params._meta);
         logger.log("Starting new session...");
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
