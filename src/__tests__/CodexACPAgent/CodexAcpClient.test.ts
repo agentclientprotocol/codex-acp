@@ -937,6 +937,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             sessionId: "session-id",
             cwd: "/workspace",
             additionalDirectories: ["/workspace/extra"],
+            agentMode: AgentMode.Agent,
         }));
 
         await codexAcpAgent.prompt({
@@ -955,6 +956,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             type: "workspaceWrite",
             writableRoots: ["/workspace/extra"],
         });
+        expect(turnStartSpy.mock.calls[0]![0].approvalsReviewer).toBe("auto_review");
     });
 
     function loadNotifications(){

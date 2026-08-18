@@ -44,11 +44,11 @@ describeE2E("E2E file approval tests", () => {
     });
 });
 
-describeE2E("E2E Agent mode file permission tests", () => {
+describeE2E("E2E read-only mode file permission tests", () => {
     let fixture: SpawnedAgentFixture;
 
     beforeEach(async () => {
-        fixture = await createAuthenticatedFixture(AgentMode.Agent);
+        fixture = await createAuthenticatedFixture(AgentMode.ReadOnly);
     });
 
     afterEach(async () => {
@@ -65,7 +65,7 @@ describeE2E("E2E Agent mode file permission tests", () => {
     });
 });
 
-describeE2E("E2E Agent with full access file permission tests", () => {
+describeE2E("E2E full-access mode file permission tests", () => {
     let fixture: SpawnedAgentFixture;
 
     beforeEach(async () => {
