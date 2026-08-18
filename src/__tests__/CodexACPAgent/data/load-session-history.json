@@ -373,8 +373,13 @@
             }
           }
         ],
+        "locations": [
+          {
+            "path": "/test/project/generated-blue-square.png"
+          }
+        ],
         "rawOutput": {
-          "status": "completed",
+          "status": "generating",
           "revisedPrompt": "A tiny blue square",
           "result": "iVBORw0KGgo=",
           "savedPath": "/test/project/generated-blue-square.png"
