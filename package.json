@@ -38,7 +38,7 @@
     "generate-types": "./node_modules/.bin/codex app-server generate-ts --out src/app-server",
     "release:preflight": "bash scripts/release-preflight.sh",
     "test": "vitest run",
-    "test:e2e": "npm run build && RUN_E2E_TESTS=true vitest run src/__tests__/CodexACPAgent/e2e",
+    "test:e2e": "npm run build && RUN_E2E_TESTS=true vitest run --no-file-parallelism --retry=2 src/__tests__/CodexACPAgent/e2e",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc --noEmit -p examples/tsconfig.json",
     "codex-test": "tsx .claude/skills/run-codex/scripts/run-codex-test.ts"

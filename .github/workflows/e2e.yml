@@ -10,6 +10,7 @@ permissions: {}
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -18,9 +19,13 @@ jobs:
         with:
           node-version: '24'
       - name: Configure sandboxing
+        timeout-minutes: 5
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes bubblewrap
+          # A stalled Ubuntu mirror once wedged this step for the full 6h runner
+          # limit, so cap and retry each fetch rather than waiting on it.
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_opts[@]}" update
+          sudo apt-get "${apt_opts[@]}" install --yes bubblewrap
           sudo sysctl -w kernel.unprivileged_userns_clone=1
           if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -28,6 +33,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run e2e tests
+        # The suite drives a live model, so a wedged turn hangs instead of
+        # failing. Bound it well above the ~2min happy path.
+        timeout-minutes: 15
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm run test:e2e
