@@ -406,6 +406,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 upgradeInfo: null,
                 availabilityNux: null,
                 modelSpecialty: null,
+                multiAgentVersion: null,
                 displayName: "gpt-5",
                 description: "test model",
                 hidden: false,
@@ -3303,6 +3304,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             data: [
                 {
                     name: "fs",
+                    pluginId: null,
                     serverInfo: null,
                     tools: {listFiles: {name: "listFiles", inputSchema: {type: "object"}}},
                     resources: [{name: "workspace", uri: "file:///workspace"}],
@@ -3311,6 +3313,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 },
                 {
                     name: "browser",
+                    pluginId: null,
                     serverInfo: null,
                     tools: {},
                     resources: [],
@@ -3360,6 +3363,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             upgradeInfo: null,
             availabilityNux: null,
             modelSpecialty: null,
+            multiAgentVersion: null,
             displayName: 'Codex 5.2',
             description: 'Coding model',
             hidden: false,
@@ -3382,6 +3386,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             upgradeInfo: null,
             availabilityNux: null,
             modelSpecialty: null,
+            multiAgentVersion: null,
             displayName: 'Standard 5.1',
             description: 'Standard model',
             hidden: false,

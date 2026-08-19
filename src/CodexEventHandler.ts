@@ -175,6 +175,7 @@ const STRING_CODEX_ERROR_CATEGORIES = {
     usageLimitExceeded: "quota_exhausted",
     serverOverloaded: "overloaded",
     cyberPolicy: "policy_denied",
+    misalignmentPolicyViolation: "policy_denied",
     internalServerError: "internal_error",
     unauthorized: "auth_required",
     badRequest: "bad_request",
@@ -507,6 +508,8 @@ export class CodexEventHandler {
                 return this.createTerminalInteractionEvent(notification.params);
             // ignored events
             case "thread/deleted":
+            case "thread/reverted":
+            case "thread/queue/changed":
             case "thread/environment/connected":
             case "thread/environment/disconnected":
             case "command/exec/outputDelta":
