@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/agentclientprotocol/codex-acp/compare/v1.6.0...v1.6.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* kill stalled apt from outside and serialize the unit suite ([51e011f](https://github.com/agentclientprotocol/codex-acp/commit/51e011fef27b812b238bf29c2a815f8ad149fa87))
+
 ## [1.6.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.5.1...v1.6.0) (2026-08-19)
 
 
