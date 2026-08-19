@@ -476,7 +476,7 @@ describe("Approval Events", () => {
 
         it("rejects a stale-turn command before opening ACP permission UI", async () => {
             const prompt = setupSessionWithPendingPrompt();
-            prompt.sessionState.currentTurnId = "newer-turn";
+            fixture.getCodexAcpClient().markTurnStale({threadId: sessionId, turnId: "turn-1"});
             const response = await fixture.sendServerRequest<{decision: unknown}>(
                 "item/commandExecution/requestApproval",
                 commandParams(["accept", "decline", "cancel"]),

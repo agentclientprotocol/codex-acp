@@ -4,8 +4,6 @@ import type { ElicitationHandler } from "./CodexAppServerClient";
 import type { ServerNotification } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import type {
-    ItemCompletedNotification,
-    ItemStartedNotification,
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse,
     ToolRequestUserInputParams,
@@ -25,47 +23,14 @@ import {
     type PersistValue,
     type McpElicitationContext,
 } from "./permissions/mcp";
+import type {PermissionPromptContext} from "./permissions/lifecycle";
+import {isRecord, normalizeJsonObject, normalizeJsonValue, recordOrNull} from "./permissions/json";
 type AcpBackedMcpElicitationParams = Extract<
     McpServerElicitationRequestParams,
     { mode: "form" } | { mode: "url" }
 >;
 
 const USER_INPUT_OTHER_FIELD_SUFFIX = "__other";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeJsonValue(value: unknown): JsonValue {
-    if (value === null || value === undefined) {
-        return null;
-    }
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-        return value;
-    }
-    if (typeof value === "bigint") {
-        return Number(value);
-    }
-    if (Array.isArray(value)) {
-        return value.map(normalizeJsonValue);
-    }
-    if (typeof value === "object") {
-        return Object.fromEntries(
-            Object.entries(value)
-                .filter(([, nested]) => nested !== undefined)
-                .map(([key, nested]) => [key, normalizeJsonValue(nested)])
-        );
-    }
-    return String(value);
-}
-
-function normalizeJsonObject(value: Record<string, unknown>): Record<string, JsonValue> {
-    return Object.fromEntries(
-        Object.entries(value)
-            .filter(([, nested]) => nested !== undefined)
-            .map(([key, nested]) => [key, normalizeJsonValue(nested)])
-    );
-}
 
 function normalizeElicitationSchema(value: unknown): acp.ElicitationSchema {
     const normalized = normalizeElicitationSchemaValue(value);
@@ -115,10 +80,6 @@ function normalizeElicitationSchemaValue(value: unknown): unknown {
     return result;
 }
 
-function metaRecord(meta: unknown): Record<string, unknown> | null {
-    return isRecord(meta) ? meta : null;
-}
-
 function contentRecord(content: unknown): Record<string, acp.ElicitationContentValue> {
     return isRecord(content) ? content as Record<string, acp.ElicitationContentValue> : {};
 }
@@ -138,7 +99,7 @@ function elicitationResponseMeta(
     context: McpElicitationContext,
     persist: unknown = undefined
 ): JsonValue | null {
-    const responseMeta = metaRecord(response._meta);
+    const responseMeta = recordOrNull(response._meta);
     const meta = responseMeta ? normalizeJsonObject(responseMeta) : {};
     if (context.isToolApproval) {
         delete meta["persist"];
@@ -179,6 +140,7 @@ function userInputResponseValue(
 export class CodexElicitationHandler implements ElicitationHandler {
     private readonly connection: AcpClientConnection;
     private readonly sessionState: SessionState;
+    private readonly permissionContext: PermissionPromptContext;
     private readonly clientCapabilities: acp.ClientCapabilities | null;
     private readonly cancellationSignal: AbortSignal | undefined;
     // In Rust, the MCP elicitation handler receives ElicitationRequestEvent directly from the MCP
@@ -190,12 +152,9 @@ export class CodexElicitationHandler implements ElicitationHandler {
     // reaches the client.
     //
     // Workaround: before requesting approval, Codex emits an item/started notification with an
-    // mcpToolCall item carrying the call id and server name. We store (threadId, serverName) → callId
-    // here so the elicitation request can correlate back to the already-rendered tool call item.
+    // mcpToolCall item carrying the call id and server name. The shared permission lifecycle stores
+    // (threadId, serverName) → callId so this request can correlate to the rendered tool call item.
     //
-    // App-server does not expose the MCP call id on form requests. Correlate only when there is one
-    // unambiguous pending call for the server; otherwise render a standalone request with its payload.
-    private readonly pendingMcpApprovals = new Map<string, string[]>();
     // The app-server handler exposes URL elicitationId, while serverRequest/resolved only exposes
     // threadId here, so accepted URL elicitations are completed at thread scope.
     private readonly pendingUrlElicitations = new Map<string, Set<string>>();
@@ -203,25 +162,20 @@ export class CodexElicitationHandler implements ElicitationHandler {
     constructor(
         connection: AcpClientConnection,
         sessionState: SessionState,
+        permissionContext: PermissionPromptContext,
         clientCapabilities: acp.ClientCapabilities | null = null,
         cancellationSignal?: AbortSignal
     ) {
         this.connection = connection;
         this.sessionState = sessionState;
+        this.permissionContext = permissionContext;
         this.clientCapabilities = clientCapabilities;
         this.cancellationSignal = cancellationSignal;
     }
 
     async handleNotification(notification: ServerNotification): Promise<void> {
         switch (notification.method) {
-            case "item/started":
-                this.handleItemStarted(notification.params);
-                return;
-            case "item/completed":
-                this.handleItemCompleted(notification.params);
-                return;
             case "serverRequest/resolved":
-                this.clearThread(notification.params.threadId);
                 await this.completeUrlElicitations(notification.params.threadId);
                 return;
             default:
@@ -255,6 +209,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 this.sessionState.sessionId,
                 params,
                 context,
+                () => this.permissionContext.nextStandaloneMcpToolCallId(params.serverName),
             );
             const response = await this.connection.request(
                 acp.methods.client.session.requestPermission,
@@ -354,21 +309,13 @@ export class CodexElicitationHandler implements ElicitationHandler {
     private createMcpElicitationContext(params: McpServerElicitationRequestParams): McpElicitationContext {
         const isToolApproval = isMcpToolCallApproval(params._meta) && this.isMessageOnlyForm(params);
         const persistOptions = parsePersistOptions(params._meta);
-        const correlatedCallId = isToolApproval && (params.mode === "form" || params.mode === "openai/form")
-            ? this.popPendingApproval(params.threadId, params.serverName)
+        const correlatedCallId = isToolApproval
+            ? this.permissionContext.popPendingMcpApproval(params.threadId, params.serverName)
             : undefined;
-        const permissionRequestSequence = (this.sessionState.permissionRequestSequence ?? 0) + 1;
-        this.sessionState.permissionRequestSequence = permissionRequestSequence;
         return {
             isToolApproval,
             persistOptions,
             correlatedCallId,
-            standaloneToolCallId: [
-                "elicitation",
-                this.sessionState.sessionId,
-                params.serverName,
-                permissionRequestSequence,
-            ].join(":"),
         };
     }
 
@@ -407,7 +354,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
             sessionId: this.sessionState.sessionId,
             ...(context.correlatedCallId ? { toolCallId: context.correlatedCallId } : {}),
             message: params.message,
-            _meta: metaRecord(params._meta),
+            _meta: recordOrNull(params._meta),
         };
 
         switch (params.mode) {
@@ -612,50 +559,4 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
     }
 
-    private handleItemStarted(event: ItemStartedNotification): void {
-        if (event.item.type !== "mcpToolCall") {
-            return;
-        }
-        const key = this.key(event.threadId, event.item.server);
-        const pending = this.pendingMcpApprovals.get(key);
-        if (pending) pending.push(event.item.id);
-        else this.pendingMcpApprovals.set(key, [event.item.id]);
-    }
-
-    private handleItemCompleted(event: ItemCompletedNotification): void {
-        if (event.item.type !== "mcpToolCall") {
-            return;
-        }
-        const key = this.key(event.threadId, event.item.server);
-        const pending = this.pendingMcpApprovals.get(key);
-        if (!pending) return;
-        const index = pending.indexOf(event.item.id);
-        if (index >= 0) pending.splice(index, 1);
-        if (pending.length === 0) this.pendingMcpApprovals.delete(key);
-    }
-
-    private popPendingApproval(threadId: string, serverName: string): string | undefined {
-        const key = this.key(threadId, serverName);
-        const pending = this.pendingMcpApprovals.get(key);
-        if (pending?.length !== 1) return undefined;
-        const callId = pending.shift();
-        this.pendingMcpApprovals.delete(key);
-        return callId;
-    }
-
-    private clearThread(threadId: string): void {
-        for (const key of this.pendingMcpApprovals.keys()) {
-            if (this.belongsToThread(key, threadId)) {
-                this.pendingMcpApprovals.delete(key);
-            }
-        }
-    }
-
-    private key(threadId: string, serverName: string): string {
-        return `${threadId}:${serverName}`;
-    }
-
-    private belongsToThread(key: string, threadId: string): boolean {
-        return key.startsWith(`${threadId}:`);
-    }
 }

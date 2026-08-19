@@ -2,7 +2,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
-import {CodexApprovalPresentationStore} from "./permissions/presentation-store";
+import {PermissionLifecycleContext} from "./permissions/lifecycle";
 import {
     planImplementationApproved,
     planImplementationPermissionRequest,
@@ -148,7 +148,6 @@ export interface SessionState {
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
-    permissionRequestSequence?: number;
 }
 
 export type SessionFailureCategory =
@@ -260,6 +259,7 @@ export class CodexAcpServer {
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
     private readonly goalControlGenerations: Map<string, number>;
+    private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
     private readonly codexProcessState: CodexProcessState | null;
     private initializeRequest: acp.InitializeRequest | null = null;
     private providerUpdate: Promise<void> | null = null;
@@ -281,6 +281,7 @@ export class CodexAcpServer {
         this.sessionGenerations = new Map();
         this.sessionOpenGenerations = new Map();
         this.goalControlGenerations = new Map();
+        this.permissionLifecycleContexts = new WeakMap();
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
@@ -1960,6 +1961,14 @@ export class CodexAcpServer {
         return sessionState;
     }
 
+    private permissionLifecycleContext(sessionState: SessionState): PermissionLifecycleContext {
+        const existing = this.permissionLifecycleContexts.get(sessionState);
+        if (existing) return existing;
+        const context = new PermissionLifecycleContext(sessionState);
+        this.permissionLifecycleContexts.set(sessionState, context);
+        return context;
+    }
+
     private resolveSessionMcpServers(
         mcpServers: Array<acp.McpServer>,
         recoverFromStartup: boolean,
@@ -2304,16 +2313,18 @@ export class CodexAcpServer {
                 this.sessionFailureEpoch,
             );
             eventHandler = promptEventHandler;
-            const approvalPresentationStore = new CodexApprovalPresentationStore();
+            const permissionLifecycle = this.permissionLifecycleContext(sessionState);
+            const permissionContext = permissionLifecycle.beginPrompt();
             const approvalHandler = new CodexApprovalHandler(
                 this.connection,
                 sessionState,
-                approvalPresentationStore,
+                permissionContext,
                 activePrompt.signal,
             );
             const elicitationHandler = new CodexElicitationHandler(
                 this.connection,
                 sessionState,
+                permissionContext,
                 this.clientCapabilities,
                 activePrompt.signal,
             );
@@ -2325,7 +2336,7 @@ export class CodexAcpServer {
                     }
                     const completesActiveTurn = event.method === "turn/completed"
                         && event.params.turn.id === sessionState.currentTurnId;
-                    approvalPresentationStore.handleNotification(event);
+                    permissionContext.handleNotification(event);
                     await elicitationHandler.handleNotification(event);
                     await promptEventHandler.handleNotification(event);
                     if (completesActiveTurn) {

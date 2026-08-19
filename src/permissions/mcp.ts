@@ -6,6 +6,7 @@ import type {
 } from "../app-server/v2";
 import {optionPermissionMeta} from "./metadata";
 import {McpApprovalOptionId} from "./option-ids";
+import {isRecord} from "./json";
 
 export type PersistValue = "session" | "always";
 
@@ -13,7 +14,6 @@ export type McpElicitationContext = {
     isToolApproval: boolean;
     persistOptions: Set<PersistValue>;
     correlatedCallId: string | undefined;
-    standaloneToolCallId: string;
 };
 
 export function parsePersistOptions(meta: unknown): Set<PersistValue> {
@@ -88,6 +88,7 @@ export function buildMcpPermissionRequest(
     sessionId: string,
     params: McpServerElicitationRequestParams,
     context: McpElicitationContext,
+    nextStandaloneToolCallId: () => string,
 ): {request: acp.RequestPermissionRequest; correlatedCallId: string | undefined} {
     const messageContent: acp.ToolCallContent = {
         type: "content",
@@ -114,7 +115,7 @@ export function buildMcpPermissionRequest(
             request: {
                 sessionId,
                 toolCall: {
-                    toolCallId: context.standaloneToolCallId,
+                    toolCallId: nextStandaloneToolCallId(),
                     kind: context.isToolApproval ? "execute" : "other",
                     status: "pending",
                     content: [messageContent],
@@ -187,8 +188,4 @@ function permissionOption(
 
 function cancelledResponse(): McpServerElicitationRequestResponse {
     return {action: "cancel", content: null, _meta: null as JsonValue | null};
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
 }
