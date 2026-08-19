@@ -48,7 +48,7 @@ import type {
     UserInput,
 } from "./app-server/v2";
 import packageJson from "../package.json";
-import type {AuthenticationStatusResponse} from "./AcpExtensions";
+import {readSessionForkMessageId, type AuthenticationStatusResponse} from "./AcpExtensions";
 import {createCodexCollaborationMode} from "./CollaborationModeConfig";
 import type {ModeKind} from "./app-server/ModeKind";
 import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUtils";
@@ -492,6 +492,71 @@ export class CodexAcpClient {
             thread: historyResponse.thread,
             additionalDirectories,
         };
+    }
+
+    async forkSession(request: acp.ForkSessionRequest): Promise<SessionMetadata> {
+        const messageId = readSessionForkMessageId(request._meta);
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        await this.refreshSkills(request.cwd, additionalDirectories);
+
+        let lastTurnId: string | undefined;
+        try {
+            if (messageId !== null) {
+                const {thread} = await this.codexClient.threadRead({
+                    threadId: request.sessionId,
+                    includeTurns: true,
+                });
+                lastTurnId = thread.turns.find(
+                    turn => turn.items.some(item => item.id === messageId)
+                )?.id;
+            }
+        } catch (error) {
+            if (
+                error instanceof Error
+                && (
+                    error.message === `thread not loaded: ${request.sessionId}`
+                    || error.message === `no rollout found for thread id ${request.sessionId}`
+                )
+            ) {
+                throw RequestError.resourceNotFound(request.sessionId);
+            }
+            throw error;
+        }
+        if (messageId !== null && lastTurnId === undefined) {
+            throw RequestError.invalidParams(
+                {sessionId: request.sessionId, messageId},
+                `Fork message ${messageId} was not found in session ${request.sessionId}`,
+            );
+        }
+
+        try {
+            const response = await this.codexClient.threadFork({
+                config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+                cwd: request.cwd,
+                modelProvider: await this.getResumeModelProvider(),
+                threadId: request.sessionId,
+                ...(lastTurnId === undefined ? {} : {lastTurnId}),
+            });
+            const models = await this.fetchAvailableModels();
+            const currentModelId = this.createModelId(models, response.model, response.reasoningEffort).toString();
+            return {
+                sessionId: response.thread.id,
+                currentModelId,
+                models,
+                collaborationMode: this.getCollaborationMode(response.thread.id),
+                modelProvider: response.modelProvider,
+                currentServiceTier: response.serviceTier as ServiceTier ?? null,
+                additionalDirectories,
+            };
+        } catch (error) {
+            if (
+                error instanceof Error
+                && error.message.includes(`no rollout found for thread id ${request.sessionId}`)
+            ) {
+                throw RequestError.resourceNotFound(request.sessionId);
+            }
+            throw error;
+        }
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
