@@ -2,7 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it} from "vitest";
-import {McpApprovalOptionId, type McpApprovalOptionId as McpApprovalOptionIdValue} from "../../../McpApprovalOptionId";
+import {McpApprovalOptionId, type McpApprovalOptionId as McpApprovalOptionIdValue} from "../../../permissions/option-ids";
 import {
     createAuthenticatedFixture,
     describeE2E,
@@ -42,7 +42,7 @@ function createMcpPermissionResponder(...optionIds: McpApprovalOptionIdValue[]):
     const queue = [...optionIds];
     return (request) => createMcpPermissionResponse(
         isMcpPermissionRequest(request)
-            ? queue.shift() ?? McpApprovalOptionId.Decline
+            ? queue.shift() ?? McpApprovalOptionId.Cancel
             : null,
     );
 }
@@ -89,8 +89,8 @@ describeE2E("E2E MCP approval tests (configured in session)", () => {
         expectMcpPermissionRequestCount(fixture, sessionId, 1);
     });
 
-    it("ends turn when MCP tool call is rejected", async () => {
-        fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.Decline));
+    it("ends turn when MCP tool call is cancelled", async () => {
+        fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.Cancel));
         const {sessionId, invocationMarkerPath} = await createMcpSession();
 
         expectEndTurn(await fixture.connection.prompt({
