@@ -29,21 +29,19 @@ import {
     requestPermissionMeta,
 } from "./metadata";
 import {additionalPermissionsToolCall, commandToolCall, fileChangeToolCall} from "./presentation";
-import type {CodexApprovalPresentationStore} from "./presentation-store";
+import type {PermissionPromptContext} from "./lifecycle";
 
 export class CodexApprovalHandler implements ApprovalHandler {
     constructor(
         private readonly connection: AcpClientConnection,
         private readonly sessionState: SessionState,
-        private readonly presentationStore: CodexApprovalPresentationStore,
+        private readonly permissionContext: PermissionPromptContext,
         private readonly cancellationSignal?: AbortSignal,
     ) {}
 
     async handleCommandExecution(
         params: CommandExecutionRequestApprovalParams,
     ): Promise<CommandExecutionRequestApprovalResponse> {
-        if (this.isStale(params.turnId)) return {decision: "cancel"};
-
         const authoritativeParams = params as CommandParamsWithAvailableDecisions;
         const decisions = commandDecisionOptions(authoritativeParams);
         if (!decisions) {
@@ -69,12 +67,11 @@ export class CodexApprovalHandler implements ApprovalHandler {
     }
 
     async handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse> {
-        if (this.isStale(params.turnId)) return {decision: "cancel"};
         const decisions = fileChangeDecisionOptions();
         try {
             const response = await this.requestPermission({
                 sessionId: this.sessionState.sessionId,
-                toolCall: fileChangeToolCall(params, this.presentationStore),
+                toolCall: fileChangeToolCall(params, this.permissionContext),
                 options: decisions.map(({option}) => option),
                 _meta: requestPermissionMeta(CODEX_FILE_CHANGE_PERMISSION_TITLE, params.reason),
             });
@@ -88,7 +85,6 @@ export class CodexApprovalHandler implements ApprovalHandler {
     async handlePermissionsRequest(
         params: PermissionsRequestApprovalParams,
     ): Promise<PermissionsRequestApprovalResponse> {
-        if (this.isStale(params.turnId)) return this.rejectPermissionsResponse();
         try {
             const response = await this.requestPermission({
                 sessionId: this.sessionState.sessionId,
@@ -157,9 +153,5 @@ export class CodexApprovalHandler implements ApprovalHandler {
             ...(permissions.network ? {network: permissions.network} : {}),
             ...(permissions.fileSystem ? {fileSystem: permissions.fileSystem} : {}),
         };
-    }
-
-    private isStale(turnId: string): boolean {
-        return this.sessionState.currentTurnId !== null && this.sessionState.currentTurnId !== turnId;
     }
 }

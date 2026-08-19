@@ -8,7 +8,7 @@ import type {
     ThreadItem,
 } from "../app-server/v2";
 import {stripShellPrefix} from "../CommandUtils";
-import type {CodexApprovalPresentationStore} from "./presentation-store";
+import type {PermissionPromptContext} from "./lifecycle";
 
 type FileChangeItem = ThreadItem & {type: "fileChange"};
 type CommandPresentationParams = CommandExecutionRequestApprovalParams & {
@@ -50,9 +50,9 @@ export function commandToolCall(params: CommandPresentationParams): acp.ToolCall
 
 export function fileChangeToolCall(
     params: FileChangeRequestApprovalParams,
-    store: CodexApprovalPresentationStore,
+    permissionContext: PermissionPromptContext,
 ): acp.ToolCallUpdate {
-    const item = store.fileChange(params.itemId);
+    const item = permissionContext.fileChange(params.itemId);
     return {
         toolCallId: params.itemId,
         kind: "edit",
