@@ -1,5 +1,4 @@
 import * as acp from "@agentclientprotocol/sdk";
-import type { SessionState } from "./CodexAcpServer";
 import type { ElicitationHandler } from "./CodexAppServerClient";
 import type { ServerNotification } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
@@ -139,7 +138,6 @@ function userInputResponseValue(
 
 export class CodexElicitationHandler implements ElicitationHandler {
     private readonly connection: AcpClientConnection;
-    private readonly sessionState: SessionState;
     private readonly permissionContext: PermissionPromptContext;
     private readonly clientCapabilities: acp.ClientCapabilities | null;
     private readonly cancellationSignal: AbortSignal | undefined;
@@ -161,13 +159,11 @@ export class CodexElicitationHandler implements ElicitationHandler {
 
     constructor(
         connection: AcpClientConnection,
-        sessionState: SessionState,
         permissionContext: PermissionPromptContext,
         clientCapabilities: acp.ClientCapabilities | null = null,
         cancellationSignal?: AbortSignal
     ) {
         this.connection = connection;
-        this.sessionState = sessionState;
         this.permissionContext = permissionContext;
         this.clientCapabilities = clientCapabilities;
         this.cancellationSignal = cancellationSignal;
@@ -198,7 +194,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 if (params.mode === "url" && result.action === "accept") {
                     this.trackUrlElicitation(params.threadId, params.elicitationId);
                 }
-                await this.publishAcceptedMcpToolApproval(context, result.action === "accept");
+                await this.publishAcceptedMcpToolApproval(params.threadId, context, result.action === "accept");
                 return result;
             }
             if (!this.canUsePermissionFallback(params)) {
@@ -206,7 +202,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
             }
 
             const {request, correlatedCallId} = buildMcpPermissionRequest(
-                this.sessionState.sessionId,
+                params.threadId,
                 params,
                 context,
                 () => this.permissionContext.nextStandaloneMcpToolCallId(params.serverName),
@@ -223,7 +219,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
             );
             if (correlatedCallId !== undefined && result.action === "accept") {
                 await this.connection.notify(acp.methods.client.session.update, {
-                    sessionId: this.sessionState.sessionId,
+                    sessionId: params.threadId,
                     update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
                 });
             }
@@ -351,7 +347,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
         context: McpElicitationContext
     ): acp.CreateElicitationRequest {
         const base = {
-            sessionId: this.sessionState.sessionId,
+            sessionId: params.threadId,
             ...(context.correlatedCallId ? { toolCallId: context.correlatedCallId } : {}),
             message: params.message,
             _meta: recordOrNull(params._meta),
@@ -429,7 +425,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
 
         const firstQuestion = params.questions[0];
         return {
-            sessionId: this.sessionState.sessionId,
+            sessionId: params.threadId,
             toolCallId: params.itemId,
             mode: "form",
             message: params.questions.length === 1 && firstQuestion
@@ -525,6 +521,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
     }
 
     private async publishAcceptedMcpToolApproval(
+        sessionId: string,
         context: McpElicitationContext,
         accepted: boolean
     ): Promise<void> {
@@ -532,7 +529,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
             return;
         }
         await this.connection.notify(acp.methods.client.session.update, {
-            sessionId: this.sessionState.sessionId,
+            sessionId,
             update: { sessionUpdate: "tool_call_update", toolCallId: context.correlatedCallId, status: "in_progress" },
         });
     }

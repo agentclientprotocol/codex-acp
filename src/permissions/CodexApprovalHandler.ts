@@ -1,5 +1,4 @@
 import * as acp from "@agentclientprotocol/sdk";
-import type {SessionState} from "../CodexAcpServer";
 import type {ApprovalHandler} from "../CodexAppServerClient";
 import type {
     CommandExecutionRequestApprovalParams,
@@ -34,7 +33,6 @@ import type {PermissionPromptContext} from "./lifecycle";
 export class CodexApprovalHandler implements ApprovalHandler {
     constructor(
         private readonly connection: AcpClientConnection,
-        private readonly sessionState: SessionState,
         private readonly permissionContext: PermissionPromptContext,
         private readonly cancellationSignal?: AbortSignal,
     ) {}
@@ -51,7 +49,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
 
         try {
             const response = await this.requestPermission({
-                sessionId: this.sessionState.sessionId,
+                sessionId: params.threadId,
                 toolCall: commandToolCall(authoritativeParams),
                 options: decisions.map(({option}) => option),
                 _meta: requestPermissionMeta(
@@ -70,7 +68,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         const decisions = fileChangeDecisionOptions();
         try {
             const response = await this.requestPermission({
-                sessionId: this.sessionState.sessionId,
+                sessionId: params.threadId,
                 toolCall: fileChangeToolCall(params, this.permissionContext),
                 options: decisions.map(({option}) => option),
                 _meta: requestPermissionMeta(CODEX_FILE_CHANGE_PERMISSION_TITLE, params.reason),
@@ -87,7 +85,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
     ): Promise<PermissionsRequestApprovalResponse> {
         try {
             const response = await this.requestPermission({
-                sessionId: this.sessionState.sessionId,
+                sessionId: params.threadId,
                 toolCall: additionalPermissionsToolCall(
                     params.itemId,
                     params.cwd,

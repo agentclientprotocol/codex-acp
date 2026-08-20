@@ -544,6 +544,10 @@ export class CodexAcpClient {
             await this.codexClient.threadUnsubscribe({threadId: sessionId});
         } finally {
             this.codexClient.clearThreadHandlers(sessionId);
+            for (const childSessionId of this.subagentSubscriptions.get(sessionId) ?? []) {
+                this.codexClient.clearThreadHandlers(childSessionId);
+            }
+            this.subagentSubscriptions.delete(sessionId);
         }
     }
 
@@ -782,35 +786,76 @@ export class CodexAcpClient {
         sessionId: string,
         eventHandler: (result: ServerNotification) => void | Promise<void>,
         approvalHandler: ApprovalHandler,
-        elicitationHandler: ElicitationHandler
+        elicitationHandler: ElicitationHandler,
+        supportsSubagents: boolean,
     ) {
-        this.codexClient.onServerNotification(sessionId, (event) => {
+        const dispatch = (event: ServerNotification) => {
             this.enqueueSessionNotification(sessionId, () => eventHandler(event));
+        };
+        const registerInteractiveHandlers = (targetSessionId: string): void => {
+            this.codexClient.onApprovalRequest(targetSessionId, {
+                handleCommandExecution: async (params) => {
+                    await this.waitForSessionNotifications(sessionId);
+                    return await approvalHandler.handleCommandExecution(params);
+                },
+                handleFileChange: async (params) => {
+                    await this.waitForSessionNotifications(sessionId);
+                    return await approvalHandler.handleFileChange(params);
+                },
+                handlePermissionsRequest: async (params) => {
+                    await this.waitForSessionNotifications(sessionId);
+                    return await approvalHandler.handlePermissionsRequest(params);
+                },
+            });
+            this.codexClient.onElicitationRequest(targetSessionId, {
+                handleElicitation: async (params) => {
+                    await this.waitForSessionNotifications(sessionId);
+                    return await elicitationHandler.handleElicitation(params);
+                },
+                handleUserInput: async (params) => {
+                    await this.waitForSessionNotifications(sessionId);
+                    return await elicitationHandler.handleUserInput(params);
+                },
+            });
+        };
+        const subscribeDiscoveredChildren = (event: ServerNotification): void => {
+            if (!supportsSubagents
+                || (event.method !== "item/started" && event.method !== "item/completed")
+                || event.params.item.type !== "collabAgentToolCall"
+                || event.params.item.tool !== "spawnAgent") {
+                return;
+            }
+            let children = this.subagentSubscriptions.get(sessionId);
+            if (!children) {
+                children = new Set();
+                this.subagentSubscriptions.set(sessionId, children);
+            }
+            for (const childSessionId of event.params.item.receiverThreadIds) {
+                if (childSessionId.trim() === "") continue;
+                if (childSessionId === sessionId || childSessionId === event.params.threadId) continue;
+                if (children.has(childSessionId)) continue;
+                children.add(childSessionId);
+                this.codexClient.onServerNotification(childSessionId, (childEvent) => {
+                    const eventThreadId = (childEvent.params as {threadId?: unknown}).threadId;
+                    if (eventThreadId !== childSessionId) {
+                        // Notifications without a thread id are broadcast by
+                        // CodexAppServerClient. The root handler owns those;
+                        // processing them here would duplicate them once per child.
+                        return;
+                    }
+                    subscribeDiscoveredChildren(childEvent);
+                    dispatch(childEvent);
+                });
+                registerInteractiveHandlers(childSessionId);
+            }
+        };
+        this.codexClient.onServerNotification(sessionId, (event) => {
+            // Register synchronously before queueing the spawn update. App-server
+            // may emit the first child event immediately after the root event.
+            subscribeDiscoveredChildren(event);
+            dispatch(event);
         });
-        this.codexClient.onApprovalRequest(sessionId, {
-            handleCommandExecution: async (params) => {
-                await this.waitForSessionNotifications(sessionId);
-                return await approvalHandler.handleCommandExecution(params);
-            },
-            handleFileChange: async (params) => {
-                await this.waitForSessionNotifications(sessionId);
-                return await approvalHandler.handleFileChange(params);
-            },
-            handlePermissionsRequest: async (params) => {
-                await this.waitForSessionNotifications(sessionId);
-                return await approvalHandler.handlePermissionsRequest(params);
-            },
-        });
-        this.codexClient.onElicitationRequest(sessionId, {
-            handleElicitation: async (params) => {
-                await this.waitForSessionNotifications(sessionId);
-                return await elicitationHandler.handleElicitation(params);
-            },
-            handleUserInput: async (params) => {
-                await this.waitForSessionNotifications(sessionId);
-                return await elicitationHandler.handleUserInput(params);
-            },
-        });
+        registerInteractiveHandlers(sessionId);
     }
 
     async waitForSessionNotifications(sessionId: string): Promise<void> {
@@ -839,6 +884,8 @@ export class CodexAcpClient {
             }
         });
     }
+
+    private readonly subagentSubscriptions = new Map<string, Set<string>>();
 
     async sendPrompt(
         request: acp.PromptRequest,

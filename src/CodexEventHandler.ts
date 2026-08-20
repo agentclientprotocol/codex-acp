@@ -72,6 +72,7 @@ import {
     createAgentTextThoughtChunk,
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
+import type {SubagentState} from "./acp-subagents";
 import {logger} from "./Logger";
 import {randomUUID} from "node:crypto";
 import {
@@ -100,6 +101,29 @@ type SessionFailurePolicy = {
 };
 
 const MAX_SESSION_FAILURE_TITLE_LENGTH = 240;
+
+function toSubagentTerminalState(status: string): SubagentState | undefined {
+    switch (status) {
+        case "completed":
+            return "completed";
+        case "interrupted":
+            return "cancelled";
+        case "errored":
+        case "shutdown":
+        case "notFound":
+            return "failed";
+        case "pendingInit":
+        case "running":
+            return undefined;
+        default:
+            return undefined;
+    }
+}
+
+function fallbackSubagentName(sessionId: string): string {
+    const suffix = sessionId.length > 8 ? sessionId.slice(-8) : sessionId;
+    return `Agent ${suffix}`;
+}
 
 const SESSION_FAILURE_POLICY: Record<CodexFailureKind, SessionFailurePolicy> = {
     transport_lost: {
@@ -225,6 +249,13 @@ export class CodexEventHandler {
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly activeSubAgentActivities = new Set<string>();
+    private readonly nativeSubagents = new Map<string, {
+        parentSessionId: string;
+        name: string;
+        task: string;
+        terminalState?: SubagentState;
+    }>();
+    private readonly nativeSubagentWaiters = new Set<() => void>();
 
     constructor(
         connection: AcpClientConnection,
@@ -232,6 +263,7 @@ export class CodexEventHandler {
         supportsPlanUpdates = false,
         supportsTypedSessionFailures = false,
         sessionFailureEpoch: string = randomUUID(),
+        private readonly supportsSubagents = false,
     ) {
         this.sessionState = sessionState;
         this.supportsPlanUpdates = supportsPlanUpdates;
@@ -361,9 +393,136 @@ export class CodexEventHandler {
 
     async handleNotification(notification: ServerNotification) {
         await this.flushPendingErrors();
+        if (await this.handleNativeSubagentNotification(notification)) {
+            return;
+        }
+        const notificationThreadId = (notification.params as {threadId?: unknown}).threadId;
+        if (typeof notificationThreadId === "string"
+            && this.nativeSubagents.get(notificationThreadId)?.terminalState !== undefined) {
+            logger.log(`Ignoring update for terminal subagent ${notificationThreadId}`);
+            return;
+        }
         const updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
-            await this.session.update(updateEvent);
+            await this.session.update(updateEvent, this.notificationSessionId(notification));
+        }
+    }
+
+    private notificationSessionId(notification: ServerNotification): string {
+        const threadId = (notification.params as {threadId?: unknown}).threadId;
+        return typeof threadId === "string" && this.nativeSubagents.has(threadId)
+            ? threadId
+            : this.session.sessionId;
+    }
+
+    private async handleNativeSubagentNotification(notification: ServerNotification): Promise<boolean> {
+        if (!this.supportsSubagents
+            || notification.method !== "item/started" && notification.method !== "item/completed") {
+            return false;
+        }
+        const item = notification.params.item;
+        if (item.type === "subAgentActivity") {
+            const hasNativeRepresentation = this.nativeSubagents.has(item.agentThreadId);
+            if (hasNativeRepresentation && item.kind === "interrupted") {
+                await this.finishNativeSubagent(item.agentThreadId, "cancelled");
+            }
+            // Activity for an announced child is redundant with its dedicated
+            // lifecycle/session. Unknown activity still needs the legacy tool
+            // representation so the client does not lose provider output.
+            return hasNativeRepresentation;
+        }
+        if (item.type !== "collabAgentToolCall") {
+            return false;
+        }
+
+        let hasNativeSpawnRepresentation = false;
+        if (item.tool === "spawnAgent") {
+            const parentSessionId = this.nativeSubagents.has(item.senderThreadId)
+                ? item.senderThreadId
+                : this.session.sessionId;
+            for (const childSessionId of item.receiverThreadIds) {
+                if (childSessionId.trim().length === 0) {
+                    logger.log("Ignoring spawned subagent with an empty thread id");
+                    continue;
+                }
+                if (childSessionId === parentSessionId || childSessionId === this.session.sessionId) {
+                    logger.log(`Ignoring self-referential spawned subagent ${childSessionId}`);
+                    continue;
+                }
+                if (this.nativeSubagents.has(childSessionId)) {
+                    hasNativeSpawnRepresentation = true;
+                    continue;
+                }
+                const child = {
+                    parentSessionId,
+                    name: fallbackSubagentName(childSessionId),
+                    task: item.prompt?.trim() || "Delegated task",
+                };
+                this.nativeSubagents.set(childSessionId, child);
+                hasNativeSpawnRepresentation = true;
+                await this.session.update({
+                    sessionUpdate: "subagent_spawned",
+                    subagentSessionId: childSessionId,
+                    name: child.name,
+                    task: child.task,
+                    capabilities: {},
+                }, parentSessionId);
+            }
+        }
+
+        for (const [childSessionId, state] of Object.entries(item.agentsStates)) {
+            if (!state) continue;
+            const terminalState = toSubagentTerminalState(state.status);
+            if (terminalState) {
+                await this.finishNativeSubagent(childSessionId, terminalState);
+            }
+        }
+        // Only spawn has an equivalent ACP subagent lifecycle representation.
+        // Keep sendInput/resume/wait/close as ordinary tool calls; suppressing
+        // them would silently discard provider operations from the transcript.
+        return item.tool === "spawnAgent" && hasNativeSpawnRepresentation;
+    }
+
+    private async finishNativeSubagent(
+        childSessionId: string,
+        state: SubagentState,
+    ): Promise<void> {
+        const child = this.nativeSubagents.get(childSessionId);
+        if (!child || child.terminalState !== undefined) return;
+        child.terminalState = state;
+        await this.session.update({
+            sessionUpdate: "subagent_state_update",
+            subagentSessionId: childSessionId,
+            state,
+        }, child.parentSessionId);
+        for (const waiter of this.nativeSubagentWaiters) waiter();
+        this.nativeSubagentWaiters.clear();
+    }
+
+    async waitForNativeSubagents(signal: AbortSignal): Promise<void> {
+        while ([...this.nativeSubagents.values()].some(child => child.terminalState === undefined)) {
+            if (signal.aborted) return;
+            await new Promise<void>((resolve) => {
+                const onAbort = () => {
+                    this.nativeSubagentWaiters.delete(onChange);
+                    resolve();
+                };
+                const onChange = () => {
+                    signal.removeEventListener("abort", onAbort);
+                    resolve();
+                };
+                this.nativeSubagentWaiters.add(onChange);
+                signal.addEventListener("abort", onAbort, {once: true});
+            });
+        }
+    }
+
+    async finishOutstandingNativeSubagents(state: SubagentState): Promise<void> {
+        // Children are registered after their parents. Finish descendants first
+        // so every lifecycle update is delivered on a still-live parent stream.
+        const childSessionIds = [...this.nativeSubagents.keys()].reverse();
+        for (const childSessionId of childSessionIds) {
+            await this.finishNativeSubagent(childSessionId, state);
         }
     }
 
