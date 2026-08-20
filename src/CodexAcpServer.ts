@@ -2632,11 +2632,15 @@ export class CodexAcpServer {
             // The app-server subscription is session-scoped and outlives this prompt. Flip routing before
             // awaiting disposal so queued late notifications cannot enter prompt-local buffers.
             promptNotificationsActive = false;
-            await eventHandler?.finishOutstandingNativeSubagents(
-                promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)
-                    ? "cancelled"
-                    : "failed",
-            );
+            try {
+                await eventHandler?.finishOutstandingNativeSubagents(
+                    promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)
+                        ? "cancelled"
+                        : "failed",
+                );
+            } catch (error) {
+                logger.error("Failed to publish terminal subagent state during prompt cleanup", error);
+            }
             if (agentFileChangeReportRequest !== null) {
                 await this.publishAgentFileChangeReport(
                     sessionState,

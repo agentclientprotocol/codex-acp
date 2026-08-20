@@ -73,8 +73,6 @@ export class CodexSubagentEventRouter {
                     name: fallbackName(childSessionId),
                     task: item.prompt?.trim() || "Delegated task",
                 };
-                this.children.set(childSessionId, child);
-                representedSpawn = true;
                 await this.publish({
                     sessionUpdate: "subagent_spawned",
                     subagentSessionId: childSessionId,
@@ -82,6 +80,8 @@ export class CodexSubagentEventRouter {
                     task: child.task,
                     capabilities: {},
                 }, parentSessionId);
+                this.children.set(childSessionId, child);
+                representedSpawn = true;
             }
         }
 
@@ -156,12 +156,12 @@ export class CodexSubagentEventRouter {
     private async finish(childSessionId: string, state: SubagentState): Promise<void> {
         const child = this.children.get(childSessionId);
         if (!child || child.terminalState !== undefined) return;
-        child.terminalState = state;
         await this.publish({
             sessionUpdate: "subagent_state_update",
             subagentSessionId: childSessionId,
             state,
         }, child.parentSessionId);
+        child.terminalState = state;
         for (const waiter of this.waiters) waiter();
         this.waiters.clear();
     }
