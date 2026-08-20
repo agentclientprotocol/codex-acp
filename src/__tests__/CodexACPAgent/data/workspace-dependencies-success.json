@@ -1,0 +1,9 @@
+{
+  "contentItems": [
+    {
+      "type": "inputText",
+      "text": "Workspace dependencies are available for this local thread.\n\n### Workspace Dependencies\nUse these bundled paths for sheets, slides, documents, PDFs, images, or browser automation:\n- Bundle version: `test-bundle`\n- Git executable: `<runtime>/dependencies/bin/fallback/git`\n- Node.js executable: `<runtime>/dependencies/node/bin/node`\n- Node.js packages: `<runtime>/dependencies/node/node_modules`\n- pnpm executable: `<runtime>/dependencies/bin/fallback/pnpm`\n- Python executable: `<runtime>/dependencies/python/bin/python3`\n- Python packages: `<runtime>/dependencies/python`\n- Override binaries: `<runtime>/dependencies/bin/override`\n- Fallback binaries: `<runtime>/dependencies/bin/fallback`"
+    }
+  ],
+  "success": true
+}
