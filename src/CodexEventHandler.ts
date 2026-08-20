@@ -41,8 +41,6 @@ import type { McpStartupCompleteEvent } from "./app-server/McpStartupCompleteEve
 import {toTokenCount} from "./TokenCount";
 import {
     commandExecutionUsesTerminalOutput,
-    createCollabAgentToolCallCompleteUpdate,
-    createCollabAgentToolCallUpdate,
     createCommandExecutionUpdate,
     createContextCompactionCompleteUpdate,
     createContextCompactionStartUpdate,
@@ -59,7 +57,6 @@ import {
     createFuzzyFileSearchComplete,
     createFuzzyFileSearchStartOrUpdate,
     createMcpToolCallUpdate,
-    createSubAgentActivityUpdate,
     createWebSearchCompleteUpdate,
     createWebSearchStartUpdate,
     fuzzyFileSearchToolCallId,
@@ -72,7 +69,6 @@ import {
     createAgentTextThoughtChunk,
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
-import type {SubagentState} from "./acp-subagents";
 import {logger} from "./Logger";
 import {randomUUID} from "node:crypto";
 import {
@@ -82,6 +78,8 @@ import {
     AIR_SESSION_FAILURE_KEY,
     JETBRAINS_META_KEY,
 } from "./AirExtension";
+import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
+import type {SubagentState} from "./subagents/AcpSubagents";
 
 export { stripShellPrefix };
 
@@ -101,29 +99,6 @@ type SessionFailurePolicy = {
 };
 
 const MAX_SESSION_FAILURE_TITLE_LENGTH = 240;
-
-function toSubagentTerminalState(status: string): SubagentState | undefined {
-    switch (status) {
-        case "completed":
-            return "completed";
-        case "interrupted":
-            return "cancelled";
-        case "errored":
-        case "shutdown":
-        case "notFound":
-            return "failed";
-        case "pendingInit":
-        case "running":
-            return undefined;
-        default:
-            return undefined;
-    }
-}
-
-function fallbackSubagentName(sessionId: string): string {
-    const suffix = sessionId.length > 8 ? sessionId.slice(-8) : sessionId;
-    return `Agent ${suffix}`;
-}
 
 const SESSION_FAILURE_POLICY: Record<CodexFailureKind, SessionFailurePolicy> = {
     transport_lost: {
@@ -248,14 +223,7 @@ export class CodexEventHandler {
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
-    private readonly activeSubAgentActivities = new Set<string>();
-    private readonly nativeSubagents = new Map<string, {
-        parentSessionId: string;
-        name: string;
-        task: string;
-        terminalState?: SubagentState;
-    }>();
-    private readonly nativeSubagentWaiters = new Set<() => void>();
+    private readonly subagents: CodexSubagentEventRouter;
 
     constructor(
         connection: AcpClientConnection,
@@ -263,13 +231,19 @@ export class CodexEventHandler {
         supportsPlanUpdates = false,
         supportsTypedSessionFailures = false,
         sessionFailureEpoch: string = randomUUID(),
-        private readonly supportsSubagents = false,
+        supportsSubagents = false,
     ) {
         this.sessionState = sessionState;
         this.supportsPlanUpdates = supportsPlanUpdates;
         this.supportsTypedSessionFailures = supportsTypedSessionFailures;
         this.sessionFailureEpoch = sessionFailureEpoch;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
+        this.subagents = new CodexSubagentEventRouter(
+            sessionState.sessionId,
+            supportsSubagents,
+            (update, sessionId) => this.session.update(update, sessionId),
+            (message) => logger.log(message),
+        );
         if (sessionState.sessionFailure !== undefined) {
             this.failuresById.set(sessionState.sessionFailure.id, sessionState.sessionFailure);
         }
@@ -393,143 +367,24 @@ export class CodexEventHandler {
 
     async handleNotification(notification: ServerNotification) {
         await this.flushPendingErrors();
-        if (await this.handleNativeSubagentNotification(notification)) {
+        if (await this.subagents.handle(notification)) {
             return;
         }
-        const notificationThreadId = (notification.params as {threadId?: unknown}).threadId;
-        if (typeof notificationThreadId === "string"
-            && this.nativeSubagents.get(notificationThreadId)?.terminalState !== undefined) {
-            logger.log(`Ignoring update for terminal subagent ${notificationThreadId}`);
+        if (this.subagents.shouldIgnore(notification)) {
             return;
         }
         const updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
-            await this.session.update(updateEvent, this.notificationSessionId(notification));
+            await this.session.update(updateEvent, this.subagents.notificationSessionId(notification));
         }
-    }
-
-    private notificationSessionId(notification: ServerNotification): string {
-        const threadId = (notification.params as {threadId?: unknown}).threadId;
-        return typeof threadId === "string" && this.nativeSubagents.has(threadId)
-            ? threadId
-            : this.session.sessionId;
-    }
-
-    private async handleNativeSubagentNotification(notification: ServerNotification): Promise<boolean> {
-        if (notification.method !== "item/started" && notification.method !== "item/completed") {
-            return false;
-        }
-        const item = notification.params.item;
-        if (!this.supportsSubagents) {
-            // Subagents are an all-or-nothing negotiated surface. Legacy collaboration
-            // tools must not leak a second, tool-shaped representation to clients that
-            // did not advertise native child sessions. Approval requests use their own
-            // ACP request path and remain available on the root session.
-            return item.type === "collabAgentToolCall" || item.type === "subAgentActivity";
-        }
-        if (item.type === "subAgentActivity") {
-            const hasNativeRepresentation = this.nativeSubagents.has(item.agentThreadId);
-            if (hasNativeRepresentation && item.kind === "interrupted") {
-                await this.finishNativeSubagent(item.agentThreadId, "cancelled");
-            }
-            // Activity for an announced child is redundant with its dedicated
-            // lifecycle/session. Unknown activity still needs the legacy tool
-            // representation so the client does not lose provider output.
-            return hasNativeRepresentation;
-        }
-        if (item.type !== "collabAgentToolCall") {
-            return false;
-        }
-
-        let hasNativeSpawnRepresentation = false;
-        if (item.tool === "spawnAgent") {
-            const parentSessionId = this.nativeSubagents.has(item.senderThreadId)
-                ? item.senderThreadId
-                : this.session.sessionId;
-            for (const childSessionId of item.receiverThreadIds) {
-                if (childSessionId.trim().length === 0) {
-                    logger.log("Ignoring spawned subagent with an empty thread id");
-                    continue;
-                }
-                if (childSessionId === parentSessionId || childSessionId === this.session.sessionId) {
-                    logger.log(`Ignoring self-referential spawned subagent ${childSessionId}`);
-                    continue;
-                }
-                if (this.nativeSubagents.has(childSessionId)) {
-                    hasNativeSpawnRepresentation = true;
-                    continue;
-                }
-                const child = {
-                    parentSessionId,
-                    name: fallbackSubagentName(childSessionId),
-                    task: item.prompt?.trim() || "Delegated task",
-                };
-                this.nativeSubagents.set(childSessionId, child);
-                hasNativeSpawnRepresentation = true;
-                await this.session.update({
-                    sessionUpdate: "subagent_spawned",
-                    subagentSessionId: childSessionId,
-                    name: child.name,
-                    task: child.task,
-                    capabilities: {},
-                }, parentSessionId);
-            }
-        }
-
-        for (const [childSessionId, state] of Object.entries(item.agentsStates)) {
-            if (!state) continue;
-            const terminalState = toSubagentTerminalState(state.status);
-            if (terminalState) {
-                await this.finishNativeSubagent(childSessionId, terminalState);
-            }
-        }
-        // Only spawn has an equivalent ACP subagent lifecycle representation.
-        // Keep sendInput/resume/wait/close as ordinary tool calls; suppressing
-        // them would silently discard provider operations from the transcript.
-        return item.tool === "spawnAgent" && hasNativeSpawnRepresentation;
-    }
-
-    private async finishNativeSubagent(
-        childSessionId: string,
-        state: SubagentState,
-    ): Promise<void> {
-        const child = this.nativeSubagents.get(childSessionId);
-        if (!child || child.terminalState !== undefined) return;
-        child.terminalState = state;
-        await this.session.update({
-            sessionUpdate: "subagent_state_update",
-            subagentSessionId: childSessionId,
-            state,
-        }, child.parentSessionId);
-        for (const waiter of this.nativeSubagentWaiters) waiter();
-        this.nativeSubagentWaiters.clear();
     }
 
     async waitForNativeSubagents(signal: AbortSignal): Promise<void> {
-        while ([...this.nativeSubagents.values()].some(child => child.terminalState === undefined)) {
-            if (signal.aborted) return;
-            await new Promise<void>((resolve) => {
-                const onAbort = () => {
-                    this.nativeSubagentWaiters.delete(onChange);
-                    resolve();
-                };
-                const onChange = () => {
-                    signal.removeEventListener("abort", onAbort);
-                    resolve();
-                };
-                this.nativeSubagentWaiters.add(onChange);
-                signal.addEventListener("abort", onAbort, {once: true});
-            });
-        }
+        await this.subagents.wait(signal);
     }
 
     async finishOutstandingNativeSubagents(state: SubagentState): Promise<void> {
-        // Children are registered after their parents. Finish descendants first
-        // so every lifecycle update is delivered on a still-live parent stream.
-        const childSessionIds = [...this.nativeSubagents.keys()].reverse();
-        for (const childSessionId of childSessionIds) {
-            await this.finishNativeSubagent(childSessionId, state);
-        }
+        await this.subagents.finishOutstanding(state);
     }
 
     async flushPendingPlanUpdates(): Promise<void> {
@@ -846,15 +701,14 @@ export class CodexEventHandler {
                 this.activeImageGenerationItems.add(event.item.id);
                 return createImageGenerationStartUpdate(event.item);
             case "collabAgentToolCall":
-                return createCollabAgentToolCallUpdate(event.item);
+                return this.subagents.legacyCollaborationStarted(event.item);
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
                 return null;
             case "contextCompaction":
                 return createContextCompactionStartUpdate(event.item);
             case "subAgentActivity":
-                this.activeSubAgentActivities.add(event.item.id);
-                return createSubAgentActivityUpdate(event.item, "in_progress", "tool_call");
+                return this.subagents.legacyActivityStarted(event.item);
             case "sleep":
             case "userMessage":
             case "hookPrompt":
@@ -903,7 +757,7 @@ export class CodexEventHandler {
             case "webSearch":
                 return createWebSearchCompleteUpdate(event.item);
             case "collabAgentToolCall":
-                return createCollabAgentToolCallCompleteUpdate(event.item);
+                return this.subagents.legacyCollaborationCompleted(event.item);
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
                 return null;
@@ -916,12 +770,8 @@ export class CodexEventHandler {
             case "contextCompaction":
                 return createContextCompactionCompleteUpdate(event.item);
             //ignored types
-            case "subAgentActivity": {
-                const sessionUpdate = this.activeSubAgentActivities.delete(event.item.id)
-                    ? "tool_call_update"
-                    : "tool_call";
-                return createSubAgentActivityUpdate(event.item, "completed", sessionUpdate);
-            }
+            case "subAgentActivity":
+                return this.subagents.legacyActivityCompleted(event.item);
             case "sleep":
             case "userMessage":
             case "hookPrompt":
