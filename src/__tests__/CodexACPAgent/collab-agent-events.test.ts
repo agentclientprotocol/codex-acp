@@ -25,7 +25,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
     });
 
-    it("maps live collab agent tool calls to ACP tool call updates", async () => {
+    it("hides collaboration lifecycle when the client lacks subagent capability but keeps permissions", async () => {
         const notifications: ServerNotification[] = [
             {
                 method: "item/started",
@@ -77,16 +77,37 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                     },
                 },
             },
+            {
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    itemId: "parent-message",
+                    delta: "Visible parent output",
+                },
+            },
         ];
 
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
 
-        await expect(`${mockFixture.getAcpConnectionDump([])}\n`).toMatchFileSnapshot(
-            "data/collab-agent-tool-call-flow.json"
-        );
+        expect(JSON.stringify(mockFixture.getAcpConnectionEvents([]))).not.toContain("call-spawn-weather");
+
+        mockFixture.setPermissionResponse({outcome: {outcome: "selected", optionId: "allow_once"}});
+        await mockFixture.sendServerRequest("item/commandExecution/requestApproval", {
+            threadId: "thread-paris",
+            turnId: "turn-child",
+            itemId: "child-command",
+            reason: "Check the weather service",
+            startedAtMs: 0,
+            environmentId: null,
+            proposedExecpolicyAmendment: null,
+        });
+        const permissionRequest = mockFixture.getAcpConnectionEvents([])
+            .find(event => event.method === "requestPermission" && event.args[0].toolCall.toolCallId === "child-command");
+        expect(permissionRequest?.args[0].sessionId).toBe(sessionId);
     });
 
-    it("maps live subagent activity to an ACP tool call", async () => {
+    it("hides legacy subagent activity when the client lacks subagent capability", async () => {
         const notifications: ServerNotification[] = [
             {
                 method: "item/completed",
@@ -103,13 +124,20 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                     },
                 },
             },
+            {
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    itemId: "parent-message",
+                    delta: "Visible parent output",
+                },
+            },
         ];
 
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
 
-        await expect(`${mockFixture.getAcpConnectionDump([])}\n`).toMatchFileSnapshot(
-            "data/subagent-activity-flow.json"
-        );
+        expect(JSON.stringify(mockFixture.getAcpConnectionEvents([]))).not.toContain("call-spawn-weather");
     });
 
     it("emits native lifecycle and routes child output after capability negotiation", async () => {
