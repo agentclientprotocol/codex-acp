@@ -1,0 +1,32 @@
+{
+  "eventType": "request",
+  "method": "thread/fork",
+  "params": {
+    "config": {
+      "projects": {
+        "/workspace": {
+          "trust_level": "trusted"
+        }
+      }
+    },
+    "cwd": "/workspace",
+    "ephemeral": false,
+    "modelProvider": "openai",
+    "threadId": "parent-session"
+  }
+}
+{
+  "eventType": "response",
+  "placeholder": "thread/fork"
+}
+{
+  "eventType": "request",
+  "method": "thread/unsubscribe",
+  "params": {
+    "threadId": "child-session"
+  }
+}
+{
+  "eventType": "response",
+  "status": "unsubscribed"
+}
