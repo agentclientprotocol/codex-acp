@@ -94,6 +94,10 @@ import {
     createUserMessageChunk,
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot,} from "./ThreadGoalSnapshot";
+import {
+    clientSupportsSubagents,
+    type SubagentAwareSessionCapabilities,
+} from "./acp-subagents";
 import {randomUUID} from "node:crypto";
 import {once} from "node:events";
 import {
@@ -310,6 +314,14 @@ export class CodexAcpServer {
         this.terminalOutputMode = resolveTerminalOutputMode(_params.clientCapabilities);
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
+        const sessionCapabilities: SubagentAwareSessionCapabilities = {
+            resume: { },
+            list: { },
+            close: { },
+            delete: { },
+            additionalDirectories: {},
+            ...(clientSupportsSubagents(_params.clientCapabilities) ? {subagents: {}} : {}),
+        };
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
             agentInfo: {
@@ -327,13 +339,7 @@ export class CodexAcpServer {
                     embeddedContext: true,
                     image: true
                 },
-                sessionCapabilities: {
-                    resume: { },
-                    list: { },
-                    close: { },
-                    delete: { },
-                    additionalDirectories: {},
-                },
+                sessionCapabilities,
                 mcpCapabilities: {
                     acp: false,
                     http: true,
@@ -2240,6 +2246,7 @@ export class CodexAcpServer {
             : null;
         let agentFileChangeReportTurnId: string | null = null;
         let agentFileChangeReportUnavailableReason: AgentFileChangeReportUnavailableReason = "providerError";
+        let promptWasCancelled = false;
         let recoverableSessionFailure = sessionState.sessionFailure;
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
@@ -2266,6 +2273,7 @@ export class CodexAcpServer {
             }
         };
         const cancelledPromptResponse = (): acp.PromptResponse => {
+            promptWasCancelled = true;
             agentFileChangeReportTurnId = null;
             agentFileChangeReportUnavailableReason = "cancelled";
             return this.cancelledPromptResponse(sessionState);
@@ -2278,12 +2286,12 @@ export class CodexAcpServer {
                 clientSupportsPlanUpdates(this.clientCapabilities),
                 clientSupportsTypedSessionFailures(this.clientCapabilities),
                 this.sessionFailureEpoch,
+                clientSupportsSubagents(this.clientCapabilities),
             );
             eventHandler = promptEventHandler;
-            const approvalHandler = new CodexApprovalHandler(this.connection, sessionState, activePrompt.signal);
+            const approvalHandler = new CodexApprovalHandler(this.connection, activePrompt.signal);
             const elicitationHandler = new CodexElicitationHandler(
                 this.connection,
-                sessionState,
                 this.clientCapabilities,
                 activePrompt.signal,
             );
@@ -2304,7 +2312,8 @@ export class CodexAcpServer {
                     }
                 },
                 approvalHandler,
-                elicitationHandler);
+                elicitationHandler,
+                clientSupportsSubagents(this.clientCapabilities));
 
             if (activePrompt.signal.aborted) {
                 return cancelledPromptResponse();
@@ -2456,6 +2465,8 @@ export class CodexAcpServer {
             }
 
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+            await eventHandler.waitForNativeSubagents(activePrompt.signal);
+            await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
             await eventHandler.flushPendingErrors();
             await eventHandler.handleFailedTurn(turnCompleted.turn);
             promptNotificationsActive = false;
@@ -2549,6 +2560,8 @@ export class CodexAcpServer {
                     }
 
                     await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                    await eventHandler.waitForNativeSubagents(activePrompt.signal);
+                    await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                     await eventHandler.flushPendingErrors();
                     await eventHandler.handleFailedTurn(turnCompleted.turn);
                     promptNotificationsActive = false;
@@ -2619,6 +2632,11 @@ export class CodexAcpServer {
             // The app-server subscription is session-scoped and outlives this prompt. Flip routing before
             // awaiting disposal so queued late notifications cannot enter prompt-local buffers.
             promptNotificationsActive = false;
+            await eventHandler?.finishOutstandingNativeSubagents(
+                promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)
+                    ? "cancelled"
+                    : "failed",
+            );
             if (agentFileChangeReportRequest !== null) {
                 await this.publishAgentFileChangeReport(
                     sessionState,
