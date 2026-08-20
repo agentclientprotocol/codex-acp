@@ -86,6 +86,7 @@ export type UrlElicitationRequest = Omit<CreateUrlElicitationRequest, "mode" | "
 
 export interface UrlElicitationRequester {
     elicitUrl(request: UrlElicitationRequest): Promise<acp.CreateElicitationResponse>;
+    completeElicitation(): Promise<void>;
 }
 
 /**
@@ -200,16 +201,34 @@ export class CodexAcpClient {
         if (loginResponse.type !== "chatgptDeviceCode") {
             return false;
         }
-        const elicitationResponse = await urlElicitationRequester.elicitUrl({
+        const elicitationResponsePromise = Promise.resolve(urlElicitationRequester.elicitUrl({
             url: loginResponse.verificationUrl,
             message: `Sign in to ChatGPT and enter this code: ${loginResponse.userCode}`,
             elicitationId: loginResponse.loginId,
-        });
-        if (!acp.CreateElicitationResponse.isAccept(elicitationResponse)) {
+        }));
+        const first = await Promise.race([
+            loginCompletedPromise.then(result => ({
+                type: "loginCompleted" as const,
+                result,
+            })),
+            elicitationResponsePromise.then(response => ({
+                type: "elicitationResponse" as const,
+                response,
+            })),
+        ]);
+
+        if (first.type === "loginCompleted") {
+            await urlElicitationRequester.completeElicitation();
+            return first.result.success;
+        }
+
+        if (!acp.CreateElicitationResponse.isAccept(first.response)) {
             await this.codexClient.accountLoginCancel({loginId: loginResponse.loginId});
             return false;
         }
+
         const result = await loginCompletedPromise;
+        await urlElicitationRequester.completeElicitation();
         return result.success;
     }
 

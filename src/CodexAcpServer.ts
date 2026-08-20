@@ -858,12 +858,24 @@ export class CodexAcpServer {
         if (requestId == null || !clientSupportsUrlElicitation(this.clientCapabilities)) {
             return undefined;
         }
+        let elicitationId: string | null = null;
         return {
-            elicitUrl: (request) => this.connection.request(acp.methods.client.elicitation.create, {
-                mode: "url",
-                requestId,
-                ...request,
-            }),
+            elicitUrl: (request) => {
+                elicitationId = request.elicitationId;
+                return this.connection.request(acp.methods.client.elicitation.create, {
+                    mode: "url",
+                    requestId,
+                    ...request,
+                });
+            },
+            completeElicitation: async () => {
+                if (elicitationId === null) {
+                    return;
+                }
+                await this.connection.notify(acp.methods.client.elicitation.complete, {
+                    elicitationId,
+                });
+            },
         };
     }
 
