@@ -63,6 +63,7 @@ import {
     createReportedAgentFileChangeReport,
     createUnavailableAgentFileChangeReport,
 } from "./AgentFileChangeReport";
+import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -108,6 +109,7 @@ export class CodexAcpClient {
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
+    private readonly subagents: CodexSubagentSubscriptions;
     private skillExtraRoots: string[] = [];
     private configPath: string | null = null;
 
@@ -117,6 +119,7 @@ export class CodexAcpClient {
         this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
         this.gatewayConfig = null;
+        this.subagents = new CodexSubagentSubscriptions(codexClient);
     }
 
     private readonly defaultClientInfo: ClientInfo = {
@@ -525,10 +528,7 @@ export class CodexAcpClient {
             await this.codexClient.threadUnsubscribe({threadId: sessionId});
         } finally {
             this.codexClient.clearThreadHandlers(sessionId);
-            for (const childSessionId of this.subagentSubscriptions.get(sessionId) ?? []) {
-                this.codexClient.clearThreadHandlers(childSessionId);
-            }
-            this.subagentSubscriptions.delete(sessionId);
+            this.subagents.clear(sessionId);
         }
     }
 
@@ -773,88 +773,14 @@ export class CodexAcpClient {
         const dispatch = (event: ServerNotification) => {
             this.enqueueSessionNotification(sessionId, () => eventHandler(event));
         };
-        const registerInteractiveHandlers = (targetSessionId: string, includeElicitations = true): void => {
-            this.codexClient.onApprovalRequest(targetSessionId, {
-                handleCommandExecution: async (params) => {
-                    await this.waitForSessionNotifications(sessionId);
-                    return await approvalHandler.handleCommandExecution(
-                        !supportsSubagents && targetSessionId !== sessionId
-                            ? {...params, threadId: sessionId}
-                            : params
-                    );
-                },
-                handleFileChange: async (params) => {
-                    await this.waitForSessionNotifications(sessionId);
-                    return await approvalHandler.handleFileChange(
-                        !supportsSubagents && targetSessionId !== sessionId
-                            ? {...params, threadId: sessionId}
-                            : params
-                    );
-                },
-                handlePermissionsRequest: async (params) => {
-                    await this.waitForSessionNotifications(sessionId);
-                    return await approvalHandler.handlePermissionsRequest(
-                        !supportsSubagents && targetSessionId !== sessionId
-                            ? {...params, threadId: sessionId}
-                            : params
-                    );
-                },
-            });
-            if (includeElicitations) {
-                this.codexClient.onElicitationRequest(targetSessionId, {
-                    handleElicitation: async (params) => {
-                        await this.waitForSessionNotifications(sessionId);
-                        return await elicitationHandler.handleElicitation(params);
-                    },
-                    handleUserInput: async (params) => {
-                        await this.waitForSessionNotifications(sessionId);
-                        return await elicitationHandler.handleUserInput(params);
-                    },
-                });
-            }
-        };
-        const subscribeDiscoveredChildren = (event: ServerNotification): void => {
-            if ((event.method !== "item/started" && event.method !== "item/completed")
-                || event.params.item.type !== "collabAgentToolCall"
-                || event.params.item.tool !== "spawnAgent") {
-                return;
-            }
-            let children = this.subagentSubscriptions.get(sessionId);
-            if (!children) {
-                children = new Set();
-                this.subagentSubscriptions.set(sessionId, children);
-            }
-            for (const childSessionId of event.params.item.receiverThreadIds) {
-                if (childSessionId.trim() === "") continue;
-                if (childSessionId === sessionId || childSessionId === event.params.threadId) continue;
-                if (children.has(childSessionId)) continue;
-                children.add(childSessionId);
-                this.codexClient.onServerNotification(childSessionId, (childEvent) => {
-                    const eventThreadId = (childEvent.params as {threadId?: unknown}).threadId;
-                    if (eventThreadId !== childSessionId) {
-                        // Notifications without a thread id are broadcast by
-                        // CodexAppServerClient. The root handler owns those;
-                        // processing them here would duplicate them once per child.
-                        return;
-                    }
-                    subscribeDiscoveredChildren(childEvent);
-                    if (supportsSubagents) {
-                        dispatch(childEvent);
-                    }
-                });
-                // Without native subagent negotiation only permission requests
-                // cross the hidden child boundary. Other child interaction and
-                // transcript events remain private to the provider.
-                registerInteractiveHandlers(childSessionId, supportsSubagents);
-            }
-        };
-        this.codexClient.onServerNotification(sessionId, (event) => {
-            // Register synchronously before queueing the spawn update. App-server
-            // may emit the first child event immediately after the root event.
-            subscribeDiscoveredChildren(event);
-            dispatch(event);
+        this.subagents.subscribe({
+            rootSessionId: sessionId,
+            supportsSubagents,
+            dispatch,
+            approvalHandler,
+            elicitationHandler,
+            waitForRootNotifications: () => this.waitForSessionNotifications(sessionId),
         });
-        registerInteractiveHandlers(sessionId);
     }
 
     async waitForSessionNotifications(sessionId: string): Promise<void> {
@@ -883,8 +809,6 @@ export class CodexAcpClient {
             }
         });
     }
-
-    private readonly subagentSubscriptions = new Map<string, Set<string>>();
 
     async sendPrompt(
         request: acp.PromptRequest,

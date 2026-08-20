@@ -4,14 +4,7 @@ import type {
     SessionNotification,
 } from "@agentclientprotocol/sdk";
 
-/**
- * Temporary typed surface for agentclientprotocol/agent-client-protocol#1992.
- *
- * The wire contract is already defined by the ACP draft, but the published
- * TypeScript SDK does not contain it yet. Keep the compatibility boundary in
- * this file so it can be replaced by SDK exports without changing lifecycle
- * code when the draft ships.
- */
+/** Temporary typed surface for agentclientprotocol/agent-client-protocol#1992. */
 export type SubagentSessionCapabilities = {
     cancel?: boolean;
     close?: boolean;

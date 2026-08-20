@@ -97,7 +97,7 @@ import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot,} 
 import {
     clientSupportsSubagents,
     type SubagentAwareSessionCapabilities,
-} from "./acp-subagents";
+} from "./subagents/AcpSubagents";
 import {randomUUID} from "node:crypto";
 import {once} from "node:events";
 import {

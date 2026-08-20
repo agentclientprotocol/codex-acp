@@ -2,7 +2,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import {
     type AcpSessionUpdate,
     asSdkSessionNotification,
-} from "./acp-subagents";
+} from "./subagents/AcpSubagents";
 
 export type AcpClientConnection = Pick<acp.AgentContext, "notify" | "request">;
 
