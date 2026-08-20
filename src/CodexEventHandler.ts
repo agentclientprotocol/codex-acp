@@ -416,11 +416,17 @@ export class CodexEventHandler {
     }
 
     private async handleNativeSubagentNotification(notification: ServerNotification): Promise<boolean> {
-        if (!this.supportsSubagents
-            || notification.method !== "item/started" && notification.method !== "item/completed") {
+        if (notification.method !== "item/started" && notification.method !== "item/completed") {
             return false;
         }
         const item = notification.params.item;
+        if (!this.supportsSubagents) {
+            // Subagents are an all-or-nothing negotiated surface. Legacy collaboration
+            // tools must not leak a second, tool-shaped representation to clients that
+            // did not advertise native child sessions. Approval requests use their own
+            // ACP request path and remain available on the root session.
+            return item.type === "collabAgentToolCall" || item.type === "subAgentActivity";
+        }
         if (item.type === "subAgentActivity") {
             const hasNativeRepresentation = this.nativeSubagents.has(item.agentThreadId);
             if (hasNativeRepresentation && item.kind === "interrupted") {

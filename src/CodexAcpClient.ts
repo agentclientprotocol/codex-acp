@@ -773,35 +773,48 @@ export class CodexAcpClient {
         const dispatch = (event: ServerNotification) => {
             this.enqueueSessionNotification(sessionId, () => eventHandler(event));
         };
-        const registerInteractiveHandlers = (targetSessionId: string): void => {
+        const registerInteractiveHandlers = (targetSessionId: string, includeElicitations = true): void => {
             this.codexClient.onApprovalRequest(targetSessionId, {
                 handleCommandExecution: async (params) => {
                     await this.waitForSessionNotifications(sessionId);
-                    return await approvalHandler.handleCommandExecution(params);
+                    return await approvalHandler.handleCommandExecution(
+                        !supportsSubagents && targetSessionId !== sessionId
+                            ? {...params, threadId: sessionId}
+                            : params
+                    );
                 },
                 handleFileChange: async (params) => {
                     await this.waitForSessionNotifications(sessionId);
-                    return await approvalHandler.handleFileChange(params);
+                    return await approvalHandler.handleFileChange(
+                        !supportsSubagents && targetSessionId !== sessionId
+                            ? {...params, threadId: sessionId}
+                            : params
+                    );
                 },
                 handlePermissionsRequest: async (params) => {
                     await this.waitForSessionNotifications(sessionId);
-                    return await approvalHandler.handlePermissionsRequest(params);
+                    return await approvalHandler.handlePermissionsRequest(
+                        !supportsSubagents && targetSessionId !== sessionId
+                            ? {...params, threadId: sessionId}
+                            : params
+                    );
                 },
             });
-            this.codexClient.onElicitationRequest(targetSessionId, {
-                handleElicitation: async (params) => {
-                    await this.waitForSessionNotifications(sessionId);
-                    return await elicitationHandler.handleElicitation(params);
-                },
-                handleUserInput: async (params) => {
-                    await this.waitForSessionNotifications(sessionId);
-                    return await elicitationHandler.handleUserInput(params);
-                },
-            });
+            if (includeElicitations) {
+                this.codexClient.onElicitationRequest(targetSessionId, {
+                    handleElicitation: async (params) => {
+                        await this.waitForSessionNotifications(sessionId);
+                        return await elicitationHandler.handleElicitation(params);
+                    },
+                    handleUserInput: async (params) => {
+                        await this.waitForSessionNotifications(sessionId);
+                        return await elicitationHandler.handleUserInput(params);
+                    },
+                });
+            }
         };
         const subscribeDiscoveredChildren = (event: ServerNotification): void => {
-            if (!supportsSubagents
-                || (event.method !== "item/started" && event.method !== "item/completed")
+            if ((event.method !== "item/started" && event.method !== "item/completed")
                 || event.params.item.type !== "collabAgentToolCall"
                 || event.params.item.tool !== "spawnAgent") {
                 return;
@@ -825,9 +838,14 @@ export class CodexAcpClient {
                         return;
                     }
                     subscribeDiscoveredChildren(childEvent);
-                    dispatch(childEvent);
+                    if (supportsSubagents) {
+                        dispatch(childEvent);
+                    }
                 });
-                registerInteractiveHandlers(childSessionId);
+                // Without native subagent negotiation only permission requests
+                // cross the hidden child boundary. Other child interaction and
+                // transcript events remain private to the provider.
+                registerInteractiveHandlers(childSessionId, supportsSubagents);
             }
         };
         this.codexClient.onServerNotification(sessionId, (event) => {
