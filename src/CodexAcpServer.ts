@@ -408,7 +408,7 @@ export class CodexAcpServer {
                     }
                 } else if (methodRequest.params.action === "pause") {
                     const goal = await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionState.sessionId, "paused"));
-                    if (this.goalPublishIsCurrent(sessionState, sessionGeneration)) {
+                    if (this.sessionPublishIsCurrent(sessionState, sessionGeneration)) {
                         await this.publishGoalSnapshot(sessionState, toThreadGoalSnapshot(goal), false);
                     }
                 } else if (methodRequest.params.action === "resume") {
@@ -420,7 +420,7 @@ export class CodexAcpServer {
                             updatedGoal = goal;
                         },
                     ));
-                    if (updatedGoal !== null && this.goalPublishIsCurrent(sessionState, sessionGeneration)) {
+                    if (updatedGoal !== null && this.sessionPublishIsCurrent(sessionState, sessionGeneration)) {
                         await this.publishGoalSnapshot(sessionState, toThreadGoalSnapshot(updatedGoal), false);
                     }
                     if (turnCompleted === null && updatedGoal !== null) {
@@ -433,7 +433,7 @@ export class CodexAcpServer {
                     }
                 } else if (methodRequest.params.action === "clear") {
                     await this.runWithProcessCheck(() => this.codexAcpClient.clearGoal(sessionState.sessionId));
-                    if (this.goalPublishIsCurrent(sessionState, sessionGeneration)) {
+                    if (this.sessionPublishIsCurrent(sessionState, sessionGeneration)) {
                         await this.publishGoalSnapshot(sessionState, null, false);
                     }
                 }
@@ -638,7 +638,7 @@ export class CodexAcpServer {
             this.publishMcpStartupStatusAsync(sessionId);
         }
 
-        this.publishAvailableCommandsAsync(sessionState);
+        this.publishAvailableCommandsAsync(sessionState, sessionGeneration);
         if ("sessionId" in request) {
             this.publishCurrentGoalAsync(sessionState, sessionGeneration);
         }
@@ -1310,7 +1310,7 @@ export class CodexAcpServer {
             sessionId: sessionState.sessionId,
             prompt: GOAL_CONTINUATION_PROMPT,
         }, "Goal continuation", async () => {
-            if (!this.goalPublishIsCurrent(sessionState, sessionGeneration)
+            if (!this.sessionPublishIsCurrent(sessionState, sessionGeneration)
                 || this.goalControlGenerations.get(sessionState.sessionId) !== goalControlGeneration) {
                 return false;
             }
@@ -1459,8 +1459,15 @@ export class CodexAcpServer {
         return !isJetBrains2026_1Client(this.clientInfo);
     }
 
-    private publishAvailableCommandsAsync(sessionState: SessionState) {
-        void this.availableCommands.publish(sessionState);
+    private publishAvailableCommandsAsync(sessionState: SessionState, sessionGeneration: number): void {
+        void this.publishAvailableCommands(sessionState, sessionGeneration);
+    }
+
+    private async publishAvailableCommands(sessionState: SessionState, sessionGeneration: number): Promise<void> {
+        await this.availableCommands.publish(
+            sessionState,
+            () => this.sessionPublishIsCurrent(sessionState, sessionGeneration),
+        );
     }
 
     private publishCurrentGoalAsync(sessionState: SessionState, sessionGeneration: number): void {
@@ -1487,14 +1494,14 @@ export class CodexAcpServer {
         const requestRevision = ++sessionState.goalRevision;
         const goal = await this.runWithProcessCheck(() => this.codexAcpClient.getGoal(sessionState.sessionId));
         const snapshot = goal === null ? null : toThreadGoalSnapshot(goal);
-        if (!this.goalPublishIsCurrent(sessionState, sessionGeneration)
+        if (!this.sessionPublishIsCurrent(sessionState, sessionGeneration)
             || sessionState.goalRevision !== requestRevision) {
             return;
         }
         await this.publishGoalSnapshot(sessionState, snapshot, force, false);
     }
 
-    private goalPublishIsCurrent(sessionState: SessionState, sessionGeneration: number): boolean {
+    private sessionPublishIsCurrent(sessionState: SessionState, sessionGeneration: number): boolean {
         return this.sessions.get(sessionState.sessionId) === sessionState
             && this.getSessionGeneration(sessionState.sessionId) === sessionGeneration
             && !this.sessionIsClosing(sessionState.sessionId);
@@ -1636,7 +1643,7 @@ export class CodexAcpServer {
             this.publishMcpStartupStatusAsync(sessionId);
         }
 
-        await this.availableCommands.publish(sessionState);
+        await this.publishAvailableCommands(sessionState, requestedSessionGeneration);
         await this.publishCurrentGoalBestEffort(sessionState, requestedSessionGeneration, true);
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
