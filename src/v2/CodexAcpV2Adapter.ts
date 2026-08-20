@@ -179,8 +179,7 @@ export class CodexAcpV2Adapter {
                     sessionId: params.sessionId,
                     update: {
                         sessionUpdate: "state_update",
-                        state: "idle",
-                        stopReason: "refusal",
+                        state: "requires_action",
                         _meta: {
                             error: error instanceof Error ? error.message : String(error),
                         },

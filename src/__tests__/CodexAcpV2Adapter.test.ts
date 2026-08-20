@@ -132,6 +132,27 @@ describe("CodexAcpV2Adapter", () => {
             },
         });
     });
+
+    it("reports prompt failures as requiring action", async () => {
+        const {adapter, notify} = createAdapter({
+            prompt: vi.fn().mockRejectedValue(new Error("provider unavailable")),
+        });
+
+        await adapter.prompt({
+            sessionId: "session-1",
+            prompt: [{type: "text", text: "hello"}],
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(notify.mock.calls[1]?.[1]).toMatchObject({
+            sessionId: "session-1",
+            update: {
+                sessionUpdate: "state_update",
+                state: "requires_action",
+                _meta: {error: "provider unavailable"},
+            },
+        });
+    });
 });
 
 function createAdapter(overrides: Partial<Record<keyof CodexAcpServer, unknown>>) {
