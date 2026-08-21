@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerNotification } from "../../app-server";
-import type { ClientCapabilities } from "@agentclientprotocol/sdk";
 import type { SessionState } from "../../CodexAcpServer";
 import { AgentMode } from "../../AgentMode";
+import {ACPSessionConnection} from "../../ACPSessionConnection";
+import {CodexSubagentEventRouter} from "../../subagents/CodexSubagentEventRouter";
 import {
     createCodexMockTestFixture,
     createTestSessionState,
@@ -12,18 +13,37 @@ import {
 
 describe("CodexEventHandler - collab agent tool call events", () => {
     let mockFixture: CodexMockTestFixture;
+    let sessionState: SessionState;
     const sessionId = "test-session-id";
 
     beforeEach(() => {
         mockFixture = createCodexMockTestFixture();
+        sessionState = createTestSessionState({
+            sessionId,
+            currentModelId: "model-id[effort]",
+            agentMode: AgentMode.DEFAULT_AGENT_MODE,
+        });
         vi.clearAllMocks();
     });
 
-    const sessionState: SessionState = createTestSessionState({
-        sessionId,
-        currentModelId: "model-id[effort]",
-        agentMode: AgentMode.DEFAULT_AGENT_MODE,
-    });
+    async function initializeNativeSubagents() {
+        const response = await mockFixture.getCodexAcpAgent().initialize({
+            protocolVersion: 1,
+            clientCapabilities: {
+                _meta: {
+                    jetbrains: {
+                        air: {version: 1, capabilities: ["nativeSubagentSessions"]},
+                    },
+                },
+            },
+        });
+        sessionState.subagents = new CodexSubagentEventRouter(
+            sessionId,
+            true,
+            new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+        );
+        return response;
+    }
 
     it("hides collaboration lifecycle when the client lacks subagent capability but keeps permissions", async () => {
         const notifications: ServerNotification[] = [
@@ -140,14 +160,199 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         expect(JSON.stringify(mockFixture.getAcpConnectionEvents([]))).not.toContain("call-spawn-weather");
     });
 
+    it("promotes subagent activity to native lifecycle when collaboration items are absent", async () => {
+        await initializeNativeSubagents();
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-started",
+                        kind: "started",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/air_architecture",
+                    },
+                },
+            },
+            {
+                method: "item/completed",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    completedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-started",
+                        kind: "started",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/air_architecture",
+                    },
+                },
+            },
+            {
+                method: "item/started",
+                params: {
+                    threadId: "child-1",
+                    turnId: "turn-child",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "nested-started",
+                        kind: "started",
+                        agentThreadId: "grandchild-1",
+                        agentPath: "/root/air_architecture/tests",
+                    },
+                },
+            },
+            {
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: "grandchild-1",
+                    turnId: "turn-grandchild",
+                    itemId: "grandchild-message",
+                    delta: "Nested result",
+                },
+            },
+            {
+                method: "item/completed",
+                params: {
+                    threadId: "child-1",
+                    turnId: "turn-child",
+                    completedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "nested-interrupted",
+                        kind: "interrupted",
+                        agentThreadId: "grandchild-1",
+                        agentPath: "/root/air_architecture/tests",
+                    },
+                },
+            },
+            {
+                method: "turn/completed",
+                params: {
+                    threadId: sessionId,
+                    turn: {
+                        id: "turn-1",
+                        items: [],
+                        itemsView: "notLoaded",
+                        status: "completed",
+                        error: null,
+                        startedAt: null,
+                        completedAt: null,
+                        durationMs: null,
+                    },
+                },
+            },
+        ]);
+
+        const updates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0]);
+        expect(updates).toEqual([
+            {
+                sessionId,
+                update: {
+                    sessionUpdate: "subagent_spawned",
+                    subagentSessionId: "child-1",
+                    name: "air_architecture",
+                    task: "Delegated task for air_architecture",
+                    capabilities: {},
+                },
+            },
+            {
+                sessionId: "child-1",
+                update: {
+                    sessionUpdate: "subagent_spawned",
+                    subagentSessionId: "grandchild-1",
+                    name: "tests",
+                    task: "Delegated task for tests",
+                    capabilities: {},
+                },
+            },
+            {
+                sessionId: "grandchild-1",
+                update: {
+                    sessionUpdate: "agent_message_chunk",
+                    content: {type: "text", text: "Nested result"},
+                    messageId: "grandchild-message",
+                },
+            },
+            {
+                sessionId: "child-1",
+                update: {
+                    sessionUpdate: "subagent_state_update",
+                    subagentSessionId: "grandchild-1",
+                    state: "cancelled",
+                },
+            },
+            {
+                sessionId,
+                update: {
+                    sessionUpdate: "subagent_state_update",
+                    subagentSessionId: "child-1",
+                    state: "completed",
+                },
+            },
+        ]);
+    });
+
+    it("does not represent the root activity as a subagent", async () => {
+        await initializeNativeSubagents();
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "root-activity",
+                        kind: "started",
+                        agentThreadId: "root-activity-thread",
+                        agentPath: "/root",
+                    },
+                },
+            },
+            {
+                method: "item/completed",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    completedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "root-activity",
+                        kind: "started",
+                        agentThreadId: "root-activity-thread",
+                        agentPath: "/root/",
+                    },
+                },
+            },
+            {
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    itemId: "parent-message",
+                    delta: "Visible root output",
+                },
+            },
+        ]);
+
+        expect(mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update))
+            .not.toContainEqual(expect.objectContaining({sessionUpdate: "subagent_spawned"}));
+    });
+
     it("emits native lifecycle and routes child output after capability negotiation", async () => {
-        const clientCapabilities = {subagents: {}} as ClientCapabilities & {
-            subagents: Record<string, never>;
-        };
-        const initializeResponse = await mockFixture.getCodexAcpAgent().initialize({
-            protocolVersion: 1,
-            clientCapabilities,
-        });
+        const initializeResponse = await initializeNativeSubagents();
         expect(
             (initializeResponse.agentCapabilities?.sessionCapabilities as {subagents?: unknown}).subagents
         ).toEqual({});
@@ -257,10 +462,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
     });
 
     it("routes nested agents through their immediate parent sessions", async () => {
-        await mockFixture.getCodexAcpAgent().initialize({
-            protocolVersion: 1,
-            clientCapabilities: {subagents: {}} as ClientCapabilities,
-        });
+        await initializeNativeSubagents();
         const collabItem = (
             threadId: string,
             senderThreadId: string,
@@ -316,10 +518,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
     });
 
     it("deduplicates lifecycle, rejects blank IDs, and ignores late child output", async () => {
-        await mockFixture.getCodexAcpAgent().initialize({
-            protocolVersion: 1,
-            clientCapabilities: {subagents: {}} as ClientCapabilities,
-        });
+        await initializeNativeSubagents();
         const spawn = (method: "item/started" | "item/completed"): ServerNotification => ({
             method,
             params: {
@@ -366,10 +565,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
     });
 
     it("keeps unsupported collaboration controls visible in native mode", async () => {
-        await mockFixture.getCodexAcpAgent().initialize({
-            protocolVersion: 1,
-            clientCapabilities: {subagents: {}} as ClientCapabilities,
-        });
+        await initializeNativeSubagents();
         const collab = (
             method: "item/started" | "item/completed",
             tool: "spawnAgent" | "sendInput",
@@ -415,10 +611,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
     });
 
     it("falls back to tool representation when a native spawn cannot be represented", async () => {
-        await mockFixture.getCodexAcpAgent().initialize({
-            protocolVersion: 1,
-            clientCapabilities: {subagents: {}} as ClientCapabilities,
-        });
+        await initializeNativeSubagents();
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [{
             method: "item/completed",
             params: {
@@ -453,10 +646,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
     });
 
     it("does not duplicate global notifications after subscribing to a child", async () => {
-        await mockFixture.getCodexAcpAgent().initialize({
-            protocolVersion: 1,
-            clientCapabilities: {subagents: {}} as ClientCapabilities,
-        });
+        await initializeNativeSubagents();
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
             {
                 method: "item/started",
@@ -510,10 +700,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
     });
 
     it("keeps the parent prompt open until every announced child is terminal", async () => {
-        await mockFixture.getCodexAcpAgent().initialize({
-            protocolVersion: 1,
-            clientCapabilities: {subagents: {}} as ClientCapabilities,
-        });
+        await initializeNativeSubagents();
         const appServer = mockFixture.getCodexAppServerClient();
         const turn = {id: "turn-1", items: [], status: "inProgress" as const, error: null};
         const completedTurn = {...turn, status: "completed" as const};

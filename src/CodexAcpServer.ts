@@ -104,15 +104,18 @@ import {
     clientSupportsSubagents,
     type SubagentAwareSessionCapabilities,
 } from "./subagents/AcpSubagents";
+import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import {randomUUID} from "node:crypto";
 import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
+    AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
     AIR_META_KEY,
     AIR_SESSION_FAILURE_KEY,
+    clientSupportsAirCapability,
     JETBRAINS_META_KEY,
 } from "./AirExtension";
 import {
@@ -152,6 +155,7 @@ export interface SessionState {
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
+    subagents: CodexSubagentEventRouter;
 }
 
 export type SessionFailureCategory =
@@ -176,21 +180,6 @@ export interface SessionFailure {
 }
 
 const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;
-
-function clientSupportsAirCapability(
-    capabilities: acp.ClientCapabilities | null,
-    capability: string,
-): boolean {
-    const jetbrains = capabilities?._meta?.[JETBRAINS_META_KEY] as Record<string, unknown> | undefined;
-    const air = jetbrains?.[AIR_META_KEY] as Record<string, unknown> | undefined;
-    const version = air?.[AIR_EXTENSION_VERSION_KEY];
-    const supported = air?.[AIR_EXTENSION_CAPABILITIES_KEY];
-    return typeof version === "number"
-        && Number.isInteger(version)
-        && version >= AIR_EXTENSION_VERSION
-        && Array.isArray(supported)
-        && supported.includes(capability);
-}
 
 function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
     return clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY);
@@ -368,6 +357,7 @@ export class CodexAcpServer {
                         [AIR_EXTENSION_CAPABILITIES_KEY]: [
                             AIR_SESSION_FAILURE_KEY,
                             AIR_AGENT_FILE_CHANGE_REPORT_KEY,
+                            AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                         ],
                     },
                 },
@@ -638,6 +628,11 @@ export class CodexAcpServer {
             goalRevision: 0,
             sessionTitle: null,
             sessionTitleSource: "sessionId" in request ? "unknown" : "unset",
+            subagents: new CodexSubagentEventRouter(
+                sessionId,
+                clientSupportsSubagents(this.clientCapabilities),
+                new ACPSessionConnection(this.connection, sessionId),
+            ),
         };
         this.sessions.set(sessionId, sessionState);
         resumeSubscribed = false;
@@ -1655,6 +1650,11 @@ export class CodexAcpServer {
             goalRevision: 0,
             sessionTitle: null,
             sessionTitleSource: "unset",
+            subagents: new CodexSubagentEventRouter(
+                sessionId,
+                clientSupportsSubagents(this.clientCapabilities),
+                new ACPSessionConnection(this.connection, sessionId),
+            ),
         };
         this.sessions.set(sessionId, sessionState);
         subscribed = false;
@@ -2319,7 +2319,7 @@ export class CodexAcpServer {
                 clientSupportsPlanUpdates(this.clientCapabilities),
                 clientSupportsTypedSessionFailures(this.clientCapabilities),
                 this.sessionFailureEpoch,
-                clientSupportsSubagents(this.clientCapabilities),
+                sessionState.subagents,
             );
             eventHandler = promptEventHandler;
             const permissionLifecycle = this.permissionLifecycleContext(sessionState);

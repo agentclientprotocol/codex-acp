@@ -3,6 +3,10 @@ import type {
     SessionCapabilities,
     SessionNotification,
 } from "@agentclientprotocol/sdk";
+import {
+    AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
+    clientSupportsAirCapability,
+} from "../AirExtension";
 
 /** Temporary typed surface for agentclientprotocol/agent-client-protocol#1992. */
 export type SubagentSessionCapabilities = {
@@ -48,7 +52,11 @@ export function clientSupportsSubagents(
     const subagents = (
         capabilities as (ClientCapabilities & { subagents?: unknown }) | null | undefined
     )?.subagents;
-    return typeof subagents === "object" && subagents !== null && !Array.isArray(subagents);
+    if (typeof subagents === "object" && subagents !== null && !Array.isArray(subagents)) {
+        return true;
+    }
+
+    return clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY);
 }
 
 /** The only cast needed until the TypeScript SDK publishes PR #1992. */
