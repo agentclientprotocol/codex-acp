@@ -11,6 +11,31 @@ const typedFailureCapabilities: acp.ClientCapabilities = {
 };
 
 describe("typed session failures over ACP transport", () => {
+    it("negotiates native subagents through AIR metadata across the SDK boundary", async () => {
+        const fixture = createWireFixture();
+        const response = await fixture.client.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {
+                _meta: {
+                    jetbrains: {
+                        air: {version: 1, capabilities: ["nativeSubagentSessions"]},
+                    },
+                },
+            },
+        });
+
+        expect((response.agentCapabilities!.sessionCapabilities as {subagents?: unknown}).subagents)
+            .toEqual({});
+        expect(response._meta).toMatchObject({
+            jetbrains: {
+                air: {
+                    version: 1,
+                    capabilities: expect.arrayContaining(["nativeSubagentSessions"]),
+                },
+            },
+        });
+    });
+
     it("returns a sanitized process-exit failure in the decoded prompt response", async () => {
         const fixture = createWireFixture({
             exitCode: 1,

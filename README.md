@@ -12,7 +12,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Model, reasoning effort, fast mode, approval, and sandbox mode configuration.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
 - Shell command, file change, permission request, MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, token usage, and review events.
-- Subagent launches as standard ACP tool calls, with Codex thread identity and activity details in namespaced `_meta.codex.subagent` metadata.
+- Native ACP subagent sessions with separate child histories and root-routed permissions.
 - Session-scoped long-running goals through the provider-neutral [goal extension](docs/goal-extension.md).
 - Client-provided MCP servers over command-based stdio config and HTTP transport.
 - Slash commands: `/status`, `/mcp`, `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.
@@ -74,6 +74,15 @@ npm run bundle:all
 ```
 
 See [readme-dev.md](readme-dev.md) for local client configuration, binary packaging, and Codex type regeneration.
+
+### Subagent sessions
+
+Subagents are exposed only after bilateral capability negotiation. Until the released ACP SDKs
+preserve the draft `clientCapabilities.subagents` field, a supporting client may advertise
+`nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`; the adapter mirrors the capability
+in its initialize response. The canonical field remains supported and takes precedence once it is
+available. Without either client signal, subagent lifecycle and child output stay hidden while
+child permission requests continue to be handled on the root session.
 
 ## License
 

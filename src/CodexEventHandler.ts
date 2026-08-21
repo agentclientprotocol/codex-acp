@@ -231,19 +231,18 @@ export class CodexEventHandler {
         supportsPlanUpdates = false,
         supportsTypedSessionFailures = false,
         sessionFailureEpoch: string = randomUUID(),
-        supportsSubagents = false,
+        subagents: CodexSubagentEventRouter = new CodexSubagentEventRouter(
+            sessionState.sessionId,
+            false,
+            new ACPSessionConnection(connection, sessionState.sessionId),
+        ),
     ) {
         this.sessionState = sessionState;
         this.supportsPlanUpdates = supportsPlanUpdates;
         this.supportsTypedSessionFailures = supportsTypedSessionFailures;
         this.sessionFailureEpoch = sessionFailureEpoch;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
-        this.subagents = new CodexSubagentEventRouter(
-            sessionState.sessionId,
-            supportsSubagents,
-            (update, sessionId) => this.session.update(update, sessionId),
-            (message) => logger.log(message),
-        );
+        this.subagents = subagents;
         if (sessionState.sessionFailure !== undefined) {
             this.failuresById.set(sessionState.sessionFailure.id, sessionState.sessionFailure);
         }
