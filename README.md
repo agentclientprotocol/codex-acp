@@ -38,6 +38,22 @@ The npm package includes a compatible `@openai/codex` dependency. Set `CODEX_PAT
 CODEX_PATH=/path/to/codex npx -y @agentclientprotocol/codex-acp
 ```
 
+## Ephemeral sessions
+
+Clients can request an in-memory Codex thread for one-off work by adding provider-specific metadata to `session/new`:
+
+```json
+{
+  "_meta": {
+    "codex": {
+      "ephemeral": true
+    }
+  }
+}
+```
+
+Without this metadata, or when `ephemeral` is `false`, sessions remain persisted as before. Ephemeral sessions are not intended to be listed or resumed.
+
 ## Authentication
 
 The adapter advertises ACP auth methods during initialization. Clients can authenticate with:
