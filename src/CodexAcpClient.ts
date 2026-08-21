@@ -467,7 +467,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: await this.getResumeModelProvider(),
+            ...(await this.resumeModelProviderParams()),
             threadId: request.sessionId,
         });
         onSubscribed?.();
@@ -477,6 +477,8 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            agentMode: AgentMode.fromSettings(response.approvalPolicy, response.sandbox)
+                ?? AgentMode.getInitialAgentMode(),
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
@@ -491,7 +493,7 @@ export class CodexAcpClient {
         const response = await this.codexClient.threadResume({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: await this.getResumeModelProvider(),
+            ...(await this.resumeModelProviderParams()),
             threadId: request.sessionId,
         });
         onSubscribed?.();
@@ -505,6 +507,8 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
+            agentMode: AgentMode.fromSettings(response.approvalPolicy, response.sandbox)
+                ?? AgentMode.getInitialAgentMode(),
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
@@ -532,6 +536,8 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
+            agentMode: AgentMode.fromSettings(response.approvalPolicy, response.sandbox)
+                ?? AgentMode.getInitialAgentMode(),
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
@@ -698,10 +704,17 @@ export class CodexAcpClient {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
     }
 
-    private async getResumeModelProvider(): Promise<string> {
-        // Prefer an explicit/gateway provider, then the provider persisted in Codex config.
-        // Keep OpenAI as the final fallback for ChatGPT-authenticated sessions without a configured provider.
-        return (await this.getCurrentModelProvider()) ?? "openai";
+    /**
+     * Resume-time provider override, as `thread/resume` params.
+     *
+     * Prefer an explicit/gateway provider, then the provider persisted in Codex config.
+     * When neither is configured the field is omitted entirely: supplying one makes the
+     * app-server re-resolve the thread's model and reasoning effort from config, which
+     * discards the picks stored on the thread itself.
+     */
+    private async resumeModelProviderParams(): Promise<{modelProvider?: string}> {
+        const modelProvider = await this.getCurrentModelProvider();
+        return modelProvider ? {modelProvider} : {};
     }
 
     private async refreshSkills(
@@ -842,7 +855,7 @@ export class CodexAcpClient {
 
     async sendPrompt(
         request: acp.PromptRequest,
-        agentMode: AgentMode,
+        getAgentMode: () => AgentMode,
         modelId: ModelId,
         serviceTier: ServiceTier | null,
         disableSummary: boolean,
@@ -857,6 +870,7 @@ export class CodexAcpClient {
         if (shouldCancel?.()) {
             return null;
         }
+        const agentMode = getAgentMode();
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
@@ -998,6 +1012,23 @@ export class CodexAcpClient {
         await this.codexClient.threadSettingsUpdate({
             threadId: sessionId,
             collaborationMode: createCodexCollaborationMode(mode, currentModelId),
+        });
+    }
+
+    async setAgentMode(sessionId: string, mode: AgentMode): Promise<void> {
+        await this.codexClient.threadSettingsUpdate({
+            threadId: sessionId,
+            approvalPolicy: mode.approvalPolicy,
+            sandboxPolicy: mode.sandboxPolicy,
+        });
+    }
+
+    async setModelAndEffort(sessionId: string, currentModelId: string): Promise<void> {
+        const modelId = ModelId.fromString(currentModelId);
+        await this.codexClient.threadSettingsUpdate({
+            threadId: sessionId,
+            model: modelId.model,
+            effort: modelId.effort as ReasoningEffort,
         });
     }
 
@@ -1234,6 +1265,7 @@ export type SessionMetadata = {
     sessionId: string,
     currentModelId: string,
     models: Model[],
+    agentMode?: AgentMode,
     collaborationMode: ModeKind,
     modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,

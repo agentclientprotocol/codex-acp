@@ -606,7 +606,7 @@ export class CodexAcpServer {
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(),
+            agentMode: sessionMetadata.agentMode ?? AgentMode.getInitialAgentMode(),
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             lastTokenUsage: null,
@@ -700,6 +700,7 @@ export class CodexAcpServer {
             availableModelCount: modelState.availableModels.length
         });
         return {
+            sessionId,
             models: modelState,
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
@@ -1023,7 +1024,7 @@ export class CodexAcpServer {
         const sessionState = this.sessions.get(_params.sessionId);
         if (!sessionState) throw new Error(`Session ${_params.sessionId} not found`);
 
-        this.applyModeChange(sessionState, _params.modeId);
+        await this.applyModeChange(sessionState, _params.modeId);
         return {};
     }
 
@@ -1048,16 +1049,16 @@ export class CodexAcpServer {
                 this.applyFastModeChange(sessionState, params);
                 break;
             case MODE_CONFIG_ID:
-                this.applyModeChange(sessionState, this.stringConfigValue(params));
+                await this.applyModeChange(sessionState, this.stringConfigValue(params));
                 break;
             case COLLABORATION_MODE_CONFIG_ID:
                 await this.applyCollaborationModeChange(sessionState, this.stringConfigValue(params));
                 break;
             case MODEL_CONFIG_ID:
-                this.applyModelChange(sessionState, this.stringConfigValue(params));
+                await this.applyModelChange(sessionState, this.stringConfigValue(params));
                 break;
             case REASONING_EFFORT_CONFIG_ID:
-                this.applyReasoningEffortChange(sessionState, this.stringConfigValue(params));
+                await this.applyReasoningEffortChange(sessionState, this.stringConfigValue(params));
                 break;
             default:
                 throw RequestError.invalidParams();
@@ -1083,12 +1084,19 @@ export class CodexAcpServer {
         return params.value;
     }
 
-    private applyModeChange(sessionState: SessionState, value: string): void {
+    private async applyModeChange(sessionState: SessionState, value: string): Promise<void> {
         const newMode = AgentMode.find(value);
         if (!newMode) {
             throw RequestError.invalidParams();
         }
+        const previousMode = sessionState.agentMode;
         sessionState.agentMode = newMode;
+        try {
+            await this.codexAcpClient.setAgentMode(sessionState.sessionId, newMode);
+        } catch (error) {
+            sessionState.agentMode = previousMode;
+            throw error;
+        }
     }
 
     private async applyCollaborationModeChange(sessionState: SessionState, value: string): Promise<void> {
@@ -1100,7 +1108,7 @@ export class CodexAcpServer {
         sessionState.collaborationMode = mode;
     }
 
-    private applyModelChange(sessionState: SessionState, value: string): void {
+    private async applyModelChange(sessionState: SessionState, value: string): Promise<void> {
         const model = sessionState.availableModels.find(m => m.id === value);
         if (!model) {
             const currentModel = ModelId.fromString(sessionState.currentModelId).model;
@@ -1112,16 +1120,22 @@ export class CodexAcpServer {
         const currentEffort = ModelId.fromString(sessionState.currentModelId).effort;
         const effort = findSupportedEffort(model.supportedReasoningEfforts, currentEffort)
             ?? model.defaultReasoningEffort;
+        await this.codexAcpClient.setModelAndEffort(
+            sessionState.sessionId,
+            ModelId.fromComponents(model, effort).toString(),
+        );
         this.applyModelAndEffort(sessionState, model, effort);
     }
 
-    private applyReasoningEffortChange(sessionState: SessionState, value: string): void {
+    private async applyReasoningEffortChange(sessionState: SessionState, value: string): Promise<void> {
         const effort = findSupportedEffort(sessionState.supportedReasoningEfforts, value);
         if (!effort) {
             throw RequestError.invalidParams();
         }
         const {model} = ModelId.fromString(sessionState.currentModelId);
-        sessionState.currentModelId = ModelId.create(model, effort).toString();
+        const currentModelId = ModelId.create(model, effort).toString();
+        await this.codexAcpClient.setModelAndEffort(sessionState.sessionId, currentModelId);
+        sessionState.currentModelId = currentModelId;
     }
 
     private applyModelAndEffort(sessionState: SessionState, model: Model, effort: ReasoningEffort): void {
@@ -1157,6 +1171,10 @@ export class CodexAcpServer {
         }
 
         sessionState.availableModels = models;
+        await this.codexAcpClient.setModelAndEffort(
+            sessionState.sessionId,
+            ModelId.fromComponents(model, reasoningEffort).toString(),
+        );
         this.applyModelAndEffort(sessionState, model, reasoningEffort);
 
         return {};
@@ -1623,7 +1641,7 @@ export class CodexAcpServer {
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(),
+            agentMode: sessionMetadata.agentMode ?? AgentMode.getInitialAgentMode(),
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             lastTokenUsage: null,
@@ -2431,7 +2449,6 @@ export class CodexAcpServer {
             if (!sessionState.supportedInputModalities.includes("image") && effectiveParams.prompt.some(b => b.type === "image")) {
                 throw RequestError.invalidRequest("The current model does not support image input");
             }
-            const agentMode = sessionState.agentMode;
             const serviceTier = resolveFastServiceTier(
                 sessionState.fastModeEnabled,
                 sessionState.currentModelSupportsFast,
@@ -2440,7 +2457,7 @@ export class CodexAcpServer {
             const sendPromptPromise = this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(
                     effectiveParams,
-                    agentMode,
+                    () => sessionState.agentMode,
                     modelId,
                     serviceTier,
                     disableSummary,
@@ -2530,7 +2547,7 @@ export class CodexAcpServer {
                     const implementationPromise = this.runWithProcessCheck(
                         () => this.codexAcpClient.sendPrompt(
                             implementationRequest,
-                            agentMode,
+                            () => sessionState.agentMode,
                             modelId,
                             serviceTier,
                             disableSummary,
