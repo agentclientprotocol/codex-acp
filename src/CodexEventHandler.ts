@@ -510,6 +510,8 @@ export class CodexEventHandler {
             case "thread/deleted":
             case "thread/reverted":
             case "thread/queue/changed":
+            case "project/changed":
+            case "thread/project/updated":
             case "thread/environment/connected":
             case "thread/environment/disconnected":
             case "command/exec/outputDelta":
@@ -519,6 +521,7 @@ export class CodexEventHandler {
             case "turn/moderationMetadata":
             case "item/fileChange/outputDelta":
             case "item/fileChange/patchUpdated":
+            case "autoApprovalReview/strictReviewRequired":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
