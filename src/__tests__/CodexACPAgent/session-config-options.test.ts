@@ -5,7 +5,7 @@ import {
     MODEL_CONFIG_ID,
     REASONING_EFFORT_CONFIG_ID,
 } from "../../ModelConfigOption";
-import type {Model, ReasoningEffortOption} from "../../app-server/v2";
+import type {Model, PermissionProfileSummary, ReasoningEffortOption} from "../../app-server/v2";
 import {LEGACY_SET_SESSION_MODEL_METHOD} from "../../AcpExtensions";
 import {
     COLLABORATION_MODE_CONFIG_ID,
@@ -35,7 +35,13 @@ function buildModels(): {fast: Model; slow: Model} {
     return {fast, slow};
 }
 
-async function createSession(currentModelId: string, availableModels: Array<Model>) {
+async function createSession(
+    currentModelId: string,
+    availableModels: Array<Model>,
+    permissionProfiles: PermissionProfileSummary[] = [],
+    activePermissionProfileId: string | null = null,
+    approvalPolicy: "on-request" | "never" = "on-request",
+) {
     const fixture = createCodexMockTestFixture();
     const codexAcpAgent = fixture.getCodexAcpAgent();
     const codexAcpClient = fixture.getCodexAcpClient();
@@ -48,6 +54,9 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
         models: availableModels,
         collaborationMode: "default",
         additionalDirectories: [],
+        activePermissionProfileId,
+        approvalPolicy,
+        permissionProfiles,
     });
 
     const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
@@ -125,6 +134,59 @@ describe("Session config options", () => {
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("custom-model[high]");
     });
 
+    it("exposes allowed custom permission profiles as modes and selects the active profile", async () => {
+        const {fast} = buildModels();
+        const permissionProfiles: PermissionProfileSummary[] = [
+            {id: ":workspace", description: "Built-in workspace", allowed: true},
+            {id: "blocked", description: "Blocked by requirements", allowed: false},
+            {id: "team-default", description: "Team default permissions", allowed: true},
+        ];
+        const {codexAcpAgent, response} = await createSession(
+            "fast-model[medium]",
+            [fast],
+            permissionProfiles,
+            "team-default",
+            "never",
+        );
+
+        const expectedModeId = "permission-profile:team-default";
+        const modeOption = response.configOptions?.find(option => option.id === MODE_CONFIG_ID);
+        expect(modeOption).toMatchObject({
+            currentValue: expectedModeId,
+            options: [
+                {
+                    group: "sandbox-modes",
+                    name: "Sandbox Modes",
+                    options: [
+                        expect.objectContaining({value: AgentMode.ReadOnly.id}),
+                        expect.objectContaining({value: AgentMode.Agent.id}),
+                        expect.objectContaining({value: AgentMode.AgentFullAccess.id}),
+                    ],
+                },
+                {
+                    group: "permission-profiles",
+                    name: "Permission Profiles",
+                    options: [{
+                        value: expectedModeId,
+                        name: "team-default",
+                        description: "Team default permissions",
+                    }],
+                },
+            ],
+        });
+        expect(response.modes).toMatchObject({
+            currentModeId: expectedModeId,
+            availableModes: expect.arrayContaining([{
+                id: expectedModeId,
+                name: "team-default",
+                description: "Team default permissions",
+            }]),
+        });
+        expect(JSON.stringify((modeOption as any).options)).not.toContain("permission-profile::workspace");
+        expect(JSON.stringify((modeOption as any).options)).not.toContain("permission-profile:blocked");
+        expect(codexAcpAgent.getSessionState("session-id").agentMode.approvalPolicy).toBe("never");
+    });
+
     it("keeps the legacy models list as combined model/effort entries", async () => {
         const {fast, slow} = buildModels();
         const {response} = await createSession("fast-model[medium]", [fast, slow]);
@@ -152,6 +214,26 @@ describe("Session config options", () => {
         expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.ReadOnly);
         const modeOption = result.configOptions?.find(o => o.id === MODE_CONFIG_ID);
         expect((modeOption as any).currentValue).toBe(AgentMode.ReadOnly.id);
+    });
+
+    it("changes to a custom permission profile via setSessionConfigOption", async () => {
+        const {fast} = buildModels();
+        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast], [{
+            id: "team-default",
+            description: "Team default permissions",
+            allowed: true,
+        }]);
+
+        const result = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODE_CONFIG_ID,
+            value: "permission-profile:team-default",
+        });
+
+        expect(codexAcpAgent.getSessionState("session-id").agentMode.permissionProfileId).toBe("team-default");
+        expect(result.configOptions?.find(option => option.id === MODE_CONFIG_ID)).toMatchObject({
+            currentValue: "permission-profile:team-default",
+        });
     });
 
     it("changes collaboration mode without starting a model turn", async () => {
