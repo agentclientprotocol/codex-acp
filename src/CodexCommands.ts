@@ -92,6 +92,9 @@ export class CodexCommands {
 
         for (const entry of skillsEntries) {
             for (const skill of entry.skills) {
+                // A skill the user disabled (`[[skills.config]] enabled = false` in
+                // ~/.codex/config.toml) is not available, so it should not be advertised.
+                if (!skill.enabled) continue;
                 const name = `$${skill.name}`;
                 if (commands.has(name)) continue;
                 const description = skill.shortDescription ?? skill.description ?? skill.name;
@@ -270,7 +273,7 @@ export class CodexCommands {
             }
             case "skills": {
                 const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
-                const skills = (response?.data ?? []).flatMap(entry => entry.skills);
+                const skills = (response?.data ?? []).flatMap(entry => entry.skills).filter(skill => skill.enabled);
                 const lines = skills.map(skill => {
                     const description = skill.shortDescription ?? skill.description ?? "";
                     return description ? `- ${skill.name}: ${description}` : `- ${skill.name}`;
