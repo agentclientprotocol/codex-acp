@@ -1,5 +1,4 @@
 import * as acp from "@agentclientprotocol/sdk";
-import type { SessionState } from "./CodexAcpServer";
 import type { ElicitationHandler } from "./CodexAppServerClient";
 import type { ServerNotification } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
@@ -270,7 +269,6 @@ function buildToolApprovalOptions(persistOptions: Set<PersistValue>): acp.Permis
 
 export class CodexElicitationHandler implements ElicitationHandler {
     private readonly connection: AcpClientConnection;
-    private readonly sessionState: SessionState;
     private readonly clientCapabilities: acp.ClientCapabilities | null;
     private readonly cancellationSignal: AbortSignal | undefined;
     // In Rust, the MCP elicitation handler receives ElicitationRequestEvent directly from the MCP
@@ -295,12 +293,10 @@ export class CodexElicitationHandler implements ElicitationHandler {
 
     constructor(
         connection: AcpClientConnection,
-        sessionState: SessionState,
         clientCapabilities: acp.ClientCapabilities | null = null,
         cancellationSignal?: AbortSignal
     ) {
         this.connection = connection;
-        this.sessionState = sessionState;
         this.clientCapabilities = clientCapabilities;
         this.cancellationSignal = cancellationSignal;
     }
@@ -337,7 +333,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 if (params.mode === "url" && result.action === "accept") {
                     this.trackUrlElicitation(params.threadId, params.elicitationId);
                 }
-                await this.publishAcceptedMcpToolApproval(context, result.action === "accept");
+                await this.publishAcceptedMcpToolApproval(params.threadId, context, result.action === "accept");
                 return result;
             }
 
@@ -351,7 +347,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 const optionId = response.outcome.optionId;
                 if (optionId !== McpApprovalOptionId.Decline) {
                     await this.connection.notify(acp.methods.client.session.update, {
-                        sessionId: this.sessionState.sessionId,
+                        sessionId: params.threadId,
                         update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
                     });
                 }
@@ -462,7 +458,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
         context: McpElicitationContext
     ): acp.CreateElicitationRequest {
         const base = {
-            sessionId: this.sessionState.sessionId,
+            sessionId: params.threadId,
             ...(context.correlatedCallId ? { toolCallId: context.correlatedCallId } : {}),
             message: params.message,
             _meta: metaRecord(params._meta),
@@ -546,7 +542,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
 
         const firstQuestion = params.questions[0];
         return {
-            sessionId: this.sessionState.sessionId,
+            sessionId: params.threadId,
             toolCallId: params.itemId,
             mode: "form",
             message: params.questions.length === 1 && firstQuestion
@@ -569,7 +565,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
         params: McpServerElicitationRequestParams,
         context: McpElicitationContext
     ): { request: acp.RequestPermissionRequest; correlatedCallId: string | undefined } {
-        const sessionId = this.sessionState.sessionId;
+        const sessionId = params.threadId;
         const messageContent: acp.ToolCallContent = {
             type: "content",
             content: { type: "text", text: params.message },
@@ -715,6 +711,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
     }
 
     private async publishAcceptedMcpToolApproval(
+        sessionId: string,
         context: McpElicitationContext,
         accepted: boolean
     ): Promise<void> {
@@ -722,7 +719,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
             return;
         }
         await this.connection.notify(acp.methods.client.session.update, {
-            sessionId: this.sessionState.sessionId,
+            sessionId,
             update: { sessionUpdate: "tool_call_update", toolCallId: context.correlatedCallId, status: "in_progress" },
         });
     }

@@ -1,5 +1,4 @@
 import * as acp from "@agentclientprotocol/sdk";
-import type {SessionState} from "./CodexAcpServer";
 import type {ApprovalHandler} from "./CodexAppServerClient";
 import type {
     CommandExecutionApprovalDecision,
@@ -56,16 +55,13 @@ function permissionOption(
 
 export class CodexApprovalHandler implements ApprovalHandler {
     private readonly connection: AcpClientConnection;
-    private readonly sessionState: SessionState;
     private readonly cancellationSignal: AbortSignal | undefined;
 
     constructor(
         connection: AcpClientConnection,
-        sessionState: SessionState,
         cancellationSignal?: AbortSignal,
     ) {
         this.connection = connection;
-        this.sessionState = sessionState;
         this.cancellationSignal = cancellationSignal;
     }
 
@@ -73,7 +69,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         params: CommandExecutionRequestApprovalParams
     ): Promise<CommandExecutionRequestApprovalResponse> {
         try {
-            const sessionId = this.sessionState.sessionId;
+            const sessionId = params.threadId;
             const acpRequest = this.buildCommandPermissionRequest(sessionId, params);
             const response = await this.connection.request(
                 acp.methods.client.session.requestPermission,
@@ -91,7 +87,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         params: FileChangeRequestApprovalParams
     ): Promise<FileChangeRequestApprovalResponse> {
         try {
-            const sessionId = this.sessionState.sessionId;
+            const sessionId = params.threadId;
             const acpRequest = this.buildFileChangePermissionRequest(sessionId, params);
             const response = await this.connection.request(
                 acp.methods.client.session.requestPermission,
@@ -109,7 +105,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         params: PermissionsRequestApprovalParams
     ): Promise<PermissionsRequestApprovalResponse> {
         try {
-            const sessionId = this.sessionState.sessionId;
+            const sessionId = params.threadId;
             const acpRequest = this.buildPermissionsRequest(sessionId, params);
             const response = await this.connection.request(
                 acp.methods.client.session.requestPermission,
