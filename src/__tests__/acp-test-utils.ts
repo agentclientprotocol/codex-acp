@@ -4,6 +4,7 @@ import {CodexAcpClient} from '../CodexAcpClient';
 import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';
 import {startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexAcpServer, type SessionState} from "../CodexAcpServer";
+import {SessionCostTracker} from "../SessionCostTracker";
 import type {AcpClientConnection} from "../ACPSessionConnection";
 import type {ServerNotification} from "../app-server";
 import type {MessageConnection} from "vscode-jsonrpc/node";
@@ -403,6 +404,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         goalRevision: 0,
         sessionTitle: null,
         sessionTitleSource: "unknown",
+        costTracker: SessionCostTracker.disabled(),
         ...overrides,
     };
 }
