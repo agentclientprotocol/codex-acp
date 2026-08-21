@@ -19,7 +19,27 @@
               "kind": "delete"
             }
           }
-        ]
+        ],
+        "locations": [
+          {
+            "path": "/test/project/OldFile.kt"
+          }
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/OldFile.kt",
+              "kind": {
+                "type": "delete"
+              },
+              "diff": "package test.project\n\nclass OldFile {}"
+            }
+          ]
+        },
+        "rawOutput": {
+          "status": "completed",
+          "success": true
+        }
       }
     }
   ]

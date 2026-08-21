@@ -6,44 +6,12 @@ import type { ThreadItem } from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
 import {AgentMode} from "../../AgentMode";
 
-const { mockFiles, mockReadDelays, mockFileContent, delayMockFileRead, removeMockFile, clearMockFiles } = vi.hoisted(() => {
-    const files = new Map<string, string>();
-    const readDelays = new Map<string, Promise<void>>();
-    return {
-        mockFiles: files,
-        mockReadDelays: readDelays,
-        mockFileContent: (path: string, content: string) => files.set(path, content),
-        delayMockFileRead: (path: string, delay: Promise<void>) => readDelays.set(path, delay),
-        removeMockFile: (path: string) => files.delete(path),
-        clearMockFiles: () => {
-            files.clear();
-            readDelays.clear();
-        },
-    };
-});
-
-vi.mock('node:fs/promises', () => ({
-    readFile: async (path: string) => {
-        const delay = mockReadDelays.get(path);
-        if (delay) {
-            await delay;
-        }
-        const content = mockFiles.get(path);
-        if (content !== undefined) {
-            return content;
-        }
-        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
-    },
-}));
-
 describe('CodexEventHandler - file change events', () => {
     let mockFixture: CodexMockTestFixture;
     const sessionId = 'test-session-id';
 
     beforeEach(() => {
         mockFixture = createCodexMockTestFixture();
-        clearMockFiles();
-        mockFileContent('/test/project/OldFile.kt', 'package test.project\n\nclass OldFile {}');
     });
 
     const sessionState: SessionState = createTestSessionState({
@@ -175,8 +143,6 @@ describe('CodexEventHandler - file change events', () => {
     });
 
     it('should handle file deletion with raw content', async () => {
-        mockFileContent('/test/project/RawDeleteFile.kt', 'fun main() {\n    println("Hello, World!")\n}\n');
-
         // Codex sends raw file content (not unified diff) for deleted files
         const deletedFileNotification: ServerNotification = {
             method: 'item/started',
@@ -207,8 +173,6 @@ describe('CodexEventHandler - file change events', () => {
     });
 
     it('should handle file deletion when old file is already missing', async () => {
-        removeMockFile('/test/project/OldFile.kt');
-
         const deleteFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
@@ -238,8 +202,6 @@ describe('CodexEventHandler - file change events', () => {
     });
 
     it('should handle file deletion with raw content when old file is already missing', async () => {
-        removeMockFile('/test/project/RawDeleteFile.kt');
-
         const deletedFileNotification: ServerNotification = {
             method: 'item/started',
             params: {
@@ -268,7 +230,7 @@ describe('CodexEventHandler - file change events', () => {
         );
     });
 
-    it('should ignore broken unified diffs in update file changes', async () => {
+    it('should preserve metadata when an update diff is invalid', async () => {
         const fileChange: ThreadItem & { type: 'fileChange' } = {
             type: 'fileChange',
             id: 'file-change-broken-diff',
@@ -290,13 +252,17 @@ describe('CodexEventHandler - file change events', () => {
         const updateEvent = await createFileChangeUpdate(fileChange);
         expect(updateEvent).toMatchObject({
             content: [],
+            locations: [{ path: '/test/project/OldFile.kt' }],
+            rawInput: { changes: fileChange.changes },
+            rawOutput: {
+                status: 'completed',
+                success: true,
+            },
         });
     });
 
-    it('should handle update diffs when the file was already patched', async () => {
-        mockFileContent('/test/project/OldFile.kt', 'package test.project\n\nclass UpdatedFile {}\n');
-
-        const updateFileNotification: ServerNotification = {
+    it('should emit localized update content when the source file is unavailable', async () => {
+        const updateFileNotification = {
             method: 'item/started',
             params: {
                 threadId: sessionId,
@@ -310,18 +276,24 @@ describe('CodexEventHandler - file change events', () => {
                             path: '/test/project/OldFile.kt',
                             kind: { type: 'update', move_path: null },
                             diff:
-`@@ -1,3 +1,3 @@
- package test.project
- 
--class OldFile {}
-+class UpdatedFile {}
+`@@ -18,7 +18,7 @@
+ modified_section_4: experiment_id=new_xyz456 status=replaced
+-random_operation_3: tool_call_count=10 agent_test=true
+-random_operation_4: data_point=value_7390
++random_operation_3: tool_call_count=12 agent_test=true
++random_operation_4: data_point=value_8462
+ random_operation_5: final_entry timestamp=2026-05-02T11:31:23Z
+ updated_entry_4: replaced_lines=22-23 round=2 op=1
+-updated_entry_5: metrics=[reads=20,writes=10,duration_ms=99999]
++updated_entry_5: metrics=[reads=23,writes=11,duration_ms=98417]
+ round2_operation_3: test_phase=integration_test status=running
 `,
                         },
                     ],
                     status: 'completed',
                 },
             },
-        };
+        } satisfies ServerNotification;
 
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [updateFileNotification]);
 
@@ -333,24 +305,38 @@ describe('CodexEventHandler - file change events', () => {
                 status: 'completed',
                 content: [
                     {
-                        oldText: 'package test.project\n\nclass OldFile {}\n',
-                        newText: 'package test.project\n\nclass UpdatedFile {}\n',
+                        oldText: [
+                            'modified_section_4: experiment_id=new_xyz456 status=replaced',
+                            'random_operation_3: tool_call_count=10 agent_test=true',
+                            'random_operation_4: data_point=value_7390',
+                            'random_operation_5: final_entry timestamp=2026-05-02T11:31:23Z',
+                            'updated_entry_4: replaced_lines=22-23 round=2 op=1',
+                            'updated_entry_5: metrics=[reads=20,writes=10,duration_ms=99999]',
+                            'round2_operation_3: test_phase=integration_test status=running',
+                        ].join('\n'),
+                        newText: [
+                            'modified_section_4: experiment_id=new_xyz456 status=replaced',
+                            'random_operation_3: tool_call_count=12 agent_test=true',
+                            'random_operation_4: data_point=value_8462',
+                            'random_operation_5: final_entry timestamp=2026-05-02T11:31:23Z',
+                            'updated_entry_4: replaced_lines=22-23 round=2 op=1',
+                            'updated_entry_5: metrics=[reads=23,writes=11,duration_ms=98417]',
+                            'round2_operation_3: test_phase=integration_test status=running',
+                        ].join('\n'),
                         path: '/test/project/OldFile.kt',
                     },
                 ],
+                locations: [{ path: '/test/project/OldFile.kt', line: 18 }],
+                rawInput: { changes: updateFileNotification.params.item.changes },
+                rawOutput: {
+                    status: 'completed',
+                    success: true,
+                },
             },
         ]);
     });
 
-    it('should not emit completion before a slow file-change start event', async () => {
-        mockFileContent('/test/project/OldFile.kt', 'package test.project\n\nclass OldFile {}\n');
-
-        let releaseRead = () => {};
-        const blockedRead = new Promise<void>((resolve) => {
-            releaseRead = resolve;
-        });
-        delayMockFileRead('/test/project/OldFile.kt', blockedRead);
-
+    it('should preserve start-before-completion ordering without file reads', async () => {
         const fileChange = {
             type: 'fileChange',
             id: 'file-change-slow-start',
@@ -413,10 +399,6 @@ describe('CodexEventHandler - file change events', () => {
         mockFixture.sendServerNotification(fileChangeStarted);
         mockFixture.sendServerNotification(fileChangeCompleted);
 
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(mockFixture.getAcpConnectionEvents([])).toEqual([]);
-
-        releaseRead();
         await vi.waitFor(() => {
             expect(mockFixture.getAcpConnectionEvents([])).toHaveLength(2);
         });
@@ -429,8 +411,8 @@ describe('CodexEventHandler - file change events', () => {
                 status: 'in_progress',
                 content: [
                     {
-                        oldText: 'package test.project\n\nclass OldFile {}\n',
-                        newText: 'package test.project\n\nclass UpdatedFile {}\n',
+                        oldText: 'package test.project\n\nclass OldFile {}',
+                        newText: 'package test.project\n\nclass UpdatedFile {}',
                         path: '/test/project/OldFile.kt',
                     },
                 ],
@@ -439,13 +421,45 @@ describe('CodexEventHandler - file change events', () => {
                 sessionUpdate: 'tool_call_update',
                 toolCallId: 'file-change-slow-start',
                 status: 'completed',
+                rawOutput: {
+                    status: 'completed',
+                    success: true,
+                },
             },
         ]);
     });
 
-    it('should parse update diffs with move metadata appended', async () => {
-        mockFileContent('/test/project/OriginalFile.kt', 'old code line\n');
+    it('should map file-change patch updates with compact content and metadata', async () => {
+        const patchUpdated: ServerNotification = {
+            method: 'item/fileChange/patchUpdated',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'file-change-patch-updated',
+                changes: [
+                    {
+                        path: '/test/project/UpdatedFile.kt',
+                        kind: { type: 'update', move_path: null },
+                        diff:
+`@@ -40,3 +40,3 @@
+ before context
+-old value
++new value
+ after context
+`,
+                    },
+                ],
+            },
+        };
 
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [patchUpdated]);
+
+        await expect(mockFixture.getAcpConnectionDump(['id'])).toMatchFileSnapshot(
+            'data/file-change-patch-updated.json'
+        );
+    });
+
+    it('should parse update diffs with move metadata appended', async () => {
         const fileChange: ThreadItem = {
             type: 'fileChange',
             id: 'file-change-move-metadata',
@@ -472,8 +486,8 @@ Moved to: /test/project/NewFile.kt`,
         expect(updateEvent).toMatchObject({
             content: [
                 {
-                    oldText: 'old code line\n',
-                    newText: 'new code line\n',
+                    oldText: 'old code line',
+                    newText: 'new code line',
                     path: '/test/project/NewFile.kt',
                 },
             ],
@@ -481,8 +495,6 @@ Moved to: /test/project/NewFile.kt`,
     });
 
     it('should parse update diffs when the original file was moved already', async () => {
-        mockFileContent('/test/project/NewFile.kt', 'new code line\n');
-
         const fileChange: ThreadItem = {
             type: 'fileChange',
             id: 'file-change-moved-file-exists',
@@ -509,8 +521,8 @@ Moved to: /test/project/NewFile.kt`,
         expect(updateEvent).toMatchObject({
             content: [
                 {
-                    oldText: 'old code line\n',
-                    newText: 'new code line\n',
+                    oldText: 'old code line',
+                    newText: 'new code line',
                     path: '/test/project/NewFile.kt',
                 },
             ],

@@ -47,6 +47,8 @@ import {
     createContextCompactionCompleteUpdate,
     createContextCompactionStartUpdate,
     createDynamicToolCallUpdate,
+    createFileChangeCompleteUpdate,
+    createFileChangePatchUpdate,
     createFileChangeUpdate,
     createGuardianApprovalReviewToolCall,
     createGuardianApprovalReviewToolCallUpdate,
@@ -506,6 +508,8 @@ export class CodexEventHandler {
                 return this.createThreadGoalClearedEvent(notification.params);
             case "item/commandExecution/terminalInteraction":
                 return this.createTerminalInteractionEvent(notification.params);
+            case "item/fileChange/patchUpdated":
+                return await createFileChangePatchUpdate(notification.params);
             // ignored events
             case "thread/deleted":
             case "thread/reverted":
@@ -518,7 +522,6 @@ export class CodexEventHandler {
             case "turn/diff/updated":
             case "turn/moderationMetadata":
             case "item/fileChange/outputDelta":
-            case "item/fileChange/patchUpdated":
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
@@ -704,6 +707,7 @@ export class CodexEventHandler {
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
+                return createFileChangeCompleteUpdate(event.item);
             case "dynamicToolCall":
                 return {
                     sessionUpdate: "tool_call_update",
