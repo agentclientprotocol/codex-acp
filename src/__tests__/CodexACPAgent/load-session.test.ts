@@ -7,6 +7,7 @@ import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
+    // @spec: restored-sub-agent-tool-call-parity#replay-sub-agent-activity-with-live-structure
     it("should replay history during loadSession", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -456,6 +457,23 @@ describe("CodexACPAgent - loadSession", () => {
                         type: "function_call_output",
                         call_id: "call-ls",
                         output: "Chunk ID: abc123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nREADME.md\nsrc\n",
+                    },
+                },
+                {
+                    type: "response_item",
+                    payload: {
+                        type: "function_call",
+                        name: "wait_agent",
+                        arguments: JSON.stringify({ timeout_ms: 30_000 }),
+                        call_id: "call-wait-agent",
+                    },
+                },
+                {
+                    type: "response_item",
+                    payload: {
+                        type: "function_call_output",
+                        call_id: "call-wait-agent",
+                        output: JSON.stringify({ timed_out: false }),
                     },
                 },
                 {

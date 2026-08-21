@@ -31,6 +31,21 @@ describe("ResponseItemHistoryFallback", () => {
         expect(toolCallUpdateStatuses(updates)).toEqual([]);
     });
 
+    // @spec: restored-sub-agent-tool-call-parity#replay-sub-agent-activity-with-live-structure
+    it("does not replay wait_agent as a separate restored tool call", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            namedFunctionCall("call-wait", "wait_agent", { timeout_ms: 30_000 }),
+            functionCallOutput("call-wait", JSON.stringify({ timed_out: false })),
+            functionCall("call-command", "pwd"),
+            functionCallOutput("call-command", "/workspace\n"),
+        ]), "content");
+
+        expect(toolCallIds(updates)).toEqual(["call-command"]);
+        expect(toolCallUpdateStatuses(updates)).toEqual([
+            { toolCallId: "call-command", status: "completed" },
+        ]);
+    });
+
     it("does not duplicate adjacent reasoning from event and response item records", () => {
         const updates = parseResponseItemHistoryFallback(jsonl([
             {
@@ -96,6 +111,16 @@ describe("ResponseItemHistoryFallback", () => {
             { toolCallId: "call-read-ok", status: "completed" },
         ]);
     });
+
+    // @spec: portable-command-output-by-default#emit-portable-command-output-without-terminal-extension
+    it("recovers command history as portable content when no terminal extension is active", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            functionCall("call-portable", "npm test"),
+            functionCallOutput("call-portable", "Process exited with code 0\nOutput:\nTests passed\n"),
+        ]), "content");
+
+        expect(updates).toMatchFileSnapshot("data/response-item-portable-command.json");
+    });
 });
 
 function jsonl(records: unknown[]): string {
@@ -103,16 +128,20 @@ function jsonl(records: unknown[]): string {
 }
 
 function functionCall(callId: string, cmd: string): unknown {
+    return namedFunctionCall(callId, "exec_command", {
+        cmd,
+        workdir: "/workspace",
+        yield_time_ms: 1000,
+    });
+}
+
+function namedFunctionCall(callId: string, name: string, args: unknown): unknown {
     return {
         type: "response_item",
         payload: {
             type: "function_call",
-            name: "exec_command",
-            arguments: JSON.stringify({
-                cmd,
-                workdir: "/workspace",
-                yield_time_ms: 1000,
-            }),
+            name,
+            arguments: JSON.stringify(args),
             call_id: callId,
         },
     };

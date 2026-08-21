@@ -44,6 +44,7 @@ import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
+import {getSubAgentActivityTracker} from "./SubAgentActivityTracker";
 import {
     GOAL_CONTROL_ACTIONS,
     GOAL_CONTROL_METHOD,
@@ -62,7 +63,6 @@ import {
     type SessionSteerRequest,
 } from "./AcpExtensions";
 import {
-    createCollabAgentToolCallUpdate,
     createCommandExecutionCompleteUpdate,
     createCommandExecutionUpdate,
     createCompletedContextCompactionUpdate,
@@ -71,7 +71,6 @@ import {
     createImageGenerationUpdate,
     createImageViewUpdate,
     createMcpToolCallUpdate,
-    createSubAgentActivityUpdate,
     formatWebSearchTitle,
 } from "./CodexToolCallMapper";
 import {
@@ -286,7 +285,7 @@ export class CodexAcpServer {
         this.sessionFailureEpoch = randomUUID();
         this.clientInfo = null;
         this.clientCapabilities = null;
-        this.terminalOutputMode = "terminal_output_delta";
+        this.terminalOutputMode = "content";
         this.booleanConfigOptionsSupported = false;
         this.availableCommands = this.createAvailableCommands(codexAcpClient);
     }
@@ -1799,6 +1798,7 @@ export class CodexAcpServer {
         return normalized.length > 0 ? normalized : null;
     }
 
+    // @spec: restored-sub-agent-tool-call-parity#replay-sub-agent-activity-with-live-structure
     private async createHistoryUpdates(item: ThreadItem, sessionState: SessionState): Promise<UpdateSessionEvent[]> {
         switch (item.type) {
             case "userMessage":
@@ -1807,7 +1807,7 @@ export class CodexAcpServer {
             case "sleep":
                 return [];
             case "subAgentActivity":
-                return [createSubAgentActivityUpdate(item, "completed", "tool_call")];
+                return getSubAgentActivityTracker(sessionState).mapSubAgentActivity(item, "completed");
             case "agentMessage": {
                 const meta = createCodexMessagePhaseMeta(item.phase);
                 return [{
@@ -1822,7 +1822,7 @@ export class CodexAcpServer {
             case "fileChange":
                 return [await createFileChangeUpdate(item)];
             case "commandExecution": {
-                const updates = [await createCommandExecutionUpdate(item)];
+                const updates = [await createCommandExecutionUpdate(item, sessionState.terminalOutputMode)];
                 const completeUpdate = createCommandExecutionCompleteUpdate(item, sessionState.terminalOutputMode);
                 if (completeUpdate) {
                     updates.push(completeUpdate);
@@ -1834,7 +1834,7 @@ export class CodexAcpServer {
             case "dynamicToolCall":
                 return [await createDynamicToolCallUpdate(item)];
             case "collabAgentToolCall":
-                return [createCollabAgentToolCallUpdate(item)];
+                return getSubAgentActivityTracker(sessionState).mapCollabAgentToolCall(item, "completed");
             case "webSearch":
                 return [this.createWebSearchUpdate(item)];
             case "imageView":
@@ -2811,9 +2811,9 @@ function mergeHistoryUpdates(
     const seen = new Set<string>();
     let fallbackIndex = 0;
 
-    const pushUpdate = (update: UpdateSessionEvent) => {
+    const pushUpdate = (update: UpdateSessionEvent, dedupe: boolean = true) => {
         const key = historyUpdateKey(update);
-        if (key && seen.has(key)) {
+        if (dedupe && key && seen.has(key)) {
             return;
         }
         if (key) {
@@ -2849,7 +2849,10 @@ function mergeHistoryUpdates(
 
     for (const update of threadUpdates) {
         flushFallbackBeforeMatchingDuplicate(update);
-        pushUpdate(update);
+        // Thread history is authoritative and can legitimately contain several
+        // progress updates for the same tool call. Only fallback records are
+        // deduplicated against those updates.
+        pushUpdate(update, false);
     }
 
     while (fallbackIndex < responseItemFallbackUpdates.length) {

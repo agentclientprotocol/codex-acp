@@ -5,34 +5,24 @@
       "sessionId": "test-session-id",
       "update": {
         "sessionUpdate": "tool_call",
-        "toolCallId": "call-spawn-weather",
+        "toolCallId": "activity-initial",
         "kind": "other",
-        "title": "spawnAgent",
+        "title": "Weather audit",
         "status": "in_progress",
         "rawInput": {
-          "prompt": "Find the current weather in Paris.",
-          "senderThreadId": "thread-main",
-          "receiverThreadIds": [
-            "thread-paris"
-          ],
-          "agentsStates": {
-            "thread-paris": {
-              "status": "running",
-              "message": "Checking weather"
-            }
-          },
-          "model": null,
-          "reasoningEffort": null,
-          "status": "inProgress"
+          "description": "Weather audit"
+        },
+        "rawOutput": {
+          "agentThreadId": "thread-paris",
+          "agentPath": "/root/weather_audit",
+          "activity": "started"
         },
         "_meta": {
           "codex": {
-            "collaboration": {
-              "tool": "spawnAgent",
-              "senderThreadId": "thread-main",
-              "receiverThreadIds": [
-                "thread-paris"
-              ]
+            "toolName": "Agent",
+            "subAgent": {
+              "agentThreadId": "thread-paris",
+              "runId": "activity-initial"
             }
           }
         }
@@ -47,33 +37,286 @@
       "sessionId": "test-session-id",
       "update": {
         "sessionUpdate": "tool_call_update",
-        "toolCallId": "call-spawn-weather",
-        "title": "spawnAgent",
+        "toolCallId": "activity-initial",
+        "title": "Weather audit",
         "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "@agentclientprotocol/codex-acp"
+            }
+          }
+        ],
+        "rawOutput": {
+          "agentThreadId": "thread-paris",
+          "agentPath": "/root/weather_audit",
+          "turnId": "child-turn-1",
+          "turnStatus": "completed",
+          "result": "@agentclientprotocol/codex-acp",
+          "error": null
+        },
+        "_meta": {
+          "codex": {
+            "toolName": "Agent",
+            "subAgent": {
+              "agentThreadId": "thread-paris",
+              "runId": "activity-initial"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "resume-1",
+        "kind": "other",
+        "title": "Weather audit",
+        "status": "in_progress",
         "rawInput": {
-          "prompt": "Find the current weather in Paris.",
+          "description": "Weather audit",
+          "prompt": null,
+          "model": null,
+          "reasoningEffort": null
+        },
+        "rawOutput": {
+          "agentThreadId": "thread-paris",
+          "agentPath": "/root/weather_audit",
+          "action": "resumeAgent",
+          "actionStatus": "inProgress",
           "senderThreadId": "thread-main",
           "receiverThreadIds": [
             "thread-paris"
           ],
-          "agentsStates": {
-            "thread-paris": {
-              "status": "completed",
-              "message": null
-            }
-          },
-          "model": null,
-          "reasoningEffort": null,
-          "status": "completed"
+          "prompt": null,
+          "agentState": {
+            "status": "running",
+            "message": "Working"
+          }
         },
         "_meta": {
           "codex": {
-            "collaboration": {
-              "tool": "spawnAgent",
-              "senderThreadId": "thread-main",
-              "receiverThreadIds": [
-                "thread-paris"
-              ]
+            "toolName": "Agent",
+            "subAgent": {
+              "agentThreadId": "thread-paris",
+              "runId": "resume-1"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "resume-1",
+        "title": "Weather audit",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Working"
+            }
+          }
+        ],
+        "rawOutput": {
+          "agentThreadId": "thread-paris",
+          "agentPath": "/root/weather_audit",
+          "action": "resumeAgent",
+          "actionStatus": "completed",
+          "senderThreadId": "thread-main",
+          "receiverThreadIds": [
+            "thread-paris"
+          ],
+          "prompt": null,
+          "agentState": {
+            "status": "running",
+            "message": "Working"
+          }
+        },
+        "_meta": {
+          "codex": {
+            "toolName": "Agent",
+            "subAgent": {
+              "agentThreadId": "thread-paris",
+              "runId": "resume-1"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "resume-1",
+        "title": "Weather audit",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Working"
+            }
+          }
+        ],
+        "rawOutput": {
+          "agentThreadId": "thread-paris",
+          "agentPath": "/root/weather_audit",
+          "action": "sendInput",
+          "actionStatus": "completed",
+          "senderThreadId": "thread-main",
+          "receiverThreadIds": [
+            "thread-paris"
+          ],
+          "prompt": "Check alerts too.",
+          "agentState": {
+            "status": "running",
+            "message": "Working"
+          }
+        },
+        "_meta": {
+          "codex": {
+            "toolName": "Agent",
+            "subAgent": {
+              "agentThreadId": "thread-paris",
+              "runId": "resume-1"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "resume-1",
+        "title": "Weather audit",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "No alerts found."
+            }
+          }
+        ],
+        "rawOutput": {
+          "agentThreadId": "thread-paris",
+          "agentPath": "/root/weather_audit",
+          "turnId": "child-turn-2",
+          "turnStatus": "completed",
+          "result": "No alerts found.",
+          "error": null
+        },
+        "_meta": {
+          "codex": {
+            "toolName": "Agent",
+            "subAgent": {
+              "agentThreadId": "thread-paris",
+              "runId": "resume-1"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "resume-1",
+        "title": "Weather audit",
+        "status": "completed",
+        "rawOutput": {
+          "agentThreadId": "thread-paris",
+          "agentPath": "/root/weather_audit",
+          "action": "closeAgent",
+          "actionStatus": "completed",
+          "senderThreadId": "thread-main",
+          "receiverThreadIds": [
+            "thread-paris"
+          ],
+          "prompt": null,
+          "agentState": {
+            "status": "shutdown",
+            "message": null
+          }
+        },
+        "_meta": {
+          "codex": {
+            "toolName": "Agent",
+            "subAgent": {
+              "agentThreadId": "thread-paris",
+              "runId": "resume-1"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "spawn-failed",
+        "kind": "other",
+        "title": "Start subagent",
+        "status": "failed",
+        "rawInput": {
+          "prompt": "Try an unavailable worker.",
+          "model": null,
+          "reasoningEffort": null
+        },
+        "rawOutput": {
+          "action": "spawnAgent",
+          "actionStatus": "failed",
+          "senderThreadId": "thread-main",
+          "receiverThreadIds": [],
+          "prompt": "Try an unavailable worker.",
+          "agentState": null
+        },
+        "_meta": {
+          "codex": {
+            "toolName": "Agent",
+            "subAgent": {
+              "agentThreadId": null,
+              "runId": "spawn-failed"
             }
           }
         }
