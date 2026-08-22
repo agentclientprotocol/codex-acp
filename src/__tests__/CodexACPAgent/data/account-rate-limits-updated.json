@@ -1,0 +1,34 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "codex": {
+            "rateLimits": {
+              "limitId": "codex",
+              "limitName": null,
+              "primary": {
+                "usedPercent": 42,
+                "windowDurationMins": 300,
+                "resetsAt": 1710000000
+              },
+              "secondary": {
+                "usedPercent": 7,
+                "windowDurationMins": 10080,
+                "resetsAt": 1710600000
+              },
+              "credits": null,
+              "individualLimit": null,
+              "spendControlReached": false,
+              "planType": "plus",
+              "rateLimitReachedType": null
+            }
+          }
+        }
+      }
+    }
+  ]
+}
