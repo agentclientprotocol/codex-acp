@@ -43,9 +43,10 @@ export class CodexSubagentEventRouter {
         }
         const item = notification.params.item;
         if (!this.supported) {
-            // Permissions use their own ACP request path. Every transcript or
-            // lifecycle representation stays hidden without bilateral support.
-            return item.type === "collabAgentToolCall" || item.type === "subAgentActivity";
+            // Preserve the pre-native protocol representation for clients that
+            // did not negotiate child sessions. The normal event mapper renders
+            // collaboration lifecycle as ordinary ACP tool calls.
+            return false;
         }
         if (item.type === "subAgentActivity") {
             // Codex reports the root participant through the same activity item

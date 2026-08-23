@@ -81,8 +81,9 @@ Subagents are exposed only after bilateral capability negotiation. Until the rel
 preserve the draft `clientCapabilities.subagents` field, a supporting client may advertise
 `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`; the adapter mirrors the capability
 in its initialize response. The canonical field remains supported and takes precedence once it is
-available. Without either client signal, subagent lifecycle and child output stay hidden while
-child permission requests continue to be handled on the root session.
+available. Without either client signal, subagent lifecycle retains its legacy ordinary ACP
+tool-call representation, while child permission and elicitation requests are handled on the root
+session.
 
 ## License
 

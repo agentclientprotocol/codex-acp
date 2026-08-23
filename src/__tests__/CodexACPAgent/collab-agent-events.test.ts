@@ -45,7 +45,11 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         return response;
     }
 
-    it("hides collaboration lifecycle when the client lacks subagent capability but keeps permissions", async () => {
+    it("keeps the legacy tool-call lifecycle without subagent capability and root-routes permissions", async () => {
+        await mockFixture.getCodexAcpAgent().initialize({
+            protocolVersion: 1,
+            clientCapabilities: {elicitation: {form: {}}},
+        });
         const notifications: ServerNotification[] = [
             {
                 method: "item/started",
@@ -110,7 +114,14 @@ describe("CodexEventHandler - collab agent tool call events", () => {
 
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
 
-        expect(JSON.stringify(mockFixture.getAcpConnectionEvents([]))).not.toContain("call-spawn-weather");
+        const collaborationUpdates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update.toolCallId === "call-spawn-weather");
+        expect(collaborationUpdates).toMatchObject([
+            {sessionUpdate: "tool_call", title: "spawnAgent", status: "in_progress"},
+            {sessionUpdate: "tool_call_update", title: "spawnAgent", status: "completed"},
+        ]);
 
         mockFixture.setPermissionResponse({outcome: {outcome: "selected", optionId: "allow_once"}});
         await mockFixture.sendServerRequest("item/commandExecution/requestApproval", {
@@ -125,9 +136,27 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         const permissionRequest = mockFixture.getAcpConnectionEvents([])
             .find(event => event.method === "requestPermission" && event.args[0].toolCall.toolCallId === "child-command");
         expect(permissionRequest?.args[0].sessionId).toBe(sessionId);
+
+        mockFixture.setElicitationResponse({action: "accept", content: {answer: "yes"}});
+        await mockFixture.sendServerRequest("mcpServer/elicitation/request", {
+            threadId: "thread-paris",
+            turnId: "turn-child",
+            serverName: "child-server",
+            mode: "form",
+            _meta: null,
+            message: "Continue?",
+            requestedSchema: {
+                type: "object",
+                properties: {answer: {type: "string"}},
+                required: ["answer"],
+            },
+        });
+        const elicitationRequest = mockFixture.getAcpConnectionEvents([])
+            .find(event => event.method === "createElicitation" && event.args[0].message === "Continue?");
+        expect(elicitationRequest?.args[0].sessionId).toBe(sessionId);
     });
 
-    it("hides legacy subagent activity when the client lacks subagent capability", async () => {
+    it("keeps legacy subagent activity as a tool call without subagent capability", async () => {
         const notifications: ServerNotification[] = [
             {
                 method: "item/completed",
@@ -157,7 +186,15 @@ describe("CodexEventHandler - collab agent tool call events", () => {
 
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
 
-        expect(JSON.stringify(mockFixture.getAcpConnectionEvents([]))).not.toContain("call-spawn-weather");
+        const activity = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .find(update => update.toolCallId === "call-spawn-weather");
+        expect(activity).toMatchObject({
+            sessionUpdate: "tool_call",
+            title: "Start subagent weather_research",
+            status: "completed",
+        });
     });
 
     it("promotes subagent activity to native lifecycle when collaboration items are absent", async () => {

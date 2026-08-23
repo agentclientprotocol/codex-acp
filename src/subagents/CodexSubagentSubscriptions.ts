@@ -86,21 +86,21 @@ export class CodexSubagentSubscriptions {
                 const current = session.current;
                 await current.waitForRootNotifications();
                 return await current.approvalHandler.handleCommandExecution(
-                    this.rootPermissionParams(current, targetSessionId, params),
+                    this.rootInteractionParams(current, targetSessionId, params),
                 );
             },
             handleFileChange: async (params) => {
                 const current = session.current;
                 await current.waitForRootNotifications();
                 return await current.approvalHandler.handleFileChange(
-                    this.rootPermissionParams(current, targetSessionId, params),
+                    this.rootInteractionParams(current, targetSessionId, params),
                 );
             },
             handlePermissionsRequest: async (params) => {
                 const current = session.current;
                 await current.waitForRootNotifications();
                 return await current.approvalHandler.handlePermissionsRequest(
-                    this.rootPermissionParams(current, targetSessionId, params),
+                    this.rootInteractionParams(current, targetSessionId, params),
                 );
             },
         });
@@ -108,17 +108,21 @@ export class CodexSubagentSubscriptions {
             handleElicitation: async (params) => {
                 const current = session.current;
                 await current.waitForRootNotifications();
-                return await current.elicitationHandler.handleElicitation(params);
+                return await current.elicitationHandler.handleElicitation(
+                    this.rootInteractionParams(current, targetSessionId, params),
+                );
             },
             handleUserInput: async (params) => {
                 const current = session.current;
                 await current.waitForRootNotifications();
-                return await current.elicitationHandler.handleUserInput(params);
+                return await current.elicitationHandler.handleUserInput(
+                    this.rootInteractionParams(current, targetSessionId, params),
+                );
             },
         });
     }
 
-    private rootPermissionParams<T extends {threadId: string}>(
+    private rootInteractionParams<T extends {threadId: string}>(
         subscription: Subscription,
         targetSessionId: string,
         params: T,
