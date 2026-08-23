@@ -3580,6 +3580,27 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({ summary: "auto" }));
     });
 
+    it('should pass the executable model name to turn/start', async () => {
+        const model = createTestModel({
+            id: "catalog-model-id",
+            model: "provider-model-name",
+        });
+        const {mockFixture, turnStartSpy} = setupPromptFixture({
+            currentModelId: "catalog-model-id[medium]",
+            availableModels: [model],
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "test"}],
+        });
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            model: "provider-model-name",
+            effort: "medium",
+        }));
+    });
+
     it ('should reject prompt with images when model does not support image input', async () => {
         const { mockFixture } = setupPromptFixture({
             supportedInputModalities: ["text"],
