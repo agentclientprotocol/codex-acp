@@ -90,7 +90,6 @@ describe("PermissionLifecycleContext", () => {
         } as unknown as AcpClientConnection;
         const handler = new CodexElicitationHandler(
             connection,
-            state,
             prompt,
             {elicitation: {form: {}}},
         );
@@ -119,7 +118,7 @@ describe("PermissionLifecycleContext", () => {
             }),
             notify: vi.fn(),
         } as unknown as AcpClientConnection;
-        const handler = new CodexElicitationHandler(connection, state, prompt);
+        const handler = new CodexElicitationHandler(connection, prompt);
         const approval = {
             threadId: "thread",
             turnId: "turn-1",

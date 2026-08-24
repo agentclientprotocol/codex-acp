@@ -11,5 +11,7 @@ export function isRootAgentPath(path: string): boolean {
 export function nameFromAgentPath(path: string, fallback: string): string {
     const normalized = normalizeAgentPath(path);
     const name = normalized.slice(normalized.lastIndexOf("/") + 1).trim();
-    return name || fallback;
+    if (!name) return fallback;
+    const words = name.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+    return words ? words.charAt(0).toUpperCase() + words.slice(1) : fallback;
 }

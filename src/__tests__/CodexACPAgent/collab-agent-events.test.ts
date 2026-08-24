@@ -296,8 +296,8 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                 update: {
                     sessionUpdate: "subagent_spawned",
                     subagentSessionId: "child-1",
-                    name: "air_architecture",
-                    description: "Delegated task for air_architecture",
+                    name: "Air architecture",
+                    description: "Delegated task for Air architecture",
                     capabilities: {},
                 },
             },
@@ -306,8 +306,8 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                 update: {
                     sessionUpdate: "subagent_spawned",
                     subagentSessionId: "grandchild-1",
-                    name: "tests",
-                    description: "Delegated task for tests",
+                    name: "Tests",
+                    description: "Delegated task for Tests",
                     capabilities: {},
                 },
             },
@@ -475,7 +475,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                 update: {
                     sessionUpdate: "subagent_spawned",
                     subagentSessionId: "thread-paris",
-                    name: "weather_research",
+                    name: "Weather research",
                     description: "Find the current weather in Paris.",
                     capabilities: {},
                 },
