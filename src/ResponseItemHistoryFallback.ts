@@ -56,6 +56,7 @@ export async function createResponseItemHistoryFallbackUpdates(
     return parseResponseItemHistoryFallback(contents, terminalOutputMode, toolCallIdsFromThread(thread));
 }
 
+// @spec: restored-sub-agent-tool-call-parity#replay-sub-agent-activity-with-live-structure
 export function parseResponseItemHistoryFallback(
     contents: string,
     terminalOutputMode: TerminalOutputMode,
@@ -106,6 +107,12 @@ export function parseResponseItemHistoryFallback(
                 break;
             case "function_call": {
                 const toolCallId = stringValue(item["call_id"]);
+                if (toolCallId && item["name"] === "wait_agent") {
+                    // The persisted wait result duplicates the sub-agent lifecycle item and would
+                    // otherwise render as an unrelated generic tool call after session loading.
+                    skippedToolCallIds.add(toolCallId);
+                    break;
+                }
                 if (toolCallId && existingToolCallIds.has(toolCallId)) {
                     skippedToolCallIds.add(toolCallId);
                     break;
@@ -113,7 +120,7 @@ export function parseResponseItemHistoryFallback(
                 if (toolCallId && emittedToolCallIds.has(toolCallId)) {
                     break;
                 }
-                const result = createFunctionCallUpdate(item);
+                const result = createFunctionCallUpdate(item, terminalOutputMode);
                 if (!result) {
                     break;
                 }
@@ -361,7 +368,10 @@ function textParts(value: unknown): string[] {
     });
 }
 
-function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | null {
+function createFunctionCallUpdate(
+    item: JsonRecord,
+    terminalOutputMode: TerminalOutputMode,
+): LegacyFunctionCallUpdate | null {
     const toolCallId = stringValue(item["call_id"]);
     const name = stringValue(item["name"]);
     if (!toolCallId || !name) {
@@ -375,7 +385,7 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
     const commandAction = command ? inferCommandAction(command, cwd) : null;
     if (commandAction) {
         return {
-            update: createCommandActionEvent(toolCallId, "inProgress", cwd, commandAction),
+            update: createCommandActionEvent(toolCallId, "inProgress", cwd, commandAction, terminalOutputMode),
             usesTerminal: false,
             isExecCommand,
         };
@@ -390,7 +400,7 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
         rawInput: rawInputForFunctionCall(name, args),
     };
 
-    if (!functionCallUsesTerminal(item)) {
+    if (terminalOutputMode === "content" || !functionCallUsesTerminal(item)) {
         return { update, usesTerminal: false, isExecCommand };
     }
 
@@ -401,6 +411,7 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
     };
 }
 
+// @spec: portable-command-output-by-default#emit-portable-command-output-without-terminal-extension
 function createFunctionCallOutputUpdate(
     item: JsonRecord,
     terminalOutputMode: TerminalOutputMode,
@@ -421,6 +432,14 @@ function createFunctionCallOutputUpdate(
             toolCallId,
             status,
             rawOutput: { output: item["output"] },
+            ...(execToolCallIds.has(toolCallId) && output.length > 0
+                ? {
+                    content: [{
+                        type: "content",
+                        content: { type: "text", text: output },
+                    }],
+                }
+                : {}),
         };
     }
 

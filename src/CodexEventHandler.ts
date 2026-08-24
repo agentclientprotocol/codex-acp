@@ -41,9 +41,8 @@ import type { McpStartupCompleteEvent } from "./app-server/McpStartupCompleteEve
 import {toTokenCount} from "./TokenCount";
 import {
     commandExecutionUsesTerminalOutput,
-    createCollabAgentToolCallCompleteUpdate,
-    createCollabAgentToolCallUpdate,
     createCommandExecutionUpdate,
+    createCommandExecutionCompleteUpdate,
     createContextCompactionCompleteUpdate,
     createContextCompactionStartUpdate,
     createDynamicToolCallUpdate,
@@ -59,13 +58,13 @@ import {
     createFuzzyFileSearchComplete,
     createFuzzyFileSearchStartOrUpdate,
     createMcpToolCallUpdate,
-    createSubAgentActivityUpdate,
     createWebSearchCompleteUpdate,
     createWebSearchStartUpdate,
     fuzzyFileSearchToolCallId,
 } from "./CodexToolCallMapper";
 import { stripShellPrefix } from "./CommandUtils";
 import {createTerminalOutputMeta, type TerminalOutputMode} from "./TerminalOutputMode";
+import {getSubAgentActivityTracker} from "./SubAgentActivityTracker";
 import {
     createCodexMessagePhaseMeta,
     createAgentTextMessageChunk,
@@ -192,6 +191,8 @@ const STRUCTURED_CODEX_ERROR_CATEGORIES = {
     activeTurnNotSteerable: "provider_error",
 } satisfies Record<StructuredCodexErrorKind, CodexFailureKind>;
 
+type UpdateResult = UpdateSessionEvent | UpdateSessionEvent[] | null;
+
 export class CodexEventHandler {
 
     private static readonly PLAN_UPDATE_INTERVAL_MS = 150;
@@ -224,7 +225,6 @@ export class CodexEventHandler {
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
-    private readonly activeSubAgentActivities = new Set<string>();
 
     constructor(
         connection: AcpClientConnection,
@@ -361,8 +361,9 @@ export class CodexEventHandler {
 
     async handleNotification(notification: ServerNotification) {
         await this.flushPendingErrors();
-        const updateEvent = await this.createUpdateEvent(notification);
-        if (updateEvent) {
+        const result = await this.createUpdateEvent(notification);
+        const updateEvents = Array.isArray(result) ? result : result ? [result] : [];
+        for (const updateEvent of updateEvents) {
             await this.session.update(updateEvent);
         }
     }
@@ -400,7 +401,7 @@ export class CodexEventHandler {
         this.lastEmittedPlanTextByItemId.clear();
     }
 
-    private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
+    private async createUpdateEvent(notification: ServerNotification): Promise<UpdateResult> {
         /*
         TODO split UpdateSessionEvent to improve completion
         createUpdateEvent({
@@ -431,6 +432,12 @@ export class CodexEventHandler {
                 await this.flushPendingErrors();
                 return null;
             case "turn/completed":
+                if (notification.params.threadId !== this.sessionState.sessionId) {
+                    return getSubAgentActivityTracker(this.sessionState).completeChildTurn(
+                        notification.params.threadId,
+                        notification.params.turn,
+                    );
+                }
                 await this.flushPendingPlanUpdates();
                 this.clearPlanTurnState();
                 this.sessionState.currentTurnId = null;
@@ -655,18 +662,21 @@ export class CodexEventHandler {
         return createAgentTextThoughtChunk(text, messageId);
     }
 
-    private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
+    private async createItemEvent(event: ItemStartedNotification): Promise<UpdateResult> {
         switch (event.item.type) {
             case "fileChange":
                 return await createFileChangeUpdate(event.item);
             case "commandExecution": {
-                if (commandExecutionUsesTerminalOutput(event.item)) {
+                if (
+                    this.sessionState.terminalOutputMode !== "content"
+                    && commandExecutionUsesTerminalOutput(event.item)
+                ) {
                     this.terminalCommandIds.add(event.item.id);
                 } else {
                     this.terminalCommandIds.delete(event.item.id);
                     this.terminalCommandOutputIds.delete(event.item.id);
                 }
-                return await createCommandExecutionUpdate(event.item);
+                return await createCommandExecutionUpdate(event.item, this.sessionState.terminalOutputMode);
             }
             case "mcpToolCall":
                 return await createMcpToolCallUpdate(event.item);
@@ -681,15 +691,14 @@ export class CodexEventHandler {
                 this.activeImageGenerationItems.add(event.item.id);
                 return createImageGenerationStartUpdate(event.item);
             case "collabAgentToolCall":
-                return createCollabAgentToolCallUpdate(event.item);
+                return getSubAgentActivityTracker(this.sessionState).mapCollabAgentToolCall(event.item, "started");
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
                 return null;
             case "contextCompaction":
                 return createContextCompactionStartUpdate(event.item);
             case "subAgentActivity":
-                this.activeSubAgentActivities.add(event.item.id);
-                return createSubAgentActivityUpdate(event.item, "in_progress", "tool_call");
+                return getSubAgentActivityTracker(this.sessionState).mapSubAgentActivity(event.item, "started");
             case "sleep":
             case "userMessage":
             case "hookPrompt":
@@ -701,7 +710,7 @@ export class CodexEventHandler {
         }
     }
 
-    private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
+    private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateResult> {
         switch (event.item.type) {
             case "fileChange":
             case "dynamicToolCall":
@@ -738,8 +747,15 @@ export class CodexEventHandler {
             case "webSearch":
                 return createWebSearchCompleteUpdate(event.item);
             case "collabAgentToolCall":
-                return createCollabAgentToolCallCompleteUpdate(event.item);
+                return getSubAgentActivityTracker(this.sessionState).mapCollabAgentToolCall(event.item, "completed");
             case "agentMessage":
+                if (event.threadId !== this.sessionState.sessionId) {
+                    getSubAgentActivityTracker(this.sessionState).recordChildMessage(
+                        event.threadId,
+                        event.item.text,
+                    );
+                    return null;
+                }
                 this.rememberAgentMessagePhase(event.item);
                 return null;
             case "plan": {
@@ -751,12 +767,8 @@ export class CodexEventHandler {
             case "contextCompaction":
                 return createContextCompactionCompleteUpdate(event.item);
             //ignored types
-            case "subAgentActivity": {
-                const sessionUpdate = this.activeSubAgentActivities.delete(event.item.id)
-                    ? "tool_call_update"
-                    : "tool_call";
-                return createSubAgentActivityUpdate(event.item, "completed", sessionUpdate);
-            }
+            case "subAgentActivity":
+                return getSubAgentActivityTracker(this.sessionState).mapSubAgentActivity(event.item, "completed");
             case "sleep":
             case "userMessage":
             case "hookPrompt":
@@ -866,7 +878,7 @@ export class CodexEventHandler {
     }
 
     private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
-        if (this.terminalCommandIds.has(event.itemId) && event.delta.length > 0) {
+        if (event.delta.length > 0) {
             this.terminalCommandOutputIds.add(event.itemId);
         }
         return this.createCommandOutputEvent(event.itemId, event.delta, this.commandOutputMode(event.itemId));
@@ -877,6 +889,16 @@ export class CodexEventHandler {
         data: string,
         terminalOutputMode: TerminalOutputMode
     ): UpdateSessionEvent {
+        if (terminalOutputMode === "content") {
+            return {
+                sessionUpdate: "tool_call_update",
+                toolCallId: itemId,
+                content: [{
+                    type: "content",
+                    content: { type: "text", text: data },
+                }],
+            };
+        }
         return {
             sessionUpdate: "tool_call_update",
             toolCallId: itemId,
@@ -948,37 +970,16 @@ export class CodexEventHandler {
     }
 
     private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {
-        const update: UpdateSessionEvent = {
-            sessionUpdate: "tool_call_update",
-            toolCallId: item.id,
-            status: item.status === "completed" ? "completed" : "failed",
-            rawOutput: {
-                formatted_output: item.aggregatedOutput ?? "",
-                exit_code: item.exitCode
-            },
-        };
-
         const commandHadTerminal = this.terminalCommandIds.delete(item.id);
         const commandHadOutput = this.terminalCommandOutputIds.delete(item.id);
-        if (!commandHadTerminal) {
-            return update;
-        }
-        const terminalMeta: Record<string, unknown> = {};
-        if (!commandHadOutput && item.aggregatedOutput) {
-            Object.assign(
-                terminalMeta,
-                createTerminalOutputMeta(this.sessionState.terminalOutputMode, item.id, item.aggregatedOutput)
-            );
-        }
-        terminalMeta["terminal_exit"] = {
-            exit_code: item.exitCode,
-            signal: null,
-            terminal_id: item.id
-        };
-        return {
-            ...update,
-            _meta: terminalMeta,
-        };
+        return createCommandExecutionCompleteUpdate(
+            item,
+            this.sessionState.terminalOutputMode,
+            {
+                includeOutputContent: !commandHadOutput,
+                includeTerminalMeta: commandHadTerminal,
+            },
+        )!;
     }
 
     private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {
