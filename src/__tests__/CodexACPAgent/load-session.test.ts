@@ -51,6 +51,7 @@ describe("CodexACPAgent - loadSession", () => {
         const thread: Thread = {
             id: "session-1",
             sessionId: "session-1",
+            projectId: null,
             parentThreadId: null,
             threadSource: null,
             forkedFromId: null,
@@ -96,6 +97,7 @@ describe("CodexACPAgent - loadSession", () => {
                             text: "Hello!",
                             phase: null,
                             memoryCitation: null,
+                            delivery: null,
                         },
                         {
                             type: "reasoning",
@@ -277,6 +279,7 @@ describe("CodexACPAgent - loadSession", () => {
         const thread: Thread = {
             id: "session-1",
             sessionId: "session-1",
+            projectId: null,
             parentThreadId: null,
             threadSource: null,
             forkedFromId: null,
@@ -490,6 +493,7 @@ describe("CodexACPAgent - loadSession", () => {
             const thread: Thread = {
                 id: "session-legacy",
                 sessionId: "session-legacy",
+                projectId: null,
                 parentThreadId: null,
                 threadSource: null,
                 forkedFromId: null,
@@ -543,6 +547,7 @@ describe("CodexACPAgent - loadSession", () => {
                                 text: "The directory contains README.md and src.",
                                 phase: null,
                                 memoryCitation: null,
+                                delivery: null,
                             },
                         ],
                     },
@@ -625,6 +630,7 @@ describe("CodexACPAgent - loadSession", () => {
         const thread: Thread = {
             id: "session-1",
             sessionId: "session-1",
+            projectId: null,
             parentThreadId: null,
             threadSource: null,
             forkedFromId: null,

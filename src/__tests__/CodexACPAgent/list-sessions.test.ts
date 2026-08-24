@@ -15,6 +15,7 @@ describe("CodexACPAgent - list sessions", () => {
         const threadA: Thread = {
             id: "sess-1",
             sessionId: "sess-1",
+            projectId: null,
             parentThreadId: null,
             threadSource: null,
             forkedFromId: null,
@@ -40,6 +41,7 @@ describe("CodexACPAgent - list sessions", () => {
         const threadB: Thread = {
             id: "sess-2",
             sessionId: "sess-2",
+            projectId: null,
             parentThreadId: null,
             threadSource: null,
             forkedFromId: null,
@@ -104,6 +106,7 @@ describe("CodexACPAgent - list sessions", () => {
         const matchingThread: Thread = {
             id: "sess-win",
             sessionId: "sess-win",
+            projectId: null,
             parentThreadId: null,
             threadSource: null,
             forkedFromId: null,
@@ -170,6 +173,7 @@ describe("CodexACPAgent - list sessions", () => {
         const thread: Thread = {
             id: "sess-1",
             sessionId: "sess-1",
+            projectId: null,
             parentThreadId: null,
             threadSource: null,
             forkedFromId: null,
@@ -249,6 +253,7 @@ describe("CodexACPAgent - list sessions", () => {
         const thread: Thread = {
             id: "sess-1",
             sessionId: "sess-1",
+            projectId: null,
             parentThreadId: null,
             threadSource: null,
             forkedFromId: null,

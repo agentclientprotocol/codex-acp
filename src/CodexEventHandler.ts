@@ -483,6 +483,8 @@ export class CodexEventHandler {
                 return this.handleGuardianApprovalReviewStarted(notification.params);
             case "item/autoApprovalReview/completed":
                 return this.handleGuardianApprovalReviewCompleted(notification.params);
+            case "autoApprovalReview/strictReviewRequired":
+                return null;
             case "thread/compacted":
                 return this.createContextCompactedEvent();
             case "item/reasoning/summaryTextDelta":
@@ -510,6 +512,8 @@ export class CodexEventHandler {
             case "thread/deleted":
             case "thread/reverted":
             case "thread/queue/changed":
+            case "project/changed":
+            case "thread/project/updated":
             case "thread/environment/connected":
             case "thread/environment/disconnected":
             case "command/exec/outputDelta":
