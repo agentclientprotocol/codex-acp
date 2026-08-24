@@ -13,8 +13,14 @@ import {isRootAgentPath, nameFromAgentPath, normalizeAgentPath} from "./CodexAge
 type NativeSubagent = {
     parentSessionId: string;
     name: string;
-    task: string;
+    description: string;
     path?: string;
+    terminalState?: SubagentState;
+};
+
+type PendingSubagent = {
+    parentSessionId: string;
+    description: string;
     terminalState?: SubagentState;
 };
 
@@ -23,6 +29,7 @@ export class CodexSubagentEventRouter {
     private static readonly DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
     private readonly children = new Map<string, NativeSubagent>();
+    private readonly pendingSpawns = new Map<string, PendingSubagent>();
     private readonly waiters = new Set<() => void>();
     private readonly activeLegacyActivities = new Set<string>();
 
@@ -53,23 +60,27 @@ export class CodexSubagentEventRouter {
             // shape as children. It is the parent conversation, not a subagent.
             if (isRootAgentPath(item.agentPath)) return true;
             let hasNativeRepresentation = this.children.has(item.agentThreadId);
-            if (!hasNativeRepresentation && item.kind !== "interrupted") {
+            const pending = this.pendingSpawns.get(item.agentThreadId);
+            if (!hasNativeRepresentation) {
                 const name = nameFromAgentPath(item.agentPath, fallbackName(item.agentThreadId));
-                const parentSessionId = this.parentSessionIdForPath(item.agentPath);
+                const parentSessionId = pending?.parentSessionId ?? this.parentSessionIdForPath(item.agentPath);
+                const description = pending?.description ?? `Delegated task for ${name}`;
                 await this.session.update({
                     sessionUpdate: "subagent_spawned",
                     subagentSessionId: item.agentThreadId,
                     name,
-                    task: `Delegated task for ${name}`,
+                    description,
                     capabilities: {},
                 }, parentSessionId);
                 this.children.set(item.agentThreadId, {
                     parentSessionId,
                     name,
-                    task: `Delegated task for ${name}`,
+                    description,
                     path: normalizeAgentPath(item.agentPath),
                 });
+                this.pendingSpawns.delete(item.agentThreadId);
                 hasNativeRepresentation = true;
+                if (pending?.terminalState) await this.finish(item.agentThreadId, pending.terminalState);
             }
             if (hasNativeRepresentation && item.kind === "interrupted") {
                 await this.finish(item.agentThreadId, "cancelled");
@@ -92,30 +103,26 @@ export class CodexSubagentEventRouter {
                     logger.log(`Ignoring self-referential spawned subagent ${childSessionId}`);
                     continue;
                 }
-                if (this.children.has(childSessionId)) {
+                if (this.children.has(childSessionId) || this.pendingSpawns.has(childSessionId)) {
                     representedSpawn = true;
                     continue;
                 }
-                const child = {
+                this.pendingSpawns.set(childSessionId, {
                     parentSessionId,
-                    name: fallbackName(childSessionId),
-                    task: item.prompt?.trim() || "Delegated task",
-                };
-                await this.session.update({
-                    sessionUpdate: "subagent_spawned",
-                    subagentSessionId: childSessionId,
-                    name: child.name,
-                    task: child.task,
-                    capabilities: {},
-                }, parentSessionId);
-                this.children.set(childSessionId, child);
+                    description: item.prompt?.trim() || "Delegated task",
+                });
                 representedSpawn = true;
             }
         }
 
         for (const [childSessionId, state] of Object.entries(item.agentsStates)) {
             const terminalState = state && terminalStateOf(state.status);
-            if (terminalState) await this.finish(childSessionId, terminalState);
+            if (!terminalState) continue;
+            if (this.children.has(childSessionId)) await this.finish(childSessionId, terminalState);
+            else {
+                const pending = this.pendingSpawns.get(childSessionId);
+                if (pending) pending.terminalState = terminalState;
+            }
         }
         // `updated` is intentionally not synthesized: the portable protocol
         // currently defines only spawn and terminal lifecycle.

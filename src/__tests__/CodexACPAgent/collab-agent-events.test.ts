@@ -297,7 +297,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                     sessionUpdate: "subagent_spawned",
                     subagentSessionId: "child-1",
                     name: "air_architecture",
-                    task: "Delegated task for air_architecture",
+                    description: "Delegated task for air_architecture",
                     capabilities: {},
                 },
             },
@@ -307,7 +307,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                     sessionUpdate: "subagent_spawned",
                     subagentSessionId: "grandchild-1",
                     name: "tests",
-                    task: "Delegated task for tests",
+                    description: "Delegated task for tests",
                     capabilities: {},
                 },
             },
@@ -417,6 +417,21 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                 },
             },
             {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-weather",
+                        kind: "started",
+                        agentThreadId: "thread-paris",
+                        agentPath: "/root/weather_research",
+                    },
+                },
+            },
+            {
                 method: "item/agentMessage/delta",
                 params: {
                     threadId: "thread-paris",
@@ -460,8 +475,8 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                 update: {
                     sessionUpdate: "subagent_spawned",
                     subagentSessionId: "thread-paris",
-                    name: "Agent ad-paris",
-                    task: "Find the current weather in Paris.",
+                    name: "weather_research",
+                    description: "Find the current weather in Paris.",
                     capabilities: {},
                 },
             },
@@ -528,7 +543,37 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         } as ServerNotification);
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
             collabItem(sessionId, sessionId, "child-1", "spawn-1", "running"),
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-root",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-child",
+                        kind: "started",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/researcher",
+                    },
+                },
+            },
             collabItem("child-1", "child-1", "grandchild-1", "spawn-2", "running"),
+            {
+                method: "item/started",
+                params: {
+                    threadId: "child-1",
+                    turnId: "turn-child-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-grandchild",
+                        kind: "started",
+                        agentThreadId: "grandchild-1",
+                        agentPath: "/root/researcher/tester",
+                    },
+                },
+            },
             {
                 method: "item/agentMessage/delta",
                 params: {
@@ -578,6 +623,21 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         } as ServerNotification);
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
             spawn("item/started"),
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-child",
+                        kind: "started",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/researcher",
+                    },
+                },
+            },
             spawn("item/completed"),
             spawn("item/completed"),
             {
@@ -631,6 +691,21 @@ describe("CodexEventHandler - collab agent tool call events", () => {
 
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
             collab("item/started", "spawnAgent", "spawn", "running"),
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-child",
+                        kind: "started",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/researcher",
+                    },
+                },
+            },
             collab("item/started", "sendInput", "send-input", "running"),
             collab("item/completed", "sendInput", "send-input", "running"),
             collab("item/completed", "spawnAgent", "spawn", "completed"),
@@ -775,6 +850,21 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             },
         });
         spawn("running");
+        await mockFixture.sendServerNotification({
+            method: "item/started",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                startedAtMs: 0,
+                item: {
+                    type: "subAgentActivity",
+                    id: "activity-child",
+                    kind: "started",
+                    agentThreadId: "child-1",
+                    agentPath: "/root/researcher",
+                },
+            },
+        });
         await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
         completeTurn();
 
