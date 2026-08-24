@@ -32,21 +32,20 @@ function defaultCommandDecisions(
 ): CommandExecutionApprovalDecision[] {
     if (params.networkApprovalContext) {
         const decisions: CommandExecutionApprovalDecision[] = ["accept", "acceptForSession"];
-        const allowAmendment = params.proposedNetworkPolicyAmendments?.find(amendment => amendment.action === "allow");
-        if (allowAmendment) {
-            decisions.push({applyNetworkPolicyAmendment: {network_policy_amendment: allowAmendment}});
+        for (const amendment of params.proposedNetworkPolicyAmendments ?? []) {
+            decisions.push({applyNetworkPolicyAmendment: {network_policy_amendment: amendment}});
         }
-        decisions.push("cancel");
+        decisions.push("decline", "cancel");
         return decisions;
     }
     if (params.additionalPermissions) return ["accept", "cancel"];
-    const decisions: CommandExecutionApprovalDecision[] = ["accept"];
-    if (params.proposedExecpolicyAmendment) {
+    const decisions: CommandExecutionApprovalDecision[] = ["accept", "acceptForSession"];
+    if (params.proposedExecpolicyAmendment && params.proposedExecpolicyAmendment.length > 0) {
         decisions.push({
             acceptWithExecpolicyAmendment: {execpolicy_amendment: params.proposedExecpolicyAmendment},
         });
     }
-    decisions.push("cancel");
+    decisions.push("decline", "cancel");
     return decisions;
 }
 

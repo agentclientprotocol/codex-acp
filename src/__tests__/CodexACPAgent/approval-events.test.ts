@@ -255,13 +255,15 @@ describe("Approval Events", () => {
             )).toEqual({decision: "accept"});
             expect(permissionRequest().options.map((option: {optionId: string}) => option.optionId)).toEqual([
                 ApprovalOptionId.AllowOnce,
+                ApprovalOptionId.AllowForSession,
                 ApprovalOptionId.AcceptWithExecpolicyAmendment,
+                ApprovalOptionId.Decline,
                 ApprovalOptionId.Cancel,
             ]);
             await finish(prompt);
         });
 
-        it("uses only the first proposed allow amendment in the legacy network fallback", async () => {
+        it("keeps every proposed amendment in the legacy network fallback", async () => {
             const prompt = setupSessionWithPendingPrompt();
             const deny = {host: "example.test", action: "deny" as const};
             const firstAllow = {host: "example.test", action: "allow" as const};
@@ -276,13 +278,32 @@ describe("Approval Events", () => {
                     proposedNetworkPolicyAmendments: [deny, firstAllow, secondAllow],
                 }),
             )).toEqual({decision: {
-                applyNetworkPolicyAmendment: {network_policy_amendment: firstAllow},
+                applyNetworkPolicyAmendment: {network_policy_amendment: deny},
             }});
             expect(permissionRequest().options.map((option: {name: string}) => option.name)).toEqual([
                 "Yes, just this once",
                 "Yes, and allow this host for this conversation",
                 "Yes, and allow this host in the future",
+                "Yes, and allow this host in the future",
+                "No, and block this host in the future",
+                "No, continue without running it",
                 "No, and tell Codex what to do differently",
+            ]);
+            await finish(prompt);
+        });
+
+        it("does not offer an empty exec-policy amendment in the legacy fallback", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowForSession}});
+            expect(await fixture.sendServerRequest(
+                "item/commandExecution/requestApproval",
+                commandParams(undefined, {proposedExecpolicyAmendment: []}),
+            )).toEqual({decision: "acceptForSession"});
+            expect(permissionRequest().options.map((option: {optionId: string}) => option.optionId)).toEqual([
+                ApprovalOptionId.AllowOnce,
+                ApprovalOptionId.AllowForSession,
+                ApprovalOptionId.Decline,
+                ApprovalOptionId.Cancel,
             ]);
             await finish(prompt);
         });
