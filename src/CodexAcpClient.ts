@@ -516,6 +516,13 @@ export class CodexAcpClient {
         };
     }
 
+    async readSessionThread(sessionId: string): Promise<Thread> {
+        return (await this.codexClient.threadRead({
+            threadId: sessionId,
+            includeTurns: true,
+        })).thread;
+    }
+
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
@@ -788,6 +795,8 @@ export class CodexAcpClient {
         approvalHandler: ApprovalHandler,
         elicitationHandler: ElicitationHandler,
         supportsSubagents: boolean,
+        observeInteraction: (result: ServerNotification) => void | Promise<void>,
+        waitForChildSession: (childThreadId: string) => Promise<string | null>,
     ) {
         const dispatch = (event: ServerNotification) => {
             this.enqueueSessionNotification(sessionId, () => eventHandler(event));
@@ -796,9 +805,16 @@ export class CodexAcpClient {
             rootSessionId: sessionId,
             supportsSubagents,
             dispatch,
+            enqueueInteraction: (event) => {
+                // Child observation uses the same serialized, error-reporting queue
+                // as ordinary session notifications; callers intentionally do not
+                // await the callback registered with app-server.
+                this.enqueueSessionNotification(sessionId, () => observeInteraction(event));
+            },
             approvalHandler,
             elicitationHandler,
             waitForRootNotifications: () => this.waitForSessionNotifications(sessionId),
+            waitForChildSession,
         });
     }
 

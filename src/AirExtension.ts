@@ -1,3 +1,5 @@
+import type {ClientCapabilities} from "@agentclientprotocol/sdk";
+
 /**
  * Wire names for the versioned JetBrains AIR ACP extension.
  *
@@ -30,4 +32,3 @@ export function clientSupportsAirCapability(
         && Array.isArray(supported)
         && supported.includes(capability);
 }
-import type {ClientCapabilities} from "@agentclientprotocol/sdk";

@@ -22,7 +22,7 @@ import {
 import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClient";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
-import type {InputModality, ReasoningEffort} from "./app-server";
+import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
 import type {Account, Model, ReasoningEffortOption, Thread, ThreadGoal, ThreadItem, UserInput} from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
@@ -105,6 +105,7 @@ import {
     type SubagentAwareSessionCapabilities,
 } from "./subagents/AcpSubagents";
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
+import {nameFromAgentPath} from "./subagents/CodexAgentPath";
 import {randomUUID} from "node:crypto";
 import {once} from "node:events";
 import {
@@ -315,7 +316,7 @@ export class CodexAcpServer {
             close: { },
             delete: { },
             additionalDirectories: {},
-            ...(clientSupportsSubagents(_params.clientCapabilities) ? {subagents: {}} : {}),
+            subagents: {},
         };
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
@@ -1684,6 +1685,16 @@ export class CodexAcpServer {
         const session = new ACPSessionConnection(this.connection, sessionId);
         const sessionState = this.getSessionState(sessionId);
         await this.publishThreadHistoryTitle(session, sessionState, thread);
+        if (clientSupportsSubagents(this.clientCapabilities)) {
+            await this.streamNativeThreadHistory(
+                sessionId,
+                thread,
+                sessionState,
+                new Set([sessionId]),
+                new Map([[sessionId, thread]]),
+            );
+            return;
+        }
         const responseItemFallbackUpdates = await createResponseItemHistoryFallbackUpdates(
             thread,
             sessionState.terminalOutputMode,
@@ -1702,6 +1713,104 @@ export class CodexAcpServer {
             : threadUpdates;
         for (const update of updates) {
             await session.update(update);
+        }
+    }
+
+    private async streamNativeThreadHistory(
+        sessionId: string,
+        thread: Thread,
+        sessionState: SessionState,
+        ancestry: Set<string>,
+        threadCache: Map<string, Thread | null>,
+    ): Promise<void> {
+        const session = new ACPSessionConnection(this.connection, sessionId);
+        const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean}>();
+        for (const turn of thread.turns) {
+            for (const item of turn.items) {
+                if (item.type === "subAgentActivity") {
+                    const activityKind = item.kind as string;
+                    if (activityKind === "started") {
+                        const previous = announced.get(item.agentThreadId);
+                        if (previous && !previous.terminal) continue;
+                        const generation = (previous?.generation ?? 0) + 1;
+                        const childSessionId = generation === 1
+                            ? item.agentThreadId
+                            : `${item.agentThreadId}:generation:${generation}`;
+                        const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
+                        await session.update({
+                            sessionUpdate: "subagent_spawned",
+                            subagentSessionId: childSessionId,
+                            name,
+                            task: `Delegated task for ${name}`,
+                            capabilities: {},
+                        });
+                        announced.set(item.agentThreadId, {generation, sessionId: childSessionId, terminal: false});
+                        if (!ancestry.has(item.agentThreadId)) {
+                            let child = threadCache.get(item.agentThreadId);
+                            if (child === undefined) {
+                                try {
+                                    child = await this.codexAcpClient.readSessionThread(item.agentThreadId);
+                                    threadCache.set(item.agentThreadId, child);
+                                }
+                                catch (error) {
+                                    threadCache.set(item.agentThreadId, null);
+                                    logger.error(`Failed to read subagent history ${item.agentThreadId}`, error);
+                                    child = null;
+                                }
+                            }
+                            const childTurn = child?.turns[generation - 1];
+                            if (child && childTurn) {
+                                await this.streamNativeThreadHistory(
+                                    childSessionId,
+                                    {...child, turns: [childTurn]},
+                                    sessionState,
+                                    new Set([...ancestry, item.agentThreadId]),
+                                    threadCache,
+                                );
+                            }
+                        }
+                    }
+                    else if (activityKind === "completed" || activityKind === "interrupted") {
+                        const child = announced.get(item.agentThreadId);
+                        if (!child) {
+                            const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
+                            await session.update({
+                                sessionUpdate: "subagent_spawned",
+                                subagentSessionId: item.agentThreadId,
+                                name,
+                                task: `Delegated task for ${name}`,
+                                capabilities: {},
+                            });
+                            announced.set(item.agentThreadId, {
+                                generation: 1,
+                                sessionId: item.agentThreadId,
+                                terminal: false,
+                            });
+                            continue;
+                        }
+                        if (child.terminal) continue;
+                        await session.update({
+                            sessionUpdate: "subagent_state_update",
+                            subagentSessionId: child.sessionId,
+                            state: activityKind === "completed" ? "completed" : "cancelled",
+                        });
+                        child.terminal = true;
+                    }
+                    continue;
+                }
+                if (item.type === "collabAgentToolCall") continue;
+                for (const update of await this.createHistoryUpdates(item, sessionState)) {
+                    await session.update(update);
+                }
+            }
+        }
+        for (const child of announced.values()) {
+            if (child.terminal) continue;
+            await session.update({
+                sessionUpdate: "subagent_state_update",
+                subagentSessionId: child.sessionId,
+                state: "disconnected",
+            });
         }
     }
 
@@ -2335,10 +2444,13 @@ export class CodexAcpServer {
                 this.clientCapabilities,
                 activePrompt.signal,
             );
+            const observeInteraction = async (event: ServerNotification): Promise<void> => {
+                permissionContext.handleNotification(event);
+                await elicitationHandler.handleNotification(event);
+            };
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
-                    permissionContext.handleNotification(event);
-                    await elicitationHandler.handleNotification(event);
+                    await observeInteraction(event);
                     if (!promptNotificationsActive) {
                         await promptEventHandler.handleSessionScopedNotification(event);
                         return;
@@ -2355,7 +2467,9 @@ export class CodexAcpServer {
                 },
                 approvalHandler,
                 elicitationHandler,
-                clientSupportsSubagents(this.clientCapabilities));
+                clientSupportsSubagents(this.clientCapabilities),
+                observeInteraction,
+                childThreadId => promptEventHandler.waitForNativeSubagentSession(childThreadId));
 
             if (activePrompt.signal.aborted) {
                 return cancelledPromptResponse();
@@ -2507,8 +2621,16 @@ export class CodexAcpServer {
             }
 
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-            await eventHandler.waitForNativeSubagents(activePrompt.signal);
-            await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+            if (turnCompleted.turn.status === "completed") {
+                await eventHandler.waitForNativeSubagents(activePrompt.signal);
+                if (activePrompt.signal.aborted) return cancelledPromptResponse();
+                await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+            }
+            else {
+                await eventHandler.finishOutstandingNativeSubagents(
+                    turnCompleted.turn.status === "interrupted" ? "cancelled" : "failed",
+                );
+            }
             await eventHandler.flushPendingErrors();
             await eventHandler.handleFailedTurn(turnCompleted.turn);
             promptNotificationsActive = false;
@@ -2602,8 +2724,16 @@ export class CodexAcpServer {
                     }
 
                     await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-                    await eventHandler.waitForNativeSubagents(activePrompt.signal);
-                    await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                    if (turnCompleted.turn.status === "completed") {
+                        await eventHandler.waitForNativeSubagents(activePrompt.signal);
+                        if (activePrompt.signal.aborted) return cancelledPromptResponse();
+                        await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                    }
+                    else {
+                        await eventHandler.finishOutstandingNativeSubagents(
+                            turnCompleted.turn.status === "interrupted" ? "cancelled" : "failed",
+                        );
+                    }
                     await eventHandler.flushPendingErrors();
                     await eventHandler.handleFailedTurn(turnCompleted.turn);
                     promptNotificationsActive = false;
@@ -2675,6 +2805,7 @@ export class CodexAcpServer {
             // awaiting disposal so queued late notifications cannot enter prompt-local buffers.
             promptNotificationsActive = false;
             try {
+                await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                 await eventHandler?.finishOutstandingNativeSubagents(
                     promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)
                         ? "cancelled"

@@ -366,7 +366,11 @@ export class CodexEventHandler {
 
     async handleNotification(notification: ServerNotification) {
         await this.flushPendingErrors();
-        if (await this.subagents.handle(notification)) {
+        const handledBySubagents = await this.subagents.handle(notification);
+        for (const buffered of this.subagents.takeBufferedNotifications()) {
+            await this.handleNotification(buffered);
+        }
+        if (handledBySubagents) {
             return;
         }
         if (this.subagents.shouldIgnore(notification)) {
@@ -376,6 +380,10 @@ export class CodexEventHandler {
         if (updateEvent) {
             await this.session.update(updateEvent, this.subagents.notificationSessionId(notification));
         }
+    }
+
+    async waitForNativeSubagentSession(childThreadId: string): Promise<string | null> {
+        return await this.subagents.waitForMaterializedSession(childThreadId);
     }
 
     async waitForNativeSubagents(signal: AbortSignal): Promise<void> {

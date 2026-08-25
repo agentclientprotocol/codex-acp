@@ -11,26 +11,35 @@ import type {SubagentState} from "./AcpSubagents";
 import {isRootAgentPath, nameFromAgentPath, normalizeAgentPath} from "./CodexAgentPath";
 
 type NativeSubagent = {
+    parentThreadId: string;
     parentSessionId: string;
+    sessionId: string;
     name: string;
-    description: string;
+    task: string;
     path?: string;
+    generation: number;
     terminalState?: SubagentState;
 };
 
 type PendingSubagent = {
+    parentThreadId: string;
     parentSessionId: string;
-    description: string;
+    task: string;
+    buffered: ServerNotification[];
+    droppedBufferedNotifications: number;
 };
 
 /** Owns native lifecycle, child routing, waiting, and legacy activity deduplication. */
 export class CodexSubagentEventRouter {
     private static readonly DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
+    private static readonly MAX_PENDING_NOTIFICATIONS = 256;
 
     private readonly children = new Map<string, NativeSubagent>();
     private readonly pendingSpawns = new Map<string, PendingSubagent>();
-    private readonly terminalPendingSpawns = new Set<string>();
+    private readonly terminalPendingSpawns = new Map<string, PendingSubagent>();
     private readonly waiters = new Set<() => void>();
+    private readonly materializationWaiters = new Map<string, Set<(sessionId: string | null) => void>>();
+    private readonly replayQueue: ServerNotification[] = [];
     private readonly activeLegacyActivities = new Set<string>();
 
     constructor(
@@ -60,6 +69,19 @@ export class CodexSubagentEventRouter {
             }
             return childTurn;
         }
+        const notificationThreadId = (notification.params as {threadId?: unknown}).threadId;
+        if (typeof notificationThreadId === "string" && this.pendingSpawns.has(notificationThreadId)) {
+            const pending = this.pendingSpawns.get(notificationThreadId)!;
+            if (pending.buffered.length === CodexSubagentEventRouter.MAX_PENDING_NOTIFICATIONS) {
+                pending.buffered.shift();
+                pending.droppedBufferedNotifications += 1;
+                if (pending.droppedBufferedNotifications === 1) {
+                    logger.log(`Pending subagent ${notificationThreadId} exceeded the notification buffer; dropping oldest updates`);
+                }
+            }
+            pending.buffered.push(notification);
+            return true;
+        }
         if (notification.method !== "item/started" && notification.method !== "item/completed") {
             return false;
         }
@@ -87,11 +109,19 @@ export class CodexSubagentEventRouter {
         }
         if (item.type !== "collabAgentToolCall") return false;
 
+        if (item.tool === "resumeAgent" || item.tool === "sendInput") {
+            for (const [childThreadId, state] of Object.entries(item.agentsStates)) {
+                if (state?.status === "running" || state?.status === "pendingInit") {
+                    await this.reopen(childThreadId);
+                }
+            }
+        }
+
         let representedSpawn = false;
         if (item.tool === "spawnAgent") {
-            const parentSessionId = this.children.has(item.senderThreadId)
-                ? item.senderThreadId
-                : this.rootSessionId;
+            const parent = this.children.get(item.senderThreadId);
+            const parentThreadId = parent ? item.senderThreadId : this.rootSessionId;
+            const parentSessionId = parent?.sessionId ?? this.rootSessionId;
             for (const childSessionId of item.receiverThreadIds) {
                 if (childSessionId.trim().length === 0) {
                     logger.log("Ignoring spawned subagent with an empty thread id");
@@ -108,8 +138,11 @@ export class CodexSubagentEventRouter {
                     continue;
                 }
                 this.pendingSpawns.set(childSessionId, {
+                    parentThreadId,
                     parentSessionId,
-                    description: item.prompt?.trim() || "Delegated task",
+                    task: item.prompt?.trim() || "Delegated task",
+                    buffered: [],
+                    droppedBufferedNotifications: 0,
                 });
                 representedSpawn = true;
             }
@@ -143,8 +176,24 @@ export class CodexSubagentEventRouter {
     notificationSessionId(notification: ServerNotification): string {
         const threadId = (notification.params as {threadId?: unknown}).threadId;
         return typeof threadId === "string" && this.children.has(threadId)
-            ? threadId
+            ? this.children.get(threadId)!.sessionId
             : this.rootSessionId;
+    }
+
+    takeBufferedNotifications(): ServerNotification[] {
+        return this.replayQueue.splice(0);
+    }
+
+    async waitForMaterializedSession(childThreadId: string): Promise<string | null> {
+        const child = this.children.get(childThreadId);
+        if (child) return child.terminalState === undefined ? child.sessionId : null;
+        if (this.terminalPendingSpawns.has(childThreadId)) return null;
+        if (!this.pendingSpawns.has(childThreadId)) return null;
+        return await new Promise(resolve => {
+            const waiters = this.materializationWaiters.get(childThreadId) ?? new Set();
+            waiters.add(resolve);
+            this.materializationWaiters.set(childThreadId, waiters);
+        });
     }
 
     legacyActivityStarted(item: ThreadItem & {type: "subAgentActivity"}): UpdateSessionEvent {
@@ -216,11 +265,6 @@ export class CodexSubagentEventRouter {
         }
     }
 
-    private hasOutstanding(): boolean {
-        return this.pendingSpawns.size > 0
-            || [...this.children.values()].some(child => child.terminalState === undefined);
-    }
-
     private isKnownChild(threadId: string): boolean {
         return threadId !== this.rootSessionId
             && (this.children.has(threadId)
@@ -232,53 +276,133 @@ export class CodexSubagentEventRouter {
         if (this.children.has(childSessionId)) return;
         const pending = this.pendingSpawns.get(childSessionId);
         const name = nameFromAgentPath(path, fallbackName(childSessionId));
-        const parentSessionId = pending?.parentSessionId
-            ?? this.parentSessionIdForPath(path);
-        const description = pending?.description ?? `Delegated task for ${name}`;
+        const inferredParent = this.parentForPath(path);
+        const parentThreadId = pending?.parentThreadId ?? inferredParent.threadId;
+        const parentSessionId = pending?.parentSessionId ?? inferredParent.sessionId;
+        const task = pending?.task ?? `Delegated task for ${name}`;
         await this.session.update({
             sessionUpdate: "subagent_spawned",
             subagentSessionId: childSessionId,
             name,
-            description,
+            task,
             capabilities: {},
         }, parentSessionId);
         this.children.set(childSessionId, {
+            parentThreadId,
             parentSessionId,
+            sessionId: childSessionId,
             name,
-            description,
+            task,
             path: normalizeAgentPath(path),
+            generation: 1,
         });
         this.pendingSpawns.delete(childSessionId);
+        this.replayQueue.push(...(pending?.buffered ?? []));
+        this.resolveMaterialization(childSessionId, childSessionId);
     }
 
     private finishPending(childSessionId: string): void {
-        if (!this.pendingSpawns.delete(childSessionId)) return;
-        this.terminalPendingSpawns.add(childSessionId);
-        for (const waiter of this.waiters) waiter();
-        this.waiters.clear();
+        const pending = this.pendingSpawns.get(childSessionId);
+        if (!pending) return;
+        this.pendingSpawns.delete(childSessionId);
+        this.terminalPendingSpawns.set(childSessionId, pending);
+        this.resolveMaterialization(childSessionId, null);
+        this.notifyWaiters();
     }
 
     private async finish(childSessionId: string, state: SubagentState): Promise<void> {
         const child = this.children.get(childSessionId);
         if (!child || child.terminalState !== undefined) return;
-        await this.session.update({
-            sessionUpdate: "subagent_state_update",
-            subagentSessionId: childSessionId,
-            state,
-        }, child.parentSessionId);
         child.terminalState = state;
+        try {
+            await this.session.update({
+                sessionUpdate: "subagent_state_update",
+                subagentSessionId: child.sessionId,
+                state,
+            }, child.parentSessionId);
+        }
+        catch (error) {
+            if (child.terminalState === state) delete child.terminalState;
+            throw error;
+        }
+        this.notifyWaiters();
+    }
+
+    private async reopen(childThreadId: string): Promise<void> {
+        const child = this.children.get(childThreadId);
+        if (!child) {
+            const pending = this.terminalPendingSpawns.get(childThreadId);
+            if (!pending) return;
+            const parentSessionId = this.children.get(pending.parentThreadId)?.sessionId ?? this.rootSessionId;
+            const reopened: NativeSubagent = {
+                parentThreadId: pending.parentThreadId,
+                parentSessionId,
+                sessionId: `${childThreadId}:generation:2`,
+                name: fallbackName(childThreadId),
+                task: pending.task,
+                generation: 2,
+            };
+            await this.session.update({
+                sessionUpdate: "subagent_spawned",
+                subagentSessionId: reopened.sessionId,
+                name: reopened.name,
+                task: reopened.task,
+                capabilities: {},
+            }, parentSessionId);
+            this.children.set(childThreadId, reopened);
+            this.terminalPendingSpawns.delete(childThreadId);
+            return;
+        }
+        if (!child.terminalState) return;
+        const previousSessionId = child.sessionId;
+        const previousParentSessionId = child.parentSessionId;
+        const previousState = child.terminalState;
+        child.parentSessionId = this.children.get(child.parentThreadId)?.sessionId ?? this.rootSessionId;
+        child.generation += 1;
+        child.sessionId = `${childThreadId}:generation:${child.generation}`;
+        delete child.terminalState;
+        try {
+            await this.session.update({
+                sessionUpdate: "subagent_spawned",
+                subagentSessionId: child.sessionId,
+                name: child.name,
+                task: child.task,
+                capabilities: {},
+            }, child.parentSessionId);
+        }
+        catch (error) {
+            child.generation -= 1;
+            child.sessionId = previousSessionId;
+            child.parentSessionId = previousParentSessionId;
+            child.terminalState = previousState;
+            throw error;
+        }
+    }
+
+    private resolveMaterialization(childThreadId: string, sessionId: string | null): void {
+        for (const resolve of this.materializationWaiters.get(childThreadId) ?? []) resolve(sessionId);
+        this.materializationWaiters.delete(childThreadId);
+    }
+
+    private hasOutstanding(): boolean {
+        return this.pendingSpawns.size > 0
+            || [...this.children.values()].some(child => child.terminalState === undefined);
+    }
+
+    private notifyWaiters(): void {
         for (const waiter of this.waiters) waiter();
         this.waiters.clear();
     }
 
-    private parentSessionIdForPath(path: string): string {
+    private parentForPath(path: string): {threadId: string; sessionId: string} {
         const normalized = normalizeAgentPath(path);
         const separator = normalized.lastIndexOf("/");
-        if (separator <= 0) return this.rootSessionId;
+        if (separator <= 0) return {threadId: this.rootSessionId, sessionId: this.rootSessionId};
         const parentPath = normalized.slice(0, separator);
-        return [...this.children.entries()]
-            .find(([, child]) => child.path === parentPath)?.[0]
-            ?? this.rootSessionId;
+        const parent = [...this.children.entries()].find(([, child]) => child.path === parentPath);
+        return parent
+            ? {threadId: parent[0], sessionId: parent[1].sessionId}
+            : {threadId: this.rootSessionId, sessionId: this.rootSessionId};
     }
 }
 

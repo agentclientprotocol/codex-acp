@@ -12,7 +12,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Model, reasoning effort, fast mode, approval, and sandbox mode configuration.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
 - Shell command, file change, [permission request](docs/permission-extension.md), MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, token usage, and review events.
-- Native ACP subagent sessions with separate child histories and root-routed permissions.
+- [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
 - Session-scoped long-running goals through the provider-neutral [goal extension](docs/goal-extension.md).
 - Client-provided MCP servers over command-based stdio config and HTTP transport.
 - Slash commands: `/status`, `/mcp`, `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.
@@ -77,13 +77,9 @@ See [readme-dev.md](readme-dev.md) for local client configuration, binary packag
 
 ### Subagent sessions
 
-Subagents are exposed only after bilateral capability negotiation. Until the released ACP SDKs
-preserve the draft `clientCapabilities.subagents` field, a supporting client may advertise
-`nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`; the adapter mirrors the capability
-in its initialize response. The canonical field remains supported and takes precedence once it is
-available. Without either client signal, subagent lifecycle retains its legacy ordinary ACP
-tool-call representation, while child permission and elicitation requests are handled on the root
-session.
+Subagent sessions follow the draft [ACP subagent RFD](https://github.com/agentclientprotocol/agent-client-protocol/pull/1992) and are enabled only after bilateral capability negotiation during `initialize`. Without native negotiation, the subagent lifecycle stays an ordinary ACP tool call.
+
+See [docs/subagent-sessions.md](docs/subagent-sessions.md) for the negotiation, lifecycle events, `session/load` reconstruction, and legacy fallback details.
 
 ## License
 
