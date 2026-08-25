@@ -12,11 +12,11 @@ function sessionState(): SessionState {
     } as SessionState;
 }
 
-function mcpStarted(id: string, turnId: string): ServerNotification {
+function mcpStarted(id: string, turnId: string, threadId = "thread"): ServerNotification {
     return {
         method: "item/started",
         params: {
-            threadId: "thread",
+            threadId,
             turnId,
             startedAtMs: 0,
             item: {
@@ -32,6 +32,42 @@ function mcpStarted(id: string, turnId: string): ServerNotification {
                 result: null,
                 error: null,
                 durationMs: null,
+            },
+        },
+    };
+}
+
+function fileChangeStarted(id: string, threadId: string): ServerNotification {
+    return {
+        method: "item/started",
+        params: {
+            threadId,
+            turnId: `turn-${threadId}`,
+            startedAtMs: 0,
+            item: {
+                type: "fileChange",
+                id,
+                changes: [{path: `/${threadId}.txt`, kind: {type: "add"}, diff: "+content"}],
+                status: "inProgress",
+            },
+        },
+    };
+}
+
+function turnCompleted(threadId: string): ServerNotification {
+    return {
+        method: "turn/completed",
+        params: {
+            threadId,
+            turn: {
+                id: `turn-${threadId}`,
+                items: [],
+                itemsView: "full",
+                status: "completed",
+                error: null,
+                startedAt: 0,
+                completedAt: 1,
+                durationMs: 1_000,
             },
         },
     };
@@ -79,6 +115,21 @@ describe("PermissionLifecycleContext", () => {
 
         expect(stalePrompt.popPendingMcpApproval("thread", "server")).toBeUndefined();
         expect(currentPrompt.popPendingMcpApproval("thread", "server")).toBe("current-call");
+    });
+
+    it("clears only the completed thread's permission correlation", () => {
+        const prompt = new PermissionLifecycleContext(sessionState()).beginPrompt();
+        prompt.handleNotification(mcpStarted("call-a", "turn-a", "child-a"));
+        prompt.handleNotification(mcpStarted("call-b", "turn-b", "child-b"));
+        prompt.handleNotification(fileChangeStarted("shared-file-change", "child-a"));
+        prompt.handleNotification(fileChangeStarted("shared-file-change", "child-b"));
+
+        prompt.handleNotification(turnCompleted("child-b"));
+
+        expect(prompt.popPendingMcpApproval("child-a", "server")).toBe("call-a");
+        expect(prompt.popPendingMcpApproval("child-b", "server")).toBeUndefined();
+        expect(prompt.fileChange("child-a", "shared-file-change")?.changes[0]?.path).toBe("/child-a.txt");
+        expect(prompt.fileChange("child-b", "shared-file-change")).toBeUndefined();
     });
 
     it("does not allocate a synthetic ID for native ACP elicitation", async () => {

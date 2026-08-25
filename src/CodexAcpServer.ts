@@ -2337,14 +2337,15 @@ export class CodexAcpServer {
             );
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
+                    permissionContext.handleNotification(event);
+                    await elicitationHandler.handleNotification(event);
                     if (!promptNotificationsActive) {
                         await promptEventHandler.handleSessionScopedNotification(event);
                         return;
                     }
                     const completesActiveTurn = event.method === "turn/completed"
+                        && event.params.threadId === sessionState.sessionId
                         && event.params.turn.id === sessionState.currentTurnId;
-                    permissionContext.handleNotification(event);
-                    await elicitationHandler.handleNotification(event);
                     await promptEventHandler.handleNotification(event);
                     if (completesActiveTurn) {
                         // The prompt may remain open for plan approval after its turn has ended. Switch at

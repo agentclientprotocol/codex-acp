@@ -52,7 +52,7 @@ export function fileChangeToolCall(
     params: FileChangeRequestApprovalParams,
     permissionContext: PermissionPromptContext,
 ): acp.ToolCallUpdate {
-    const item = permissionContext.fileChange(params.itemId);
+    const item = permissionContext.fileChange(params.threadId, params.itemId);
     return {
         toolCallId: params.itemId,
         kind: "edit",

@@ -30,6 +30,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         const response = await mockFixture.getCodexAcpAgent().initialize({
             protocolVersion: 1,
             clientCapabilities: {
+                elicitation: {url: {}},
                 _meta: {
                     jetbrains: {
                         air: {version: 1, capabilities: ["nativeSubagentSessions"]},
@@ -266,6 +267,22 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                         kind: "interrupted",
                         agentThreadId: "grandchild-1",
                         agentPath: "/root/air_architecture/tests",
+                    },
+                },
+            },
+            {
+                method: "turn/completed",
+                params: {
+                    threadId: "child-1",
+                    turn: {
+                        id: "turn-child",
+                        items: [],
+                        itemsView: "notLoaded",
+                        status: "completed",
+                        error: null,
+                        startedAt: null,
+                        completedAt: null,
+                        durationMs: null,
                     },
                 },
             },
@@ -866,6 +883,131 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             },
         });
         await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+        await mockFixture.sendServerNotification({
+            method: "turn/completed",
+            params: {
+                threadId: sessionId,
+                turn: {
+                    ...completedTurn,
+                    itemsView: "notLoaded",
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
+                },
+            },
+        });
+        completeTurn();
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+
+        let promptSettled = false;
+        void prompt.finally(() => { promptSettled = true; });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(promptSettled).toBe(false);
+
+        await mockFixture.sendServerNotification({
+            method: "item/started",
+            params: {
+                threadId: "child-1",
+                turnId: "turn-child",
+                startedAtMs: 0,
+                item: {
+                    type: "mcpToolCall",
+                    id: "child-mcp-call",
+                    server: "child-server",
+                    tool: "child-tool",
+                    status: "inProgress",
+                    arguments: {},
+                    appContext: null,
+                    readOnlyHint: null,
+                    pluginId: null,
+                    result: null,
+                    error: null,
+                    durationMs: null,
+                },
+            },
+        });
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+        mockFixture.setPermissionResponse({outcome: {outcome: "selected", optionId: "allow_once"}});
+        await mockFixture.sendServerRequest("mcpServer/elicitation/request", {
+            threadId: "child-1",
+            turnId: "turn-child",
+            serverName: "child-server",
+            mode: "form",
+            _meta: {codex_approval_kind: "mcp_tool_call"},
+            message: "Allow child tool?",
+            requestedSchema: {type: "object", properties: {}},
+        });
+        const childPermission = mockFixture.getAcpConnectionEvents([])
+            .find(event => event.method === "requestPermission"
+                && event.args[0].toolCall.toolCallId === "child-mcp-call");
+        expect(childPermission?.args[0].sessionId).toBe("child-1");
+
+        mockFixture.setElicitationResponse({action: "accept"});
+        await mockFixture.sendServerRequest("mcpServer/elicitation/request", {
+            threadId: "child-1",
+            turnId: "turn-child",
+            serverName: "child-server",
+            mode: "url",
+            _meta: null,
+            message: "Authorize child",
+            url: "https://example.com/child",
+            elicitationId: "child-url",
+        });
+        await mockFixture.sendServerNotification({
+            method: "serverRequest/resolved",
+            params: {threadId: "child-1", requestId: 1},
+        });
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+        const completedElicitation = mockFixture.getAcpConnectionEvents([])
+            .find(event => event.method === "completeElicitation"
+                && event.args[0].elicitationId === "child-url");
+        expect(completedElicitation).toBeDefined();
+
+        spawn("completed");
+        await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
+    });
+
+    it("waits for a pending spawn without publishing fallback identity and suppresses late activity", async () => {
+        await initializeNativeSubagents();
+        const appServer = mockFixture.getCodexAppServerClient();
+        const turn = {id: "turn-1", items: [], status: "inProgress" as const, error: null};
+        const completedTurn = {...turn, status: "completed" as const};
+        let completeTurn!: () => void;
+        appServer.turnStart = vi.fn().mockResolvedValue({turn});
+        appServer.awaitTurnCompleted = vi.fn().mockReturnValue(new Promise(resolve => {
+            completeTurn = () => resolve({threadId: sessionId, turn: completedTurn});
+        }));
+        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
+
+        const prompt = mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{type: "text", text: "Delegate work"}],
+        });
+        await vi.waitFor(() => expect(appServer.turnStart).toHaveBeenCalled());
+        const spawn = (status: "running" | "completed") => mockFixture.sendServerNotification({
+            method: status === "running" ? "item/started" : "item/completed",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                ...(status === "running" ? {startedAtMs: 0} : {completedAtMs: 0}),
+                item: {
+                    type: "collabAgentToolCall",
+                    id: "spawn-without-activity",
+                    tool: "spawnAgent",
+                    status: status === "running" ? "inProgress" : "completed",
+                    senderThreadId: sessionId,
+                    receiverThreadIds: ["child-without-activity"],
+                    prompt: "Child task",
+                    model: null,
+                    reasoningEffort: null,
+                    agentsStates: {
+                        "child-without-activity": {status, message: null},
+                    },
+                },
+            },
+        });
+        spawn("running");
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
         completeTurn();
 
         let promptSettled = false;
@@ -875,5 +1017,145 @@ describe("CodexEventHandler - collab agent tool call events", () => {
 
         spawn("completed");
         await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
+        await mockFixture.sendServerNotification({
+            method: "item/started",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                startedAtMs: 0,
+                item: {
+                    type: "subAgentActivity",
+                    id: "late-activity",
+                    kind: "started",
+                    agentThreadId: "child-without-activity",
+                    agentPath: "/root/late_identity",
+                },
+            },
+        });
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+        const lifecycle = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update.subagentSessionId === "child-without-activity");
+        expect(lifecycle).toEqual([]);
+    });
+
+    it("finishes only the child whose turn completed", async () => {
+        await initializeNativeSubagents();
+        const activity = (child: string): ServerNotification => ({
+            method: "item/started",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-root",
+                startedAtMs: 0,
+                item: {
+                    type: "subAgentActivity",
+                    id: `activity-${child}`,
+                    kind: "started",
+                    agentThreadId: child,
+                    agentPath: `/root/${child}`,
+                },
+            },
+        });
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            activity("child-a"),
+            activity("child-b"),
+            {
+                method: "turn/completed",
+                params: {
+                    threadId: "child-a",
+                    turn: {
+                        id: "turn-child-a",
+                        items: [],
+                        itemsView: "notLoaded",
+                        status: "completed",
+                        error: null,
+                        startedAt: null,
+                        completedAt: null,
+                        durationMs: null,
+                    },
+                },
+            },
+        ]);
+
+        const terminalUpdates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update.sessionUpdate === "subagent_state_update");
+        expect(terminalUpdates).toMatchObject([
+            {subagentSessionId: "child-a", state: "completed"},
+        ]);
+    });
+
+    it("keeps child turn boundaries out of the root event handler", async () => {
+        await initializeNativeSubagents();
+        const turn = (id: string, status: "inProgress" | "completed") => ({
+            id,
+            items: [],
+            itemsView: "notLoaded" as const,
+            status,
+            error: null,
+            startedAt: null,
+            completedAt: null,
+            durationMs: null,
+        });
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            {
+                method: "turn/started",
+                params: {threadId: sessionId, turn: turn("root-turn", "inProgress")},
+            },
+            {
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: sessionId,
+                    turnId: "root-turn",
+                    itemId: "root-message",
+                    delta: "Root output",
+                },
+            },
+        ]);
+        expect(sessionState.currentTurnId).toBe("root-turn");
+
+        await mockFixture.sendServerNotification({
+            method: "item/started",
+            params: {
+                threadId: sessionId,
+                turnId: "root-turn",
+                startedAtMs: 0,
+                item: {
+                    type: "subAgentActivity",
+                    id: "child-activity",
+                    kind: "started",
+                    agentThreadId: "child-turn-thread",
+                    agentPath: "/root/child_turn",
+                },
+            },
+        });
+        await mockFixture.sendServerNotification({
+            method: "turn/started",
+            params: {
+                threadId: "child-turn-thread",
+                turn: turn("child-turn", "inProgress"),
+            },
+        });
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+        expect(sessionState.currentTurnId).toBe("root-turn");
+
+        await mockFixture.sendServerNotification({
+            method: "turn/completed",
+            params: {
+                threadId: "child-turn-thread",
+                turn: turn("child-turn", "completed"),
+            },
+        });
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+        expect(sessionState.currentTurnId).toBe("root-turn");
+
+        await mockFixture.sendServerNotification({
+            method: "turn/completed",
+            params: {threadId: sessionId, turn: turn("root-turn", "completed")},
+        });
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+        expect(sessionState.currentTurnId).toBeNull();
     });
 });

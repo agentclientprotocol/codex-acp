@@ -22,7 +22,7 @@ export class PermissionLifecycleContext {
 
 /** Prompt-scoped permission presentation and MCP correlation state. */
 export class PermissionPromptContext {
-    private readonly fileChanges = new Map<string, FileChangeItem>();
+    private readonly fileChanges = new Map<string, Map<string, FileChangeItem>>();
     private readonly pendingMcpApprovals = new Map<string, Map<string, string[]>>();
 
     constructor(private readonly nextStandaloneId: (serverName: string) => string) {}
@@ -36,7 +36,7 @@ export class PermissionPromptContext {
                 this.handleItemCompleted(notification.params.threadId, notification.params.item);
                 return;
             case "turn/completed":
-                this.clearTransientState();
+                this.clearTransientState(notification.params.threadId);
                 return;
             case "serverRequest/resolved":
                 this.pendingMcpApprovals.delete(notification.params.threadId);
@@ -46,8 +46,8 @@ export class PermissionPromptContext {
         }
     }
 
-    fileChange(itemId: string): FileChangeItem | undefined {
-        return this.fileChanges.get(itemId);
+    fileChange(threadId: string, itemId: string): FileChangeItem | undefined {
+        return this.fileChanges.get(threadId)?.get(itemId);
     }
 
     popPendingMcpApproval(threadId: string, serverName: string): string | undefined {
@@ -67,7 +67,9 @@ export class PermissionPromptContext {
 
     private handleItemStarted(threadId: string, item: ThreadItem): void {
         if (item.type === "fileChange") {
-            this.fileChanges.set(item.id, item);
+            const byItem = this.fileChanges.get(threadId) ?? new Map<string, FileChangeItem>();
+            byItem.set(item.id, item);
+            this.fileChanges.set(threadId, byItem);
             return;
         }
         if (item.type !== "mcpToolCall") return;
@@ -80,7 +82,9 @@ export class PermissionPromptContext {
 
     private handleItemCompleted(threadId: string, item: ThreadItem): void {
         if (item.type === "fileChange") {
-            this.fileChanges.delete(item.id);
+            const byItem = this.fileChanges.get(threadId);
+            byItem?.delete(item.id);
+            if (byItem?.size === 0) this.fileChanges.delete(threadId);
             return;
         }
         if (item.type !== "mcpToolCall") return;
@@ -94,8 +98,8 @@ export class PermissionPromptContext {
         if (byServer.size === 0) this.pendingMcpApprovals.delete(threadId);
     }
 
-    private clearTransientState(): void {
-        this.fileChanges.clear();
-        this.pendingMcpApprovals.clear();
+    private clearTransientState(threadId: string): void {
+        this.fileChanges.delete(threadId);
+        this.pendingMcpApprovals.delete(threadId);
     }
 }
