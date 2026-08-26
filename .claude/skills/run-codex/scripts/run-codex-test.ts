@@ -108,7 +108,7 @@ async function main() {
             if (json) {
                 console.log(JSON.stringify(event));
             } else {
-                console.log(`[CODEX] ${event.type}:`, JSON.stringify(event.data, null, 2));
+                console.log(`[CODEX] ${event.eventType}:`, JSON.stringify(event, null, 2));
             }
         }
     });
@@ -181,7 +181,7 @@ async function main() {
             // Event type breakdown
             const eventTypes = new Map<string, number>();
             for (const event of codexEvents) {
-                const key = `${event.type}:${(event.data as any)?.method || "unknown"}`;
+                const key = `${event.eventType}:${"method" in event ? event.method : "unknown"}`;
                 eventTypes.set(key, (eventTypes.get(key) || 0) + 1);
             }
             console.log(`\nEvent Types:`);

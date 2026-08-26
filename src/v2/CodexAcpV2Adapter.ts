@@ -40,7 +40,7 @@ export function createLegacyClientConnection(
         request: async (method: string, params?: unknown): Promise<unknown> => {
             if (method === acpV1.methods.client.session.requestPermission) {
                 const request = params as acpV1.RequestPermissionRequest;
-                return await connection.request(acp.methods.client.session.requestPermission, {
+                const requestParams: acp.RequestPermissionRequest = {
                     sessionId: request.sessionId,
                     title: request.toolCall.title ?? "Permission required",
                     description: permissionDescription(request.toolCall),
@@ -49,8 +49,9 @@ export function createLegacyClientConnection(
                         toolCall: mapToolCallUpdate(request.toolCall),
                     },
                     options: request.options,
-                    _meta: request._meta,
-                });
+                    ...(request._meta === undefined ? {} : {_meta: request._meta}),
+                };
+                return await connection.request(acp.methods.client.session.requestPermission, requestParams);
             }
             return await connection.request(method, params);
         },
@@ -314,6 +315,8 @@ export class V2SessionUpdateMapper {
         case "plan_removed":
         case "session_info_update":
         case "usage_update":
+        case "compaction_update":
+        case "compaction_summary_chunk":
             return notification as unknown as acp.UpdateSessionNotification;
         }
     }
@@ -452,13 +455,6 @@ function mapConfigOptions(options?: acpV1.SessionConfigOption[] | null): acp.Ses
 
 function mapAuthMethod(method: acpV1.AuthMethod): acp.AuthMethod {
     const {id, ...rest} = method;
-    if ("type" in method && method.type === "env_var") {
-        return {
-            ...rest,
-            type: "env_var",
-            methodId: id,
-        };
-    }
     if ("type" in method && method.type === "terminal") {
         return {
             ...rest,
