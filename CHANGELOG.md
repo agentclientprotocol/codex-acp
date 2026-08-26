@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/agentclientprotocol/codex-acp/compare/v1.6.1...v1.6.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* right-size the apt timeouts so a slow mirror still finishes ([86e0772](https://github.com/agentclientprotocol/codex-acp/commit/86e0772204a07d6fc4a8853c523ceb5006431f88))
+
 ## [1.6.1](https://github.com/agentclientprotocol/codex-acp/compare/v1.6.0...v1.6.1) (2026-08-19)
 
 

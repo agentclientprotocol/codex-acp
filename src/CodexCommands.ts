@@ -54,11 +54,14 @@ export class CodexCommands {
         this.onLogout = onLogout;
     }
 
-    async publish(sessionState: SessionState): Promise<void> {
+    async publish(sessionState: SessionState, shouldPublish: () => boolean = () => true): Promise<void> {
         try {
+            if (!shouldPublish()) {
+                return;
+            }
             const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
             const availableCommands = this.buildAvailableCommands(skillsResponse?.data ?? []);
-            if (availableCommands.length === 0) {
+            if (availableCommands.length === 0 || !shouldPublish()) {
                 return;
             }
 
@@ -68,7 +71,9 @@ export class CodexCommands {
                 availableCommands
             });
         } catch (err) {
-            logger.error(`Failed to publish available commands for session ${sessionState.sessionId}`, err);
+            if (shouldPublish()) {
+                logger.error(`Failed to publish available commands for session ${sessionState.sessionId}`, err);
+            }
         }
     }
 

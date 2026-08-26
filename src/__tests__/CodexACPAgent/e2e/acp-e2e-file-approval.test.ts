@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it, onTestFinished, vi} from "vitest";
 import {AgentMode} from "../../../AgentMode";
-import {ApprovalOptionId} from "../../../ApprovalOptionId";
+import {ApprovalOptionId} from "../../../permissions/option-ids";
 import {
     createAuthenticatedFixture,
     createPermissionResponder,
@@ -37,18 +37,18 @@ describeE2E("E2E file approval tests", () => {
     });
 
     it("does not apply rejected file edits", async () => {
-        fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.RejectOnce));
+        fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.Cancel));
         const sessionId = await expectFileEditBlocked(fixture, newFilePathIn(fixture.workspaceDir));
         expect(fixture.readPermissionRequests(sessionId, "edit").length).toBeGreaterThanOrEqual(1);
         expect(fixture.readPermissionRequests(sessionId, "execute")).toHaveLength(0);
     });
 });
 
-describeE2E("E2E Agent mode file permission tests", () => {
+describeE2E("E2E read-only mode file permission tests", () => {
     let fixture: SpawnedAgentFixture;
 
     beforeEach(async () => {
-        fixture = await createAuthenticatedFixture(AgentMode.Agent);
+        fixture = await createAuthenticatedFixture(AgentMode.ReadOnly);
     });
 
     afterEach(async () => {
@@ -65,7 +65,7 @@ describeE2E("E2E Agent mode file permission tests", () => {
     });
 });
 
-describeE2E("E2E Agent with full access file permission tests", () => {
+describeE2E("E2E full-access mode file permission tests", () => {
     let fixture: SpawnedAgentFixture;
 
     beforeEach(async () => {

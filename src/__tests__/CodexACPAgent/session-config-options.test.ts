@@ -90,6 +90,23 @@ describe("Session config options", () => {
             category: "mode",
             currentValue: AgentMode.DEFAULT_AGENT_MODE.id,
             type: "select",
+            options: [
+                {
+                    value: "read-only",
+                    name: "Ask for approval",
+                    description: "Always ask to edit external files and use the internet",
+                },
+                {
+                    value: "agent",
+                    name: "Approve for me",
+                    description: "Only ask for actions detected as potentially unsafe",
+                },
+                {
+                    value: "agent-full-access",
+                    name: "Full access",
+                    description: "Unrestricted access to the internet and any file on your computer",
+                },
+            ],
         });
         expect((modeOption as any).options.map((o: any) => o.value)).toEqual(
             AgentMode.all().map(m => m.id)
@@ -146,12 +163,12 @@ describe("Session config options", () => {
         const result = await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
             configId: MODE_CONFIG_ID,
-            value: AgentMode.ReadOnly.id,
+            value: AgentMode.Agent.id,
         });
 
-        expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.ReadOnly);
+        expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.Agent);
         const modeOption = result.configOptions?.find(o => o.id === MODE_CONFIG_ID);
-        expect((modeOption as any).currentValue).toBe(AgentMode.ReadOnly.id);
+        expect((modeOption as any).currentValue).toBe(AgentMode.Agent.id);
     });
 
     it("changes collaboration mode without starting a model turn", async () => {
