@@ -541,7 +541,8 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadStart({
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
+            // ACP v2 allows omitting mcpServers; the v1 type only happens to require it
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });

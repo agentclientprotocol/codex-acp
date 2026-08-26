@@ -48,6 +48,17 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
     });
 
+    it('creates a session when mcpServers is omitted (ACP v2 optionality)', async () => {
+        const fixture = createTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        await codexAcpAgent.authenticate({methodId: "api-key", _meta: {"api-key": {apiKey: "TOKEN"}}});
+
+        // v2 的 NewSessionRequest 不要求 mcpServers;v1 类型碰巧要求 —— 缺省必须等价于 []
+        const response = await codexAcpAgent.newSession({cwd: ""} as Parameters<typeof codexAcpAgent.newSession>[0]);
+        expect(response.sessionId).toBeDefined();
+    });
+
     it('should authenticate with key', async () => {
         const keyFixture = createTestFixture();
         const codexAcpAgent = keyFixture.getCodexAcpAgent();
