@@ -66,7 +66,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await forkFixture.getCodexAcpAgent().initialize({protocolVersion: 1});
         vi.spyOn(appServer, "threadFork").mockResolvedValue({thread: {id: "forked-thread"}} as ThreadForkResponse);
         vi.spyOn(appServer, "listModels").mockRejectedValue(new Error("models unavailable"));
-        const unsubscribe = vi.spyOn(appServer, "threadUnsubscribe").mockResolvedValue({});
+        const unsubscribe = vi.spyOn(appServer, "threadUnsubscribe").mockResolvedValue({status: "unsubscribed"});
         const clearHandlers = vi.spyOn(appServer, "clearThreadHandlers");
 
         await expect(codexAcpClient.forkSession({sessionId: "source-thread", cwd: ""}))
