@@ -494,17 +494,28 @@ export class CodexAcpClient {
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             modelProvider: await this.getResumeModelProvider(),
         });
-        const codexModels = await this.fetchAvailableModels();
-        const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
-        return {
-            sessionId: response.thread.id,
-            currentModelId: currentModelId,
-            models: codexModels,
-            collaborationMode: this.getCollaborationMode(response.thread.id),
-            modelProvider: response.modelProvider,
-            currentServiceTier: response.serviceTier as ServiceTier ?? null,
-            additionalDirectories,
-        };
+        try {
+            const codexModels = await this.fetchAvailableModels();
+            const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
+            return {
+                sessionId: response.thread.id,
+                currentModelId: currentModelId,
+                models: codexModels,
+                collaborationMode: this.getCollaborationMode(response.thread.id),
+                modelProvider: response.modelProvider,
+                currentServiceTier: response.serviceTier as ServiceTier ?? null,
+                additionalDirectories,
+            };
+        } catch (error) {
+            // thread/fork already loaded and subscribed the new thread; a failure in
+            // the remaining initialization must not leave that subscription alive.
+            try {
+                await this.closeSession(response.thread.id);
+            } catch (cleanupError) {
+                logger.error("Failed to close forked thread after initialization failure", cleanupError);
+            }
+            throw error;
+        }
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {

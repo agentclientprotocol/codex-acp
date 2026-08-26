@@ -613,6 +613,15 @@ export class CodexAcpServer {
         } catch (err) {
             if (resumeSubscribed && requestedSessionGeneration !== null) {
                 await this.cleanupStaleSessionOpen(sessionId, requestedSessionGeneration);
+            } else if ("forkFromSessionId" in request) {
+                // the forked thread is already loaded and subscribed on the app-server
+                // side; failing here must not leave that subscription alive (the resume
+                // cleanup above is keyed on the requested id, which a fork never has)
+                try {
+                    await this.runWithProcessCheck(() => this.codexAcpClient.closeSession(sessionId));
+                } catch (cleanupError) {
+                    logger.error("Failed to close forked thread after auth-state failure", cleanupError);
+                }
             }
             throw err;
         }
