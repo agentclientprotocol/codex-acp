@@ -1083,14 +1083,7 @@ export class CodexAcpClient {
             "appServer",
             "unknown",
         ];
-        const requestedCwd = request.cwd?.trim() ?? null;
-        const filterByCwd = (thread: Thread): boolean => {
-            if (!requestedCwd) return true;
-            if (isAbsolutePathLike(requestedCwd)) {
-                return arePathsEqual(thread.cwd, requestedCwd);
-            }
-            return arePathBasenamesEqual(thread.cwd, requestedCwd);
-        };
+        const requestedCwd = request.cwd?.trim() || null;
 
         const preferredProvider = this.getModelProvider();
         const modelProviders = preferredProvider ? [preferredProvider] : [];
@@ -1098,6 +1091,8 @@ export class CodexAcpClient {
             cursor: request.cursor ?? null,
             modelProviders: modelProviders,
             sourceKinds: sourceKinds,
+            cwd: requestedCwd,
+            useStateDbOnly: true,
         });
 
         const mapThreadToSession = (thread: Thread) => ({
@@ -1107,25 +1102,8 @@ export class CodexAcpClient {
             updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
         });
 
-        if (listResponse.data.length === 0) {
-            const diagnostics = await this.runSessionListDiagnostics();
-            logger.log("Session list diagnostics", diagnostics);
-        }
-
-        let sessions = listResponse.data.map(mapThreadToSession);
-        if (requestedCwd) {
-            const filtered = listResponse.data
-                .filter(filterByCwd)
-                .map(mapThreadToSession);
-            if (filtered.length > 0 || isAbsolutePathLike(requestedCwd)) {
-                sessions = filtered;
-            } else {
-                logger.log("Ignoring non-absolute cwd filter for session/list", {cwd: requestedCwd});
-            }
-        }
-
         return {
-            sessions,
+            sessions: listResponse.data.map(mapThreadToSession),
             nextCursor: listResponse.nextCursor ?? null,
         };
     }
