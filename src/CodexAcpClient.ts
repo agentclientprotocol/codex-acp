@@ -484,6 +484,29 @@ export class CodexAcpClient {
         }
     }
 
+    async forkSession(request: acp.ForkSessionRequest): Promise<SessionMetadata> {
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        await this.refreshSkills(request.cwd, additionalDirectories);
+
+        const response = await this.codexClient.threadFork({
+            threadId: request.sessionId,
+            cwd: request.cwd,
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+            modelProvider: await this.getResumeModelProvider(),
+        });
+        const codexModels = await this.fetchAvailableModels();
+        const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
+        return {
+            sessionId: response.thread.id,
+            currentModelId: currentModelId,
+            models: codexModels,
+            collaborationMode: this.getCollaborationMode(response.thread.id),
+            modelProvider: response.modelProvider,
+            currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            additionalDirectories,
+        };
+    }
+
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);

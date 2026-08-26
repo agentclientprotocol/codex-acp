@@ -134,6 +134,7 @@ function startAcpV2Server(): void {
         })
         .onRequest(acp.methods.agent.initialize, (ctx) => getAdapter().initialize(ctx.params))
         .onRequest(acp.methods.agent.session.new, (ctx) => getAdapter().newSession(ctx.params))
+        .onRequest(acp.methods.agent.session.fork, (ctx) => getAdapter().forkSession(ctx.params))
         .onRequest(acp.methods.agent.session.list, (ctx) => getAdapter().listSessions(ctx.params))
         .onRequest(acp.methods.agent.session.delete, (ctx) => getAdapter().deleteSession(ctx.params))
         .onRequest(acp.methods.agent.session.resume, (ctx) => getAdapter().resumeSession(ctx.params))

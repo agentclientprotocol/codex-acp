@@ -38,7 +38,7 @@ describe("CodexAcpV2Adapter", () => {
                 sessionUpdate: "plan",
                 entries: [{content: "Implement", priority: "high", status: "in_progress"}],
             },
-        }).update).toEqual({
+        })!.update).toEqual({
             sessionUpdate: "plan_update",
             plan: {
                 type: "items",
@@ -59,7 +59,7 @@ describe("CodexAcpV2Adapter", () => {
                     options: [{value: "gpt-5", name: "GPT-5"}],
                 }],
             },
-        }).update).toMatchObject({
+        })!.update).toMatchObject({
             sessionUpdate: "config_option_update",
             configOptions: [{configId: "model"}],
         });
@@ -77,7 +77,7 @@ describe("CodexAcpV2Adapter", () => {
                     input: {hint: "optional instructions"},
                 }],
             },
-        }).update).toEqual({
+        })!.update).toEqual({
             sessionUpdate: "available_commands_update",
             availableCommands: [{
                 name: "review",
@@ -98,7 +98,7 @@ describe("CodexAcpV2Adapter", () => {
                     newText: "after\n",
                 }],
             },
-        }).update).toMatchObject({
+        })!.update).toMatchObject({
             sessionUpdate: "tool_call_update",
             content: [{
                 type: "diff",
@@ -123,16 +123,16 @@ describe("CodexAcpV2Adapter", () => {
             update: {sessionUpdate: "agent_thought_chunk", content: {type: "text", text: "thinking"}},
         });
 
-        expect(first.update).toMatchObject({messageId: "v2-legacy-message-1"});
-        expect(second.update).toMatchObject({messageId: "v2-legacy-message-1"});
-        expect(thought.update).toMatchObject({messageId: "v2-legacy-message-2"});
+        expect(first!.update).toMatchObject({messageId: "v2-legacy-message-1"});
+        expect(second!.update).toMatchObject({messageId: "v2-legacy-message-1"});
+        expect(thought!.update).toMatchObject({messageId: "v2-legacy-message-2"});
 
         mapper.resetSession("session-1");
         const nextTurn = mapper.map({
             sessionId: "session-1",
             update: {sessionUpdate: "agent_message_chunk", content: {type: "text", text: "next"}},
         });
-        expect(nextTurn.update).toMatchObject({messageId: "v2-legacy-message-3"});
+        expect(nextTurn!.update).toMatchObject({messageId: "v2-legacy-message-3"});
     });
 
     it("maps config option ids in new-session responses", async () => {
@@ -159,6 +159,58 @@ describe("CodexAcpV2Adapter", () => {
                 options: [{value: "gpt-5", name: "GPT-5"}],
             }],
         });
+    });
+
+    it("forks a session through the legacy agent and maps config ids", async () => {
+        const forkSession = vi.fn().mockResolvedValue({
+            sessionId: "session-2",
+            configOptions: [{
+                id: "model",
+                name: "Model",
+                type: "select",
+                currentValue: "gpt-5",
+                options: [{value: "gpt-5", name: "GPT-5"}],
+            }],
+        });
+        const {adapter} = createAdapter({forkSession});
+
+        await expect(adapter.forkSession({sessionId: "session-1", cwd: "/tmp"})).resolves.toEqual({
+            sessionId: "session-2",
+            configOptions: [{
+                configId: "model",
+                name: "Model",
+                type: "select",
+                currentValue: "gpt-5",
+                options: [{value: "gpt-5", name: "GPT-5"}],
+            }],
+        });
+        expect(forkSession).toHaveBeenCalledWith({sessionId: "session-1", cwd: "/tmp"});
+    });
+
+    it("declares the session fork capability when the legacy agent has one", async () => {
+        const {adapter} = createAdapter({
+            initialize: vi.fn().mockResolvedValue({
+                agentInfo: {name: "codex-acp", version: "test"},
+                agentCapabilities: {sessionCapabilities: {fork: {}}},
+            }),
+        });
+
+        const response = await adapter.initialize({
+            protocolVersion: 2,
+            info: {name: "test-client", version: "test"},
+            capabilities: {},
+        });
+        expect(response.capabilities?.session?.fork).toEqual({});
+    });
+
+    it("drops the legacy current_mode_update dialect (modes travel via config_option_update)", () => {
+        expect(new V2SessionUpdateMapper().map({
+            sessionId: "session-1",
+            update: {
+                sessionUpdate: "current_mode_update",
+                currentModeId: "code",
+            },
+        })).toBeNull();
     });
 
     it("maps auth method and grouped config identifiers to v2", async () => {
@@ -278,6 +330,7 @@ function createAdapter(overrides: Partial<Record<keyof CodexAcpServer, unknown>>
         newSession: vi.fn().mockResolvedValue({}),
         loadSession: vi.fn().mockResolvedValue({}),
         resumeSession: vi.fn().mockResolvedValue({}),
+        forkSession: vi.fn().mockResolvedValue({}),
         listSessions: vi.fn().mockResolvedValue({sessions: []}),
         deleteSession: vi.fn().mockResolvedValue({}),
         closeSession: vi.fn().mockResolvedValue({}),

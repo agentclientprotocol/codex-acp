@@ -7,6 +7,7 @@ import {logger} from "../Logger";
 type LegacyAgent = Pick<CodexAcpServer,
     | "initialize"
     | "newSession"
+    | "forkSession"
     | "loadSession"
     | "resumeSession"
     | "listSessions"
@@ -30,9 +31,10 @@ export function createLegacyClientConnection(
     return {
         notify: async (method: string, params?: unknown): Promise<void> => {
             if (method === acpV1.methods.client.session.update) {
-                await connection.notify(acp.methods.client.session.update, updateMapper.map(
-                    params as acpV1.SessionNotification,
-                ));
+                const mapped = updateMapper.map(params as acpV1.SessionNotification);
+                if (mapped !== null) {
+                    await connection.notify(acp.methods.client.session.update, mapped);
+                }
                 return;
             }
             await connection.notify(method, params);
@@ -88,6 +90,7 @@ export class CodexAcpV2Adapter {
                     prompt: mapPromptCapabilities(capabilities?.promptCapabilities),
                     mcp: mapMcpCapabilities(capabilities?.mcpCapabilities),
                     delete: capabilities?.sessionCapabilities?.delete,
+                    fork: capabilities?.sessionCapabilities?.fork,
                     additionalDirectories: capabilities?.sessionCapabilities?.additionalDirectories,
                 }),
                 auth: capabilities?.auth,
@@ -105,6 +108,15 @@ export class CodexAcpV2Adapter {
             configOptions: mapConfigOptions(response.configOptions),
             _meta: response._meta,
         }) as acp.NewSessionResponse;
+    }
+
+    async forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+        const response = await this.agent.forkSession(params as acpV1.ForkSessionRequest);
+        return compact({
+            sessionId: response.sessionId,
+            configOptions: mapConfigOptions(response.configOptions),
+            _meta: response._meta,
+        }) as acp.ForkSessionResponse;
     }
 
     async resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
@@ -230,7 +242,7 @@ export class V2SessionUpdateMapper {
     private nextMessageId = 1;
     private readonly fallbackMessageIds = new Map<string, string>();
 
-    map(notification: acpV1.SessionNotification): acp.UpdateSessionNotification {
+    map(notification: acpV1.SessionNotification): acp.UpdateSessionNotification | null {
         const update = notification.update;
         switch (update.sessionUpdate) {
         case "user_message_chunk":
@@ -278,13 +290,9 @@ export class V2SessionUpdateMapper {
                 },
             };
         case "current_mode_update":
-            return {
-                ...notification,
-                update: {
-                    ...update,
-                    sessionUpdate: "_codex/current_mode_update",
-                },
-            } as acp.UpdateSessionNotification;
+            // 模式变化已由 config_option_update 承载(MODE_CONFIG_ID);
+            // 旧 `_codex/current_mode_update` 方言无人消费,不再转发
+            return null;
         case "tool_call_update": {
             const {sessionUpdate: _sessionUpdate, ...toolCall} = update;
             return {
