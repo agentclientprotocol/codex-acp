@@ -32,6 +32,15 @@ npm install -g @agentclientprotocol/codex-acp
 codex-acp --version
 ```
 
+The package also includes an experimental ACP v2 entry point:
+
+```bash
+npx -y --package @agentclientprotocol/codex-acp codex-acp-v2
+```
+
+ACP v2 is currently a draft. The stable `codex-acp` command continues to use
+ACP v1, while `codex-acp-v2` opts in to the SDK's experimental v2 protocol.
+
 The npm package includes a compatible `@openai/codex` dependency. Set `CODEX_PATH` only when you want the adapter to run a different Codex binary:
 
 ```bash

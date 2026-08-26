@@ -84,3 +84,19 @@ npm run package:all
 1. Update the `@openai/codex` version in `package.json` (under `dependencies`).
 2. Regenerate Codex types in `src/app-server/`: `npm run generate-types`
 3. Ensure there are no type errors or failed tests: `npm run typecheck` and `npm run test`
+
+# ACP v2 development
+
+The stable `codex-acp` executable continues to serve ACP v1. The experimental
+`codex-acp-v2` executable uses `@agentclientprotocol/sdk/experimental/v2` and
+shares the same Codex app-server implementation through a protocol adapter.
+
+Run it from source with:
+
+```bash
+npm run start:v2
+```
+
+After `npm run build`, the v2 bundle is available at `dist/index-v2.js`. ACP v2
+is a draft protocol, so SDK upgrades must include the v2 adapter tests and a
+wire-level compatibility check with the consuming client.

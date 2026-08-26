@@ -13,7 +13,7 @@ import {
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
-import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
+import type {Model, ReviewStartResponse, ThreadForkResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 import {GOAL_CONTROL_METHOD} from "../../AcpExtensions";
@@ -46,6 +46,35 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const transportDump = authFixture.getCodexConnectionDump(ignoredFields);
         await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
+    });
+
+    it('creates a session when mcpServers is omitted (ACP v2 optionality)', async () => {
+        const fixture = createTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        await codexAcpAgent.authenticate({methodId: "api-key", _meta: {"api-key": {apiKey: "TOKEN"}}});
+
+        // v2 的 NewSessionRequest 不要求 mcpServers;v1 类型碰巧要求 —— 缺省必须等价于 []
+        const response = await codexAcpAgent.newSession({cwd: ""} as Parameters<typeof codexAcpAgent.newSession>[0]);
+        expect(response.sessionId).toBeDefined();
+    });
+
+    it('unsubscribes the forked thread when post-fork initialization fails', async () => {
+        const forkFixture = createTestFixture();
+        const codexAcpClient = forkFixture.getCodexAcpClient();
+        const appServer = forkFixture.getCodexAppServerClient();
+        await forkFixture.getCodexAcpAgent().initialize({protocolVersion: 1});
+        vi.spyOn(appServer, "threadFork").mockResolvedValue({thread: {id: "forked-thread"}} as ThreadForkResponse);
+        vi.spyOn(appServer, "listModels").mockRejectedValue(new Error("models unavailable"));
+        const unsubscribe = vi.spyOn(appServer, "threadUnsubscribe").mockResolvedValue({status: "unsubscribed"});
+        const clearHandlers = vi.spyOn(appServer, "clearThreadHandlers");
+
+        await expect(codexAcpClient.forkSession({sessionId: "source-thread", cwd: ""}))
+            .rejects.toThrow("models unavailable");
+
+        // thread/fork 已订阅新 thread —— 后续初始化失败不得留下活订阅
+        expect(unsubscribe).toHaveBeenCalledWith({threadId: "forked-thread"});
+        expect(clearHandlers).toHaveBeenCalledWith("forked-thread");
     });
 
     it('should authenticate with key', async () => {

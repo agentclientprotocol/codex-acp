@@ -7,10 +7,12 @@
   "description": "",
   "main": "dist/index.js",
   "bin": {
-    "codex-acp": "dist/index.js"
+    "codex-acp": "dist/index.js",
+    "codex-acp-v2": "dist/index-v2.js"
   },
   "files": [
     "dist/index.js",
+    "dist/index-v2.js",
     "README.md",
     "LICENSE",
     "package.json"
@@ -33,6 +35,7 @@
     "package:win-x64": "cd dist/bin && zip codex-acp-x64-windows.zip codex-acp-x64-windows.exe",
     "package:win-arm64": "cd dist/bin && zip codex-acp-arm64-windows.zip codex-acp-arm64-windows.exe",
     "start": "node --import tsx src/index.ts",
+    "start:v2": "node --import tsx src/v2/index.ts",
     "example:steering": "node --import tsx examples/steering.ts",
     "example:steering:multistep": "node --import tsx examples/steering.ts",
     "generate-types": "./node_modules/.bin/codex app-server generate-ts --out src/app-server",
@@ -65,7 +68,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
-    "@openai/codex": "^0.148.0",
+    "@openai/codex": "^0.149.1",
     "diff": "^9.0.0",
     "open": "^11.0.1",
     "vscode-jsonrpc": "^9.0.1",

@@ -484,6 +484,40 @@ export class CodexAcpClient {
         }
     }
 
+    async forkSession(request: acp.ForkSessionRequest): Promise<SessionMetadata> {
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        await this.refreshSkills(request.cwd, additionalDirectories);
+
+        const response = await this.codexClient.threadFork({
+            threadId: request.sessionId,
+            cwd: request.cwd,
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+            modelProvider: await this.getResumeModelProvider(),
+        });
+        try {
+            const codexModels = await this.fetchAvailableModels();
+            const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
+            return {
+                sessionId: response.thread.id,
+                currentModelId: currentModelId,
+                models: codexModels,
+                collaborationMode: this.getCollaborationMode(response.thread.id),
+                modelProvider: response.modelProvider,
+                currentServiceTier: response.serviceTier as ServiceTier ?? null,
+                additionalDirectories,
+            };
+        } catch (error) {
+            // thread/fork already loaded and subscribed the new thread; a failure in
+            // the remaining initialization must not leave that subscription alive.
+            try {
+                await this.closeSession(response.thread.id);
+            } catch (cleanupError) {
+                logger.error("Failed to close forked thread after initialization failure", cleanupError);
+            }
+            throw error;
+        }
+    }
+
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
@@ -518,7 +552,8 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadStart({
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
+            // ACP v2 allows omitting mcpServers; the v1 type only happens to require it
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });

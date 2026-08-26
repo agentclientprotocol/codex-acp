@@ -1,6 +1,7 @@
 import type {
     ClientContext,
     ContentBlock,
+    ForkSessionResponse,
     LoadSessionResponse,
     NewSessionResponse,
     ResumeSessionResponse,
@@ -54,6 +55,10 @@ export type LegacyLoadSessionResponse = LoadSessionResponse & {
 }
 
 export type LegacyResumeSessionResponse = ResumeSessionResponse & {
+    models?: LegacySessionModelState | null;
+}
+
+export type LegacyForkSessionResponse = ForkSessionResponse & {
     models?: LegacySessionModelState | null;
 }
 

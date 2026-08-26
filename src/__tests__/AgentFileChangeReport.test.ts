@@ -20,6 +20,7 @@ function completedReport(value: unknown): Turn {
             text: JSON.stringify(value),
             phase: "final_answer",
             memoryCitation: null,
+            delivery: null,
         }],
         itemsView: "full",
         status: "completed",
