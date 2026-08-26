@@ -1,12 +1,15 @@
 import {describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk/experimental/v2";
 import type * as acpV1 from "@agentclientprotocol/sdk";
-import {CodexAcpV2Adapter, mapSessionUpdateNotification} from "../v2/CodexAcpV2Adapter";
+import {
+    CodexAcpV2Adapter,
+    V2SessionUpdateMapper,
+} from "../v2/CodexAcpV2Adapter";
 import type {CodexAcpServer} from "../CodexAcpServer";
 
 describe("CodexAcpV2Adapter", () => {
     it("maps v1 tool-call creation to a v2 upsert", () => {
-        const notification = mapSessionUpdateNotification({
+        const notification = new V2SessionUpdateMapper().map({
             sessionId: "session-1",
             update: {
                 sessionUpdate: "tool_call",
@@ -28,7 +31,8 @@ describe("CodexAcpV2Adapter", () => {
     });
 
     it("maps legacy plan and config updates to their v2 shapes", () => {
-        expect(mapSessionUpdateNotification({
+        const mapper = new V2SessionUpdateMapper();
+        expect(mapper.map({
             sessionId: "session-1",
             update: {
                 sessionUpdate: "plan",
@@ -43,7 +47,7 @@ describe("CodexAcpV2Adapter", () => {
             },
         });
 
-        expect(mapSessionUpdateNotification({
+        expect(mapper.map({
             sessionId: "session-1",
             update: {
                 sessionUpdate: "config_option_update",
@@ -59,6 +63,33 @@ describe("CodexAcpV2Adapter", () => {
             sessionUpdate: "config_option_update",
             configOptions: [{configId: "model"}],
         });
+    });
+
+    it("assigns stable v2 message ids to legacy chunks that omit them", () => {
+        const mapper = new V2SessionUpdateMapper();
+        const first = mapper.map({
+            sessionId: "session-1",
+            update: {sessionUpdate: "agent_message_chunk", content: {type: "text", text: "hel"}},
+        });
+        const second = mapper.map({
+            sessionId: "session-1",
+            update: {sessionUpdate: "agent_message_chunk", content: {type: "text", text: "lo"}},
+        });
+        const thought = mapper.map({
+            sessionId: "session-1",
+            update: {sessionUpdate: "agent_thought_chunk", content: {type: "text", text: "thinking"}},
+        });
+
+        expect(first.update).toMatchObject({messageId: "v2-legacy-message-1"});
+        expect(second.update).toMatchObject({messageId: "v2-legacy-message-1"});
+        expect(thought.update).toMatchObject({messageId: "v2-legacy-message-2"});
+
+        mapper.resetSession("session-1");
+        const nextTurn = mapper.map({
+            sessionId: "session-1",
+            update: {sessionUpdate: "agent_message_chunk", content: {type: "text", text: "next"}},
+        });
+        expect(nextTurn.update).toMatchObject({messageId: "v2-legacy-message-3"});
     });
 
     it("maps config option ids in new-session responses", async () => {
@@ -149,7 +180,7 @@ describe("CodexAcpV2Adapter", () => {
             update: {
                 sessionUpdate: "state_update",
                 state: "requires_action",
-                _meta: {error: "provider unavailable"},
+                _meta: {codex: {error: "provider unavailable"}},
             },
         });
     });
@@ -181,7 +212,7 @@ function createAdapter(overrides: Partial<Record<keyof CodexAcpServer, unknown>>
     };
     const agent = Object.assign(defaults, overrides) as unknown as CodexAcpServer;
     return {
-        adapter: new CodexAcpV2Adapter(agent, connection),
+        adapter: new CodexAcpV2Adapter(agent, connection, new V2SessionUpdateMapper()),
         notify,
     };
 }

@@ -16,7 +16,11 @@ import {
     GOAL_CONTROL_METHOD,
     SESSION_STEERING_METHOD,
 } from "../AcpExtensions";
-import {CodexAcpV2Adapter, createLegacyClientConnection} from "./CodexAcpV2Adapter";
+import {
+    CodexAcpV2Adapter,
+    createLegacyClientConnection,
+    V2SessionUpdateMapper,
+} from "./CodexAcpV2Adapter";
 
 const sessionSteerParamsParser = z.object({
     sessionId: z.string(),
@@ -109,17 +113,18 @@ function startAcpV2Server(): void {
 
     acp.agent({name: `${packageJson.name}-v2`})
         .onConnect((connection) => {
+            const updateMapper = new V2SessionUpdateMapper();
             const appServerClient = new CodexAppServerClient(codexProcessState.connection.connection);
             const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
             const legacyAgent = new CodexAcpServer(
-                createLegacyClientConnection(connection.client),
+                createLegacyClientConnection(connection.client, updateMapper),
                 codexClient,
                 defaultAuthRequest,
                 undefined,
                 undefined,
                 codexProcessState,
             );
-            const connectedAdapter = new CodexAcpV2Adapter(legacyAgent, connection.client);
+            const connectedAdapter = new CodexAcpV2Adapter(legacyAgent, connection.client, updateMapper);
             adapter = connectedAdapter;
             connection.signal.addEventListener("abort", () => {
                 if (adapter === connectedAdapter) {

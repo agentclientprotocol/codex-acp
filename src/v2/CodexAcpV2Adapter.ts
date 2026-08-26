@@ -1,6 +1,7 @@
 import * as acpV1 from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk/experimental/v2";
 import type {CodexAcpServer} from "../CodexAcpServer";
+import {logger} from "../Logger";
 
 type LegacyAgent = Pick<CodexAcpServer,
     | "initialize"
@@ -21,11 +22,14 @@ type LegacyAgent = Pick<CodexAcpServer,
     | "extMethod"
 >;
 
-export function createLegacyClientConnection(connection: acp.AgentContext): Pick<acpV1.AgentContext, "notify" | "request"> {
+export function createLegacyClientConnection(
+    connection: acp.AgentContext,
+    updateMapper: V2SessionUpdateMapper,
+): Pick<acpV1.AgentContext, "notify" | "request"> {
     return {
         notify: async (method: string, params?: unknown): Promise<void> => {
             if (method === acpV1.methods.client.session.update) {
-                await connection.notify(acp.methods.client.session.update, mapSessionUpdateNotification(
+                await connection.notify(acp.methods.client.session.update, updateMapper.map(
                     params as acpV1.SessionNotification,
                 ));
                 return;
@@ -55,10 +59,12 @@ export function createLegacyClientConnection(connection: acp.AgentContext): Pick
 export class CodexAcpV2Adapter {
     private readonly agent: LegacyAgent;
     private readonly connection: acp.AgentContext;
+    private readonly updateMapper: V2SessionUpdateMapper;
 
-    constructor(agent: LegacyAgent, connection: acp.AgentContext) {
+    constructor(agent: LegacyAgent, connection: acp.AgentContext, updateMapper: V2SessionUpdateMapper) {
         this.agent = agent;
         this.connection = connection;
+        this.updateMapper = updateMapper;
     }
 
     async initialize(params: acp.InitializeRequest): Promise<acp.InitializeResponse> {
@@ -161,31 +167,9 @@ export class CodexAcpV2Adapter {
     }
 
     async prompt(params: acp.PromptRequest, signal?: AbortSignal): Promise<acp.PromptResponse> {
+        this.updateMapper.resetSession(params.sessionId);
         await this.updateState(params.sessionId, "running");
-        void this.agent.prompt(params as acpV1.PromptRequest, signal)
-            .then(async (response) => {
-                await this.connection.notify(acp.methods.client.session.update, {
-                    sessionId: params.sessionId,
-                    update: {
-                        sessionUpdate: "state_update",
-                        state: "idle",
-                        stopReason: response.stopReason,
-                        usage: response.usage,
-                    },
-                });
-            })
-            .catch(async (error: unknown) => {
-                await this.connection.notify(acp.methods.client.session.update, {
-                    sessionId: params.sessionId,
-                    update: {
-                        sessionUpdate: "state_update",
-                        state: "requires_action",
-                        _meta: {
-                            error: error instanceof Error ? error.message : String(error),
-                        },
-                    },
-                });
-            });
+        void this.runPrompt(params, signal);
         return {};
     }
 
@@ -206,11 +190,60 @@ export class CodexAcpV2Adapter {
             },
         });
     }
+
+    private async runPrompt(params: acp.PromptRequest, signal?: AbortSignal): Promise<void> {
+        try {
+            const response = await this.agent.prompt(params as acpV1.PromptRequest, signal);
+            await this.connection.notify(acp.methods.client.session.update, {
+                sessionId: params.sessionId,
+                update: {
+                    sessionUpdate: "state_update",
+                    state: "idle",
+                    stopReason: response.stopReason,
+                    usage: response.usage,
+                },
+            });
+        } catch (error: unknown) {
+            try {
+                await this.connection.notify(acp.methods.client.session.update, {
+                    sessionId: params.sessionId,
+                    update: {
+                        sessionUpdate: "state_update",
+                        state: "requires_action",
+                        _meta: {
+                            codex: {
+                                error: error instanceof Error ? error.message : String(error),
+                            },
+                        },
+                    },
+                });
+            } catch (notificationError: unknown) {
+                logger.error("Failed to report ACP v2 prompt failure", notificationError);
+            }
+        }
+    }
 }
 
-export function mapSessionUpdateNotification(notification: acpV1.SessionNotification): acp.UpdateSessionNotification {
-    const update = notification.update;
-    switch (update.sessionUpdate) {
+export class V2SessionUpdateMapper {
+    private nextMessageId = 1;
+    private readonly fallbackMessageIds = new Map<string, string>();
+
+    map(notification: acpV1.SessionNotification): acp.UpdateSessionNotification {
+        const update = notification.update;
+        switch (update.sessionUpdate) {
+        case "user_message_chunk":
+        case "agent_message_chunk":
+        case "agent_thought_chunk": {
+            const key = `${notification.sessionId}:${update.sessionUpdate}`;
+            const messageId = update.messageId ?? this.fallbackMessageId(key);
+            return {
+                ...notification,
+                update: {
+                    ...update,
+                    messageId,
+                },
+            };
+        }
         case "tool_call":
             return {
                 ...notification,
@@ -248,9 +281,6 @@ export function mapSessionUpdateNotification(notification: acpV1.SessionNotifica
                     sessionUpdate: "_codex/current_mode_update",
                 },
             } as acp.UpdateSessionNotification;
-        case "user_message_chunk":
-        case "agent_message_chunk":
-        case "agent_thought_chunk":
         case "tool_call_update":
         case "plan_update":
         case "plan_removed":
@@ -258,6 +288,26 @@ export function mapSessionUpdateNotification(notification: acpV1.SessionNotifica
         case "session_info_update":
         case "usage_update":
             return notification as unknown as acp.UpdateSessionNotification;
+        }
+    }
+
+    resetSession(sessionId: string): void {
+        const prefix = `${sessionId}:`;
+        for (const key of this.fallbackMessageIds.keys()) {
+            if (key.startsWith(prefix)) {
+                this.fallbackMessageIds.delete(key);
+            }
+        }
+    }
+
+    private fallbackMessageId(key: string): string {
+        const existing = this.fallbackMessageIds.get(key);
+        if (existing !== undefined) {
+            return existing;
+        }
+        const messageId = `v2-legacy-message-${this.nextMessageId++}`;
+        this.fallbackMessageIds.set(key, messageId);
+        return messageId;
     }
 }
 
