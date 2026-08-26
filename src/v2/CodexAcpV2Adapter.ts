@@ -1,5 +1,6 @@
 import * as acpV1 from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk/experimental/v2";
+import {createTwoFilesPatch} from "diff";
 import type {CodexAcpServer} from "../CodexAcpServer";
 import {logger} from "../Logger";
 
@@ -45,7 +46,7 @@ export function createLegacyClientConnection(
                     description: permissionDescription(request.toolCall),
                     subject: {
                         type: "tool_call",
-                        toolCall: request.toolCall,
+                        toolCall: mapToolCallUpdate(request.toolCall),
                     },
                     options: request.options,
                     _meta: request._meta,
@@ -91,7 +92,7 @@ export class CodexAcpV2Adapter {
                 auth: capabilities?.auth,
                 providers: capabilities?.providers,
             }),
-            authMethods: response.authMethods,
+            authMethods: response.authMethods?.map(mapAuthMethod),
             _meta: response._meta,
         }) as unknown as acp.InitializeResponse;
     }
@@ -244,14 +245,16 @@ export class V2SessionUpdateMapper {
                 },
             };
         }
-        case "tool_call":
+        case "tool_call": {
+            const {sessionUpdate: _sessionUpdate, ...toolCall} = update;
             return {
                 ...notification,
                 update: {
-                    ...update,
                     sessionUpdate: "tool_call_update",
+                    ...mapToolCallUpdate(toolCall),
                 },
-            } as acp.UpdateSessionNotification;
+            };
+        }
         case "plan":
             return {
                 ...notification,
@@ -281,10 +284,34 @@ export class V2SessionUpdateMapper {
                     sessionUpdate: "_codex/current_mode_update",
                 },
             } as acp.UpdateSessionNotification;
-        case "tool_call_update":
+        case "tool_call_update": {
+            const {sessionUpdate: _sessionUpdate, ...toolCall} = update;
+            return {
+                ...notification,
+                update: {
+                    sessionUpdate: "tool_call_update",
+                    ...mapToolCallUpdate(toolCall),
+                },
+            };
+        }
+        case "available_commands_update":
+            return {
+                ...notification,
+                update: {
+                    ...update,
+                    availableCommands: update.availableCommands.map((command) => ({
+                        ...command,
+                        ...(command.input == null ? {} : {
+                            input: {
+                                type: "text" as const,
+                                ...command.input,
+                            },
+                        }),
+                    })),
+                },
+            };
         case "plan_update":
         case "plan_removed":
-        case "available_commands_update":
         case "session_info_update":
         case "usage_update":
             return notification as unknown as acp.UpdateSessionNotification;
@@ -311,8 +338,63 @@ export class V2SessionUpdateMapper {
     }
 }
 
+function mapToolCallUpdate(update: acpV1.ToolCallUpdate): acp.ToolCallUpdate {
+    const {content, ...rest} = update;
+    return {
+        ...rest,
+        ...(content === undefined ? {} : {
+            content: content?.map(mapToolCallContent) ?? null,
+        }),
+    };
+}
+
+function mapToolCallContent(content: acpV1.ToolCallContent): acp.ToolCallContent {
+    if (content.type !== "diff") {
+        return content;
+    }
+
+    const operation = diffOperation(content);
+    const oldFileName = operation === "add" ? "/dev/null" : content.path;
+    const newFileName = operation === "delete" ? "/dev/null" : content.path;
+    return {
+        type: "diff",
+        changes: [{
+            operation,
+            path: content.path,
+        }],
+        patch: {
+            format: "git_patch",
+            text: createTwoFilesPatch(
+                oldFileName,
+                newFileName,
+                content.oldText ?? "",
+                content.newText,
+            ),
+        },
+        _meta: content._meta,
+    };
+}
+
+function diffOperation(content: Extract<acpV1.ToolCallContent, {type: "diff"}>): "add" | "delete" | "modify" {
+    const kind = content._meta?.["kind"];
+    if (kind === "add" || kind === "delete") {
+        return kind;
+    }
+    if (content.oldText == null) {
+        return "add";
+    }
+    if (content.newText.length === 0) {
+        return "delete";
+    }
+    return "modify";
+}
+
 function mapClientCapabilities(capabilities: acp.ClientCapabilities): acpV1.ClientCapabilities {
     return compact({
+        auth: capabilities.auth == null ? undefined : compact({
+            terminal: capabilities.auth.terminal == null ? undefined : true,
+            _meta: capabilities.auth._meta,
+        }),
         elicitation: capabilities.elicitation,
         _meta: capabilities._meta,
         plan: {},
@@ -351,11 +433,47 @@ function mapMcpCapabilities(capabilities?: acpV1.McpCapabilities): acp.McpCapabi
 function mapConfigOptions(options?: acpV1.SessionConfigOption[] | null): acp.SessionConfigOption[] | undefined {
     return options?.map((option) => {
         const {id, ...rest} = option;
+        const mappedOptions = option.type === "select"
+            ? option.options.map((entry) => {
+                if ("group" in entry) {
+                    const {group, ...groupRest} = entry;
+                    return {groupId: group, ...groupRest};
+                }
+                return entry;
+            })
+            : undefined;
         return {
             ...rest,
             configId: id,
+            ...(mappedOptions === undefined ? {} : {options: mappedOptions}),
         } as acp.SessionConfigOption;
     }) ?? undefined;
+}
+
+function mapAuthMethod(method: acpV1.AuthMethod): acp.AuthMethod {
+    const {id, ...rest} = method;
+    if ("type" in method && method.type === "env_var") {
+        return {
+            ...rest,
+            type: "env_var",
+            methodId: id,
+        };
+    }
+    if ("type" in method && method.type === "terminal") {
+        return {
+            ...rest,
+            type: "terminal",
+            methodId: id,
+            ...(method.env === undefined ? {} : {
+                env: Object.entries(method.env).map(([name, value]) => ({name, value})),
+            }),
+        };
+    }
+    return {
+        ...rest,
+        type: "agent",
+        methodId: id,
+    };
 }
 
 function permissionDescription(toolCall: acpV1.ToolCallUpdate): string | null {

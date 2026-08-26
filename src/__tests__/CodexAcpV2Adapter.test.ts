@@ -65,6 +65,49 @@ describe("CodexAcpV2Adapter", () => {
         });
     });
 
+    it("maps legacy command inputs and file diffs to v2 shapes", () => {
+        const mapper = new V2SessionUpdateMapper();
+        expect(mapper.map({
+            sessionId: "session-1",
+            update: {
+                sessionUpdate: "available_commands_update",
+                availableCommands: [{
+                    name: "review",
+                    description: "Review changes",
+                    input: {hint: "optional instructions"},
+                }],
+            },
+        }).update).toEqual({
+            sessionUpdate: "available_commands_update",
+            availableCommands: [{
+                name: "review",
+                description: "Review changes",
+                input: {type: "text", hint: "optional instructions"},
+            }],
+        });
+
+        expect(mapper.map({
+            sessionId: "session-1",
+            update: {
+                sessionUpdate: "tool_call_update",
+                toolCallId: "edit-1",
+                content: [{
+                    type: "diff",
+                    path: "/tmp/example.txt",
+                    oldText: "before\n",
+                    newText: "after\n",
+                }],
+            },
+        }).update).toMatchObject({
+            sessionUpdate: "tool_call_update",
+            content: [{
+                type: "diff",
+                changes: [{operation: "modify", path: "/tmp/example.txt"}],
+                patch: {format: "git_patch"},
+            }],
+        });
+    });
+
     it("assigns stable v2 message ids to legacy chunks that omit them", () => {
         const mapper = new V2SessionUpdateMapper();
         const first = mapper.map({
@@ -114,6 +157,44 @@ describe("CodexAcpV2Adapter", () => {
                 type: "select",
                 currentValue: "gpt-5",
                 options: [{value: "gpt-5", name: "GPT-5"}],
+            }],
+        });
+    });
+
+    it("maps auth method and grouped config identifiers to v2", async () => {
+        const {adapter} = createAdapter({
+            initialize: vi.fn().mockResolvedValue({
+                agentInfo: {name: "codex-acp", version: "test"},
+                agentCapabilities: {},
+                authMethods: [{id: "chat-gpt", name: "ChatGPT"}],
+            }),
+            newSession: vi.fn().mockResolvedValue({
+                sessionId: "session-1",
+                configOptions: [{
+                    id: "model",
+                    name: "Model",
+                    type: "select",
+                    currentValue: "gpt-5",
+                    options: [{
+                        group: "recommended",
+                        name: "Recommended",
+                        options: [{value: "gpt-5", name: "GPT-5"}],
+                    }],
+                }],
+            }),
+        });
+
+        await expect(adapter.initialize({
+            protocolVersion: 2,
+            info: {name: "test-client", version: "test"},
+            capabilities: {},
+        })).resolves.toMatchObject({
+            authMethods: [{type: "agent", methodId: "chat-gpt", name: "ChatGPT"}],
+        });
+        await expect(adapter.newSession({cwd: "/tmp"})).resolves.toMatchObject({
+            configOptions: [{
+                configId: "model",
+                options: [{groupId: "recommended"}],
             }],
         });
     });
