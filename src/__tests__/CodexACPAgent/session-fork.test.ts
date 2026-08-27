@@ -10,6 +10,7 @@ describe("ACP session fork", () => {
 
         vi.spyOn(client, "authRequired").mockResolvedValue(false);
         vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         const forkSpy = vi.spyOn(client, "forkSession").mockResolvedValue({
             sessionId: "fork-id",
             currentModelId: "gpt-5[medium]",
@@ -28,6 +29,7 @@ describe("ACP session fork", () => {
 
         expect(response.sessionId).toBe("fork-id");
         expect(agent.getSessionState("fork-id").cwd).toBe("/workspace");
+        expect(fixture.getAcpConnectionEvents([])).toEqual([]);
         expect(forkSpy).toHaveBeenCalledWith({
             sessionId: "source-id",
             cwd: "/workspace",

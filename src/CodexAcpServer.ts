@@ -648,7 +648,8 @@ export class CodexAcpServer {
         this.sessions.set(sessionId, sessionState);
         resumeSubscribed = false;
 
-        if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
+        const canPublishSessionUpdates = operation !== "fork";
+        if (canPublishSessionUpdates && requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.pendingMcpStartupSessions.set(sessionId, {
                 requestedServers: new Set(getRequestedMcpServerNames(requestedMcpServers)),
                 afterVersion: mcpServerStartupVersion,
@@ -656,7 +657,9 @@ export class CodexAcpServer {
             this.publishMcpStartupStatusAsync(sessionId);
         }
 
-        this.publishAvailableCommandsAsync(sessionState, sessionGeneration);
+        if (canPublishSessionUpdates) {
+            this.publishAvailableCommandsAsync(sessionState, sessionGeneration);
+        }
         if (operation === "resume") {
             this.publishCurrentGoalAsync(sessionState, sessionGeneration);
         }

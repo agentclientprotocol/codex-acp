@@ -577,6 +577,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             reasoningEffort: "medium",
             serviceTier: null,
         } as any);
+        const threadUnsubscribeSpy = vi.spyOn(codexAppServerClient, "threadUnsubscribe").mockResolvedValue({
+            status: "unsubscribed",
+        });
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
             data: [createTestModel({id: "gpt-5"})],
             nextCursor: null,
@@ -601,6 +604,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 },
             }),
         }));
+        expect(threadUnsubscribeSpy).toHaveBeenCalledWith({threadId: "fork-id"});
     });
 
     it('maps an AIR fork message id to the containing Codex turn', async () => {
