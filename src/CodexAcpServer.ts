@@ -126,7 +126,7 @@ import {
     createUnavailableAgentFileChangeReport,
     parseAgentFileChangeReportRequest,
 } from "./AgentFileChangeReport";
-import {ModelCapacityRetryController} from "./ModelCapacityRetry";
+import {CodexModelCapacityRetryRunner} from "./ModelCapacityRetry";
 
 
 export interface SessionState {
@@ -2297,7 +2297,7 @@ export class CodexAcpServer {
         const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
         let eventHandler: CodexEventHandler | null = null;
         let promptNotificationsActive = true;
-        const modelCapacityRetry = new ModelCapacityRetryController();
+        let modelCapacityRetry: CodexModelCapacityRetryRunner | null = null;
         const clearRecoveredSessionFailure = async (handler: CodexEventHandler): Promise<void> => {
             await handler.completeSuccessfulTurn(sessionState.currentTurnId);
             const current = sessionState.sessionFailure;
@@ -2344,7 +2344,8 @@ export class CodexAcpServer {
                         await promptEventHandler.handleSessionScopedNotification(event);
                         return;
                     }
-                    const handledEvent = modelCapacityRetry.transformNotification(event, sessionState.currentTurnId);
+                    const handledEvent = modelCapacityRetry?.transformNotification(event, sessionState.currentTurnId)
+                        ?? event;
                     const completesActiveTurn = event.method === "turn/completed"
                         && event.params.turn.id === sessionState.currentTurnId;
                     permissionContext.handleNotification(handledEvent);
@@ -2470,85 +2471,43 @@ export class CodexAcpServer {
                 sessionState.fastModeEnabled,
                 sessionState.currentModelSupportsFast,
             );
-            const runTurnWithModelCapacityRetries = async (
-                initialRequest: acp.PromptRequest,
-                notifyOnTurnStarted: boolean,
-                notificationsActiveBeforeStart: boolean,
-            ) => modelCapacityRetry.run(initialRequest, {
-                signal: activePrompt.signal,
+            const capacityRetryRunner = new CodexModelCapacityRetryRunner({
+                sessionId: params.sessionId,
+                activePrompt,
+                sessionState,
+                codexAcpClient: this.codexAcpClient,
+                eventHandler: promptEventHandler,
+                agentMode,
+                modelId,
+                serviceTier,
+                disableSummary,
+                runWithProcessCheck: (operation) => this.runWithProcessCheck(operation),
                 shouldStop: () => this.promptShouldStop(params.sessionId, activePrompt),
-                runTurn: async (turnRequest, retryAttempt) => {
-                    promptNotificationsActive = retryAttempt === 0 ? notificationsActiveBeforeStart : true;
+                isActivePrompt: () => this.activePrompts.get(params.sessionId) === activePrompt,
+                interruptLateStartedTurn: (turn) => this.interruptLateStartedTurn(turn),
+                cancelBeforeTurnStarted: () => this.cancelBeforeTurnStarted(activePrompt),
+                ensurePendingTurnStart: () => {
                     ensurePendingTurnStart();
-                    const sendPromptPromise = this.runWithProcessCheck(() => this.codexAcpClient.sendPrompt(
-                        turnRequest,
-                        agentMode,
-                        modelId,
-                        serviceTier,
-                        disableSummary,
-                        sessionState.cwd,
-                        sessionState.additionalDirectories,
-                        (turnId) => {
-                            const turn = {threadId: params.sessionId, turnId};
-                            activePrompt.currentTurn = turn;
-                            if (this.promptShouldStop(params.sessionId, activePrompt)) {
-                                this.interruptLateStartedTurn(turn);
-                                return;
-                            }
-                            sessionState.currentTurnId = turnId;
-                            if (!notificationsActiveBeforeStart && retryAttempt === 0) {
-                                recoverableSessionFailure = sessionState.sessionFailure;
-                            }
-                            promptNotificationsActive = true;
-                            modelCapacityRetry.markTurnStarted(turnId);
-                            pendingTurnStart?.resolve(turnId);
-                            if (notifyOnTurnStarted && retryAttempt === 0) {
-                                onTurnStarted?.();
-                            }
-                        },
-                        () => this.promptShouldStop(params.sessionId, activePrompt),
-                    ));
-                    void sendPromptPromise.catch((err) => {
-                        if (this.activePrompts.get(params.sessionId) !== activePrompt) {
-                            logger.error(`Prompt for cancelled session ${params.sessionId} failed after prompt returned`, err);
-                        }
-                    });
-                    return await Promise.race([
-                        sendPromptPromise,
-                        activePrompt.closeSignal,
-                        this.cancelBeforeTurnStarted(activePrompt),
-                    ]);
                 },
-                afterTurn: async () => {
-                    await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-                    await promptEventHandler.flushPendingErrors();
-                },
-                onFinalTurn: async (completed) => {
-                    await promptEventHandler.handleFailedTurn(completed.turn);
-                    promptNotificationsActive = false;
-                },
-                onRetry: async (completed, retry) => {
-                    if (!retry.warningPublished) {
-                        await promptEventHandler.publishModelCapacityRetryWarning(
-                            completed.turn.id,
-                            retry.title,
-                        );
-                    }
-                    await promptEventHandler.flushPendingPlanUpdates();
-                    recoverableSessionFailure = sessionState.sessionFailure;
-                    activePrompt.currentTurn = null;
-                    sessionState.currentTurnId = null;
+                resolvePendingTurnStart: (turnId) => pendingTurnStart?.resolve(turnId),
+                preparePendingTurnStart: () => {
                     pendingTurnStart = this.createPendingTurnStart();
                     this.pendingTurnStarts.set(params.sessionId, pendingTurnStart);
-                    logger.log("Selected model is at capacity; scheduling retry", {
-                        sessionId: params.sessionId,
-                        attempt: retry.attempt,
-                        delaySeconds: retry.delaySeconds,
-                    });
                 },
+                setPromptNotificationsActive: (active) => {
+                    promptNotificationsActive = active;
+                },
+                snapshotRecoverableSessionFailure: () => {
+                    recoverableSessionFailure = sessionState.sessionFailure;
+                },
+                onTurnStarted,
             });
+            modelCapacityRetry = capacityRetryRunner;
 
-            let turnCompleted = await runTurnWithModelCapacityRetries(effectiveParams, true, true);
+            let turnCompleted = await capacityRetryRunner.run(effectiveParams, {
+                notifyOnTurnStarted: true,
+                notificationsActiveBeforeStart: true,
+            });
 
             if (turnCompleted === null) {
                 return cancelledPromptResponse();
@@ -2607,7 +2566,10 @@ export class CodexAcpServer {
                     recoverableSessionFailure = sessionState.sessionFailure;
                     pendingTurnStart = this.createPendingTurnStart();
                     this.pendingTurnStarts.set(params.sessionId, pendingTurnStart);
-                    turnCompleted = await runTurnWithModelCapacityRetries(implementationRequest, false, false);
+                    turnCompleted = await capacityRetryRunner.run(implementationRequest, {
+                        notifyOnTurnStarted: false,
+                        notificationsActiveBeforeStart: false,
+                    });
 
                     if (turnCompleted === null) {
                         return cancelledPromptResponse();
