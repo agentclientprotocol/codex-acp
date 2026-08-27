@@ -2273,6 +2273,12 @@ export class CodexAcpServer {
             : null;
         let agentFileChangeReportTurnId: string | null = null;
         let agentFileChangeReportUnavailableReason: AgentFileChangeReportUnavailableReason = "providerError";
+        // The App Server turn that produced this prompt's terminal response, so a
+        // client can name the exact point this conversation reached. Request-local
+        // and assigned only where a turn actually completed: `currentTurnId` is
+        // session state that a concurrent prompt on the same session moves, and
+        // reading it here would report another prompt's turn as this one's.
+        let checkpointTurnId: string | null = null;
         let recoverableSessionFailure = sessionState.sessionFailure;
         sessionState.currentTurnId = null;
         sessionState.lastTokenUsage = null;
@@ -2420,6 +2426,7 @@ export class CodexAcpServer {
                 }
                 if (commandResult.turnCompleted?.turn.status === "completed") {
                     agentFileChangeReportTurnId = commandResult.turnCompleted.turn.id;
+                    checkpointTurnId = commandResult.turnCompleted.turn.id;
                 } else if (commandResult.turnCompleted === undefined) {
                     agentFileChangeReportUnavailableReason = "notReported";
                 }
@@ -2427,7 +2434,10 @@ export class CodexAcpServer {
                 return {
                     stopReason: "end_turn",
                     usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                    _meta: this.buildQuotaMeta(sessionState),
+                    _meta: {
+                        ...this.buildQuotaMeta(sessionState),
+                        ...this.buildCheckpointMeta(checkpointTurnId),
+                    },
                 };
             }
 
@@ -2615,6 +2625,10 @@ export class CodexAcpServer {
             }
             if (turnCompleted.turn.status === "completed") {
                 agentFileChangeReportTurnId = turnCompleted.turn.id;
+                // `turnCompleted` has already been reassigned if a plan
+                // implementation turn ran, so this is the final turn — the one
+                // that produced the response being returned.
+                checkpointTurnId = turnCompleted.turn.id;
             }
 
             await clearRecoveredSessionFailure(eventHandler);
@@ -2627,7 +2641,10 @@ export class CodexAcpServer {
             return {
                 stopReason: "end_turn",
                 usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                _meta: this.buildQuotaMeta(sessionState),
+                _meta: {
+                    ...this.buildQuotaMeta(sessionState),
+                    ...this.buildCheckpointMeta(checkpointTurnId),
+                },
             };
         } catch (err) {
             logger.error(`Prompt for session ${params.sessionId} failed`, err);
@@ -2740,6 +2757,21 @@ export class CodexAcpServer {
                 ...failureMeta,
             },
         };
+    }
+
+    /**
+     * Which App Server turn this response is, when one completed.
+     *
+     * A client that keeps this can later say exactly where a conversation had
+     * reached, rather than "wherever that session is now". The value is the App
+     * Server's own turn id, carried out unchanged.
+     *
+     * Empty for a cancelled prompt, for a failed one, and for a command this
+     * adapter answered itself without ever starting a provider turn — none of
+     * those is a point anything could resume from.
+     */
+    private buildCheckpointMeta(turnId: string | null): { codex?: { turnId: string } } {
+        return turnId === null ? {} : { codex: { turnId } };
     }
 
     private buildQuotaMeta(sessionState: SessionState): { quota: QuotaMeta } {
