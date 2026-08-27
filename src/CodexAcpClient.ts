@@ -924,22 +924,9 @@ export class CodexAcpClient {
             });
             const outcome = await budget.wait(turnPromise);
             auditTurnCompleted = true;
-            const thread = await budget.wait(this.codexClient.threadRead({
-                threadId: forkThreadId,
-                includeTurns: true,
-            }));
-            const completedTurn = thread.thread.turns.find(
-                turn => turn.id === outcome.turn.id,
-            );
-            if (completedTurn === undefined) {
-                throw new AgentFileChangeReportError(
-                    "notReported",
-                    "The completed audit turn was not present in thread history",
-                );
-            }
             return createReportedAgentFileChangeReport(
                 params.requestId,
-                completedTurn,
+                outcome.turn,
                 params.workspace,
             );
         } catch (error) {
@@ -956,7 +943,7 @@ export class CodexAcpClient {
                 return createUnavailableAgentFileChangeReport(params.requestId, error.reason);
             }
             if (error instanceof AgentFileChangeReportError) {
-                logger.log("Agent file-change report unavailable", {reason: error.reason});
+                logger.error("Agent file-change report unavailable", error);
                 return createUnavailableAgentFileChangeReport(params.requestId, error.reason);
             }
             logger.error("Agent file-change report failed", error);

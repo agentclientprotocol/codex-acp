@@ -11,9 +11,9 @@ import {
     AGENT_FILE_CHANGE_REPORT_TIMEOUT_MS,
 } from "../../AgentFileChangeReport";
 import {CodexCommands} from "../../CodexCommands";
+import {logger} from "../../Logger";
 import type {
     ThreadForkResponse,
-    ThreadReadResponse,
     Turn,
     TurnCompletedNotification,
 } from "../../app-server/v2";
@@ -38,10 +38,6 @@ function createTurn(
 
 function createForkResponse(threadId: string): ThreadForkResponse {
     return {thread: {id: threadId}} as ThreadForkResponse;
-}
-
-function createThreadReadResponse(threadId: string, turns: Turn[]): ThreadReadResponse {
-    return {thread: {id: threadId, turns}} as ThreadReadResponse;
 }
 
 function promptWithFileChangeReport(
@@ -150,21 +146,20 @@ describe("agent file-change report lifecycle", () => {
             });
             return {
                 threadId: "audit-thread",
-                turn: createTurn("audit-turn", "completed"),
+                turn: createTurn("audit-turn", "completed", [{
+                    type: "agentMessage",
+                    id: "audit-message",
+                    text: JSON.stringify({
+                        paths: ["src/Main.kt", "/generated/output.txt"],
+                        complete: true,
+                        uncertainty: null,
+                    }),
+                    phase: "final_answer",
+                    memoryCitation: null,
+                }], "full"),
             };
         });
-        vi.spyOn(appServer, "threadRead").mockResolvedValue(createThreadReadResponse("audit-thread", [
-            createTurn("audit-turn", "completed", [{
-                type: "agentMessage",
-                id: "audit-message",
-                text: JSON.stringify({
-                    paths: ["src/Main.kt", "/generated/output.txt"],
-                    complete: true,
-                }),
-                phase: "final_answer",
-                memoryCitation: null,
-            }], "full"),
-        ]));
+        const threadRead = vi.spyOn(appServer, "threadRead");
         const unsubscribe = vi.spyOn(appServer, "threadUnsubscribe")
             .mockResolvedValue({status: "unsubscribed"});
 
@@ -198,10 +193,7 @@ describe("agent file-change report lifecycle", () => {
             summary: "none",
             outputSchema: AGENT_FILE_CHANGE_REPORT_OUTPUT_SCHEMA,
         });
-        expect(appServer.threadRead).toHaveBeenCalledWith({
-            threadId: "audit-thread",
-            includeTurns: true,
-        });
+        expect(threadRead).not.toHaveBeenCalled();
         expect(unsubscribe).toHaveBeenCalledWith({threadId: "audit-thread"});
 
         const acpEvents = fixture.getAcpConnectionEvents([]);
@@ -466,33 +458,42 @@ describe("agent file-change report lifecycle", () => {
         });
     });
 
-    it("bounds a stuck thread read with the same audit deadline", async () => {
-        vi.useFakeTimers();
+    it("reports a failed audit turn with the provider error without failing the main prompt", async () => {
         const {fixture, sessionState, turnStart, awaitTurnCompleted} = await setupMainPrompt();
         const appServer = fixture.getCodexAppServerClient();
         vi.spyOn(appServer, "threadFork").mockResolvedValue(createForkResponse("audit-thread"));
         turnStart.mockResolvedValueOnce({turn: createTurn("audit-turn", "inProgress")});
+        const failedTurn = createTurn("audit-turn", "failed");
+        failedTurn.error = {
+            message: "invalid_json_schema: missing uncertainty",
+            codexErrorInfo: null,
+            additionalDetails: null,
+        };
         awaitTurnCompleted.mockResolvedValueOnce({
             threadId: "audit-thread",
-            turn: createTurn("audit-turn", "completed"),
+            turn: failedTurn,
         });
-        const read = vi.spyOn(appServer, "threadRead").mockReturnValue(new Promise(() => {}));
-        vi.spyOn(appServer, "threadUnsubscribe").mockReturnValue(new Promise(() => {}));
+        const read = vi.spyOn(appServer, "threadRead");
+        vi.spyOn(appServer, "threadUnsubscribe").mockResolvedValue({status: "unsubscribed"});
+        const logError = vi.spyOn(logger, "error").mockImplementation(() => {});
 
-        const prompt = fixture.getCodexAcpAgent().prompt(
+        await expect(fixture.getCodexAcpAgent().prompt(
             promptWithFileChangeReport(sessionState.sessionId, "request-read-timeout"),
+        )).resolves.toMatchObject({stopReason: "end_turn"});
+        expect(read).not.toHaveBeenCalled();
+        expect(logError).toHaveBeenCalledWith(
+            "Agent file-change report unavailable",
+            expect.objectContaining({
+                reason: "providerError",
+                message: "The audit turn failed: invalid_json_schema: missing uncertainty",
+            }),
         );
-        await vi.advanceTimersByTimeAsync(0);
-        expect(read).toHaveBeenCalledOnce();
-        await vi.advanceTimersByTimeAsync(AGENT_FILE_CHANGE_REPORT_TIMEOUT_MS);
-
-        await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
         expect(reportedUpdates(fixture)).toHaveLength(1);
         expect(reportedUpdates(fixture)[0]).toMatchObject({
             _meta: {jetbrains: {air: {agentFileChangeReport: {
                 requestId: "request-read-timeout",
                 status: "unavailable",
-                reason: "timeout",
+                reason: "providerError",
             }}}},
         });
     });
@@ -504,17 +505,15 @@ describe("agent file-change report lifecycle", () => {
         turnStart.mockResolvedValueOnce({turn: createTurn("audit-turn", "inProgress")});
         awaitTurnCompleted.mockResolvedValueOnce({
             threadId: "audit-thread",
-            turn: createTurn("audit-turn", "completed"),
-        });
-        vi.spyOn(appServer, "threadRead").mockResolvedValue(createThreadReadResponse("audit-thread", [
-            createTurn("audit-turn", "completed", [{
+            turn: createTurn("audit-turn", "completed", [{
                 type: "agentMessage",
                 id: "audit-message",
                 text: "not JSON",
                 phase: "final_answer",
                 memoryCitation: null,
             }], "full"),
-        ]));
+        });
+        const threadRead = vi.spyOn(appServer, "threadRead");
         vi.spyOn(appServer, "threadUnsubscribe").mockResolvedValue({status: "unsubscribed"});
 
         await expect(fixture.getCodexAcpAgent().prompt({
@@ -528,6 +527,8 @@ describe("agent file-change report lifecycle", () => {
                 },
             },
         })).resolves.toMatchObject({stopReason: "end_turn"});
+
+        expect(threadRead).not.toHaveBeenCalled();
 
         expect(fixture.getAcpConnectionEvents([])).toEqual([{
             method: "sessionUpdate",

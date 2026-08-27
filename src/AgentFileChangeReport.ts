@@ -60,7 +60,7 @@ export type AgentFileChangeReport = ReportedAgentFileChangeReport | UnavailableA
 export const AGENT_FILE_CHANGE_REPORT_OUTPUT_SCHEMA: JsonValue = {
     type: "object",
     additionalProperties: false,
-    required: ["paths", "complete"],
+    required: ["paths", "complete", "uncertainty"],
     properties: {
         paths: {
             type: "array",
@@ -68,8 +68,12 @@ export const AGENT_FILE_CHANGE_REPORT_OUTPUT_SCHEMA: JsonValue = {
         },
         complete: {type: "boolean"},
         uncertainty: {
-            type: "string",
-            maxLength: AGENT_FILE_CHANGE_REPORT_MAX_UNCERTAINTY_LENGTH,
+            anyOf: [{
+                type: "string",
+                maxLength: AGENT_FILE_CHANGE_REPORT_MAX_UNCERTAINTY_LENGTH,
+            }, {
+                type: "null",
+            }],
         },
     },
 };
@@ -148,7 +152,10 @@ function parseModelFileChangeReport(turn: Turn): ModelFileChangeReport {
         case "interrupted":
             throw new AgentFileChangeReportError("cancelled", "The audit turn was interrupted");
         case "failed":
-            throw new AgentFileChangeReportError("providerError", "The audit turn failed");
+            throw new AgentFileChangeReportError(
+                "providerError",
+                `The audit turn failed${turn.error?.message ? `: ${turn.error.message}` : ""}`,
+            );
         case "inProgress":
             throw new AgentFileChangeReportError("notReported", "The audit turn did not complete");
         case "completed":
@@ -183,10 +190,10 @@ function parseModelFileChangeReport(turn: Turn): ModelFileChangeReport {
     if (!Array.isArray(paths)
         || !paths.every((item): item is string => typeof item === "string")
         || typeof complete !== "boolean"
-        || (uncertainty !== undefined && typeof uncertainty !== "string")) {
+        || (uncertainty !== undefined && uncertainty !== null && typeof uncertainty !== "string")) {
         throw new AgentFileChangeReportError("invalidOutput", "The audit turn returned invalid fields");
     }
-    const normalizedUncertainty = uncertainty?.trim();
+    const normalizedUncertainty = typeof uncertainty === "string" ? uncertainty.trim() : undefined;
     if (normalizedUncertainty !== undefined
         && normalizedUncertainty.length > AGENT_FILE_CHANGE_REPORT_MAX_UNCERTAINTY_LENGTH) {
         throw new AgentFileChangeReportError("invalidOutput", "The audit turn returned oversized uncertainty");
