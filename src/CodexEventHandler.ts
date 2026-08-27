@@ -323,6 +323,22 @@ export class CodexEventHandler {
         delete this.sessionState.sessionFailure;
     }
 
+    async publishModelCapacityRetryWarning(turnId: string, title: string): Promise<void> {
+        const update = await this.createErrorEvent({
+            threadId: this.sessionState.sessionId,
+            turnId,
+            willRetry: true,
+            error: {
+                message: title,
+                codexErrorInfo: "serverOverloaded",
+                additionalDetails: null,
+            },
+        });
+        if (update !== null) {
+            await this.session.update(update);
+        }
+    }
+
     async completeSuccessfulTurn(turnId: string | null): Promise<void> {
         this.lastSessionNotice = undefined;
         if (!this.supportsTypedSessionFailures || turnId === null) return;

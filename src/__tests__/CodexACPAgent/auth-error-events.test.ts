@@ -110,6 +110,104 @@ describe("CodexEventHandler - auth error events", () => {
         );
     });
 
+    it("retries the exact model-capacity failure with jittered delays and continuation turns", async () => {
+        vi.useFakeTimers();
+        const random = vi.spyOn(Math, "random")
+            .mockReturnValueOnce(0)
+            .mockReturnValueOnce(0.5)
+            .mockReturnValue(0);
+        try {
+            const {fixture, promptPromise, turnStart} = await startModelCapacityRetryPrompt(2);
+            await vi.runAllTimersAsync();
+            const result = await promptPromise;
+
+            expect(result).toMatchObject({stopReason: "end_turn"});
+            expect(turnStart).toHaveBeenCalledTimes(3);
+            expect(JSON.stringify(turnStart.mock.calls[0]?.[0])).toContain("test capacity retry");
+            expect(JSON.stringify(turnStart.mock.calls[1]?.[0])).toContain("Continue from where you left off.");
+            expect(JSON.stringify(turnStart.mock.calls[2]?.[0])).toContain("Continue from where you left off.");
+
+            const updates = fixture.getAcpConnectionEvents([]).map(event => event.args[0].update);
+            expect(updates).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sessionUpdate: "session_info_update",
+                    _meta: {jetbrains: {air: expect.objectContaining({sessionFailure: expect.objectContaining({
+                        severity: "warning",
+                        title: "Selected model is at capacity. Retrying in 1 second (1/5).",
+                    })})}},
+                }),
+                expect.objectContaining({
+                    sessionUpdate: "session_info_update",
+                    _meta: {jetbrains: {air: expect.objectContaining({sessionFailure: expect.objectContaining({
+                        severity: "warning",
+                        title: "Selected model is at capacity. Retrying in 16 seconds (2/5).",
+                    })})}},
+                }),
+            ]));
+        } finally {
+            random.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
+    it("returns the terminal model-capacity failure after all five custom retries", async () => {
+        vi.useFakeTimers();
+        const random = vi.spyOn(Math, "random").mockReturnValue(0);
+        try {
+            const {fixture, promptPromise, turnStart} = await startModelCapacityRetryPrompt(6);
+            await vi.runAllTimersAsync();
+            const result = await promptPromise;
+
+            expect(turnStart).toHaveBeenCalledTimes(6);
+            expect(result).toMatchObject({
+                stopReason: "end_turn",
+                _meta: {jetbrains: {air: {sessionFailure: {
+                    category: "service",
+                    severity: "error",
+                    title: "Selected model is at capacity. Please try a different model.",
+                    actions: ["retry"],
+                }}}},
+            });
+            const warningTitles = fixture.getAcpConnectionEvents([])
+                .map(event => event.args[0].update?._meta?.jetbrains?.air?.sessionFailure)
+                .filter(failure => failure?.severity === "warning")
+                .map(failure => failure.title);
+            expect(warningTitles).toEqual([
+                "Selected model is at capacity. Retrying in 1 second (1/5).",
+                "Selected model is at capacity. Retrying in 1 second (2/5).",
+                "Selected model is at capacity. Retrying in 30 seconds (3/5).",
+                "Selected model is at capacity. Retrying in 60 seconds (4/5).",
+                "Selected model is at capacity. Retrying in 120 seconds (5/5).",
+            ]);
+        } finally {
+            random.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
+    it("cancels immediately while waiting to retry model capacity", async () => {
+        vi.useFakeTimers();
+        const random = vi.spyOn(Math, "random").mockReturnValue(0);
+        const controller = new AbortController();
+        try {
+            const {fixture, promptPromise, turnStart} = await startModelCapacityRetryPrompt(1, controller.signal);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(turnStart).toHaveBeenCalledTimes(1);
+            expect(fixture.getAcpConnectionEvents([]).some(event =>
+                event.args[0].update?._meta?.jetbrains?.air?.sessionFailure?.severity === "warning",
+            )).toBe(true);
+
+            controller.abort();
+            await vi.advanceTimersByTimeAsync(0);
+
+            await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+            expect(turnStart).toHaveBeenCalledTimes(1);
+        } finally {
+            random.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
     it("does not attach a foreign turn failure to the active prompt", async () => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: "foreign-turn-session",
@@ -796,6 +894,54 @@ describe("CodexEventHandler - auth error events", () => {
         },
     );
 });
+
+async function startModelCapacityRetryPrompt(failuresBeforeSuccess: number, signal?: AbortSignal) {
+    const fixture = createCodexMockTestFixture();
+    const codexAcpAgent = fixture.getCodexAcpAgent();
+    const codexAppServerClient = fixture.getCodexAppServerClient();
+    const sessionState = createTestSessionState({
+        sessionId: "model-capacity-retry-session",
+        account: {type: "apiKey"},
+    });
+    await codexAcpAgent.initialize({
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: typedFailureCapabilities,
+    });
+    vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+    let turnNumber = 0;
+    const turnStart = vi.spyOn(codexAppServerClient, "turnStart").mockImplementation(async () => ({
+        turn: createTurn("inProgress", `capacity-turn-${++turnNumber}`),
+    }));
+    vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockImplementation(async (threadId, turnId) => {
+        const failed = Number(turnId.replace("capacity-turn-", "")) <= failuresBeforeSuccess;
+        const error: ErrorNotification["error"] | null = failed
+            ? {
+                message: "Selected model is at capacity. Please try a different model.",
+                codexErrorInfo: "serverOverloaded",
+                additionalDetails: null,
+            }
+            : null;
+        if (error !== null) {
+            fixture.sendServerNotification({
+                method: "error",
+                params: {threadId, turnId, willRetry: false, error},
+            });
+        }
+        const completion: TurnCompletedNotification = {
+            threadId,
+            turn: createTurn(failed ? "failed" : "completed", turnId, error),
+        };
+        fixture.sendServerNotification({method: "turn/completed", params: completion});
+        return completion;
+    });
+
+    const promptPromise = codexAcpAgent.prompt({
+        sessionId: sessionState.sessionId,
+        prompt: [{type: "text", text: "test capacity retry"}],
+    }, signal);
+    return {fixture, promptPromise, turnStart};
+}
 
 async function runPromptWithError(
     sessionState: SessionState,
