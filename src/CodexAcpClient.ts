@@ -63,7 +63,7 @@ import {
     createReportedAgentFileChangeReport,
     createUnavailableAgentFileChangeReport,
 } from "./AgentFileChangeReport";
-import {type CapacityRetry, RetryCapacityService} from "./RetryCapacityService";
+import {RetryCapacityService, type TurnRetry, type TurnRetryService} from "./RetryCapacityService";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -110,7 +110,7 @@ export class CodexAcpClient {
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
-    private readonly retryCapacityService = new RetryCapacityService();
+    private readonly turnRetryService: TurnRetryService = new RetryCapacityService();
     private skillExtraRoots: string[] = [];
     private configPath: string | null = null;
 
@@ -850,37 +850,54 @@ export class CodexAcpClient {
         disableSummary: boolean,
         cwd: string,
         additionalDirectories: string[],
-        onTurnStarted?: (turnId: string, retry: CapacityRetry | null) => void,
+        onTurnStarted?: (turnId: string, retry: TurnRetry | null) => void,
         shouldCancel?: () => boolean,
-        onModelCapacityRetry?: (
+        onTurnRetry?: (
             completed: TurnCompletedNotification,
-            retry: CapacityRetry,
+            retry: TurnRetry,
         ) => Promise<void>,
         retrySignal?: AbortSignal,
+        retryAttempt = 0,
     ): Promise<TurnCompletedNotification | null> {
+        const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
-        return await this.retryCapacityService.run(request, {
-            signal: retrySignal,
+        await this.refreshSkills(cwd, additionalDirectories);
+        if (shouldCancel?.()) {
+            return null;
+        }
+        const retry = this.turnRetryService.createRetry(retryAttempt);
+        const completed = await this.codexClient.runTurn({
+            threadId: request.sessionId,
+            input,
+            approvalPolicy: agentMode.approvalPolicy,
+            approvalsReviewer: agentMode.approvalsReviewer,
+            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            summary: disableSummary ? "none" : "auto",
+            effort,
+            model: modelId.model,
+            serviceTier,
+        }, (turnId) => onTurnStarted?.(turnId, retry));
+        if (retry === null || !this.turnRetryService.shouldRetry(completed)) {
+            return completed;
+        }
+        await onTurnRetry?.(completed, retry);
+        if (!await this.turnRetryService.wait(retry, retrySignal, shouldCancel)) {
+            return null;
+        }
+        return await this.sendPrompt(
+            this.turnRetryService.createContinuationRequest(request),
+            agentMode,
+            modelId,
+            serviceTier,
+            disableSummary,
+            cwd,
+            additionalDirectories,
+            onTurnStarted,
             shouldCancel,
-            onRetry: onModelCapacityRetry,
-            runTurn: async (turnRequest, retry) => {
-                await this.refreshSkills(cwd, additionalDirectories);
-                if (shouldCancel?.()) {
-                    return null;
-                }
-                return await this.codexClient.runTurn({
-                    threadId: turnRequest.sessionId,
-                    input: buildPromptItems(turnRequest.prompt),
-                    approvalPolicy: agentMode.approvalPolicy,
-                    approvalsReviewer: agentMode.approvalsReviewer,
-                    sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
-                    summary: disableSummary ? "none" : "auto",
-                    effort,
-                    model: modelId.model,
-                    serviceTier,
-                }, (turnId) => onTurnStarted?.(turnId, retry));
-            },
-        });
+            onTurnRetry,
+            retrySignal,
+            retryAttempt + 1,
+        );
     }
 
     async runAgentFileChangeReport(params: {

@@ -12,67 +12,63 @@ const RETRY_WINDOWS_SECONDS = [
     [120, 300],
 ] as const;
 
-export interface CapacityRetry {
+export interface TurnRetry {
     attempt: number;
     delaySeconds: number;
     title: string;
     warningPublished: boolean;
 }
 
-interface RetryCapacityOptions {
-    signal: AbortSignal | undefined;
-    shouldCancel: (() => boolean) | undefined;
-    runTurn(request: PromptRequest, retry: CapacityRetry | null): Promise<TurnCompletedNotification | null>;
-    onRetry: ((completed: TurnCompletedNotification, retry: CapacityRetry) => Promise<void>) | undefined;
+export interface TurnRetryService {
+    createRetry(retryAttempt: number): TurnRetry | null;
+    shouldRetry(completed: TurnCompletedNotification): boolean;
+    wait(
+        retry: TurnRetry,
+        signal: AbortSignal | undefined,
+        shouldCancel: (() => boolean) | undefined,
+    ): Promise<boolean>;
+    createContinuationRequest(request: PromptRequest): PromptRequest;
+    transformNotification(
+        notification: ServerNotification,
+        currentTurnId: string | null,
+        retry: TurnRetry | null,
+    ): ServerNotification;
+    createWarning(threadId: string, turnId: string, retry: TurnRetry): ServerNotification;
 }
 
-class CapacityRetryError extends Error {
-    constructor(
-        readonly completed: TurnCompletedNotification,
-        readonly retry: CapacityRetry,
-    ) {
-        super(retry.title);
-    }
-}
-
-export class RetryCapacityService {
-    async run(
-        request: PromptRequest,
-        options: RetryCapacityOptions,
-        retryAttempt = 0,
-    ): Promise<TurnCompletedNotification | null> {
-        if (options.signal?.aborted || options.shouldCancel?.()) {
+export class RetryCapacityService implements TurnRetryService {
+    createRetry(retryAttempt: number): TurnRetry | null {
+        const window = RETRY_WINDOWS_SECONDS[retryAttempt];
+        if (window === undefined) {
             return null;
         }
-        const retry = this.createRetry(retryAttempt);
-        try {
-            const completed = await options.runTurn(request, retry);
-            if (completed === null) {
-                return null;
-            }
-            if (retry !== null && completed.turn.status === "failed" && isCapacityError(completed.turn.error)) {
-                throw new CapacityRetryError(completed, retry);
-            }
-            return completed;
-        } catch (error) {
-            if (!(error instanceof CapacityRetryError)) {
-                throw error;
-            }
-            await options.onRetry?.(error.completed, error.retry);
-            if (!await this.wait(error.retry.delaySeconds, options)) {
-                return null;
-            }
-            return await this.run({
-                sessionId: request.sessionId,
-                prompt: [{type: "text", text: CONTINUATION_PROMPT}],
-            }, options, retryAttempt + 1);
-        }
+        const [minimum, maximum] = window;
+        const delaySeconds = minimum + Math.floor(Math.random() * (maximum - minimum + 1));
+        const unit = delaySeconds === 1 ? "second" : "seconds";
+        return {
+            attempt: retryAttempt + 1,
+            delaySeconds,
+            title: `Selected model is at capacity. Retrying in ${delaySeconds} ${unit} `
+                + `(${retryAttempt + 1}/${RETRY_WINDOWS_SECONDS.length}).`,
+            warningPublished: false,
+        };
+    }
+
+    shouldRetry(completed: TurnCompletedNotification): boolean {
+        return completed.turn.status === "failed" && isCapacityError(completed.turn.error);
+    }
+
+    createContinuationRequest(request: PromptRequest): PromptRequest {
+        return {
+            sessionId: request.sessionId,
+            prompt: [{type: "text", text: CONTINUATION_PROMPT}],
+        };
     }
 
     transformNotification(
         notification: ServerNotification,
         currentTurnId: string | null,
-        retry: CapacityRetry | null,
+        retry: TurnRetry | null,
     ): ServerNotification {
         if (notification.method !== "error"
             || notification.params.willRetry
@@ -92,7 +88,7 @@ export class RetryCapacityService {
         };
     }
 
-    createWarning(threadId: string, turnId: string, retry: CapacityRetry): ServerNotification {
+    createWarning(threadId: string, turnId: string, retry: TurnRetry): ServerNotification {
         return {
             method: "error",
             params: {
@@ -108,36 +104,23 @@ export class RetryCapacityService {
         };
     }
 
-    private createRetry(retryAttempt: number): CapacityRetry | null {
-        const window = RETRY_WINDOWS_SECONDS[retryAttempt];
-        if (window === undefined) {
-            return null;
-        }
-        const [minimum, maximum] = window;
-        const delaySeconds = minimum + Math.floor(Math.random() * (maximum - minimum + 1));
-        const unit = delaySeconds === 1 ? "second" : "seconds";
-        return {
-            attempt: retryAttempt + 1,
-            delaySeconds,
-            title: `Selected model is at capacity. Retrying in ${delaySeconds} ${unit} `
-                + `(${retryAttempt + 1}/${RETRY_WINDOWS_SECONDS.length}).`,
-            warningPublished: false,
-        };
-    }
-
-    private async wait(delaySeconds: number, options: RetryCapacityOptions): Promise<boolean> {
-        if (options.signal?.aborted || options.shouldCancel?.()) {
+    async wait(
+        retry: TurnRetry,
+        signal: AbortSignal | undefined,
+        shouldCancel: (() => boolean) | undefined,
+    ): Promise<boolean> {
+        if (signal?.aborted || shouldCancel?.()) {
             return false;
         }
         return await new Promise<boolean>((resolve) => {
             const finish = (completed: boolean) => {
                 clearTimeout(timer);
-                options.signal?.removeEventListener("abort", onAbort);
+                signal?.removeEventListener("abort", onAbort);
                 resolve(completed);
             };
             const onAbort = () => finish(false);
-            const timer = setTimeout(() => finish(!options.shouldCancel?.()), delaySeconds * 1000);
-            options.signal?.addEventListener("abort", onAbort, {once: true});
+            const timer = setTimeout(() => finish(!shouldCancel?.()), retry.delaySeconds * 1000);
+            signal?.addEventListener("abort", onAbort, {once: true});
         });
     }
 }

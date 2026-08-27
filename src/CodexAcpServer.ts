@@ -19,7 +19,7 @@ import {
     type SessionMetadataWithThread,
     type UrlElicitationRequester
 } from "./CodexAcpClient";
-import {type CapacityRetry, RetryCapacityService} from "./RetryCapacityService";
+import {RetryCapacityService, type TurnRetry, type TurnRetryService} from "./RetryCapacityService";
 import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClient";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -2298,8 +2298,8 @@ export class CodexAcpServer {
         const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
         let eventHandler: CodexEventHandler | null = null;
         let promptNotificationsActive = true;
-        const retryCapacityService = new RetryCapacityService();
-        let modelCapacityRetry: CapacityRetry | null = null;
+        const turnRetryService: TurnRetryService = new RetryCapacityService();
+        let turnRetry: TurnRetry | null = null;
         const clearRecoveredSessionFailure = async (handler: CodexEventHandler): Promise<void> => {
             await handler.completeSuccessfulTurn(sessionState.currentTurnId);
             const current = sessionState.sessionFailure;
@@ -2346,10 +2346,10 @@ export class CodexAcpServer {
                         await promptEventHandler.handleSessionScopedNotification(event);
                         return;
                     }
-                    const handledEvent = retryCapacityService.transformNotification(
+                    const handledEvent = turnRetryService.transformNotification(
                         event,
                         sessionState.currentTurnId,
-                        modelCapacityRetry,
+                        turnRetry,
                     );
                     const completesActiveTurn = event.method === "turn/completed"
                         && event.params.turn.id === sessionState.currentTurnId;
@@ -2365,14 +2365,14 @@ export class CodexAcpServer {
                 approvalHandler,
                 elicitationHandler);
 
-            const handleModelCapacityRetry = async (
+            const handleTurnRetry = async (
                 completed: TurnCompletedNotification,
-                retry: CapacityRetry,
+                retry: TurnRetry,
             ) => {
                 await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                 await promptEventHandler.flushPendingErrors();
                 if (!retry.warningPublished) {
-                    await promptEventHandler.handleNotification(retryCapacityService.createWarning(
+                    await promptEventHandler.handleNotification(turnRetryService.createWarning(
                         params.sessionId,
                         completed.turn.id,
                         retry,
@@ -2384,7 +2384,7 @@ export class CodexAcpServer {
                 sessionState.currentTurnId = null;
                 pendingTurnStart = this.createPendingTurnStart();
                 this.pendingTurnStarts.set(params.sessionId, pendingTurnStart);
-                logger.log("Selected model is at capacity; scheduling retry", {
+                logger.log("Scheduling turn retry", {
                     sessionId: params.sessionId,
                     attempt: retry.attempt,
                     delaySeconds: retry.delaySeconds,
@@ -2520,14 +2520,14 @@ export class CodexAcpServer {
                             return;
                         }
                         sessionState.currentTurnId = turnId;
-                        modelCapacityRetry = retry;
+                        turnRetry = retry;
                         pendingTurnStart?.resolve(turnId);
                         if (retry?.attempt === 1) {
                             onTurnStarted?.();
                         }
                     },
                     () => this.promptShouldStop(params.sessionId, activePrompt),
-                    handleModelCapacityRetry,
+                    handleTurnRetry,
                     activePrompt.signal,
                 ));
             void sendPromptPromise.catch((err) => {
@@ -2615,14 +2615,14 @@ export class CodexAcpServer {
                                     return;
                                 }
                                 sessionState.currentTurnId = turnId;
-                                modelCapacityRetry = retry;
+                                turnRetry = retry;
                                 // Keep the approval-to-turn-start gap session-scoped. Once the new turn has
                                 // an identity, snapshot any unchanged session failure as its recovery baseline.
                                 recoverableSessionFailure = sessionState.sessionFailure;
                                 promptNotificationsActive = true;
                             },
                             () => this.promptShouldStop(params.sessionId, activePrompt),
-                            handleModelCapacityRetry,
+                            handleTurnRetry,
                             activePrompt.signal,
                         ),
                     );
