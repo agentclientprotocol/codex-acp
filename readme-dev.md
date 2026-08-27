@@ -12,6 +12,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
+- `CODEX_RPC_TIMEOUT_MS` - override the deadline for Codex app-server JSON-RPC requests. Unset uses 60s, or 15s for `turn/interrupt`.
 
 ### Quick start
 

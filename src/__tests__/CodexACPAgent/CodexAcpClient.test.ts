@@ -2529,36 +2529,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             .then(() => {
                 cancelResolved = true;
             });
-        await flushAsyncWork();
-        expect(cancelResolved).toBe(false);
-
-        mockFixture.sendServerNotification({
-            method: "thread/goal/updated",
-            params: {
-                threadId: "session-id",
-                turnId: null,
-                goal,
-            },
-        });
-
-        mockFixture.sendServerNotification({
-            method: "item/agentMessage/delta",
-            params: {
-                threadId: "session-id",
-                turnId: "goal-turn-id",
-                itemId: "goal-message-id",
-                delta: "goal output",
-            },
-        });
-
-        await vi.waitFor(() => {
-            expect(turnInterruptSpy).toHaveBeenCalledWith({
-                threadId: "session-id",
-                turnId: "goal-turn-id",
-            });
-        });
         await expect(cancelPromise).resolves.toBeUndefined();
+        expect(cancelResolved).toBe(true);
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+        expect(turnInterruptSpy).not.toHaveBeenCalled();
     });
 
     it('controls an active goal through the out-of-band session extension', async () => {

@@ -1,4 +1,5 @@
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
+import {withDeadline} from "./StdUtils";
 import type {
     ClientRequest,
     InitializeParams,
@@ -129,6 +130,18 @@ const ToolRequestUserInputRequest = new RequestType<
 >('item/tool/requestUserInput');
 
 const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
+export const DEFAULT_CODEX_RPC_TIMEOUT_MS = 60_000;
+
+export function resolveRpcTimeoutMs(method: string, env: NodeJS.ProcessEnv = process.env): number {
+    const override = Number(env["CODEX_RPC_TIMEOUT_MS"]);
+    if (Number.isFinite(override) && override > 0) {
+        return override;
+    }
+    if (method === "turn/interrupt") {
+        return 15_000;
+    }
+    return DEFAULT_CODEX_RPC_TIMEOUT_MS;
+}
 
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
@@ -957,13 +970,10 @@ export class CodexAppServerClient {
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "request", ...request});
         }
-        let result: any;
-        if (request.params) {
-            result = await this.connection.sendRequest<R>(request.method, request.params)
-        }
-        else {
-            result = await this.connection.sendRequest<R>(request.method);
-        }
+        const send = request.params
+            ? this.connection.sendRequest<R>(request.method, request.params)
+            : this.connection.sendRequest<R>(request.method);
+        const result = await withDeadline(send, resolveRpcTimeoutMs(request.method), `Codex RPC ${request.method}`);
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "response", ...result});
         }
