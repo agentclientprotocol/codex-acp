@@ -5,6 +5,9 @@
     "quota": {
       "token_count": null,
       "model_usage": []
+    },
+    "codex": {
+      "turnId": "turn-id"
     }
   }
 }
