@@ -490,10 +490,26 @@ export class CodexAcpClient {
     async forkSession(request: acp.ForkSessionRequest): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
+        const messageId = readAirForkMessageId(request._meta);
+        let lastTurnId: string | undefined;
+        if (messageId) {
+            const history = await this.codexClient.threadRead({
+                threadId: request.sessionId,
+                includeTurns: true,
+            });
+            lastTurnId = history.thread.turns.find(turn => turn.items.some(item => item.id === messageId))?.id;
+            if (!lastTurnId) {
+                throw RequestError.invalidParams(
+                    {messageId},
+                    `Fork point message ${messageId} was not found in session ${request.sessionId}`,
+                );
+            }
+        }
 
         const response = await this.codexClient.threadFork({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
+            ...(lastTurnId !== undefined && {lastTurnId}),
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
@@ -1351,6 +1367,24 @@ function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[
         .filter((value): value is string => typeof value === "string")
         .map(value => value.trim())
         .filter(value => value.length > 0));
+}
+
+function readAirForkMessageId(meta?: Record<string, unknown> | null): string | undefined {
+    const jetbrains = meta?.["jetbrains"];
+    if (!isUnknownRecord(jetbrains)) return undefined;
+    const air = jetbrains["air"];
+    if (!isUnknownRecord(air)) return undefined;
+    const fork = air["fork"];
+    if (!isUnknownRecord(fork) || fork["version"] !== 1) return undefined;
+    const messageId = fork["messageId"];
+    if (typeof messageId !== "string" || messageId.trim().length === 0) {
+        throw RequestError.invalidParams(undefined, "AIR fork messageId must be a non-empty string");
+    }
+    return messageId.trim();
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readAdditionalDirectories(cwd: string, additionalDirectories?: string[],  meta?: Record<string, unknown> | null): string[] {
