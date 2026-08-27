@@ -1531,6 +1531,43 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(mockFixture.getCodexConnectionDump(ignoredFields)).toMatchFileSnapshot("data/send-attachments-turn-start.json");
     });
 
+    it('converts ACP session links to Codex deep links', async () => {
+        const {mockFixture, turnStartSpy} = setupPromptFixture();
+        const threadRead = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadRead");
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [
+                {
+                    type: "resource_link",
+                    name: "Source chat",
+                    uri: "acp-session://reference?sessionId=source-session",
+                },
+                {
+                    type: "resource_link",
+                    name: "Duplicate source chat",
+                    uri: "acp-session://reference?sessionId=source-session",
+                },
+            ],
+        });
+
+        expect(threadRead).not.toHaveBeenCalled();
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            input: [
+                {
+                    type: "text",
+                    text: "codex://threads/source-session",
+                    text_elements: [],
+                },
+                {
+                    type: "text",
+                    text: "codex://threads/source-session",
+                    text_elements: [],
+                },
+            ],
+        }));
+    });
+
     it('should fail on wrong sessionId', async () => {
         const sessionId = "not-existing-session";
 

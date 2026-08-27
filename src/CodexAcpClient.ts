@@ -70,6 +70,7 @@ import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions
 import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
+import {toCodexSessionLinks} from "./SessionReferences";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -885,7 +886,7 @@ export class CodexAcpClient {
         onTurnStarted?: (turnId: string) => void,
         shouldCancel?: () => boolean,
     ): Promise<TurnCompletedNotification | null> {
-        const input = buildPromptItems(request.prompt);
+        const input = buildPromptItems(toCodexSessionLinks(request.prompt));
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
         await this.refreshSkills(cwd, additionalDirectories);
         if (shouldCancel?.()) {
@@ -1165,7 +1166,7 @@ export class CodexAcpClient {
         return await this.codexClient.turnSteer({
             threadId: params.threadId,
             expectedTurnId: params.turnId,
-            input: buildPromptItems(params.prompt),
+            input: buildPromptItems(toCodexSessionLinks(params.prompt)),
         });
     }
 
