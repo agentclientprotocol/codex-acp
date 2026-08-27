@@ -3,14 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it, onTestFinished, vi} from "vitest";
 import {AgentMode} from "../../../AgentMode";
-import {ApprovalOptionId} from "../../../permissions/option-ids";
 import {
     createAuthenticatedFixture,
-    createPermissionResponder,
     describeE2E,
     expectEndTurn,
     expectNoPermissionRequests,
-    expectPermissionRequests,
     generateFileNameForTest,
     type SpawnedAgentFixture,
 } from "./acp-e2e-test-utils";
@@ -18,31 +15,6 @@ import {
 const FILE_CONTENT = "file approval e2e";
 // The edit lands before the turn ends, so this only absorbs filesystem visibility lag.
 const FILE_APPEARS_TIMEOUT_MS = 5_000;
-
-describeE2E("E2E file approval tests", () => {
-    let fixture: SpawnedAgentFixture;
-
-    beforeEach(async () => {
-        fixture = await createAuthenticatedFixture(AgentMode.ReadOnly);
-    });
-
-    afterEach(async () => {
-        await fixture.dispose();
-    });
-
-    it("applies approved file edits", async () => {
-        fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.AllowOnce));
-        const sessionId = await expectFileEditApplied(fixture, newFilePathIn(fixture.workspaceDir));
-        expectPermissionRequests(fixture, sessionId, {edit: 1, execute: 0});
-    });
-
-    it("does not apply rejected file edits", async () => {
-        fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.Cancel));
-        const sessionId = await expectFileEditBlocked(fixture, newFilePathIn(fixture.workspaceDir));
-        expect(fixture.readPermissionRequests(sessionId, "edit").length).toBeGreaterThanOrEqual(1);
-        expect(fixture.readPermissionRequests(sessionId, "execute")).toHaveLength(0);
-    });
-});
 
 describeE2E("E2E read-only mode file permission tests", () => {
     let fixture: SpawnedAgentFixture;

@@ -8,6 +8,7 @@ import {
     createPermissionResponder,
     createPermissionResponse,
     describeE2E,
+    expectCancelled,
     expectEndTurn,
     expectNoPermissionRequests,
     expectPermissionRequests,
@@ -38,15 +39,23 @@ describeE2E("E2E shell approval tests", () => {
         await fixture.dispose();
     });
 
-    async function promptShellCommandTwice(): Promise<void> {
-        for (const text of [
+    async function promptShellCommandTwice(
+        expectedStopReasons: ["end_turn" | "cancelled", "end_turn" | "cancelled"],
+    ): Promise<void> {
+        const prompts = [
             `Use your shell tool to run exactly \`${command}\`.`,
             `Use your shell tool to run exactly the same command again: \`${command}\`.`,
-        ]) {
-            expectEndTurn(await fixture.connection.prompt({
+        ];
+        for (const [index, text] of prompts.entries()) {
+            const response = await fixture.connection.prompt({
                 sessionId,
                 prompt: [{type: "text", text}],
-            }));
+            });
+            if (expectedStopReasons[index] === "cancelled") {
+                expectCancelled(response);
+            } else {
+                expectEndTurn(response);
+            }
         }
     }
 
@@ -57,15 +66,18 @@ describeE2E("E2E shell approval tests", () => {
                 ? responses.shift() ?? ApprovalOptionId.Cancel
                 : null
         ));
-        await promptShellCommandTwice();
+        await promptShellCommandTwice(["end_turn", "cancelled"]);
         expect(fs.existsSync(firstFilePath)).toBe(true);
         expect(fs.existsSync(secondFilePath)).toBe(false);
         expectPermissionRequests(fixture, sessionId, {execute: 2, edit: 0});
     });
 
-    it("skips subsequent approvals when allow_for_session is selected", async () => {
-        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowForSession));
-        await promptShellCommandTwice();
+    it("skips subsequent approvals when the exec-policy amendment is accepted", async () => {
+        fixture.setPermissionResponder(createPermissionResponder(
+            "execute",
+            ApprovalOptionId.AcceptWithExecpolicyAmendment,
+        ));
+        await promptShellCommandTwice(["end_turn", "end_turn"]);
         expect(fs.existsSync(firstFilePath)).toBe(true);
         expect(fs.existsSync(secondFilePath)).toBe(true);
         expectPermissionRequests(fixture, sessionId, {execute: 1, edit: 0});
@@ -73,7 +85,7 @@ describeE2E("E2E shell approval tests", () => {
 
     it("cancels every command when cancel is selected", async () => {
         fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.Cancel));
-        await promptShellCommandTwice();
+        await promptShellCommandTwice(["cancelled", "cancelled"]);
         expect(fs.existsSync(firstFilePath)).toBe(false);
         expect(fs.existsSync(secondFilePath)).toBe(false);
         expectPermissionRequests(fixture, sessionId, {execute: 2, edit: 0});
