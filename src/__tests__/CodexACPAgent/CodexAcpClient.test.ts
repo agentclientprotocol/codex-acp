@@ -635,7 +635,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             sessionId: "source-id",
             cwd: "/workspace",
             _meta: {
-                jetbrains: {air: {fork: {version: 1, messageId: "agent-message-2"}}},
+                jetbrains: {air: {fork: {version: 1, messageId: "agent-message-2:segment:0"}}},
             },
         });
 

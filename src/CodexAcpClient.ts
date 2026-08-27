@@ -497,7 +497,10 @@ export class CodexAcpClient {
                 threadId: request.sessionId,
                 includeTurns: true,
             });
-            lastTurnId = history.thread.turns.find(turn => turn.items.some(item => item.id === messageId))?.id;
+            const candidateIds = airForkMessageIdCandidates(messageId);
+            lastTurnId = candidateIds
+                .map(candidateId => history.thread.turns.find(turn => turn.items.some(item => item.id === candidateId))?.id)
+                .find(turnId => turnId !== undefined);
             if (!lastTurnId) {
                 throw RequestError.invalidParams(
                     {messageId},
@@ -1381,6 +1384,13 @@ function readAirForkMessageId(meta?: Record<string, unknown> | null): string | u
         throw RequestError.invalidParams(undefined, "AIR fork messageId must be a non-empty string");
     }
     return messageId.trim();
+}
+
+function airForkMessageIdCandidates(messageId: string): string[] {
+    // Older AIR builds sent their visible segment id. Prefer the exact id before its ACP source id.
+    const visibleSegmentSuffix = /:segment:\d+$/;
+    const protocolMessageId = messageId.replace(visibleSegmentSuffix, "");
+    return protocolMessageId === messageId ? [messageId] : [messageId, protocolMessageId];
 }
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {
