@@ -27,7 +27,6 @@ import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
-import {createHash} from "node:crypto";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
 import type {
@@ -65,6 +64,9 @@ import {
     createUnavailableAgentFileChangeReport,
 } from "./AgentFileChangeReport";
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
+import {forkSession as runForkSession} from "./SessionFork";
+import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
+export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -490,52 +492,17 @@ export class CodexAcpClient {
 
     async forkSession(request: acp.ForkSessionRequest): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
-        await this.refreshSkills(request.cwd, additionalDirectories);
-        const forkPoint = readAirForkPoint(request._meta);
-        let lastTurnId: string | undefined;
-        if (forkPoint) {
-            const history = await this.codexClient.threadRead({
-                threadId: request.sessionId,
-                includeTurns: true,
-            });
-            const candidateIds = airForkMessageIdCandidates(forkPoint.messageId);
-            lastTurnId = candidateIds
-                .map(candidateId => history.thread.turns.find(turn => turn.items.some(item => item.id === candidateId))?.id)
-                .find(turnId => turnId !== undefined);
-            if (!lastTurnId && forkPoint.messageFingerprint) {
-                const matchingTurns = history.thread.turns.flatMap(turn => turn.items
-                    .filter(item => item.type === "agentMessage"
-                        && fingerprintAgentMessage(item.text) === forkPoint.messageFingerprint)
-                    .map(() => turn.id));
-                lastTurnId = matchingTurns[forkPoint.messageOccurrence - 1];
-            }
-            if (!lastTurnId) {
-                throw RequestError.invalidParams(
-                    {messageId: forkPoint.messageId},
-                    `Fork point message ${forkPoint.messageId} was not found in session ${request.sessionId}`,
-                );
-            }
-        }
-
-        const response = await this.codexClient.threadFork({
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
-            cwd: request.cwd,
-            ...(lastTurnId !== undefined && {lastTurnId}),
-            modelProvider: await this.getResumeModelProvider(),
-            threadId: request.sessionId,
+        return await runForkSession(request, additionalDirectories, {
+            codexClient: this.codexClient,
+            refreshSkills: (cwd, directories) => this.refreshSkills(cwd, directories),
+            createSessionConfig: (cwd, directories, mcpServers) =>
+                this.createSessionConfig(cwd, directories, mcpServers),
+            getResumeModelProvider: () => this.getResumeModelProvider(),
+            fetchAvailableModels: () => this.fetchAvailableModels(),
+            createCurrentModelId: (models, model, reasoningEffort) =>
+                this.createModelId(models, model, reasoningEffort).toString(),
+            getCollaborationMode: sessionId => this.getCollaborationMode(sessionId),
         });
-        await this.codexClient.threadUnsubscribe({threadId: response.thread.id});
-        const codexModels = await this.fetchAvailableModels();
-        const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
-        return {
-            sessionId: response.thread.id,
-            currentModelId,
-            models: codexModels,
-            collaborationMode: this.getCollaborationMode(response.thread.id),
-            modelProvider: response.modelProvider,
-            currentServiceTier: response.serviceTier as ServiceTier ?? null,
-            additionalDirectories,
-        };
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
@@ -1274,20 +1241,6 @@ class AgentFileChangeReportBudget {
 
 export type JsonObject = { [key in string]?: JsonValue }
 
-export type SessionMetadata = {
-    sessionId: string,
-    currentModelId: string,
-    models: Model[],
-    collaborationMode: ModeKind,
-    modelProvider?: string | null,
-    currentServiceTier?: ServiceTier | null,
-    additionalDirectories: string[],
-}
-
-export type SessionMetadataWithThread = SessionMetadata & {
-    thread: Thread,
-}
-
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
     return prompt.map((block): UserInput | null => {
         switch (block.type) {
@@ -1379,54 +1332,6 @@ function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[
         .filter((value): value is string => typeof value === "string")
         .map(value => value.trim())
         .filter(value => value.length > 0));
-}
-
-type AirForkPoint = {
-    messageId: string;
-    messageFingerprint?: string;
-    messageOccurrence: number;
-};
-
-function readAirForkPoint(meta?: Record<string, unknown> | null): AirForkPoint | undefined {
-    const jetbrains = meta?.["jetbrains"];
-    if (!isUnknownRecord(jetbrains)) return undefined;
-    const air = jetbrains["air"];
-    if (!isUnknownRecord(air)) return undefined;
-    const fork = air["fork"];
-    if (!isUnknownRecord(fork) || fork["version"] !== 1) return undefined;
-    const messageId = fork["messageId"];
-    if (typeof messageId !== "string" || messageId.trim().length === 0) {
-        throw RequestError.invalidParams(undefined, "AIR fork messageId must be a non-empty string");
-    }
-    const messageFingerprint = fork["messageFingerprint"];
-    if (messageFingerprint !== undefined
-        && (typeof messageFingerprint !== "string" || !/^sha256:[0-9a-f]{64}$/.test(messageFingerprint))) {
-        throw RequestError.invalidParams(undefined, "AIR fork messageFingerprint must be a SHA-256 fingerprint");
-    }
-    const messageOccurrence = fork["messageOccurrence"] ?? 1;
-    if (!Number.isSafeInteger(messageOccurrence) || (messageOccurrence as number) < 1) {
-        throw RequestError.invalidParams(undefined, "AIR fork messageOccurrence must be a positive integer");
-    }
-    return {
-        messageId: messageId.trim(),
-        ...(typeof messageFingerprint === "string" && {messageFingerprint}),
-        messageOccurrence: messageOccurrence as number,
-    };
-}
-
-function fingerprintAgentMessage(text: string): string {
-    return `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
-}
-
-function airForkMessageIdCandidates(messageId: string): string[] {
-    // Older AIR builds sent their visible segment id. Prefer the exact id before its ACP source id.
-    const visibleSegmentSuffix = /:segment:\d+$/;
-    const protocolMessageId = messageId.replace(visibleSegmentSuffix, "");
-    return protocolMessageId === messageId ? [messageId] : [messageId, protocolMessageId];
-}
-
-function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readAdditionalDirectories(cwd: string, additionalDirectories?: string[],  meta?: Record<string, unknown> | null): string[] {
