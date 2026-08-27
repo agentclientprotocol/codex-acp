@@ -13,14 +13,13 @@ import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 import {
     CodexAcpClient,
-    isModelCapacityError,
     type JsonObject,
-    type ModelCapacityRetry,
     OPENAI_PROVIDER_ID,
     type SessionMetadata,
     type SessionMetadataWithThread,
     type UrlElicitationRequester
 } from "./CodexAcpClient";
+import {type CapacityRetry, RetryCapacityService} from "./RetryCapacityService";
 import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClient";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -2299,7 +2298,8 @@ export class CodexAcpServer {
         const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
         let eventHandler: CodexEventHandler | null = null;
         let promptNotificationsActive = true;
-        let modelCapacityRetry: ModelCapacityRetry | null = null;
+        const retryCapacityService = new RetryCapacityService();
+        let modelCapacityRetry: CapacityRetry | null = null;
         const clearRecoveredSessionFailure = async (handler: CodexEventHandler): Promise<void> => {
             await handler.completeSuccessfulTurn(sessionState.currentTurnId);
             const current = sessionState.sessionFailure;
@@ -2346,22 +2346,11 @@ export class CodexAcpServer {
                         await promptEventHandler.handleSessionScopedNotification(event);
                         return;
                     }
-                    let handledEvent = event;
-                    if (event.method === "error"
-                        && !event.params.willRetry
-                        && modelCapacityRetry !== null
-                        && event.params.turnId === sessionState.currentTurnId
-                        && isModelCapacityError(event.params.error)) {
-                        modelCapacityRetry.warningPublished = true;
-                        handledEvent = {
-                            method: "error",
-                            params: {
-                                ...event.params,
-                                willRetry: true,
-                                error: {...event.params.error, message: modelCapacityRetry.title},
-                            },
-                        };
-                    }
+                    const handledEvent = retryCapacityService.transformNotification(
+                        event,
+                        sessionState.currentTurnId,
+                        modelCapacityRetry,
+                    );
                     const completesActiveTurn = event.method === "turn/completed"
                         && event.params.turn.id === sessionState.currentTurnId;
                     permissionContext.handleNotification(handledEvent);
@@ -2378,24 +2367,16 @@ export class CodexAcpServer {
 
             const handleModelCapacityRetry = async (
                 completed: TurnCompletedNotification,
-                retry: ModelCapacityRetry,
+                retry: CapacityRetry,
             ) => {
                 await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
                 await promptEventHandler.flushPendingErrors();
                 if (!retry.warningPublished) {
-                    await promptEventHandler.handleNotification({
-                        method: "error",
-                        params: {
-                            threadId: params.sessionId,
-                            turnId: completed.turn.id,
-                            willRetry: true,
-                            error: {
-                                message: retry.title,
-                                codexErrorInfo: "serverOverloaded",
-                                additionalDetails: null,
-                            },
-                        },
-                    });
+                    await promptEventHandler.handleNotification(retryCapacityService.createWarning(
+                        params.sessionId,
+                        completed.turn.id,
+                        retry,
+                    ));
                 }
                 await promptEventHandler.flushPendingPlanUpdates();
                 recoverableSessionFailure = sessionState.sessionFailure;

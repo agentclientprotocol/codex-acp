@@ -63,6 +63,7 @@ import {
     createReportedAgentFileChangeReport,
     createUnavailableAgentFileChangeReport,
 } from "./AgentFileChangeReport";
+import {type CapacityRetry, RetryCapacityService} from "./RetryCapacityService";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -72,73 +73,6 @@ import {
 export const CUSTOM_GATEWAY_PROVIDER_ID = "custom-gateway";
 export const OPENAI_PROVIDER_ID = "openai";
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
-const MODEL_CAPACITY_ERROR_MESSAGE = "Selected model is at capacity. Please try a different model.";
-const MODEL_CAPACITY_CONTINUATION_PROMPT = "Continue from where you left off.";
-const MODEL_CAPACITY_RETRY_WINDOWS_SECONDS = [
-    [1, 10],
-    [1, 30],
-    [30, 60],
-    [60, 120],
-    [120, 300],
-] as const;
-
-export interface ModelCapacityRetry {
-    attempt: number;
-    delaySeconds: number;
-    title: string;
-    warningPublished: boolean;
-}
-
-class ModelCapacityRetryError extends Error {
-    constructor(
-        readonly completed: TurnCompletedNotification,
-        readonly retry: ModelCapacityRetry,
-    ) {
-        super(retry.title);
-    }
-}
-
-export function isModelCapacityError(error: {message: string; codexErrorInfo: unknown} | null): boolean {
-    return error?.codexErrorInfo === "serverOverloaded"
-        && error.message.trim() === MODEL_CAPACITY_ERROR_MESSAGE;
-}
-
-function createModelCapacityRetry(retryAttempt: number): ModelCapacityRetry | null {
-    const window = MODEL_CAPACITY_RETRY_WINDOWS_SECONDS[retryAttempt];
-    if (window === undefined) {
-        return null;
-    }
-    const [minimum, maximum] = window;
-    const delaySeconds = minimum + Math.floor(Math.random() * (maximum - minimum + 1));
-    const unit = delaySeconds === 1 ? "second" : "seconds";
-    return {
-        attempt: retryAttempt + 1,
-        delaySeconds,
-        title: `Selected model is at capacity. Retrying in ${delaySeconds} ${unit} `
-            + `(${retryAttempt + 1}/${MODEL_CAPACITY_RETRY_WINDOWS_SECONDS.length}).`,
-        warningPublished: false,
-    };
-}
-
-async function waitForModelCapacityRetry(
-    delaySeconds: number,
-    signal: AbortSignal | undefined,
-    shouldCancel: (() => boolean) | undefined,
-): Promise<boolean> {
-    if (signal?.aborted || shouldCancel?.()) {
-        return false;
-    }
-    return await new Promise<boolean>((resolve) => {
-        const finish = (completed: boolean) => {
-            clearTimeout(timer);
-            signal?.removeEventListener("abort", onAbort);
-            resolve(completed);
-        };
-        const onAbort = () => finish(false);
-        const timer = setTimeout(() => finish(!shouldCancel?.()), delaySeconds * 1000);
-        signal?.addEventListener("abort", onAbort, {once: true});
-    });
-}
 
 /**
  * The url-mode variant of the ACP `elicitation/create` request params.
@@ -176,6 +110,7 @@ export class CodexAcpClient {
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
+    private readonly retryCapacityService = new RetryCapacityService();
     private skillExtraRoots: string[] = [];
     private configPath: string | null = null;
 
@@ -915,64 +850,37 @@ export class CodexAcpClient {
         disableSummary: boolean,
         cwd: string,
         additionalDirectories: string[],
-        onTurnStarted?: (turnId: string, retry: ModelCapacityRetry | null) => void,
+        onTurnStarted?: (turnId: string, retry: CapacityRetry | null) => void,
         shouldCancel?: () => boolean,
         onModelCapacityRetry?: (
             completed: TurnCompletedNotification,
-            retry: ModelCapacityRetry,
+            retry: CapacityRetry,
         ) => Promise<void>,
         retrySignal?: AbortSignal,
-        retryAttempt = 0,
     ): Promise<TurnCompletedNotification | null> {
-        const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
-        await this.refreshSkills(cwd, additionalDirectories);
-        if (shouldCancel?.()) {
-            return null;
-        }
-        const retry = createModelCapacityRetry(retryAttempt);
-        try {
-            const completed = await this.codexClient.runTurn({
-                threadId: request.sessionId,
-                input: input,
-                approvalPolicy: agentMode.approvalPolicy,
-                approvalsReviewer: agentMode.approvalsReviewer,
-                sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
-                summary: disableSummary ? "none" : "auto",
-                effort: effort,
-                model: modelId.model,
-                serviceTier: serviceTier,
-            }, (turnId) => onTurnStarted?.(turnId, retry));
-            if (retry !== null && completed.turn.status === "failed" && isModelCapacityError(completed.turn.error)) {
-                throw new ModelCapacityRetryError(completed, retry);
-            }
-            return completed;
-        } catch (error) {
-            if (!(error instanceof ModelCapacityRetryError)) {
-                throw error;
-            }
-            await onModelCapacityRetry?.(error.completed, error.retry);
-            if (!await waitForModelCapacityRetry(error.retry.delaySeconds, retrySignal, shouldCancel)) {
-                return null;
-            }
-            return await this.sendPrompt(
-                {
-                    sessionId: request.sessionId,
-                    prompt: [{type: "text", text: MODEL_CAPACITY_CONTINUATION_PROMPT}],
-                },
-                agentMode,
-                modelId,
-                serviceTier,
-                disableSummary,
-                cwd,
-                additionalDirectories,
-                onTurnStarted,
-                shouldCancel,
-                onModelCapacityRetry,
-                retrySignal,
-                retryAttempt + 1,
-            );
-        }
+        return await this.retryCapacityService.run(request, {
+            signal: retrySignal,
+            shouldCancel,
+            onRetry: onModelCapacityRetry,
+            runTurn: async (turnRequest, retry) => {
+                await this.refreshSkills(cwd, additionalDirectories);
+                if (shouldCancel?.()) {
+                    return null;
+                }
+                return await this.codexClient.runTurn({
+                    threadId: turnRequest.sessionId,
+                    input: buildPromptItems(turnRequest.prompt),
+                    approvalPolicy: agentMode.approvalPolicy,
+                    approvalsReviewer: agentMode.approvalsReviewer,
+                    sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+                    summary: disableSummary ? "none" : "auto",
+                    effort,
+                    model: modelId.model,
+                    serviceTier,
+                }, (turnId) => onTurnStarted?.(turnId, retry));
+            },
+        });
     }
 
     async runAgentFileChangeReport(params: {
