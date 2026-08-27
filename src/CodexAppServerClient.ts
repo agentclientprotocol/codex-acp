@@ -528,7 +528,7 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
-    async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
+    async threadResume(params: ExperimentalThreadResumeParams): Promise<ThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
     }
 
@@ -980,7 +980,11 @@ export type CompactionCompletedNotification =
     | { method: "thread/compacted", params: Extract<ServerNotification, { method: "thread/compacted" }>["params"] }
     | { method: "item/completed", params: ItemCompletedNotification & { item: Extract<ItemCompletedNotification["item"], { type: "contextCompaction" }> } };
 
-type CodexRequest = DistributiveOmit<ClientRequest, "id">
+type StableCodexRequest = DistributiveOmit<ClientRequest, "id">
+
+type CodexRequest =
+    | Exclude<StableCodexRequest, { method: "thread/resume" }>
+    | { method: "thread/resume", params: ExperimentalThreadResumeParams }
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>
@@ -997,6 +1001,12 @@ export interface ExperimentalThreadSettingsUpdateParams {
         };
     };
 }
+
+// The adapter opts into app-server's experimental API, while the checked-in
+// generated bindings currently contain only stable fields.
+type ExperimentalThreadResumeParams = ThreadResumeParams & {
+    excludeTurns?: boolean;
+};
 
 type McpServerStartupSnapshot = {
     status: McpServerStartupState;
