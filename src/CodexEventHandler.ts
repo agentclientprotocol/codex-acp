@@ -537,6 +537,8 @@ export class CodexEventHandler {
             case "thread/deleted":
             case "thread/reverted":
             case "thread/queue/changed":
+            case "project/changed":
+            case "thread/project/updated":
             case "thread/environment/connected":
             case "thread/environment/disconnected":
             case "command/exec/outputDelta":
@@ -549,12 +551,16 @@ export class CodexEventHandler {
             case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
+            case "mcpServer/event/stream/notification":
             case "serverRequest/resolved":
             case "model/verification":
             case "model/safetyBuffering/updated":
             case "windows/worldWritableWarning":
             case "thread/realtime/started":
             case "thread/realtime/itemAdded":
+            case "thread/realtime/item/started":
+            case "thread/realtime/item/transcript/delta":
+            case "thread/realtime/item/completed":
             case "thread/realtime/transcript/delta":
             case "thread/realtime/transcript/done":
             case "thread/realtime/outputAudio/delta":
@@ -575,6 +581,7 @@ export class CodexEventHandler {
             case "externalAgentConfig/import/progress":
             case "process/outputDelta":
             case "process/exited":
+            case "autoApprovalReview/strictReviewRequired":
                 return null;
         }
     }

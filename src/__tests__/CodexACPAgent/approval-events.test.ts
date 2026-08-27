@@ -66,6 +66,7 @@ describe("Approval Events", () => {
         overrides: Partial<CommandParams> = {},
     ): CommandParams {
         return {
+            kind: "command",
             threadId: sessionId,
             turnId: "turn-1",
             itemId: "command-item",

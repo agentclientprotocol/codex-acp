@@ -156,6 +156,7 @@ describe("agent file-change report lifecycle", () => {
                     }),
                     phase: "final_answer",
                     memoryCitation: null,
+                    delivery: null,
                 }], "full"),
             };
         });
@@ -511,6 +512,7 @@ describe("agent file-change report lifecycle", () => {
                 text: "not JSON",
                 phase: "final_answer",
                 memoryCitation: null,
+                delivery: null,
             }], "full"),
         });
         const threadRead = vi.spyOn(appServer, "threadRead");
