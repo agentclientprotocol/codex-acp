@@ -27,6 +27,7 @@ import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
+import {createHash} from "node:crypto";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
 import type {
@@ -490,21 +491,28 @@ export class CodexAcpClient {
     async forkSession(request: acp.ForkSessionRequest): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
-        const messageId = readAirForkMessageId(request._meta);
+        const forkPoint = readAirForkPoint(request._meta);
         let lastTurnId: string | undefined;
-        if (messageId) {
+        if (forkPoint) {
             const history = await this.codexClient.threadRead({
                 threadId: request.sessionId,
                 includeTurns: true,
             });
-            const candidateIds = airForkMessageIdCandidates(messageId);
+            const candidateIds = airForkMessageIdCandidates(forkPoint.messageId);
             lastTurnId = candidateIds
                 .map(candidateId => history.thread.turns.find(turn => turn.items.some(item => item.id === candidateId))?.id)
                 .find(turnId => turnId !== undefined);
+            if (!lastTurnId && forkPoint.messageFingerprint) {
+                const matchingTurns = history.thread.turns.flatMap(turn => turn.items
+                    .filter(item => item.type === "agentMessage"
+                        && fingerprintAgentMessage(item.text) === forkPoint.messageFingerprint)
+                    .map(() => turn.id));
+                lastTurnId = matchingTurns[forkPoint.messageOccurrence - 1];
+            }
             if (!lastTurnId) {
                 throw RequestError.invalidParams(
-                    {messageId},
-                    `Fork point message ${messageId} was not found in session ${request.sessionId}`,
+                    {messageId: forkPoint.messageId},
+                    `Fork point message ${forkPoint.messageId} was not found in session ${request.sessionId}`,
                 );
             }
         }
@@ -1372,7 +1380,13 @@ function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[
         .filter(value => value.length > 0));
 }
 
-function readAirForkMessageId(meta?: Record<string, unknown> | null): string | undefined {
+type AirForkPoint = {
+    messageId: string;
+    messageFingerprint?: string;
+    messageOccurrence: number;
+};
+
+function readAirForkPoint(meta?: Record<string, unknown> | null): AirForkPoint | undefined {
     const jetbrains = meta?.["jetbrains"];
     if (!isUnknownRecord(jetbrains)) return undefined;
     const air = jetbrains["air"];
@@ -1383,7 +1397,24 @@ function readAirForkMessageId(meta?: Record<string, unknown> | null): string | u
     if (typeof messageId !== "string" || messageId.trim().length === 0) {
         throw RequestError.invalidParams(undefined, "AIR fork messageId must be a non-empty string");
     }
-    return messageId.trim();
+    const messageFingerprint = fork["messageFingerprint"];
+    if (messageFingerprint !== undefined
+        && (typeof messageFingerprint !== "string" || !/^sha256:[0-9a-f]{64}$/.test(messageFingerprint))) {
+        throw RequestError.invalidParams(undefined, "AIR fork messageFingerprint must be a SHA-256 fingerprint");
+    }
+    const messageOccurrence = fork["messageOccurrence"] ?? 1;
+    if (!Number.isSafeInteger(messageOccurrence) || (messageOccurrence as number) < 1) {
+        throw RequestError.invalidParams(undefined, "AIR fork messageOccurrence must be a positive integer");
+    }
+    return {
+        messageId: messageId.trim(),
+        ...(typeof messageFingerprint === "string" && {messageFingerprint}),
+        messageOccurrence: messageOccurrence as number,
+    };
+}
+
+function fingerprintAgentMessage(text: string): string {
+    return `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 }
 
 function airForkMessageIdCandidates(messageId: string): string[] {
