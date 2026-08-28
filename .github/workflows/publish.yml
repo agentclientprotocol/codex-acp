@@ -27,6 +27,7 @@ jobs:
   release-please:
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: release # Optional: for enhanced security
     permissions:
       contents: write
@@ -68,6 +69,11 @@ jobs:
     needs: [release-please]
     if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.publish_npm) || needs.release-please.outputs.release_created == 'true') }}
     runs-on: ubuntu-latest
+    # Without this a stalled step burns the full 6h runner limit before anyone
+    # notices the release did not publish. A hung apt mirror already cost one
+    # release that way. Sized for the worst case of its steps: apt retries, then
+    # the unit and e2e suites, both of which run their files serially.
+    timeout-minutes: 40
     permissions:
       contents: read
     steps:
@@ -78,9 +84,33 @@ jobs:
         with:
           node-version: "24"
       - name: Configure sandboxing
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes bubblewrap
+          # Acquire::*::Timeout only guards a single socket operation, so a mirror
+          # that stalls once the headers are in never trips it -- that ate a 6h
+          # runner limit, then a 5min step cap. Kill each attempt from the outside
+          # and retry the fetch instead. No Acquire::Retries: apt retrying inside a
+          # killed window would just burn the budget without ever finishing.
+          #
+          # The per-attempt budgets are generous on purpose. When the image's
+          # package lists are stale, a healthy `update` pulls ~5MB of indexes and
+          # takes about two minutes; a tighter cap killed it mid-download three
+          # times in a row and turned "slow but fine" into a failed release.
+          # Languages=none drops the Translation-* files, which nothing here reads.
+          apt_opts=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Languages=none)
+          for attempt in 1 2; do
+            if timeout 300 sudo apt-get "${apt_opts[@]}" update \
+              && timeout 120 sudo apt-get "${apt_opts[@]}" install --yes bubblewrap; then
+              installed=yes
+              break
+            fi
+            echo "apt attempt ${attempt} stalled or failed, retrying"
+            sleep 10
+          done
+          if [ -z "${installed:-}" ]; then
+            echo "::error::bubblewrap install failed after 3 attempts"
+            exit 1
+          fi
           sudo sysctl -w kernel.unprivileged_userns_clone=1
           if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -89,6 +119,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - name: Run e2e tests
+        # The suite drives a live model, so a wedged turn hangs instead of
+        # failing. Bound it well above the ~3min happy path.
+        timeout-minutes: 15
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm run test:e2e
@@ -98,6 +131,7 @@ jobs:
     needs: [release-please, verify]
     if: ${{ always() && needs.verify.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: release # Optional: for enhanced security
     permissions:
       contents: read
@@ -119,6 +153,7 @@ jobs:
     needs: publish-npm
     if: ${{ always() && (needs.publish-npm.result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.publish_npm)) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     environment: release
     permissions: {}
     steps:

@@ -254,6 +254,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             url: "https://example.com/device",
             message: expect.stringContaining("ABCD-1234"),
         });
+        const elicitationComplete = deviceFixture.getAcpConnectionEvents([])
+            .find(event => event.method === "completeElicitation");
+        expect(elicitationComplete?.args[0]).toEqual({
+            elicitationId: "login-1",
+        });
     });
 
     it('should cancel ChatGPT device code login when URL elicitation is declined', async () => {
@@ -270,6 +275,30 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(codexAcpAgent.authenticate({ methodId: "chat-gpt-device-code" }, 42))
             .rejects.toThrow();
         expect(cancelSpy).toHaveBeenCalledWith({ loginId: "login-1" });
+        expect(deviceFixture.getAcpConnectionEvents([])
+            .some(event => event.method === "completeElicitation"))
+            .toBe(false);
+    });
+
+    it('should complete URL elicitation when login finishes before the elicitation response', async () => {
+        const { deviceFixture, completeLogin, loginCompletedSubscribed } = createDeviceCodeFixture();
+        const codexAcpAgent = deviceFixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: { elicitation: { url: {} } },
+        });
+        deviceFixture.setElicitationResponse(new Promise(() => {}));
+
+        const authPromise = codexAcpAgent.authenticate({ methodId: "chat-gpt-device-code" }, 42);
+        await vi.waitFor(() => expect(loginCompletedSubscribed()).toBe(true));
+        completeLogin(true);
+        await expect(authPromise).resolves.toEqual({});
+
+        const elicitationComplete = deviceFixture.getAcpConnectionEvents([])
+            .find(event => event.method === "completeElicitation");
+        expect(elicitationComplete?.args[0]).toEqual({
+            elicitationId: "login-1",
+        });
     });
 
     it('should reject ChatGPT device code auth when the client lacks URL elicitation', async () => {
@@ -406,6 +435,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 upgradeInfo: null,
                 availabilityNux: null,
                 modelSpecialty: null,
+                multiAgentVersion: null,
                 displayName: "gpt-5",
                 description: "test model",
                 hidden: false,
@@ -907,6 +937,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             sessionId: "session-id",
             cwd: "/workspace",
             additionalDirectories: ["/workspace/extra"],
+            agentMode: AgentMode.Agent,
         }));
 
         await codexAcpAgent.prompt({
@@ -925,6 +956,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             type: "workspaceWrite",
             writableRoots: ["/workspace/extra"],
         });
+        expect(turnStartSpy.mock.calls[0]![0].approvalsReviewer).toBe("auto_review");
     });
 
     function loadNotifications(){
@@ -1215,7 +1247,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
     });
 
-    it('returns success when a cancelled ACP prompt request completes before interruption wins', async () => {
+    it('returns cancelled when completion races with an already cancelled ACP prompt request', async () => {
         const { mockFixture, sessionState } = setupPromptFixture();
         const turnCompleted = deferred<TurnCompletedNotification>();
         vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
@@ -1255,7 +1287,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             threadId: "session-id",
             turn: createTurn("turn-id", "completed"),
         });
-        await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
         expect(mockFixture.getAcpConnectionDump([])).toContain("tail output");
         turnInterrupt.resolve(undefined);
     });
@@ -3303,6 +3335,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             data: [
                 {
                     name: "fs",
+                    pluginId: null,
                     serverInfo: null,
                     tools: {listFiles: {name: "listFiles", inputSchema: {type: "object"}}},
                     resources: [{name: "workspace", uri: "file:///workspace"}],
@@ -3311,6 +3344,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 },
                 {
                     name: "browser",
+                    pluginId: null,
                     serverInfo: null,
                     tools: {},
                     resources: [],
@@ -3360,6 +3394,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             upgradeInfo: null,
             availabilityNux: null,
             modelSpecialty: null,
+            multiAgentVersion: null,
             displayName: 'Codex 5.2',
             description: 'Coding model',
             hidden: false,
@@ -3382,6 +3417,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             upgradeInfo: null,
             availabilityNux: null,
             modelSpecialty: null,
+            multiAgentVersion: null,
             displayName: 'Standard 5.1',
             description: 'Standard model',
             hidden: false,

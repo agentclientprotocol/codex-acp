@@ -61,6 +61,21 @@ describe("ACP session close", () => {
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
     });
 
+    it("does not publish available commands after close completes", async () => {
+        const skills = deferred<{data: []}>();
+        const {fixture, codexAcpAgent} = await createSession({
+            configure: ({codexAcpClient}) => {
+                vi.spyOn(codexAcpClient, "listSkills").mockReturnValue(skills.promise);
+            },
+        });
+
+        await codexAcpAgent.closeSession({sessionId});
+        skills.resolve({data: []});
+        await waitForMicrotasks();
+
+        expect(fixture.getAcpConnectionEvents([])).toEqual([]);
+    });
+
     it("does not wait for delayed turn start before closing", async () => {
         const {fixture, codexAcpAgent} = await createSession();
         const turnStart = deferred<TurnStartResponse>();

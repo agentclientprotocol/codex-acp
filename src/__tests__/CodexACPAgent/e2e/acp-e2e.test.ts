@@ -80,7 +80,7 @@ describeE2E("E2E tests", () => {
     });
 
     it("respects INITIAL_AGENT_MODE when seeding the initial session mode", async () => {
-        const initialMode = AgentMode.ReadOnly;
+        const initialMode = AgentMode.Agent;
         fixture = await createAuthenticatedFixture(initialMode);
         const session = await fixture.createSession();
 

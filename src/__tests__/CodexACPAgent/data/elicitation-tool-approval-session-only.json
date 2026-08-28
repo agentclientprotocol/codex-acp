@@ -4,7 +4,7 @@
     {
       "sessionId": "test-session-id",
       "toolCall": {
-        "toolCallId": "elicitation-tool-server",
+        "toolCallId": "elicitation:test-session-id:tool-server:1",
         "kind": "execute",
         "status": "pending",
         "content": [
@@ -29,17 +29,20 @@
         {
           "optionId": "allow_once",
           "name": "Allow",
-          "kind": "allow_once"
+          "kind": "allow_once",
+          "_meta": "_meta"
         },
         {
           "optionId": "allow_session",
-          "name": "Allow for This Session",
-          "kind": "allow_always"
+          "name": "Allow for this session",
+          "kind": "allow_always",
+          "_meta": "_meta"
         },
         {
-          "optionId": "decline",
-          "name": "Decline",
-          "kind": "reject_once"
+          "optionId": "cancel",
+          "name": "Cancel",
+          "kind": "reject_once",
+          "_meta": "_meta"
         }
       ]
     }

@@ -26,7 +26,12 @@ class Logger {
     }
 
     error(message: string, err: unknown) {
-        this.log(`[SYSTEM_ERROR] ${message}`, {exception: this.formatError(err)});
+        const formattedError = this.formatError(err);
+        if (!this.logFilePath) {
+            console.error(`[SYSTEM_ERROR] ${message}: ${formattedError}`);
+            return;
+        }
+        this.log(`[SYSTEM_ERROR] ${message}`, {exception: formattedError});
     }
 
     log(message: string, context?: LogContext) {

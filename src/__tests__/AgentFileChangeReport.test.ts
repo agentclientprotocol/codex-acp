@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import {describe, expect, it} from "vitest";
 import {
+    AGENT_FILE_CHANGE_REPORT_OUTPUT_SCHEMA,
     AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH,
     AGENT_FILE_CHANGE_REPORT_MAX_TOTAL_BYTES,
     AgentFileChangeReportError,
@@ -31,6 +32,17 @@ function completedReport(value: unknown): Turn {
 }
 
 describe("agent file-change report", () => {
+    it("uses a strict output schema with nullable uncertainty", () => {
+        expect(AGENT_FILE_CHANGE_REPORT_OUTPUT_SCHEMA).toMatchObject({
+            required: ["paths", "complete", "uncertainty"],
+            properties: {
+                uncertainty: {
+                    anyOf: [{type: "string"}, {type: "null"}],
+                },
+            },
+        });
+    });
+
     it("accepts only a versioned request with a bounded opaque id", () => {
         expect(parseAgentFileChangeReportRequest({
             jetbrains: {air: {agentFileChangeReportRequest: {version: 1, requestId: "turn.42:audit-1"}}},
@@ -78,6 +90,39 @@ describe("agent file-change report", () => {
             truncated: true,
             uncertainty: "generator output may be incomplete",
         });
+    });
+
+    it("treats null uncertainty as absent and reports an empty file list", () => {
+        const report = createReportedAgentFileChangeReport(
+            "request-empty",
+            completedReport({paths: [], complete: true, uncertainty: null}),
+            {cwd: "/repo", additionalDirectories: []},
+        );
+
+        expect(report).toEqual({
+            version: 1,
+            requestId: "request-empty",
+            status: "reported",
+            paths: [],
+            declaredComplete: true,
+            truncated: false,
+        });
+    });
+
+    it("preserves the provider error from a failed audit turn", () => {
+        const turn = completedReport({});
+        turn.status = "failed";
+        turn.error = {
+            message: "invalid_json_schema: missing uncertainty",
+            codexErrorInfo: null,
+            additionalDetails: null,
+        };
+
+        expect(() => createReportedAgentFileChangeReport(
+            "request-failed",
+            turn,
+            {cwd: "/repo", additionalDirectories: []},
+        )).toThrow("The audit turn failed: invalid_json_schema: missing uncertainty");
     });
 
     it("deduplicates Windows paths case-insensitively on a non-Windows host", () => {
