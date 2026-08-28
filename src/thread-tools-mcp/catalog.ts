@@ -71,6 +71,12 @@ function tool(
     return {
         name,
         description,
+        annotations: {
+            readOnlyHint: name === "list_threads"
+                || name === "list_archived_threads"
+                || name === "read_thread"
+                || name === "wait_threads",
+        },
         inputSchema: {
             type: "object",
             additionalProperties: false,

@@ -16,21 +16,39 @@ import {toolError, toolResult} from "./output";
 import type {JsonValue} from "../app-server/serde_json/JsonValue";
 
 type JsonObject = {[key: string]: JsonValue | undefined};
+type McpSession = {transport: StreamableHTTPServerTransport, server: McpServer};
 
 export class CodexThreadToolsMcpServer {
     private readonly authorization = `Bearer ${randomUUID()}`;
     private readonly executor: CodexThreadToolExecutor;
-    private readonly transports = new Map<string, StreamableHTTPServerTransport>();
+    private readonly sessions = new Map<string, McpSession>();
+    private readonly threadConfigs = new Map<string, JsonObject>();
     private httpServer: HttpServer | null = null;
     private startPromise: Promise<void> | null = null;
     private port: number | null = null;
 
-    constructor(client: CodexAppServerClient) {
-        this.executor = new CodexThreadToolExecutor(client, () => this.config());
+    constructor(
+        client: CodexAppServerClient,
+        createFallbackConfig: (cwd: string) => Promise<JsonObject> = async () => this.threadToolsConfig(),
+    ) {
+        this.executor = new CodexThreadToolExecutor(
+            client,
+            async (threadId, cwd) => this.threadConfigs.get(threadId) ?? createFallbackConfig(cwd),
+            (threadId, config) => this.registerThreadConfig(threadId, config),
+        );
+    }
+
+    registerThreadConfig(threadId: string, config: JsonObject): void {
+        this.threadConfigs.set(threadId, structuredClone(config));
+    }
+
+    forgetThreadConfig(threadId: string): void {
+        this.threadConfigs.delete(threadId);
     }
 
     async config(): Promise<JsonObject> {
         await this.start();
+        if (this.port === null) throw new Error("The thread tools MCP server closed while it started");
         return {
             url: `http://127.0.0.1:${this.port}/mcp`,
             http_headers: {Authorization: this.authorization},
@@ -44,12 +62,14 @@ export class CodexThreadToolsMcpServer {
     }
 
     async close(): Promise<void> {
+        await this.startPromise?.catch(() => {});
         const server = this.httpServer;
         this.httpServer = null;
         this.port = null;
         this.startPromise = null;
-        await Promise.all(Array.from(this.transports.values(), transport => transport.close()));
-        this.transports.clear();
+        await Promise.all(Array.from(this.sessions.values(), session => session.server.close()));
+        this.sessions.clear();
+        this.threadConfigs.clear();
         if (server === null) return;
         await new Promise<void>((resolve, reject) => {
             server.close(error => error === undefined ? resolve() : reject(error));
@@ -58,7 +78,10 @@ export class CodexThreadToolsMcpServer {
 
     private async start(): Promise<void> {
         if (this.httpServer !== null) return;
-        this.startPromise ??= this.listen();
+        this.startPromise ??= this.listen().catch(error => {
+            this.startPromise = null;
+            throw error;
+        });
         await this.startPromise;
     }
 
@@ -74,10 +97,11 @@ export class CodexThreadToolsMcpServer {
         app.post("/mcp", async (request: Request, response: Response) => {
             try {
                 const sessionId = request.headers["mcp-session-id"];
-                let transport = typeof sessionId === "string" ? this.transports.get(sessionId) : undefined;
+                let transport = typeof sessionId === "string" ? this.sessions.get(sessionId)?.transport : undefined;
                 if (transport === undefined && !sessionId && isInitializeRequest(request.body)) {
-                    transport = this.createTransport();
-                    await this.createProtocolServer().connect(transport as unknown as Parameters<McpServer["connect"]>[0]);
+                    const protocolServer = this.createProtocolServer();
+                    transport = this.createTransport(protocolServer);
+                    await protocolServer.connect(transport as unknown as Parameters<McpServer["connect"]>[0]);
                 }
                 if (transport === undefined) {
                     response.status(400).json({
@@ -98,8 +122,16 @@ export class CodexThreadToolsMcpServer {
                 }
             }
         });
-        app.get("/mcp", (_request: Request, response: Response) => response.status(405).set("Allow", "POST").send("Method Not Allowed"));
-        app.delete("/mcp", (_request: Request, response: Response) => response.status(405).set("Allow", "POST").send("Method Not Allowed"));
+        app.get("/mcp", (_request: Request, response: Response) => response.status(405).set("Allow", "POST, DELETE").send("Method Not Allowed"));
+        app.delete("/mcp", async (request: Request, response: Response) => {
+            const sessionId = request.headers["mcp-session-id"];
+            const transport = typeof sessionId === "string" ? this.sessions.get(sessionId)?.transport : undefined;
+            if (transport === undefined) {
+                response.status(400).send("Unknown MCP session");
+                return;
+            }
+            await transport.handleRequest(request, response);
+        });
 
         await new Promise<void>((resolve, reject) => {
             const server = app.listen(0, "127.0.0.1", () => {
@@ -117,17 +149,17 @@ export class CodexThreadToolsMcpServer {
         });
     }
 
-    private createTransport(): StreamableHTTPServerTransport {
+    private createTransport(server: McpServer): StreamableHTTPServerTransport {
         let transport: StreamableHTTPServerTransport;
         transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: randomUUID,
             enableJsonResponse: true,
             onsessioninitialized: sessionId => {
-                this.transports.set(sessionId, transport);
+                this.sessions.set(sessionId, {transport, server});
             },
         });
         transport.onclose = () => {
-            if (transport.sessionId !== undefined) this.transports.delete(transport.sessionId);
+            if (transport.sessionId !== undefined) this.sessions.delete(transport.sessionId);
         };
         return transport;
     }
@@ -144,6 +176,7 @@ export class CodexThreadToolsMcpServer {
                     request.params.name,
                     request.params.arguments ?? {},
                     context._meta,
+                    context.signal,
                 );
                 return toolResult(value);
             } catch (error) {
@@ -151,5 +184,9 @@ export class CodexThreadToolsMcpServer {
             }
         });
         return server;
+    }
+
+    private async threadToolsConfig(): Promise<JsonObject> {
+        return {mcp_servers: {[THREAD_TOOLS_MCP_NAME]: await this.config()}};
     }
 }
