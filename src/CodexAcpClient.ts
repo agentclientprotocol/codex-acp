@@ -71,6 +71,8 @@ import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 import {toCodexSessionLinks} from "./SessionReferences";
+import {CodexThreadToolsMcpServer} from "./thread-tools-mcp/server";
+import {THREAD_TOOLS_MCP_NAME} from "./thread-tools-mcp/catalog";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -118,6 +120,7 @@ export class CodexAcpClient {
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
     private readonly subagents: CodexSubagentSubscriptions;
+    private readonly threadToolsMcpServer: CodexThreadToolsMcpServer;
     private skillExtraRoots: string[] = [];
     private configPath: string | null = null;
 
@@ -128,6 +131,7 @@ export class CodexAcpClient {
         this.modelProvider = modelProvider ?? null;
         this.gatewayConfig = null;
         this.subagents = new CodexSubagentSubscriptions(codexClient);
+        this.threadToolsMcpServer = new CodexThreadToolsMcpServer(codexClient);
     }
 
     get appServerClient(): CodexAppServerClient {
@@ -697,27 +701,22 @@ export class CodexAcpClient {
             }])),
         };
         const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
-        if (mcpServers.length === 0) {
-            return configWithWorkspaceRoots;
-        }
-
         const requestedServers = mcpServers.map(mcp => ({
             name: sanitizeMcpServerName(mcp.name),
             server: mcp,
         }));
         let serversToConfigure = requestedServers;
-        if (shouldDeduplicateMcpConflicts()) {
+        if (requestedServers.length > 0 && shouldDeduplicateMcpConflicts()) {
             // Prevents Codex from deep-merging incompatible field types, such as url and stdio schemas.
             const existingNames = await this.getConfigMcpServerNames(projectPath);
             serversToConfigure = requestedServers.filter(mcp => !existingNames.has(mcp.name));
         }
-        if (serversToConfigure.length === 0) {
-            return configWithWorkspaceRoots;
-        }
-
         return {
             ...configWithWorkspaceRoots,
-            "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+            "mcp_servers": {
+                ...Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+                [THREAD_TOOLS_MCP_NAME]: await this.threadToolsMcpServer.config(),
+            },
         };
     }
 

@@ -57,6 +57,8 @@ import type {
     ThreadReadResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
+    ThreadSetNameParams,
+    ThreadSetNameResponse,
     ThreadSettings,
     ThreadStartParams,
     ThreadStartResponse,
@@ -64,6 +66,8 @@ import type {
     ThreadSetNameResponse,
     ThreadUnsubscribeParams,
     ThreadUnsubscribeResponse,
+    ThreadUnarchiveParams,
+    ThreadUnarchiveResponse,
     ToolRequestUserInputParams,
     ToolRequestUserInputResponse,
     TurnCompletedNotification,
@@ -570,6 +574,18 @@ export class CodexAppServerClient {
 
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
         return await this.sendRequest({ method: "thread/archive", params: params });
+    }
+
+    async threadUnarchive(params: ThreadUnarchiveParams): Promise<ThreadUnarchiveResponse> {
+        return await this.sendRequest({ method: "thread/unarchive", params });
+    }
+
+    async threadSetName(params: ThreadSetNameParams): Promise<ThreadSetNameResponse> {
+        return await this.sendRequest({ method: "thread/name/set", params });
+    }
+
+    onThreadStatus(threadId: string, handler: (status: ThreadStatus) => void): () => void {
+        return this.captureThreadStatuses(threadId, handler);
     }
 
     async threadUnsubscribe(params: ThreadUnsubscribeParams): Promise<ThreadUnsubscribeResponse> {

@@ -67,7 +67,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(newSessionResponse.sessionId).toBeDefined();
 
         const transportEvents = keyFixture.getCodexConnectionEvents([...ignoredFields, "upgrade"]);
-        const transportMethods = transportEvents.flatMap(event => "method" in event ? [event.method] : []);
+        const transportMethods = transportEvents
+            .flatMap(event => "method" in event ? [event.method] : [])
+            .filter(method => method !== "mcpServer/startupStatus/updated");
         const loginRequest = transportEvents.find(event =>
             event.eventType === "request" &&
             "method" in event &&
@@ -918,6 +920,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const threadStartRequest = threadStartSpy.mock.calls[0]![0];
         expect(threadStartRequest.config?.["mcp_servers"]).toEqual({
+            codex_tui: {
+                url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/),
+                http_headers: {Authorization: expect.stringMatching(/^Bearer /)},
+                default_tools_approval_mode: "approve",
+                tools: {
+                    create_thread: {approval_mode: "prompt"},
+                    send_message_to_thread: {approval_mode: "prompt"},
+                    fork_thread: {approval_mode: "prompt"},
+                },
+            },
             stdio_server_one: {
                 command: "npx",
                 args: ["stdio"],
@@ -1531,7 +1543,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(mockFixture.getCodexConnectionDump(ignoredFields)).toMatchFileSnapshot("data/send-attachments-turn-start.json");
     });
 
-    it('converts ACP session links to Codex deep links', async () => {
+    it('converts ACP session links to readable Codex task references', async () => {
         const {mockFixture, turnStartSpy} = setupPromptFixture();
         const threadRead = vi.spyOn(mockFixture.getCodexAppServerClient(), "threadRead");
 
@@ -1556,12 +1568,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             input: [
                 {
                     type: "text",
-                    text: "codex://threads/source-session",
+                    text: "Referenced Codex task. Call `read_thread` before relying on its contents.\n{\"threadId\":\"source-session\"}\ncodex://threads/source-session",
                     text_elements: [],
                 },
                 {
                     type: "text",
-                    text: "codex://threads/source-session",
+                    text: "Referenced Codex task. Call `read_thread` before relying on its contents.\n{\"threadId\":\"source-session\"}\ncodex://threads/source-session",
                     text_elements: [],
                 },
             ],

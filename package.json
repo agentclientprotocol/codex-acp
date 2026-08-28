@@ -57,6 +57,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^26.1.0",
     "esbuild": "^0.28.2",
     "mcp-hello-world": "^1.1.2",
@@ -66,6 +67,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@openai/codex": "^0.152.0",
     "diff": "^9.0.0",
     "open": "^11.0.1",

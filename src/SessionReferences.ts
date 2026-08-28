@@ -4,7 +4,15 @@ export function toCodexSessionLinks(prompt: ContentBlock[]): ContentBlock[] {
     return prompt.map((block): ContentBlock => {
         if (block.type !== "resource_link") return block;
         const sessionId = acpSessionId(block.uri);
-        return sessionId === null ? block : {type: "text", text: `codex://threads/${sessionId}`};
+        if (sessionId === null) return block;
+        return {
+            type: "text",
+            text: [
+                "Referenced Codex task. Call `read_thread` before relying on its contents.",
+                JSON.stringify({threadId: sessionId}),
+                `codex://threads/${sessionId}`,
+            ].join("\n"),
+        };
     });
 }
 
