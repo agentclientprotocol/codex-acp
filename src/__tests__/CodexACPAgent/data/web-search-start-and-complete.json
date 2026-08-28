@@ -42,7 +42,26 @@
             "query": "agent client protocol",
             "queries": null
           }
-        }
+        },
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "resource_link",
+              "name": "turn0search0",
+              "uri": "https://agentclientprotocol.com/",
+              "title": "Agent Client Protocol"
+            }
+          },
+          {
+            "type": "content",
+            "content": {
+              "type": "resource_link",
+              "name": "turn0search1",
+              "uri": "https://example.com/source"
+            }
+          }
+        ]
       }
     }
   ]

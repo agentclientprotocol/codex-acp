@@ -395,13 +395,60 @@ export function createWebSearchStartUpdate(
 export function createWebSearchCompleteUpdate(
     item: WebSearchItem
 ): UpdateSessionEvent {
+    const content = createWebSearchContent(item.results);
     return {
         sessionUpdate: "tool_call_update",
         toolCallId: item.id,
         title: formatWebSearchTitle(item),
         status: "completed",
         rawInput: createWebSearchRawInput(item),
+        ...(content.length > 0 ? {content} : {}),
     };
+}
+
+function createWebSearchContent(results: WebSearchItem["results"]): ToolCallContent[] {
+    const sources = new Map<string, {uri: string; canonicalUri: string; title?: string}>();
+    const conflicts = new Set<string>();
+
+    for (const result of results ?? []) {
+        if (typeof result !== "object" || result === null || Array.isArray(result)) continue;
+        if (result["type"] !== "text_result") continue;
+
+        const name = typeof result["ref_id"] === "string" ? result["ref_id"] : "";
+        const uri = typeof result["url"] === "string" ? result["url"] : "";
+        if (name.trim().length === 0 || uri.trim().length === 0 || conflicts.has(name)) continue;
+
+        let canonicalUri: string;
+        try {
+            const parsed = new URL(uri);
+            if (parsed.protocol !== "http:" && parsed.protocol !== "https:") continue;
+            canonicalUri = parsed.href;
+        } catch {
+            continue;
+        }
+
+        const title = typeof result["title"] === "string" && result["title"].trim().length > 0
+            ? result["title"]
+            : undefined;
+        const previous = sources.get(name);
+        if (previous && previous.canonicalUri !== canonicalUri) {
+            sources.delete(name);
+            conflicts.add(name);
+            continue;
+        }
+        if (previous) {
+            if (!previous.title && title) sources.set(name, {...previous, title});
+            continue;
+        }
+        sources.set(name, {uri, canonicalUri, ...(title ? {title} : {})});
+    }
+
+    return Array.from(sources, ([name, source]) => createContent({
+        type: "resource_link",
+        name,
+        uri: source.uri,
+        ...(source.title ? {title: source.title} : {}),
+    }));
 }
 
 function createWebSearchRawInput(item: WebSearchItem): Record<string, JsonValue> {

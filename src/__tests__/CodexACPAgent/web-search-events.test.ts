@@ -24,7 +24,7 @@ describe("CodexEventHandler - web search events", () => {
         agentMode: AgentMode.DEFAULT_AGENT_MODE
     });
 
-    it("maps web search start and completion to a search tool call", async () => {
+    it("maps web search results to resource links", async () => {
         const notifications: ServerNotification[] = [
             {
                 method: "item/started",
@@ -55,7 +55,44 @@ describe("CodexEventHandler - web search events", () => {
                         type: "webSearch",
                         id: "web-search-1",
                         query: "agent client protocol",
-                        results: null,
+                        results: [
+                            {
+                                type: "text_result",
+                                ref_id: "turn0search0",
+                                url: "https://agentclientprotocol.com/",
+                                title: "Agent Client Protocol",
+                            },
+                            {
+                                type: "text_result",
+                                ref_id: "turn0search1",
+                                url: "https://example.com/source",
+                            },
+                            {
+                                type: "image_result",
+                                ref_id: "turn0image0",
+                                url: "https://example.com/image.png",
+                            },
+                            {
+                                type: "text_result",
+                                ref_id: "",
+                                url: "https://example.com/missing-ref",
+                            },
+                            {
+                                type: "text_result",
+                                ref_id: "turn0search2",
+                                url: "javascript:alert(1)",
+                            },
+                            {
+                                type: "text_result",
+                                ref_id: "turn0search3",
+                                url: "https://example.com/first",
+                            },
+                            {
+                                type: "text_result",
+                                ref_id: "turn0search3",
+                                url: "https://example.com/conflict",
+                            },
+                        ],
                         action: {
                             type: "search",
                             query: "agent client protocol",
@@ -68,7 +105,7 @@ describe("CodexEventHandler - web search events", () => {
 
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
 
-        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+        await expect(`${mockFixture.getAcpConnectionDump([])}\n`).toMatchFileSnapshot(
             "data/web-search-start-and-complete.json"
         );
     });
