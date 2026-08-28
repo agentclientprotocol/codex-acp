@@ -1258,10 +1258,20 @@ export class CodexEventHandler {
             return null;
         }
 
+        const cost = this.sessionState.totalTokenUsage === null || this.sessionState.lastTokenUsage === null
+            ? null
+            : this.sessionState.costTracker.update(
+                this.sessionState.totalTokenUsage,
+                this.sessionState.lastTokenUsage,
+                this.sessionState.currentModelId,
+                this.sessionState.fastModeEnabled,
+            );
+
         return {
             sessionUpdate: "usage_update",
             used,
             size,
+            ...(cost === null ? {} : {cost}),
         };
     }
 
