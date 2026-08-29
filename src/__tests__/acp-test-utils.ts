@@ -39,6 +39,25 @@ export function createSmartMock<T extends object>(
     });
 }
 
+/**
+ * Whether this notification is the backend-acceptance marker.
+ *
+ * It is control data: every accepted turn reports it, it carries no session
+ * information of its own, and a client that is not waiting for it ignores it.
+ * The shared collector drops it so that every test comparing the session
+ * updates a prompt produces keeps describing the conversation. The marker's own
+ * emission is proven in `session-materialization-events.test.ts`, against a
+ * connection mock that collects everything.
+ */
+export function isSessionMaterializationEvent(event: MethodCallEvent): boolean {
+    if (event.method !== "notify" || event.args[0] !== acp.methods.client.session.update) {
+        return false;
+    }
+    const update = (event.args[1] as {update?: {sessionUpdate?: string; _meta?: Record<string, unknown>}})?.update;
+    return update?.sessionUpdate === "session_info_update"
+        && update._meta?.["executablemd.session-materialization/v1"] !== undefined;
+}
+
 function normalizeAcpConnectionEvent(event: MethodCallEvent): MethodCallEvent {
     if (event.method === "request" && event.args[0] === acp.methods.client.session.requestPermission) {
         return {method: "requestPermission", args: [event.args[1]]};
@@ -68,6 +87,8 @@ export interface TestFixture {
     onAcpConnectionEvent(handler: (event: MethodCallEvent) => void): void,
     getAcpConnectionEvents(ignoredFields: string[]): MethodCallEvent[],
     getAcpConnectionDump(ignoredFields: string[]): string,
+    /** The backend-acceptance markers this fixture kept out of the events above. */
+    getSessionMaterializationEvents(): MethodCallEvent[],
     clearAcpConnectionDump(): void,
 }
 
@@ -79,6 +100,7 @@ export interface AcpConnectionConfig {
     connection: AcpClientConnection;
     events: MethodCallEvent[];
     eventHandlers: ((event: MethodCallEvent) => void)[];
+    materializationEvents?: MethodCallEvent[];
 }
 
 export interface ConnectionConfig {
@@ -90,7 +112,12 @@ export interface ConnectionConfig {
 export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
     const acpConnectionEvents = config.acpConnection?.events ?? [];
     const acpEventHandlers = config.acpConnection?.eventHandlers ?? [];
+    const acpMaterializationEvents = config.acpConnection?.materializationEvents ?? [];
     const acpConnection = config.acpConnection?.connection ?? createSmartMock<AcpClientConnection>((event) => {
+        if (isSessionMaterializationEvent(event)) {
+            acpMaterializationEvents.push(event);
+            return;
+        }
         const normalizedEvent = normalizeAcpConnectionEvent(event);
         acpConnectionEvents.push(normalizedEvent);
         acpEventHandlers.forEach(handler => handler(normalizedEvent));
@@ -164,6 +191,9 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         },
         getAcpConnectionDump(ignoredFields: string[]): string {
             return createArrayDump(this.getAcpConnectionEvents(ignoredFields), []);
+        },
+        getSessionMaterializationEvents(): MethodCallEvent[] {
+            return [...acpMaterializationEvents];
         },
         clearAcpConnectionDump() {
             acpConnectionEvents.splice(0, acpConnectionEvents.length);
@@ -302,7 +332,12 @@ export function createCodexMockTestFixture(
     });
     returnValues.set('requestPermission', () => permissionState.response);
 
+    const acpMaterializationEvents: MethodCallEvent[] = [];
     const acpConnection = createSmartMock<AcpClientConnection>((event) => {
+        if (isSessionMaterializationEvent(event)) {
+            acpMaterializationEvents.push(event);
+            return;
+        }
         const normalizedEvent = normalizeAcpConnectionEvent(event);
         acpConnectionEvents.push(normalizedEvent);
         acpEventHandlers.forEach(handler => handler(normalizedEvent));
@@ -315,6 +350,7 @@ export function createCodexMockTestFixture(
             connection: acpConnection,
             events: acpConnectionEvents,
             eventHandlers: acpEventHandlers,
+            materializationEvents: acpMaterializationEvents,
         }
     });
     if (restartCodexClient) {

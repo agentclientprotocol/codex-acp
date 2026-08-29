@@ -173,6 +173,15 @@ export interface SessionFailure {
 
 const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;
 
+/**
+ * The metadata key naming a backend's acceptance of a turn.
+ *
+ * Versioned, because a client reads it to decide whether a conversation now
+ * exists, and a changed meaning under an unchanged key would be read as the
+ * old one.
+ */
+const SESSION_MATERIALIZATION_META = "executablemd.session-materialization/v1";
+
 function clientSupportsAirCapability(
     capabilities: acp.ClientCapabilities | null,
     capability: string,
@@ -2255,6 +2264,25 @@ export class CodexAcpServer {
         return turnId;
     }
 
+    /**
+     * Tell the client this thread's backend accepted a turn.
+     *
+     * A client that defers durable session state until a conversation really
+     * exists cannot learn that from what a turn produces: text, a stop reason
+     * and a terminal response each say the adapter is talking, not that the
+     * backend took the turn. This says exactly that and nothing else, on the
+     * session it happened on.
+     */
+    private async publishSessionMaterialization(sessionId: string): Promise<void> {
+        const session = new ACPSessionConnection(this.connection, sessionId);
+        await session.update({
+            sessionUpdate: "session_info_update",
+            _meta: {
+                [SESSION_MATERIALIZATION_META]: {state: "accepted"},
+            },
+        });
+    }
+
     async prompt(
         params: acp.PromptRequest,
         signal?: AbortSignal,
@@ -2479,7 +2507,7 @@ export class CodexAcpServer {
                     disableSummary,
                     sessionState.cwd,
                     sessionState.additionalDirectories,
-                    (turnId) => {
+                    async (turnId) => {
                         const turn = {threadId: params.sessionId, turnId};
                         activePrompt.currentTurn = turn;
                         if (this.promptShouldStop(params.sessionId, activePrompt)) {
@@ -2488,6 +2516,7 @@ export class CodexAcpServer {
                         }
                         sessionState.currentTurnId = turnId;
                         pendingTurnStart?.resolve(turnId);
+                        await this.publishSessionMaterialization(params.sessionId);
                         onTurnStarted?.();
                     },
                     () => this.promptShouldStop(params.sessionId, activePrompt),

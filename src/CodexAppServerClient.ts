@@ -274,7 +274,7 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "turn/start", params: params });
     }
 
-    async runTurn(params: TurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
+    async runTurn(params: TurnStartParams, onTurnStarted?: (turnId: string) => void | Promise<void>): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
             capturedCompletions.push(event);
@@ -282,7 +282,9 @@ export class CodexAppServerClient {
 
         try {
             const turnStarted = await this.turnStart(params);
-            onTurnStarted?.(turnStarted.turn.id);
+            // Awaited: a caller that publishes the acceptance of this turn has to
+            // publish it before anything the turn produces reaches the client.
+            await onTurnStarted?.(turnStarted.turn.id);
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === turnStarted.turn.id);
             releaseCapture();
             if (earlyCompletion) {

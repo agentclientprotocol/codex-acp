@@ -848,7 +848,7 @@ export class CodexAcpClient {
         disableSummary: boolean,
         cwd: string,
         additionalDirectories: string[],
-        onTurnStarted?: (turnId: string) => void,
+        onTurnStarted?: (turnId: string) => void | Promise<void>,
         shouldCancel?: () => boolean,
     ): Promise<TurnCompletedNotification | null> {
         const input = buildPromptItems(request.prompt);
