@@ -4,6 +4,7 @@
 import type { AbsolutePathBuf } from "../AbsolutePathBuf";
 import type { GitInfo } from "./GitInfo";
 import type { SessionSource } from "./SessionSource";
+import type { ThreadHistoryMode } from "./ThreadHistoryMode";
 import type { ThreadSection } from "./ThreadSection";
 import type { ThreadSource } from "./ThreadSource";
 import type { ThreadStatus } from "./ThreadStatus";
@@ -34,6 +35,12 @@ section: ThreadSection | null, /**
  * Unix timestamp in seconds when the thread entered its current section.
  */
 sectionEnteredAt: number | null, /**
+ * Canonical project assignment owned by app-server, if any.
+ */
+projectId: string | null, /**
+ * Persisted thread history contract selected when this thread was created.
+ */
+historyMode: ThreadHistoryMode, /**
  * Model provider used for this thread (for example, 'openai').
  */
 modelProvider: string, /**
