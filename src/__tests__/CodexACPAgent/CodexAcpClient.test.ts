@@ -1575,7 +1575,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     shortDescription: "Build",
                     path: "/workspace",
                     scope: "user",
-                    enabled: true
+                    enabled: true,
+                    pluginId: null
                 }],
                 errors: []
             }]
@@ -3443,8 +3444,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             data: [{
                 cwd: "/workspace",
                 skills: [
-                    { name: "build", description: "Build the project", shortDescription: "Build", path: "/workspace/build", scope: "user", enabled: true },
-                    { name: "deploy", description: "Deploy the service", path: "/workspace/deploy", scope: "repo", enabled: true }
+                    { name: "build", description: "Build the project", shortDescription: "Build", path: "/workspace/build", scope: "user", enabled: true, pluginId: null },
+                    { name: "deploy", description: "Deploy the service", path: "/workspace/deploy", scope: "repo", enabled: true, pluginId: null }
                 ],
                 errors: []
             }]
@@ -3468,6 +3469,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             data: [
                 {
                     name: "fs",
+                    runtimeStatus: null,
                     pluginId: null,
                     serverInfo: null,
                     tools: {listFiles: {name: "listFiles", inputSchema: {type: "object"}}},
@@ -3477,6 +3479,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 },
                 {
                     name: "browser",
+                    runtimeStatus: null,
                     pluginId: null,
                     serverInfo: null,
                     tools: {},

@@ -35,6 +35,8 @@ describe("CodexACPAgent - loadSession", () => {
             cliVersion: "0",
             section: null,
             sectionEnteredAt: null,
+            projectId: null,
+            historyMode: "legacy",
             source: "cli",
             agentNickname: null,
             agentRole: null,
@@ -94,6 +96,7 @@ describe("CodexACPAgent - loadSession", () => {
             text: "Persisted first-generation output",
             phase: null,
             memoryCitation: null,
+            delivery: null,
         }]);
         const firstChildTurn = child.turns[0]!;
         child.turns.push({
@@ -110,6 +113,7 @@ describe("CodexACPAgent - loadSession", () => {
                 text: "Persisted second-generation output",
                 phase: null,
                 memoryCitation: null,
+                delivery: null,
             }],
         });
         appServer.threadResume = vi.fn().mockResolvedValue({
@@ -212,6 +216,8 @@ describe("CodexACPAgent - loadSession", () => {
             cliVersion: "0.0.0",
             section: null,
             sectionEnteredAt: null,
+            projectId: null,
+            historyMode: "legacy",
             source: "cli",
             agentNickname: null,
             agentRole: null,
@@ -242,6 +248,7 @@ describe("CodexACPAgent - loadSession", () => {
                             text: "Hello!",
                             phase: null,
                             memoryCitation: null,
+                            delivery: null,
                         },
                         {
                             type: "reasoning",
@@ -438,6 +445,8 @@ describe("CodexACPAgent - loadSession", () => {
             cliVersion: "0.0.0",
             section: null,
             sectionEnteredAt: null,
+            projectId: null,
+            historyMode: "legacy",
             source: "cli",
             agentNickname: null,
             agentRole: null,
@@ -651,6 +660,8 @@ describe("CodexACPAgent - loadSession", () => {
                 cliVersion: "0.139.0",
                 section: null,
                 sectionEnteredAt: null,
+                projectId: null,
+                historyMode: "legacy",
                 source: "vscode",
                 agentNickname: null,
                 agentRole: null,
@@ -689,6 +700,7 @@ describe("CodexACPAgent - loadSession", () => {
                                 text: "The directory contains README.md and src.",
                                 phase: null,
                                 memoryCitation: null,
+                                delivery: null,
                             },
                         ],
                     },
@@ -786,6 +798,8 @@ describe("CodexACPAgent - loadSession", () => {
             cliVersion: "0.0.0",
             section: null,
             sectionEnteredAt: null,
+            projectId: null,
+            historyMode: "legacy",
             source: "cli",
             agentNickname: null,
             agentRole: null,

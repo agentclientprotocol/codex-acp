@@ -180,6 +180,7 @@ function toolCallIdFromThreadItem(item: ThreadItem): string | null {
         case "userMessage":
         case "hookPrompt":
         case "agentMessage":
+        case "functionCallOutput":
         case "plan":
         case "reasoning":
         case "subAgentActivity":

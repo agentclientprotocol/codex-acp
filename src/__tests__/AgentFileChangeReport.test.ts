@@ -21,6 +21,7 @@ function completedReport(value: unknown): Turn {
             text: JSON.stringify(value),
             phase: "final_answer",
             memoryCitation: null,
+            delivery: null,
         }],
         itemsView: "full",
         status: "completed",
@@ -116,6 +117,7 @@ describe("agent file-change report", () => {
             message: "invalid_json_schema: missing uncertainty",
             codexErrorInfo: null,
             additionalDetails: null,
+            misalignment: null,
         };
 
         expect(() => createReportedAgentFileChangeReport(

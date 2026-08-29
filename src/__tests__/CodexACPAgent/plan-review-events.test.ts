@@ -18,6 +18,7 @@ type TurnCompletion = {
             message: string;
             codexErrorInfo: "serverOverloaded";
             additionalDetails: string | null;
+            misalignment: null;
         };
         startedAt: null;
         completedAt: null;
@@ -268,6 +269,7 @@ describe("CodexACPAgent - plan review", () => {
                     message: "Codex is temporarily overloaded.",
                     codexErrorInfo: "serverOverloaded",
                     additionalDetails: "secret approval detail",
+                    misalignment: null,
                 },
             },
         });
@@ -323,6 +325,7 @@ describe("CodexACPAgent - plan review", () => {
                     message: "late plan failure",
                     codexErrorInfo: "serverOverloaded",
                     additionalDetails: null,
+                    misalignment: null,
                 },
             },
         });
@@ -367,6 +370,7 @@ describe("CodexACPAgent - plan review", () => {
             message: "Codex is temporarily overloaded.",
             codexErrorInfo: "serverOverloaded" as const,
             additionalDetails: "secret implementation detail",
+            misalignment: null,
         };
         fixture.sendServerNotification({
             method: "error",
@@ -432,6 +436,7 @@ describe("CodexACPAgent - plan review", () => {
                     message: "failure before implementation start",
                     codexErrorInfo: "serverOverloaded",
                     additionalDetails: null,
+                    misalignment: null,
                 },
             },
         });

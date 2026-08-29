@@ -129,6 +129,7 @@ describe("typed session failures over ACP transport", () => {
                     message: "Codex is temporarily overloaded.",
                     codexErrorInfo: "serverOverloaded",
                     additionalDetails: "secret idle detail",
+                    misalignment: null,
                 },
             },
         });
@@ -312,7 +313,12 @@ describe("typed session failures over ACP transport", () => {
                 threadId: fixture.sessionId,
                 turnId: "turn-id",
                 willRetry: false,
-                error: {message: "provider blew up", codexErrorInfo: "serverOverloaded", additionalDetails: null},
+                error: {
+                    message: "provider blew up",
+                    codexErrorInfo: "serverOverloaded",
+                    additionalDetails: null,
+                    misalignment: null,
+                },
             },
         });
         fixture.sendServerNotification({
@@ -375,6 +381,7 @@ describe("typed session failures over ACP transport", () => {
             message: "Connection to Codex was lost.",
             codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
             additionalDetails: null,
+            misalignment: null,
         };
 
         for (const [willRetry, message] of [

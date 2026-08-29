@@ -1959,6 +1959,7 @@ export class CodexAcpServer {
                 return this.createUserMessageUpdates(item);
             case "hookPrompt":
             case "sleep":
+            case "functionCallOutput":
                 return [];
             case "subAgentActivity":
                 return [createSubAgentActivityUpdate(item, "completed", "tool_call")];
