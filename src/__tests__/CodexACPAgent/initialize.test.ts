@@ -6,6 +6,12 @@ import {getCodexAuthMethods} from "../../CodexAuthMethod";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import packageJson from "../../../package.json";
+import {
+    KANDEV_GUARDED_TTY_CAPABILITY,
+    KANDEV_GUARDED_TTY_CAPABILITY_METHOD,
+    KANDEV_GUARDED_TTY_EXEC_METHOD,
+    KANDEV_GUARDED_TTY_VERSION,
+} from "../../AcpExtensions";
 
 describe('CodexACPAgent - initialize', () => {
     let agent: CodexAcpServer;
@@ -71,6 +77,12 @@ describe('CodexACPAgent - initialize', () => {
                     version: 1,
                     controlMethod: "_session/goal",
                     actions: ["set", "pause", "resume", "clear"],
+                },
+                guardedTtyExec: {
+                    capability: KANDEV_GUARDED_TTY_CAPABILITY,
+                    version: KANDEV_GUARDED_TTY_VERSION,
+                    capabilityMethod: KANDEV_GUARDED_TTY_CAPABILITY_METHOD,
+                    execMethod: KANDEV_GUARDED_TTY_EXEC_METHOD,
                 },
                 jetbrains: {
                     air: {

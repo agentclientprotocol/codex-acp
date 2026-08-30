@@ -14,8 +14,14 @@ import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
 import {
     GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
+    KANDEV_GUARDED_TTY_CAPABILITY_METHOD,
+    KANDEV_GUARDED_TTY_EXEC_METHOD,
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
+import {
+    GUARDED_TTY_MAX_ARG_COUNT,
+    GUARDED_TTY_MAX_SINGLE_ARG_BYTES,
+} from "./GuardedTtyExec";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -43,6 +49,17 @@ const goalControlParamsParser = z.discriminatedUnion("action", [
         action: z.enum(["pause", "resume", "clear"]),
     }).passthrough(),
 ]);
+
+const guardedTtyCapabilityParamsParser = z.object({
+    sessionId: z.string(),
+}).strict();
+
+const guardedTtyExecParamsParser = z.object({
+    sessionId: z.string(),
+    argv: z.array(z.string().min(1).max(GUARDED_TTY_MAX_SINGLE_ARG_BYTES))
+        .min(1)
+        .max(GUARDED_TTY_MAX_ARG_COUNT),
+}).strict();
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
@@ -162,5 +179,7 @@ function startAcpServer() {
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
+        .onRequest(KANDEV_GUARDED_TTY_CAPABILITY_METHOD, guardedTtyCapabilityParamsParser, (ctx) => getAgent().extMethod(KANDEV_GUARDED_TTY_CAPABILITY_METHOD, ctx.params, ctx.signal))
+        .onRequest(KANDEV_GUARDED_TTY_EXEC_METHOD, guardedTtyExecParamsParser, (ctx) => getAgent().extMethod(KANDEV_GUARDED_TTY_EXEC_METHOD, ctx.params, ctx.signal))
         .connect(acpJsonStream);
 }

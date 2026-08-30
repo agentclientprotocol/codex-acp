@@ -55,6 +55,10 @@ import {
     GOAL_CONTROL_METHOD,
     GOAL_EXTENSION_VERSION,
     isExtMethodRequest,
+    KANDEV_GUARDED_TTY_CAPABILITY,
+    KANDEV_GUARDED_TTY_CAPABILITY_METHOD,
+    KANDEV_GUARDED_TTY_EXEC_METHOD,
+    KANDEV_GUARDED_TTY_VERSION,
     LEGACY_GOAL_CONTROL_METHOD,
     LEGACY_SET_SESSION_MODEL_METHOD,
     type LegacyLoadSessionResponse,
@@ -66,6 +70,10 @@ import {
     SESSION_STEERING_METHOD,
     type SessionSteeringResponse,
     type SessionSteerRequest,
+    type KandevGuardedTtyCapabilityRequest,
+    type KandevGuardedTtyCapabilityResponse,
+    type KandevGuardedTtyExecReceipt,
+    type KandevGuardedTtyExecRequest,
 } from "./AcpExtensions";
 import {
     createCollabAgentToolCallUpdate,
@@ -126,6 +134,10 @@ import {
     createUnavailableAgentFileChangeReport,
     parseAgentFileChangeReportRequest,
 } from "./AgentFileChangeReport";
+import {
+    createUndispatchedGuardedTtyReceipt,
+    validateGuardedTtyArgv,
+} from "./GuardedTtyExec";
 
 
 export interface SessionState {
@@ -253,6 +265,7 @@ export class CodexAcpServer {
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
     private readonly goalControlGenerations: Map<string, number>;
+    private readonly guardedTtyExecutions: Map<string, Set<AbortController>>;
     private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
     private readonly codexProcessState: CodexProcessState | null;
     private initializeRequest: acp.InitializeRequest | null = null;
@@ -275,6 +288,7 @@ export class CodexAcpServer {
         this.sessionGenerations = new Map();
         this.sessionOpenGenerations = new Map();
         this.goalControlGenerations = new Map();
+        this.guardedTtyExecutions = new Map();
         this.permissionLifecycleContexts = new WeakMap();
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
@@ -353,6 +367,12 @@ export class CodexAcpServer {
                     controlMethod: GOAL_CONTROL_METHOD,
                     actions: [...GOAL_CONTROL_ACTIONS],
                 },
+                guardedTtyExec: {
+                    capability: KANDEV_GUARDED_TTY_CAPABILITY,
+                    version: KANDEV_GUARDED_TTY_VERSION,
+                    capabilityMethod: KANDEV_GUARDED_TTY_CAPABILITY_METHOD,
+                    execMethod: KANDEV_GUARDED_TTY_EXEC_METHOD,
+                },
                 [JETBRAINS_META_KEY]: {
                     [AIR_META_KEY]: {
                         [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
@@ -367,7 +387,11 @@ export class CodexAcpServer {
         };
     }
 
-    async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    async extMethod(
+        method: string,
+        params: Record<string, unknown>,
+        signal?: AbortSignal,
+    ): Promise<Record<string, unknown>> {
         const methodRequest = { method: method, params: params };
         if (!isExtMethodRequest(methodRequest)) {
             return {};
@@ -383,6 +407,13 @@ export class CodexAcpServer {
                 return await this.unstable_setSessionModel(this.parseLegacySetSessionModelParams(methodRequest.params));
             case SESSION_STEERING_METHOD:
                 return await this.executeOrQueueSteeringRequest(this.parseSessionSteerParams(methodRequest.params));
+            case KANDEV_GUARDED_TTY_CAPABILITY_METHOD:
+                return this.guardedTtyCapability(this.parseGuardedTtyCapabilityParams(methodRequest.params));
+            case KANDEV_GUARDED_TTY_EXEC_METHOD:
+                return await this.executeGuardedTtyExec(
+                    this.parseGuardedTtyExecParams(methodRequest.params),
+                    signal,
+                );
             case GOAL_CONTROL_METHOD:
             case LEGACY_GOAL_CONTROL_METHOD: {
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
@@ -790,6 +821,7 @@ export class CodexAcpServer {
         const closeGeneration = this.bumpSessionGeneration(params.sessionId);
         const sessionState = this.sessions.get(params.sessionId);
         this.beginSessionCloseFence(params.sessionId);
+        this.abortGuardedTtyExecutions(params.sessionId);
 
         try {
             if (sessionState) {
@@ -819,6 +851,14 @@ export class CodexAcpServer {
         }
 
         return {};
+    }
+
+    private abortGuardedTtyExecutions(sessionId: string): void {
+        const executions = this.guardedTtyExecutions.get(sessionId);
+        if (!executions) return;
+        for (const execution of executions) {
+            execution.abort("stale_session");
+        }
     }
 
     async deleteSession(params: acp.DeleteSessionRequest): Promise<acp.DeleteSessionResponse> {
@@ -1201,6 +1241,86 @@ export class CodexAcpServer {
         this.applyModelAndEffort(sessionState, model, reasoningEffort);
 
         return {};
+    }
+
+    private guardedTtyCapability(
+        params: KandevGuardedTtyCapabilityRequest,
+    ): KandevGuardedTtyCapabilityResponse {
+        const sessionState = this.sessions.get(params.sessionId);
+        if (!sessionState || !this.sessionPublishIsCurrent(
+            sessionState,
+            this.getSessionGeneration(params.sessionId),
+        )) {
+            throw RequestError.invalidParams(undefined, "Unknown or stale session");
+        }
+        return {
+            capability: KANDEV_GUARDED_TTY_CAPABILITY,
+            version: KANDEV_GUARDED_TTY_VERSION,
+            supported: true,
+            capability_method: KANDEV_GUARDED_TTY_CAPABILITY_METHOD,
+            exec_method: KANDEV_GUARDED_TTY_EXEC_METHOD,
+            session_id: sessionState.sessionId,
+        };
+    }
+
+    private async executeGuardedTtyExec(
+        params: KandevGuardedTtyExecRequest,
+        requestSignal?: AbortSignal,
+    ): Promise<KandevGuardedTtyExecReceipt> {
+        const sessionState = this.sessions.get(params.sessionId);
+        if (!sessionState || this.sessionIsClosing(params.sessionId)) {
+            return createUndispatchedGuardedTtyReceipt(params.sessionId, "stale_session");
+        }
+        const sessionGeneration = this.getSessionGeneration(params.sessionId);
+        const controller = new AbortController();
+        const abortFromRequest = () => controller.abort("cancelled");
+        if (requestSignal?.aborted) {
+            abortFromRequest();
+        } else {
+            requestSignal?.addEventListener("abort", abortFromRequest, {once: true});
+        }
+        const executions = this.guardedTtyExecutions.get(params.sessionId) ?? new Set<AbortController>();
+        executions.add(controller);
+        this.guardedTtyExecutions.set(params.sessionId, executions);
+
+        try {
+            return await this.codexAcpClient.guardedTtyExec({
+                sessionId: sessionState.sessionId,
+                argv: params.argv,
+                cwd: sessionState.cwd,
+                sandboxPolicy: sessionState.agentMode.sandboxPolicy,
+                signal: controller.signal,
+                isSessionCurrent: () => this.sessionPublishIsCurrent(sessionState, sessionGeneration),
+            });
+        } finally {
+            requestSignal?.removeEventListener("abort", abortFromRequest);
+            executions.delete(controller);
+            if (executions.size === 0) {
+                this.guardedTtyExecutions.delete(params.sessionId);
+            }
+        }
+    }
+
+    private parseGuardedTtyCapabilityParams(
+        params: Record<string, unknown>,
+    ): KandevGuardedTtyCapabilityRequest {
+        if (!hasExactKeys(params, ["sessionId"]) || typeof params["sessionId"] !== "string") {
+            throw RequestError.invalidParams();
+        }
+        return {sessionId: params["sessionId"]};
+    }
+
+    private parseGuardedTtyExecParams(params: Record<string, unknown>): KandevGuardedTtyExecRequest {
+        const sessionId = params["sessionId"];
+        const argv = params["argv"];
+        if (!hasExactKeys(params, ["argv", "sessionId"])
+            || typeof sessionId !== "string"
+            || !Array.isArray(argv)
+            || !argv.every((arg): arg is string => typeof arg === "string")
+            || !validateGuardedTtyArgv(argv)) {
+            throw RequestError.invalidParams();
+        }
+        return {sessionId, argv};
     }
 
     private parseLegacySetSessionModelParams(params: Record<string, unknown>): LegacySetSessionModelRequest {
@@ -3069,4 +3189,9 @@ function historyUpdateContentKey(update: UpdateSessionEvent): string | null {
 
 function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
     return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(server.name))));
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: string[]): boolean {
+    const actual = Object.keys(value).sort();
+    return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
