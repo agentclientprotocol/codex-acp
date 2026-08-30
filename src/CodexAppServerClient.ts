@@ -300,7 +300,7 @@ export class CodexAppServerClient {
 
     async runReview(
         params: ReviewStartParams,
-        onTurnStarted?: (turnId: string, threadId: string) => void,
+        onTurnStarted?: (turnId: string, threadId: string) => void | Promise<void>,
     ): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
@@ -309,7 +309,10 @@ export class CodexAppServerClient {
 
         try {
             const reviewStarted = await this.reviewStart(params);
-            onTurnStarted?.(reviewStarted.turn.id, reviewStarted.reviewThreadId);
+            // Awaited for the same reason `runTurn` awaits it: a caller that
+            // publishes this turn's acceptance has to publish it before
+            // anything the turn produces reaches the client.
+            await onTurnStarted?.(reviewStarted.turn.id, reviewStarted.reviewThreadId);
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === reviewStarted.turn.id);
             releaseCapture();
             if (earlyCompletion) {
@@ -323,7 +326,7 @@ export class CodexAppServerClient {
 
     async runGoalSet(
         params: ThreadGoalSetParams,
-        onTurnStarted?: (turnId: string) => void,
+        onTurnStarted?: (turnId: string) => void | Promise<void>,
         runtimeEffectsGraceMs = GOAL_RUNTIME_EFFECTS_GRACE_MS,
         onGoalSet?: (goal: ThreadGoal) => void,
     ): Promise<TurnCompletedNotification | null> {
@@ -351,12 +354,17 @@ export class CodexAppServerClient {
         let expectedGoal: ThreadGoal | null = null;
         const noGoalTurnStarted = this.createNoGoalTurnStartedPromise(runtimeEffectsGraceMs);
         const capturedGoalUpdates: Array<ThreadGoalUpdatedNotification> = [];
+        // A goal turn is routed to us on a notification, so the callback runs
+        // where nothing can be awaited. What it starts is kept instead, and
+        // waited for below — before this returns, and therefore before the
+        // prompt it belongs to answers.
+        let turnStartedPublication: Promise<void> | undefined;
         const releaseRoutingCapture = this.captureTurnRoutings(params.threadId, (turnId) => {
             if (!goalUpdateHandled || goalTurnId !== null) {
                 return;
             }
             goalTurnId = turnId;
-            onTurnStarted?.(turnId);
+            turnStartedPublication = Promise.resolve(onTurnStarted?.(turnId)).then(() => {});
             resolveGoalTurnStarted(turnId);
         });
         const releaseGoalUpdateCapture = this.captureThreadGoalUpdates(params.threadId, (event) => {
@@ -388,6 +396,7 @@ export class CodexAppServerClient {
                 return null;
             }
             const turnId = goalTurnId ?? await Promise.race([goalTurnStarted, noGoalTurnStarted.promise]);
+            await turnStartedPublication;
             noGoalTurnStarted.release();
             releaseRoutingCapture();
             releaseStatusCapture();

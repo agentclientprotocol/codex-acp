@@ -30,7 +30,7 @@ export const GOAL_CONTINUATION_PROMPT: acp.ContentBlock[] = [{
 
 export type CommandHandleOptions = {
     onTurnStartPending?: () => void;
-    onTurnStarted?: (turnId: string, threadId: string) => void;
+    onTurnStarted?: (turnId: string, threadId: string) => void | Promise<void>;
     setConfigOption?: (configId: string, value: string) => Promise<void>;
 };
 
@@ -315,8 +315,8 @@ export class CodexCommands {
         return await this.runWithProcessCheck(() => this.codexAcpClient.runReview(
             sessionState.sessionId,
             target,
-            (turnId, threadId) => {
-                this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
+            async (turnId, threadId) => {
+                await this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
             },
         ));
     }
@@ -341,8 +341,8 @@ export class CodexCommands {
                 options.onTurnStartPending?.();
                 return this.createGoalCommandResult(await this.runWithProcessCheck(() => this.codexAcpClient.resumeGoal(
                     sessionId,
-                    (turnId) => {
-                        this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
+                    async (turnId) => {
+                        await this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
                     },
                 )));
             case "clear":
@@ -360,20 +360,24 @@ export class CodexCommands {
         return this.createGoalCommandResult(await this.runWithProcessCheck(() => this.codexAcpClient.setGoal(
             sessionId,
             argument,
-            (turnId) => {
-                this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
+            async (turnId) => {
+                await this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
             },
         )));
     }
 
-    private handleCommandTurnStarted(
+    private async handleCommandTurnStarted(
         sessionState: SessionState,
         options: CommandHandleOptions,
         turnId: string,
         threadId: string,
-    ): void {
+    ): Promise<void> {
         if (options.onTurnStarted) {
-            options.onTurnStarted(turnId, threadId);
+            // Awaited, so a caller that publishes this turn's acceptance
+            // publishes it before the command goes on — every path that starts
+            // a turn reports it the same way, and a command that starts none
+            // never arrives here.
+            await options.onTurnStarted(turnId, threadId);
         } else {
             sessionState.currentTurnId = turnId;
         }

@@ -2390,7 +2390,7 @@ export class CodexAcpServer {
                 onTurnStartPending: () => {
                     ensurePendingTurnStart();
                 },
-                onTurnStarted: (turnId, threadId) => {
+                onTurnStarted: async (turnId, threadId) => {
                     const turn = {threadId, turnId};
                     activePrompt.currentTurn = turn;
                     if (this.promptShouldStop(params.sessionId, activePrompt)) {
@@ -2399,6 +2399,10 @@ export class CodexAcpServer {
                     }
                     sessionState.currentTurnId = turnId;
                     pendingTurnStart?.resolve(turnId);
+                    // A command that starts a turn is a turn the backend
+                    // accepted, exactly as an ordinary prompt is. A command that
+                    // starts none never reaches here and publishes nothing.
+                    await this.publishSessionMaterialization(params.sessionId);
                     onTurnStarted?.();
                 },
                 setConfigOption: async (configId, value) => {

@@ -554,7 +554,7 @@ export class CodexAcpClient {
     async runReview(
         sessionId: string,
         target: ReviewTarget,
-        onTurnStarted?: (turnId: string, threadId: string) => void,
+        onTurnStarted?: (turnId: string, threadId: string) => void | Promise<void>,
     ): Promise<TurnCompletedNotification> {
         return await this.codexClient.runReview({
             threadId: sessionId,
@@ -575,7 +575,7 @@ export class CodexAcpClient {
     async setGoal(
         sessionId: string,
         objective: string,
-        onTurnStarted?: (turnId: string) => void,
+        onTurnStarted?: (turnId: string) => void | Promise<void>,
         onGoalSet?: (goal: ThreadGoal) => void,
     ): Promise<TurnCompletedNotification | null> {
         const params = {
@@ -605,7 +605,7 @@ export class CodexAcpClient {
 
     async resumeGoal(
         sessionId: string,
-        onTurnStarted?: (turnId: string) => void,
+        onTurnStarted?: (turnId: string) => void | Promise<void>,
         onGoalSet?: (goal: ThreadGoal) => void,
     ): Promise<TurnCompletedNotification | null> {
         const params = {
