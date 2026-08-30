@@ -190,7 +190,7 @@ export async function executeGuardedTtyExec(
                 }
                 finalize({kind: "response", response});
             },
-            () => finalize({kind: "failure", code: "app_server_error"}),
+            () => fail("app_server_error"),
         );
     }
 

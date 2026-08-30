@@ -105,7 +105,10 @@ describe("Kandev guarded TTY ACP extension", () => {
         const commandExec = vi.spyOn(fixture.getCodexAppServerClient(), "commandExec");
         const invalidRequests = [
             {sessionId: "session-id", argv: []},
+            {sessionId: "session-id", argv: Array.from({length: 65}, () => "x")},
             {sessionId: "session-id", argv: ["x".repeat(4 * 1024 + 1)]},
+            {sessionId: "session-id", argv: ["x".repeat(4 * 1024), "y".repeat(4 * 1024), "z"]},
+            {sessionId: "session-id", argv: ["contains\0nul"]},
             {sessionId: "session-id", argv: ["printf", 123]},
             {sessionId: "session-id", argv: ["pwd"], cwd: "/tmp"},
             {sessionId: "session-id", argv: ["pwd"], tty: false},
@@ -255,7 +258,8 @@ describe("Kandev guarded TTY ACP extension", () => {
     it("returns stable failures for invalid output and App Server errors", async () => {
         const fixture = createCodexMockTestFixture();
         installSession(fixture);
-        vi.spyOn(fixture.getCodexAppServerClient(), "commandExecTerminate").mockResolvedValue({});
+        const terminate = vi.spyOn(fixture.getCodexAppServerClient(), "commandExecTerminate")
+            .mockResolvedValue({});
         vi.spyOn(fixture.getCodexAppServerClient(), "commandExec")
             .mockImplementationOnce(async (params: CommandExecParams) => {
                 fixture.sendServerNotification({
@@ -276,6 +280,7 @@ describe("Kandev guarded TTY ACP extension", () => {
         });
         expect(appServerFailure).toMatchObject({denial_code: "app_server_error"});
         expect(JSON.stringify(appServerFailure)).not.toContain("secret-bearing");
+        expect(terminate).toHaveBeenCalledTimes(2);
     });
 
     it("terminates a command that outlives the fixed bridge deadline", async () => {
