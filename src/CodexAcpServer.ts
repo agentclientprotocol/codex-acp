@@ -1138,14 +1138,8 @@ export class CodexAcpServer {
         if (!newMode) {
             throw RequestError.invalidParams();
         }
-        const previousMode = sessionState.agentMode;
+        await this.codexAcpClient.setAgentMode(sessionState.sessionId, newMode);
         sessionState.agentMode = newMode;
-        try {
-            await this.codexAcpClient.setAgentMode(sessionState.sessionId, newMode);
-        } catch (error) {
-            sessionState.agentMode = previousMode;
-            throw error;
-        }
     }
 
     private async applyCollaborationModeChange(sessionState: SessionState, value: string): Promise<void> {

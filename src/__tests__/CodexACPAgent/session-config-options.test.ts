@@ -207,7 +207,7 @@ describe("Session config options", () => {
         expect((modeOption as any).currentValue).toBe(AgentMode.ReadOnly.id);
     });
 
-    it("uses a new agent mode for prompts while thread persistence is pending", async () => {
+    it("does not use a new agent mode for prompts until thread persistence succeeds", async () => {
         const {fast} = buildModels();
         const {fixture, codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
         const sessionState = codexAcpAgent.getSessionState("session-id");
@@ -221,7 +221,7 @@ describe("Session config options", () => {
             value: AgentMode.AgentFullAccess.id,
         });
 
-        expect(sessionState.agentMode).toBe(AgentMode.AgentFullAccess);
+        expect(sessionState.agentMode).toBe(AgentMode.Agent);
 
         await codexAcpAgent.prompt({
             sessionId: sessionState.sessionId,
@@ -229,12 +229,13 @@ describe("Session config options", () => {
         });
 
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
-            approvalPolicy: AgentMode.AgentFullAccess.approvalPolicy,
-            sandboxPolicy: AgentMode.AgentFullAccess.sandboxPolicy,
+            approvalPolicy: AgentMode.Agent.approvalPolicy,
+            sandboxPolicy: AgentMode.Agent.sandboxPolicy,
         }));
 
         persistence.resolve();
         await modeChange;
+        expect(sessionState.agentMode).toBe(AgentMode.AgentFullAccess);
     });
 
     it("uses a new agent mode when it changes during prompt preparation", async () => {
@@ -266,7 +267,7 @@ describe("Session config options", () => {
         }));
     });
 
-    it("rolls back the agent mode when thread persistence fails", async () => {
+    it("keeps the agent mode unchanged when thread persistence fails", async () => {
         const {fast} = buildModels();
         const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
         const sessionState = codexAcpAgent.getSessionState("session-id");
