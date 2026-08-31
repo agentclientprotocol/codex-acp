@@ -553,10 +553,15 @@ export class CodexAcpClient {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
+        const initialAgentMode = AgentMode.getInitialAgentMode();
+
         const response = await this.codexClient.threadStart({
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
+            approvalPolicy: initialAgentMode.approvalPolicy,
+            approvalsReviewer: initialAgentMode.approvalsReviewer,
+            sandbox: initialAgentMode.sandboxMode,
         });
 
         const codexModels = await this.fetchAvailableModels();
@@ -568,8 +573,7 @@ export class CodexAcpClient {
             sessionId: response.thread.id,
             currentModelId: currentModelId,
             models: codexModels,
-            agentMode: AgentMode.fromSettings(response.approvalPolicy, response.approvalsReviewer, response.sandbox)
-                ?? AgentMode.getInitialAgentMode(),
+            agentMode: initialAgentMode,
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
