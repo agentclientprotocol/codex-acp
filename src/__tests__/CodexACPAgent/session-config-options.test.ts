@@ -72,6 +72,19 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
 }
 
 describe("Session config options", () => {
+    it("distinguishes modes that share an approval policy and sandbox", () => {
+        expect(AgentMode.fromSettings(
+            AgentMode.ReadOnly.approvalPolicy,
+            AgentMode.ReadOnly.approvalsReviewer,
+            AgentMode.ReadOnly.sandboxPolicy,
+        )).toBe(AgentMode.ReadOnly);
+        expect(AgentMode.fromSettings(
+            AgentMode.Agent.approvalPolicy,
+            AgentMode.Agent.approvalsReviewer,
+            AgentMode.Agent.sandboxPolicy,
+        )).toBe(AgentMode.Agent);
+    });
+
     it("exposes mode, model, reasoning_effort and fast-mode in the new session response", async () => {
         const {fast, slow} = buildModels();
         const {response} = await createSession("fast-model[medium]", [fast, slow]);
@@ -107,6 +120,23 @@ describe("Session config options", () => {
             category: "mode",
             currentValue: AgentMode.DEFAULT_AGENT_MODE.id,
             type: "select",
+            options: [
+                {
+                    value: "read-only",
+                    name: "Ask for approval",
+                    description: "Always ask to edit external files and use the internet",
+                },
+                {
+                    value: "agent",
+                    name: "Approve for me",
+                    description: "Only ask for actions detected as potentially unsafe",
+                },
+                {
+                    value: "agent-full-access",
+                    name: "Full access",
+                    description: "Unrestricted access to the internet and any file on your computer",
+                },
+            ],
         });
         expect((modeOption as any).options.map((o: any) => o.value)).toEqual(
             AgentMode.all().map(m => m.id)
@@ -170,6 +200,7 @@ describe("Session config options", () => {
         expect(update).toHaveBeenCalledWith({
             threadId: "session-id",
             approvalPolicy: AgentMode.ReadOnly.approvalPolicy,
+            approvalsReviewer: AgentMode.ReadOnly.approvalsReviewer,
             sandboxPolicy: AgentMode.ReadOnly.sandboxPolicy,
         });
         const modeOption = result.configOptions?.find(o => o.id === MODE_CONFIG_ID);

@@ -75,6 +75,13 @@
             }
           },
           {
+            "name": "rename",
+            "description": "Rename the current session.",
+            "input": {
+              "hint": "new name"
+            }
+          },
+          {
             "name": "logout",
             "description": "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
             "input": null
@@ -391,11 +398,13 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-context-compaction-1",
-        "kind": "other",
-        "title": "Context compacted",
+        "kind": "think",
+        "title": "Compact conversation",
         "status": "completed",
         "_meta": {
-          "contextCompaction": true
+          "contextCompaction": {
+            "version": 1
+          }
         }
       }
     }

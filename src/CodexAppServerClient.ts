@@ -7,6 +7,7 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
+    ApprovalsReviewer,
     AskForApproval,
     CancelLoginAccountParams,
     CancelLoginAccountResponse,
@@ -45,6 +46,8 @@ import type {
     ThreadGoalGetResponse,
     ThreadGoalSetParams,
     ThreadGoalSetResponse,
+    ThreadForkParams,
+    ThreadForkResponse,
     ThreadLoadedListParams,
     ThreadLoadedListResponse,
     ThreadListParams,
@@ -56,6 +59,8 @@ import type {
     ThreadSettings,
     ThreadStartParams,
     ThreadStartResponse,
+    ThreadSetNameParams,
+    ThreadSetNameResponse,
     ThreadUnsubscribeParams,
     ThreadUnsubscribeResponse,
     ToolRequestUserInputParams,
@@ -221,11 +226,11 @@ export class CodexAppServerClient {
 
         this.connection.onRequest(PermissionsApprovalRequest, async (params) => {
             if (this.isStaleTurn(params.threadId, params.turnId)) {
-                return { permissions: {}, scope: "turn", strictAutoReview: true };
+                return { permissions: {}, scope: "turn", strictAutoReview: false };
             }
             const handler = this.approvalHandlers.get(params.threadId);
             if (!handler) {
-                return { permissions: {}, scope: "turn", strictAutoReview: true };
+                return { permissions: {}, scope: "turn", strictAutoReview: false };
             }
             return await handler.handlePermissionsRequest(params);
         });
@@ -529,8 +534,16 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
+    async threadSetName(params: ThreadSetNameParams): Promise<ThreadSetNameResponse> {
+        return await this.sendRequest({ method: "thread/name/set", params });
+    }
+
     async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
+    }
+
+    async threadFork(params: ThreadForkParams): Promise<ThreadForkResponse> {
+        return await this.sendRequest({ method: "thread/fork", params: params });
     }
 
     getThreadSettings(threadId: string): ThreadSettings | undefined {
@@ -986,6 +999,7 @@ type DistributiveOmit<T, K extends keyof any> = T extends any
 export interface ThreadSettingsUpdateParams {
     threadId: string;
     approvalPolicy?: AskForApproval;
+    approvalsReviewer?: ApprovalsReviewer;
     sandboxPolicy?: SandboxPolicy;
     model?: string;
     effort?: ReasoningEffort;

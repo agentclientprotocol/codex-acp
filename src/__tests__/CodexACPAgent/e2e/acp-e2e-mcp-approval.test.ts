@@ -2,7 +2,8 @@ import type * as acp from "@agentclientprotocol/sdk";
 import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it} from "vitest";
-import {McpApprovalOptionId, type McpApprovalOptionId as McpApprovalOptionIdValue} from "../../../McpApprovalOptionId";
+import {AgentMode} from "../../../AgentMode";
+import {McpApprovalOptionId, type McpApprovalOptionId as McpApprovalOptionIdValue} from "../../../permissions/option-ids";
 import {
     createAuthenticatedFixture,
     describeE2E,
@@ -42,7 +43,7 @@ function createMcpPermissionResponder(...optionIds: McpApprovalOptionIdValue[]):
     const queue = [...optionIds];
     return (request) => createMcpPermissionResponse(
         isMcpPermissionRequest(request)
-            ? queue.shift() ?? McpApprovalOptionId.Decline
+            ? queue.shift() ?? McpApprovalOptionId.Cancel
             : null,
     );
 }
@@ -67,7 +68,7 @@ describeE2E("E2E MCP approval tests (configured in session)", () => {
     let fixture: SpawnedAgentFixture;
 
     beforeEach(async () => {
-        fixture = await createAuthenticatedFixture();
+        fixture = await createAuthenticatedFixture(AgentMode.ReadOnly);
     });
 
     afterEach(async () => {
@@ -89,8 +90,8 @@ describeE2E("E2E MCP approval tests (configured in session)", () => {
         expectMcpPermissionRequestCount(fixture, sessionId, 1);
     });
 
-    it("ends turn when MCP tool call is rejected", async () => {
-        fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.Decline));
+    it("ends turn when MCP tool call is cancelled", async () => {
+        fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.Cancel));
         const {sessionId, invocationMarkerPath} = await createMcpSession();
 
         expectEndTurn(await fixture.connection.prompt({
@@ -139,7 +140,7 @@ describeE2E("E2E MCP approval tests (configured in toml)", () => {
     let fixture: SpawnedAgentFixture;
 
     beforeEach(async () => {
-        fixture = await createAuthenticatedFixture();
+        fixture = await createAuthenticatedFixture(AgentMode.ReadOnly);
         invocationMarkerPath = path.join(os.tmpdir(), `mcp-tool-invocation-${crypto.randomUUID()}.txt`)
     });
 
@@ -151,7 +152,7 @@ describeE2E("E2E MCP approval tests (configured in toml)", () => {
 
     beforeEach(async () => {
         await fixture.dispose();
-        fixture = await createAuthenticatedFixture(undefined, [createMcpServer(invocationMarkerPath)]);
+        fixture = await createAuthenticatedFixture(AgentMode.ReadOnly, [createMcpServer(invocationMarkerPath)]);
     });
 
     it("skips subsequent approvals in the same session when allow_always is selected", async () => {

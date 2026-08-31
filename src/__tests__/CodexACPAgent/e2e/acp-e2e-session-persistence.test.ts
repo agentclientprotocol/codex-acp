@@ -18,6 +18,30 @@ describeE2E("E2E session persistence tests", () => {
         beforeRestartFixture = null;
     });
 
+    it("persists the selected model and effort across an ACP process restart", async () => {
+        beforeRestartFixture = await createAuthenticatedFixture();
+        const sessionId = (await beforeRestartFixture.createSession()).sessionId;
+
+        await beforeRestartFixture.expectPromptText(
+            sessionId,
+            "Reply with exactly materialized-ok and nothing else.",
+            (text) => expect(text.toLowerCase()).toContain("materialized-ok"),
+        );
+        await legacySetSessionModel(beforeRestartFixture.connection, {
+            sessionId,
+            modelId: OTHER_TEST_MODEL_ID.toString(),
+        });
+
+        afterRestartFixture = await beforeRestartFixture.restart();
+        const loadSessionResponse = await afterRestartFixture.connection.loadSession({
+            sessionId,
+            cwd: afterRestartFixture.workspaceDir,
+            mcpServers: [],
+        }) as LegacyLoadSessionResponse;
+
+        expect(loadSessionResponse.models?.currentModelId).toBe(OTHER_TEST_MODEL_ID.toString());
+    });
+
     // Temporarily disabled as flaky
     it.skip("persists a session across ACP process restart", async () => {
         beforeRestartFixture = await createAuthenticatedFixture();

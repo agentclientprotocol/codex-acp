@@ -4,7 +4,7 @@ import {CodexAcpClient} from '../CodexAcpClient';
 import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';
 import {startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexAcpServer, type SessionState} from "../CodexAcpServer";
-import type {AcpClientConnection} from "../ACPSessionConnection";
+import {ACPSessionConnection, type AcpClientConnection} from "../ACPSessionConnection";
 import type {ServerNotification} from "../app-server";
 import type {MessageConnection} from "vscode-jsonrpc/node";
 import path from "node:path";
@@ -14,6 +14,7 @@ import {AgentMode} from "../AgentMode";
 import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
+import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -69,6 +70,7 @@ export interface TestFixture {
     getAcpConnectionEvents(ignoredFields: string[]): MethodCallEvent[],
     getAcpConnectionDump(ignoredFields: string[]): string,
     clearAcpConnectionDump(): void,
+    getAcpConnection(): AcpClientConnection,
 }
 
 export interface CodexConnectionDumpOptions {
@@ -98,7 +100,13 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
 
     const codexAppServerClient = new CodexAppServerClient(config.connection);
     const codexAcpClient = new CodexAcpClient(codexAppServerClient);
-    const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient, undefined, config.getExitCode);
+    const codexAcpAgent = new CodexAcpServer(
+        acpConnection,
+        codexAcpClient,
+        undefined,
+        config.getExitCode,
+        undefined,
+    );
 
     const transportEvents: CodexConnectionEvent[] = [];
     const codexEventHandlers: ((event: CodexConnectionEvent) => void)[] = [];
@@ -161,6 +169,9 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         },
         clearAcpConnectionDump() {
             acpConnectionEvents.splice(0, acpConnectionEvents.length);
+        },
+        getAcpConnection(): AcpClientConnection {
+            return acpConnection;
         }
     };
 }
@@ -255,7 +266,9 @@ export interface CodexMockTestFixture extends TestFixture {
  * Provides `sendServerRequest()` to simulate server-initiated requests (e.g., approval requests).
  * Provides `setPermissionResponse()` to control ACP permission dialog responses.
  */
-export function createCodexMockTestFixture(): CodexMockTestFixture {
+export function createCodexMockTestFixture(
+    restartCodexClient?: () => Promise<CodexAcpClient>,
+): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
 
@@ -309,6 +322,10 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
             eventHandlers: acpEventHandlers,
         }
     });
+    if (restartCodexClient) {
+        vi.spyOn(baseFixture.getCodexAcpAgent() as any, "restartCodexClient")
+            .mockImplementation(restartCodexClient);
+    }
 
     return {
         ...baseFixture,
@@ -367,6 +384,7 @@ function anonymizeValue(value: any, path: string[], fieldsToAnonymize: Set<strin
  * Override specific fields as needed.
  */
 export function createTestSessionState(overrides?: Partial<SessionState>): SessionState {
+    const sessionId = overrides?.sessionId ?? "session-id";
     return {
         currentTurnId: null,
         lastTokenUsage: null,
@@ -378,7 +396,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         authProvider: null,
         cwd: "/test/cwd",
         additionalDirectories: [],
-        sessionId: "session-id",
+        sessionId,
         currentModelId: "model-id[effort]",
         availableModels: [],
         supportedReasoningEfforts: [],
@@ -391,6 +409,11 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         goalRevision: 0,
         sessionTitle: null,
         sessionTitleSource: "unknown",
+        subagents: new CodexSubagentEventRouter(
+            sessionId,
+            false,
+            new ACPSessionConnection({notify: vi.fn(), request: vi.fn()} as AcpClientConnection, sessionId),
+        ),
         ...overrides,
     };
 }
@@ -405,6 +428,7 @@ export function createTestModel(overrides?: Partial<Model>): Model {
         upgradeInfo: null,
         availabilityNux: null,
         modelSpecialty: null,
+        multiAgentVersion: null,
         displayName: id,
         description: `${id} model`,
         hidden: false,

@@ -52,7 +52,9 @@ describe('CodexACPAgent - initialize', () => {
                     list: {},
                     close: {},
                     delete: {},
+                    fork: {},
                     additionalDirectories: {},
+                    subagents: {},
                 },
                 mcpCapabilities: {
                     acp: false,
@@ -73,7 +75,7 @@ describe('CodexACPAgent - initialize', () => {
                 jetbrains: {
                     air: {
                         version: 1,
-                        capabilities: ["sessionFailure"],
+                        capabilities: ["sessionFailure", "agentFileChangeReport", "nativeSubagentSessions"],
                     },
                 },
             },

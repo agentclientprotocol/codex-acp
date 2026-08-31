@@ -265,7 +265,7 @@ describe("CodexACPAgent - plan review", () => {
                 turnId: "plan-turn",
                 willRetry: false,
                 error: {
-                    message: "raw post-turn approval error",
+                    message: "Codex is temporarily overloaded.",
                     codexErrorInfo: "serverOverloaded",
                     additionalDetails: "secret approval detail",
                 },
@@ -283,29 +283,26 @@ describe("CodexACPAgent - plan review", () => {
                     air: {
                         version: 1,
                         sessionFailure: {
-                            id: expect.stringMatching(/^plan-review-session:error:[0-9a-f-]+$/),
+                            id: "plan-turn:error",
                             revision: 1,
-                            phase: "active",
-                            category: "overloaded",
-                            source: "codex",
-                            safeMessage: "Codex is temporarily overloaded.",
-                            retryable: true,
+                            category: "service",
+                            severity: "error",
+                            title: "Codex is temporarily overloaded.",
                             actions: ["retry"],
                         },
                     },
                 },
             },
         }]);
-        expect(JSON.stringify(updates)).not.toContain("raw post-turn approval error");
         expect(JSON.stringify(updates)).not.toContain("secret approval detail");
         expect(turnStart).toHaveBeenCalledTimes(1);
 
         permission.resolve({outcome: {outcome: "cancelled"}});
         await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
-        expect(sessionState.sessionFailure).toMatchObject({phase: "active", revision: 1});
+        expect(sessionState.sessionFailure).toMatchObject({severity: "error", revision: 1});
     });
 
-    it("clears an unchanged plan-approval failure after successful implementation", async () => {
+    it("keeps the plan-approval failure in history after successful implementation", async () => {
         const permission = deferred<acp.RequestPermissionResponse>();
         const {promptPromise, sessionState, turnStart, implementationTurn} = await startPlanPrompt(null, {
             typedFailures: true,
@@ -354,10 +351,9 @@ describe("CodexACPAgent - plan review", () => {
             .map(event => event.args[0].update?._meta?.jetbrains?.air?.sessionFailure)
             .filter(Boolean);
         expect(failures).toEqual([
-            expect.objectContaining({id: activeId, phase: "active", revision: 1}),
-            expect.objectContaining({id: activeId, phase: "cleared", revision: 2}),
+            expect.objectContaining({id: activeId, severity: "error", revision: 1}),
         ]);
-        expect(sessionState.sessionFailure).toMatchObject({id: activeId, phase: "cleared", revision: 2});
+        expect(sessionState.sessionFailure).toBeUndefined();
     });
 
     it("keeps an implementation failure terminal on the prompt response", async () => {
@@ -368,7 +364,7 @@ describe("CodexACPAgent - plan review", () => {
         await vi.waitFor(() => expect(turnStart).toHaveBeenCalledTimes(2));
         fixture.clearAcpConnectionDump();
         const implementationError = {
-            message: "raw implementation failure",
+            message: "Codex is temporarily overloaded.",
             codexErrorInfo: "serverOverloaded" as const,
             additionalDetails: "secret implementation detail",
         };
@@ -402,15 +398,12 @@ describe("CodexACPAgent - plan review", () => {
             stopReason: "end_turn",
             _meta: {jetbrains: {air: {sessionFailure: {
                 id: "implementation-turn:error",
-                phase: "active",
-                category: "overloaded",
-                turnId: "implementation-turn",
+                category: "service",
+                severity: "error",
             }}}},
         });
-        expect(JSON.stringify(response)).not.toContain("raw implementation failure");
         expect(JSON.stringify(response)).not.toContain("secret implementation detail");
-        expect(sessionState.sessionFailure).toMatchObject({phase: "active", revision: 1});
-        expect(JSON.stringify(fixture.getAcpConnectionEvents([]))).not.toContain('"phase":"cleared"');
+        expect(sessionState.sessionFailure).toMatchObject({severity: "error", revision: 1});
     });
 
     it("keeps the approval-to-implementation-start gap session-scoped", async () => {
@@ -443,8 +436,7 @@ describe("CodexACPAgent - plan review", () => {
             },
         });
         await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
-        expect(sessionState.sessionFailure).toMatchObject({phase: "active", revision: 1});
-        expect(sessionState.sessionFailure).not.toHaveProperty("turnId");
+        expect(sessionState.sessionFailure).toMatchObject({severity: "error", revision: 1});
 
         implementationStart.resolve({
             turn: {
@@ -472,6 +464,6 @@ describe("CodexACPAgent - plan review", () => {
             },
         });
         await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
-        expect(sessionState.sessionFailure).toMatchObject({phase: "cleared", revision: 2});
+        expect(sessionState.sessionFailure).toBeUndefined();
     });
 });
