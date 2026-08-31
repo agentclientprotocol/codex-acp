@@ -37,34 +37,8 @@ describe("CodexACPAgent - list sessions", () => {
             name: null,
             turns: [],
         };
-        const threadB: Thread = {
-            id: "sess-2",
-            sessionId: "sess-2",
-            parentThreadId: null,
-            threadSource: null,
-            forkedFromId: null,
-            preview: "Other session",
-            ephemeral: false,
-            modelProvider: "openai",
-            createdAt: 300,
-            updatedAt: 400,
-            recencyAt: null,
-            status: { type: "idle" },
-            path: null,
-            cwd: "/repo/other",
-            cliVersion: "0.0.0",
-            section: null,
-            sectionEnteredAt: null,
-            source: "cli",
-            agentNickname: null,
-            agentRole: null,
-            gitInfo: null,
-            name: null,
-            turns: [],
-        };
-
         codexAppServerClient.threadList = vi.fn().mockResolvedValue({
-            data: [threadA, threadB],
+            data: [threadA],
             nextCursor: "next-cursor",
         });
         codexAppServerClient.threadLoadedList = vi.fn().mockResolvedValue({
@@ -87,13 +61,94 @@ describe("CodexACPAgent - list sessions", () => {
                 "appServer",
                 "unknown",
             ],
+            cwd: "/repo/project",
+            useStateDbOnly: true,
         }));
         await expect(JSON.stringify(response, null, 2)).toMatchFileSnapshot(
             "data/list-sessions.json"
         );
     });
 
-    it("normalizes Windows cwd filters before comparing absolute paths", async () => {
+    it("preserves cwd filtering across pagination", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+        const cwd = "/repo/project";
+
+        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+
+        const makeThread = (id: string, updatedAt: number, threadCwd = cwd): Thread => ({
+            id,
+            sessionId: id,
+            parentThreadId: null,
+            threadSource: null,
+            forkedFromId: null,
+            preview: `${id} session`,
+            ephemeral: false,
+            modelProvider: "openai",
+            createdAt: updatedAt - 100,
+            updatedAt,
+            recencyAt: null,
+            status: { type: "idle" },
+            path: null,
+            cwd: threadCwd,
+            cliVersion: "0.0.0",
+            section: null,
+            sectionEnteredAt: null,
+            source: "cli",
+            agentNickname: null,
+            agentRole: null,
+            gitInfo: null,
+            name: null,
+            turns: [],
+        });
+
+        codexAppServerClient.threadList = vi.fn().mockImplementation(({ cursor, cwd: requestedCwd }) => {
+            if (requestedCwd !== cwd) {
+                return {
+                    data: [makeThread("unrelated", 400, "/repo/other")],
+                    nextCursor: "global-page-2",
+                };
+            }
+            if (cursor === null) {
+                return { data: [makeThread("page-1", 300)], nextCursor: "page-2" };
+            }
+            if (cursor === "page-2") {
+                return { data: [makeThread("page-2", 200)], nextCursor: null };
+            }
+            throw new Error(`Unexpected project cursor: ${cursor}`);
+        });
+
+        const firstResponse = await codexAcpAgent.listSessions({ cwd, cursor: null });
+        const secondResponse = await codexAcpAgent.listSessions({
+            cwd,
+            cursor: firstResponse.nextCursor ?? null,
+        });
+
+        expect(firstResponse.sessions).toEqual([expect.objectContaining({
+            sessionId: "page-1",
+            cwd,
+        })]);
+        expect(firstResponse.nextCursor).toBe("page-2");
+        expect(secondResponse.sessions).toEqual([expect.objectContaining({
+            sessionId: "page-2",
+            cwd,
+        })]);
+        expect(secondResponse.nextCursor).toBeNull();
+        expect(codexAppServerClient.threadList).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            cwd,
+            cursor: null,
+            useStateDbOnly: true,
+        }));
+        expect(codexAppServerClient.threadList).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            cwd,
+            cursor: "page-2",
+            useStateDbOnly: true,
+        }));
+    });
+
+    it("forwards absolute Windows cwd filters to the app server", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
@@ -115,7 +170,7 @@ describe("CodexACPAgent - list sessions", () => {
             recencyAt: null,
             status: { type: "idle" },
             path: null,
-            cwd: "D:\\workspace\\sample-project\\",
+            cwd: "d:/workspace/sample-project",
             cliVersion: "0.0.0",
             section: null,
             sectionEnteredAt: null,
@@ -126,16 +181,8 @@ describe("CodexACPAgent - list sessions", () => {
             name: null,
             turns: [],
         };
-        const otherThread: Thread = {
-            ...matchingThread,
-            id: "sess-other",
-            sessionId: "sess-other",
-            preview: "Other session",
-            cwd: "D:\\workspace\\other-project",
-        };
-
         codexAppServerClient.threadList = vi.fn().mockResolvedValue({
-            data: [matchingThread, otherThread],
+            data: [matchingThread],
             nextCursor: null,
         });
 
@@ -146,17 +193,14 @@ describe("CodexACPAgent - list sessions", () => {
 
         expect(response.sessions).toEqual([{
             sessionId: "sess-win",
-            cwd: "D:\\workspace\\sample-project\\",
+            cwd: "d:/workspace/sample-project",
             title: "Windows session",
             updatedAt: "1970-01-01T00:03:20.000Z",
         }]);
-
-        const basenameResponse = await codexAcpAgent.listSessions({
-            cwd: "sample-project",
-            cursor: null,
-        });
-
-        expect(basenameResponse.sessions.map(session => session.sessionId)).toEqual(["sess-win"]);
+        expect(codexAppServerClient.threadList).toHaveBeenCalledWith(expect.objectContaining({
+            cwd: "d:/workspace/sample-project",
+            useStateDbOnly: true,
+        }));
     });
 
     it("should prefer the explicit thread name as the session title", async () => {
