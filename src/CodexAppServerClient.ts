@@ -19,6 +19,10 @@ import type {
     LogoutAccountResponse,
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse,
+    McpServerOauthLoginParams,
+    McpServerOauthLoginResponse,
+    McpServerOauthLoginCompletedNotification,
+    McpServerStartupFailureReason,
     McpServerStartupState,
     McpServerStatusUpdatedNotification,
     ModelListParams,
@@ -90,6 +94,7 @@ export interface ElicitationHandler {
 export type McpStartupFailure = {
     server: string;
     error: string;
+    failureReason?: McpServerStartupFailureReason;
 };
 
 export type McpStartupResult = {
@@ -160,6 +165,7 @@ export class CodexAppServerClient {
                 this.mcpServerStartupStates.set(serverNotification.params.name, {
                     status: serverNotification.params.status,
                     error: serverNotification.params.error,
+                    failureReason: serverNotification.params.failureReason ?? null,
                     version: this.mcpServerStartupVersion,
                 });
                 this.resolveMcpServerStartupResolvers();
@@ -584,6 +590,29 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "mcpServerStatus/list", params });
     }
 
+    async mcpServerOauthLogin(params: McpServerOauthLoginParams): Promise<McpServerOauthLoginResponse> {
+        return await this.sendRequest({ method: "mcpServer/oauth/login", params });
+    }
+
+    async awaitMcpServerOauthLoginCompleted(
+        name: string,
+        threadId: string,
+    ): Promise<McpServerOauthLoginCompletedNotification> {
+        return await new Promise((resolve) => {
+            let disposable: {dispose(): void} | undefined;
+            disposable = this.connection.onNotification(
+                "mcpServer/oauthLogin/completed",
+                (event: McpServerOauthLoginCompletedNotification) => {
+                    if (event.name !== name || event.threadId !== threadId) {
+                        return;
+                    }
+                    disposable?.dispose();
+                    resolve(event);
+                },
+            );
+        });
+    }
+
     async accountLogin(params: LoginAccountParams): Promise<LoginAccountResponse> {
         return await this.sendRequest({ method: "account/login/start", params: params });
     }
@@ -942,6 +971,7 @@ export class CodexAppServerClient {
                     failed.push({
                         server: serverName,
                         error: state.error ?? "unknown MCP startup error",
+                        ...(state.failureReason === null ? {} : {failureReason: state.failureReason}),
                     });
                     break;
                 case "cancelled":
@@ -1001,6 +1031,7 @@ export interface ExperimentalThreadSettingsUpdateParams {
 type McpServerStartupSnapshot = {
     status: McpServerStartupState;
     error: string | null;
+    failureReason: McpServerStartupFailureReason | null;
     version: number;
 };
 

@@ -2182,12 +2182,66 @@ export class CodexAcpServer {
             }
             : mcpStartup;
 
-        for (const update of CodexEventHandler.createMcpStartupUpdates(filteredStartup)) {
+        const failuresAfterOauth: typeof filteredStartup.failed = [];
+        const readyAfterOauth = [...filteredStartup.ready];
+        for (const failure of filteredStartup.failed) {
+            if (failure.failureReason !== "reauthenticationRequired"
+                || !clientSupportsUrlElicitation(this.clientCapabilities)) {
+                failuresAfterOauth.push(failure);
+                continue;
+            }
+            try {
+                const authenticated = await this.authenticateMcpServer(sessionId, failure.server);
+                if (authenticated) {
+                    readyAfterOauth.push(failure.server);
+                } else {
+                    failuresAfterOauth.push(failure);
+                }
+            } catch (error) {
+                logger.error(`Failed to authenticate MCP server ${failure.server}`, error);
+                failuresAfterOauth.push(failure);
+            }
+        }
+
+        for (const update of CodexEventHandler.createMcpStartupUpdates({
+            ...filteredStartup,
+            ready: readyAfterOauth,
+            failed: failuresAfterOauth,
+        })) {
             await this.connection.notify(acp.methods.client.session.update, {
                 sessionId,
                 update,
             });
         }
+    }
+
+    private async authenticateMcpServer(sessionId: string, serverName: string): Promise<boolean> {
+        const elicitationId = `mcp-oauth-${randomUUID()}`;
+        const completed = this.codexAcpClient.awaitMcpServerOauthLoginCompleted(serverName, sessionId);
+        const login = await this.codexAcpClient.mcpServerOauthLogin({
+            name: serverName,
+            threadId: sessionId,
+        });
+        const elicitation = Promise.resolve(this.connection.request(
+            acp.methods.client.elicitation.create,
+            {
+                mode: "url",
+                sessionId,
+                message: `Authenticate with MCP server ${serverName}`,
+                url: login.authorizationUrl,
+                elicitationId,
+            },
+        ));
+        const first = await Promise.race([
+            completed.then(result => ({type: "completed" as const, result})),
+            elicitation.then(response => ({type: "elicitation" as const, response})),
+        ]);
+        if (first.type === "elicitation" && !acp.CreateElicitationResponse.isAccept(first.response)) {
+            return false;
+        }
+        const result = first.type === "completed" ? first.result : await completed;
+        await this.connection.notify(acp.methods.client.elicitation.complete, {elicitationId});
+        return result.success;
     }
 
     private trackActivePrompt(sessionId: string): ActivePrompt {
