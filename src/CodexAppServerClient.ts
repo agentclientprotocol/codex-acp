@@ -7,8 +7,6 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
-    ApprovalsReviewer,
-    AskForApproval,
     CancelLoginAccountParams,
     CancelLoginAccountResponse,
     ConfigReadParams,
@@ -72,7 +70,6 @@ import type {
     TurnStartResponse,
     TurnSteerParams,
     TurnSteerResponse,
-    SandboxPolicy,
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
     FileChangeRequestApprovalParams,
@@ -998,9 +995,6 @@ type DistributiveOmit<T, K extends keyof any> = T extends any
 
 export interface ThreadSettingsUpdateParams {
     threadId: string;
-    approvalPolicy?: AskForApproval;
-    approvalsReviewer?: ApprovalsReviewer;
-    sandboxPolicy?: SandboxPolicy;
     model?: string;
     effort?: ReasoningEffort;
     collaborationMode?: {

@@ -514,38 +514,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
-    it('seeds new Codex threads with the configured initial agent mode', async () => {
-        const mockFixture = createCodexMockTestFixture();
-        const codexAcpClient = mockFixture.getCodexAcpClient();
-        const codexAppServerClient = mockFixture.getCodexAppServerClient();
-        vi.stubEnv("INITIAL_AGENT_MODE", AgentMode.AgentFullAccess.id);
-
-        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
-        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-        const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
-            thread: {id: "thread-id"} as any,
-            model: "gpt-5",
-            reasoningEffort: "medium",
-            serviceTier: null,
-            approvalPolicy: AgentMode.ReadOnly.approvalPolicy,
-            approvalsReviewer: AgentMode.ReadOnly.approvalsReviewer,
-            sandbox: AgentMode.ReadOnly.sandboxPolicy,
-        } as any);
-        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
-            data: [createTestModel({id: "gpt-5"})],
-            nextCursor: null,
-        });
-
-        const session = await codexAcpClient.newSession({cwd: "/workspace", mcpServers: []});
-
-        expect(threadStartSpy).toHaveBeenCalledWith(expect.objectContaining({
-            approvalPolicy: AgentMode.AgentFullAccess.approvalPolicy,
-            approvalsReviewer: AgentMode.AgentFullAccess.approvalsReviewer,
-            sandbox: AgentMode.AgentFullAccess.sandboxMode,
-        }));
-        expect(session.agentMode).toBe(AgentMode.AgentFullAccess);
-    });
-
     it('applies ACP additional directories to resumed and loaded sessions explicitly', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
@@ -729,7 +697,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         }));
     });
 
-    it('restores collaboration and agent modes for resumed and loaded sessions', async () => {
+    it('restores collaboration mode for resumed and loaded sessions', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
         const codexAcpClient = mockFixture.getCodexAcpClient();
@@ -758,9 +726,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 modelProvider: "openai",
                 reasoningEffort: "medium",
                 serviceTier: null,
-                approvalPolicy: "never",
-                approvalsReviewer: "user",
-                sandbox: {type: "dangerFullAccess"},
             } as any;
         });
         vi.spyOn(codexAppServerClient, "threadRead").mockImplementation(async ({threadId}) => ({
@@ -783,12 +748,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         expect(codexAcpAgent.getSessionState("resume-id").collaborationMode).toBe("plan");
         expect(codexAcpAgent.getSessionState("load-id").collaborationMode).toBe("plan");
-        expect(codexAcpAgent.getSessionState("resume-id").agentMode).toBe(AgentMode.AgentFullAccess);
-        expect(codexAcpAgent.getSessionState("load-id").agentMode).toBe(AgentMode.AgentFullAccess);
         expect(resumed.configOptions?.find(option => option.id === "collaboration_mode")).toMatchObject({currentValue: "plan"});
         expect(loaded.configOptions?.find(option => option.id === "collaboration_mode")).toMatchObject({currentValue: "plan"});
-        expect(resumed.configOptions?.find(option => option.id === "mode")).toMatchObject({currentValue: "agent-full-access"});
-        expect(loaded.configOptions?.find(option => option.id === "mode")).toMatchObject({currentValue: "agent-full-access"});
     });
 
     it('uses configured model provider when resuming sessions without an explicit provider', async () => {
