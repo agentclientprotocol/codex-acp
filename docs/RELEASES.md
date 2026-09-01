@@ -41,7 +41,7 @@ Once the workflow finishes, confirm both outputs landed:
 
 ```sh
 gh release view "v<version>"
-npm view "$(node -p \"require('./package.json').name\")@<version>"
+npm view "$(node -p "require('./package.json').name")@<version>"
 ```
 
 ## How the version is chosen

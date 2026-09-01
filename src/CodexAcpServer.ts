@@ -2522,7 +2522,8 @@ export class CodexAcpServer {
         if (pendingConfigUpdate !== undefined) {
             try {
                 await pendingConfigUpdate;
-            } catch {
+            } catch (error) {
+                logger.error(`Pending session configuration update failed for ${params.sessionId}`, error);
                 throw RequestError.invalidRequest(
                     undefined,
                     "Prompt blocked because a pending session configuration update failed",
