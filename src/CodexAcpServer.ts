@@ -255,6 +255,7 @@ export class CodexAcpServer {
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
     private readonly goalControlGenerations: Map<string, number>;
+    private readonly sessionConfigUpdates: Map<string, Promise<void>>;
     private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
     private readonly codexProcessState: CodexProcessState | null;
     private initializeRequest: acp.InitializeRequest | null = null;
@@ -277,6 +278,7 @@ export class CodexAcpServer {
         this.sessionGenerations = new Map();
         this.sessionOpenGenerations = new Map();
         this.goalControlGenerations = new Map();
+        this.sessionConfigUpdates = new Map();
         this.permissionLifecycleContexts = new WeakMap();
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
@@ -1085,7 +1087,17 @@ export class CodexAcpServer {
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
-        await this.applySessionConfigOption(sessionState, params);
+        const run = () => this.applySessionConfigOption(sessionState, params);
+        const previous = this.sessionConfigUpdates.get(params.sessionId);
+        const update = previous ? previous.then(run, run) : run();
+        this.sessionConfigUpdates.set(params.sessionId, update);
+        try {
+            await update;
+        } finally {
+            if (this.sessionConfigUpdates.get(params.sessionId) === update) {
+                this.sessionConfigUpdates.delete(params.sessionId);
+            }
+        }
 
         return {
             configOptions: this.createSessionConfigOptions(sessionState),
@@ -1165,6 +1177,7 @@ export class CodexAcpServer {
         await this.codexAcpClient.setModelAndEffort(
             sessionState.sessionId,
             ModelId.fromComponents(model, effort).toString(),
+            sessionState.collaborationMode,
         );
         this.applyModelAndEffort(sessionState, model, effort);
     }
@@ -1176,7 +1189,11 @@ export class CodexAcpServer {
         }
         const {model} = ModelId.fromString(sessionState.currentModelId);
         const currentModelId = ModelId.create(model, effort).toString();
-        await this.codexAcpClient.setModelAndEffort(sessionState.sessionId, currentModelId);
+        await this.codexAcpClient.setModelAndEffort(
+            sessionState.sessionId,
+            currentModelId,
+            sessionState.collaborationMode,
+        );
         sessionState.currentModelId = currentModelId;
     }
 
@@ -1212,11 +1229,12 @@ export class CodexAcpServer {
             reasoningEffort = model.defaultReasoningEffort;
         }
 
-        sessionState.availableModels = models;
         await this.codexAcpClient.setModelAndEffort(
             sessionState.sessionId,
             ModelId.fromComponents(model, reasoningEffort).toString(),
+            sessionState.collaborationMode,
         );
+        sessionState.availableModels = models;
         this.applyModelAndEffort(sessionState, model, reasoningEffort);
 
         return {};
@@ -2491,6 +2509,10 @@ export class CodexAcpServer {
     ): Promise<acp.PromptResponse> {
         if (this.providerUpdate !== null) {
             await this.providerUpdate;
+        }
+        const pendingConfigUpdate = this.sessionConfigUpdates.get(params.sessionId);
+        if (pendingConfigUpdate !== undefined) {
+            await pendingConfigUpdate;
         }
         logger.log("Prompt received", {
             sessionId: params.sessionId,

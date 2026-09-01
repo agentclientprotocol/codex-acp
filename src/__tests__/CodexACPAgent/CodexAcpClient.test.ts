@@ -608,6 +608,40 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(threadUnsubscribeSpy).toHaveBeenCalledWith({threadId: "fork-id"});
     });
 
+    it('uses the configured model provider when forking a session', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+            config: {model_provider: "azure"},
+        } as any);
+        const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
+            thread: {id: "fork-id"},
+            model: "gpt-5",
+            modelProvider: "azure",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "threadUnsubscribe").mockResolvedValue({status: "unsubscribed"});
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        await codexAcpClient.forkSession({
+            sessionId: "source-id",
+            cwd: "/workspace",
+        });
+
+        expect(threadForkSpy).toHaveBeenCalledWith(expect.objectContaining({
+            threadId: "source-id",
+            modelProvider: "azure",
+        }));
+    });
+
     it('maps an AIR fork message id to the containing Codex turn', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();

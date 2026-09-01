@@ -1030,12 +1030,17 @@ export class CodexAcpClient {
         });
     }
 
-    async setModelAndEffort(sessionId: string, currentModelId: string): Promise<void> {
+    async setModelAndEffort(
+        sessionId: string,
+        currentModelId: string,
+        collaborationMode: ModeKind,
+    ): Promise<void> {
         const modelId = ModelId.fromString(currentModelId);
         await this.codexClient.threadSettingsUpdate({
             threadId: sessionId,
             model: modelId.model,
             effort: modelId.effort as ReasoningEffort,
+            collaborationMode: createCodexCollaborationMode(collaborationMode, currentModelId),
         });
     }
 
