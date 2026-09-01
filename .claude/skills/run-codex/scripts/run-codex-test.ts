@@ -17,12 +17,19 @@ import {CodexAcpServer} from "../../../../src/CodexAcpServer";
 import type {AgentSideConnection} from "@agentclientprotocol/sdk";
 
 // Parse command line arguments
-function parseArgs(): { prompt: string; cwd: string; output: string; json: boolean } {
+function parseArgs(): {
+    prompt: string;
+    cwd: string;
+    output: string;
+    json: boolean;
+    systemPromptAppend?: string;
+} {
     const args = process.argv.slice(2);
     let prompt = "";
     let cwd = process.cwd();
     let output = "all";
     let json = false;
+    let systemPromptAppend: string | undefined;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -34,6 +41,8 @@ function parseArgs(): { prompt: string; cwd: string; output: string; json: boole
             output = args[++i] || "all";
         } else if (arg === "--json") {
             json = true;
+        } else if (arg === "--system-prompt-append") {
+            systemPromptAppend = args[++i] || "";
         } else if (arg === "--help" || arg === "-h") {
             console.log(`
 Usage: npm run codex-test -- [options]
@@ -43,6 +52,8 @@ Options:
   -c, --cwd <path>      Working directory for the session (default: current dir)
   -o, --output <type>   Output type: all, codex, acp, summary (default: all)
   --json                Output events as JSON
+  --system-prompt-append <text>
+                        Append session-scoped developer instructions
   -h, --help            Show this help message
 
 Examples:
@@ -59,7 +70,7 @@ Examples:
         process.exit(1);
     }
 
-    return { prompt, cwd, output, json };
+    return { prompt, cwd, output, json, systemPromptAppend };
 }
 
 type MethodCallEvent = { method: string; args: unknown[] };
@@ -76,7 +87,7 @@ function createMockAcpConnection(events: MethodCallEvent[]): AgentSideConnection
 }
 
 async function main() {
-    const { prompt, cwd, output, json } = parseArgs();
+    const { prompt, cwd, output, json, systemPromptAppend } = parseArgs();
 
     // Find Codex binary
     const pathToCodex = path.resolve(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "codex.cmd" : "codex");
@@ -91,6 +102,7 @@ async function main() {
     console.log(`Prompt: ${prompt}`);
     console.log(`CWD: ${cwd}`);
     console.log(`Output: ${output}`);
+    console.log(`System prompt append: ${systemPromptAppend ? "configured" : "none"}`);
     console.log("=".repeat(60));
     console.log("");
 
@@ -145,7 +157,13 @@ async function main() {
 
         // Create session
         console.log("\n--- Creating Session ---\n");
-        const sessionResponse = await codexAcpAgent.newSession({ cwd, mcpServers: [] });
+        const sessionResponse = await codexAcpAgent.newSession({
+            cwd,
+            mcpServers: [],
+            ...(systemPromptAppend && {
+                _meta: {systemPrompt: {append: systemPromptAppend}},
+            }),
+        });
         console.log(`Session ID: ${sessionResponse.sessionId}`);
         console.log(`Model: ${sessionResponse.models?.currentModelId}`);
 

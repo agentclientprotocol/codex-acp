@@ -64,6 +64,11 @@ describe('CodexACPAgent - initialize', () => {
             },
             authMethods: getCodexAuthMethods(),
             _meta: {
+                systemPrompt: {
+                    version: 1,
+                    append: true,
+                    maxBytes: 262144,
+                },
                 steering: {
                     supported: true,
                 },

@@ -14,6 +14,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Shell command, file change, [permission request](docs/permission-extension.md), MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, token usage, and review events.
 - [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
 - Session-scoped long-running goals through the provider-neutral [goal extension](docs/goal-extension.md).
+- Client-provided, session-scoped instructions through the [system prompt append extension](docs/system-prompt-extension.md), mapped to Codex developer instructions without replacing its base prompt.
 - A per-turn [agent file-change report](docs/agent-file-change-report.md) after capability negotiation.
 - Client-provided MCP servers over command-based stdio config and HTTP transport.
 - Slash commands: `/status`, `/mcp`, `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.

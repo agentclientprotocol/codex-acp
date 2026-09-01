@@ -6,6 +6,7 @@ import type {ModeKind} from "./app-server/ModeKind";
 import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model, ThreadForkParams} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
+import {readSystemPromptAppend} from "./SystemPrompt";
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
@@ -26,6 +27,7 @@ export async function forkSession(
     additionalDirectories: string[],
     dependencies: SessionForkDependencies,
 ): Promise<SessionMetadata> {
+    const developerInstructions = readSystemPromptAppend(request._meta);
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
     const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
     const response = await dependencies.codexClient.threadFork({
@@ -36,6 +38,7 @@ export async function forkSession(
         ),
         cwd: request.cwd,
         ...(lastTurnId !== undefined && {lastTurnId}),
+        ...(developerInstructions !== undefined && {developerInstructions}),
         modelProvider: await dependencies.getResumeModelProvider(),
         threadId: request.sessionId,
     });
