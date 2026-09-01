@@ -104,4 +104,42 @@ describe("PromptResponse turn configuration receipt", () => {
             },
         });
     });
+
+    it("marks command-started turns as having no explicit requested configuration", async () => {
+        const agent = fixture.getCodexAcpAgent();
+        const appServer = fixture.getCodexAppServerClient();
+        const reviewThreadId = "review-thread-id";
+        const turn = {id: "review-turn-id", items: [], status: "inProgress" as const, error: null};
+
+        vi.spyOn(appServer, "reviewStart").mockResolvedValue({
+            reviewThreadId,
+            turn,
+        } as never);
+        vi.spyOn(appServer, "awaitTurnCompleted").mockResolvedValue({
+            threadId: reviewThreadId,
+            turn: {...turn, status: "completed" as const},
+        } as never);
+        vi.spyOn(agent, "getSessionState").mockReturnValue(createTestSessionState({
+            sessionId,
+            currentModelId: "gpt-5.6-terra[medium]",
+        }));
+
+        const response = await agent.prompt({
+            sessionId,
+            prompt: [{type: "text", text: "/review"}],
+        });
+
+        expect(response._meta?.["codex"]).toEqual({
+            turnConfiguration: {
+                version: 1,
+                turns: [{
+                    threadId: reviewThreadId,
+                    turnId: turn.id,
+                    requested: null,
+                    threadSettings: null,
+                    modelReroutes: [],
+                }],
+            },
+        });
+    });
 });
