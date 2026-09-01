@@ -504,7 +504,7 @@ export class CodexAcpClient {
             refreshSkills: (cwd, directories) => this.refreshSkills(cwd, directories),
             createSessionConfig: (cwd, directories, mcpServers) =>
                 this.createSessionConfig(cwd, directories, mcpServers),
-            getResumeModelProvider: () => this.getResumeModelProvider(),
+            getResumeModelProviderParams: () => this.resumeModelProviderParams(),
             fetchAvailableModels: () => this.fetchAvailableModels(),
             createCurrentModelId: (models, model, reasoningEffort) =>
                 this.createModelId(models, model, reasoningEffort).toString(),
