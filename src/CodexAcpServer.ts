@@ -2520,7 +2520,14 @@ export class CodexAcpServer {
         }
         const pendingConfigUpdate = this.sessionConfigUpdates.get(params.sessionId);
         if (pendingConfigUpdate !== undefined) {
-            await pendingConfigUpdate;
+            try {
+                await pendingConfigUpdate;
+            } catch {
+                throw RequestError.invalidRequest(
+                    undefined,
+                    "Prompt blocked because a pending session configuration update failed",
+                );
+            }
         }
         logger.log("Prompt received", {
             sessionId: params.sessionId,
@@ -2635,11 +2642,14 @@ export class CodexAcpServer {
                     onTurnStarted?.();
                 },
                 setConfigOption: async (configId, value) => {
-                    await this.applySessionConfigOption(sessionState, {
-                        sessionId: sessionState.sessionId,
-                        configId,
-                        value,
-                    });
+                    await this.runSessionConfigUpdate(
+                        sessionState.sessionId,
+                        () => this.applySessionConfigOption(sessionState, {
+                            sessionId: sessionState.sessionId,
+                            configId,
+                            value,
+                        }),
+                    );
                     const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
                     await session.update({
                         sessionUpdate: "config_option_update",
@@ -2814,7 +2824,10 @@ export class CodexAcpServer {
                     return cancelledPromptResponse();
                 }
                 if (approved && !this.promptShouldStop(params.sessionId, activePrompt)) {
-                    await this.applyCollaborationModeChange(sessionState, DEFAULT_COLLABORATION_MODE);
+                    await this.runSessionConfigUpdate(
+                        sessionState.sessionId,
+                        () => this.applyCollaborationModeChange(sessionState, DEFAULT_COLLABORATION_MODE),
+                    );
                     const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
                     await session.update({
                         sessionUpdate: "config_option_update",
