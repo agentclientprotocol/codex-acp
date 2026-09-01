@@ -499,7 +499,9 @@ export class CodexEventHandler {
                 return this.createMcpToolProgressEvent(notification.params);
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
-                return null;
+                return this.createCodexSessionInfoUpdate({
+                    rateLimits: notification.params.rateLimits,
+                });
             case "configWarning":
                 return await this.createConfigWarningEvent(notification.params);
             case "warning":
