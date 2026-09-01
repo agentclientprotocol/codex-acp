@@ -15,6 +15,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
 - Session-scoped long-running goals through the provider-neutral [goal extension](docs/goal-extension.md).
 - A per-turn [agent file-change report](docs/agent-file-change-report.md) after capability negotiation.
+- [Turn configuration receipts](docs/turn-configuration-receipt.md) in prompt response metadata.
 - Client-provided MCP servers over command-based stdio config and HTTP transport.
 - Slash commands: `/status`, `/mcp`, `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.
 
