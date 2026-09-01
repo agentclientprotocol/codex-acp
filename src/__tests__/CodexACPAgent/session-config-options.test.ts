@@ -429,6 +429,35 @@ describe("Session config options", () => {
         expect(sendPrompt.mock.calls[0]![2].toString()).toBe("slow-model[medium]");
     });
 
+    it("waits for an in-flight legacy model update before starting a pipelined prompt", async () => {
+        const {fast, slow} = buildModels();
+        const {codexAcpAgent, codexAcpClient, update} = await createSession("fast-model[medium]", [fast]);
+        vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue([fast, slow]);
+        let releaseUpdate!: () => void;
+        update.mockImplementationOnce(() => new Promise<void>(resolve => {
+            releaseUpdate = resolve;
+        }));
+        const sendPrompt = vi.spyOn(codexAcpClient, "sendPrompt").mockResolvedValue(null);
+
+        const configPromise = codexAcpAgent.unstable_setSessionModel({
+            sessionId: "session-id",
+            modelId: "slow-model[medium]",
+        });
+        await vi.waitFor(() => expect(update).toHaveBeenCalled());
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "use the legacy-configured model"}],
+        });
+
+        await Promise.resolve();
+        expect(sendPrompt).not.toHaveBeenCalled();
+        releaseUpdate();
+        await configPromise;
+        await promptPromise;
+
+        expect(sendPrompt.mock.calls[0]![2].toString()).toBe("slow-model[medium]");
+    });
+
     it("changes the model through the legacy session/set_model extMethod", async () => {
         const {fast, slow} = buildModels();
         const {codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);

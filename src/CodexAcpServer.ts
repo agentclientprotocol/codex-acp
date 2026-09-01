@@ -255,7 +255,7 @@ export class CodexAcpServer {
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
     private readonly goalControlGenerations: Map<string, number>;
-    private readonly sessionConfigUpdates: Map<string, Promise<void>>;
+    private readonly sessionConfigUpdates: Map<string, Promise<unknown>>;
     private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
     private readonly codexProcessState: CodexProcessState | null;
     private initializeRequest: acp.InitializeRequest | null = null;
@@ -1087,17 +1087,10 @@ export class CodexAcpServer {
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
-        const run = () => this.applySessionConfigOption(sessionState, params);
-        const previous = this.sessionConfigUpdates.get(params.sessionId);
-        const update = previous ? previous.then(run, run) : run();
-        this.sessionConfigUpdates.set(params.sessionId, update);
-        try {
-            await update;
-        } finally {
-            if (this.sessionConfigUpdates.get(params.sessionId) === update) {
-                this.sessionConfigUpdates.delete(params.sessionId);
-            }
-        }
+        await this.runSessionConfigUpdate(
+            params.sessionId,
+            () => this.applySessionConfigOption(sessionState, params),
+        );
 
         return {
             configOptions: this.createSessionConfigOptions(sessionState),
@@ -1123,6 +1116,19 @@ export class CodexAcpServer {
                 break;
             default:
                 throw RequestError.invalidParams();
+        }
+    }
+
+    private async runSessionConfigUpdate<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+        const previous = this.sessionConfigUpdates.get(sessionId);
+        const update = previous ? previous.then(operation, operation) : operation();
+        this.sessionConfigUpdates.set(sessionId, update);
+        try {
+            return await update;
+        } finally {
+            if (this.sessionConfigUpdates.get(sessionId) === update) {
+                this.sessionConfigUpdates.delete(sessionId);
+            }
         }
     }
 
@@ -1205,39 +1211,41 @@ export class CodexAcpServer {
     }
 
     async unstable_setSessionModel(params: LegacySetSessionModelRequest): Promise<LegacySetSessionModelResponse> {
-        logger.log("Set session model requested", {
-            sessionId: params.sessionId,
-            modelId: params.modelId
-        });
-        const sessionState = this.sessions.get(params.sessionId);
-        if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
+        return await this.runSessionConfigUpdate(params.sessionId, async () => {
+            logger.log("Set session model requested", {
+                sessionId: params.sessionId,
+                modelId: params.modelId
+            });
+            const sessionState = this.sessions.get(params.sessionId);
+            if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
-        const {model: requestedModelName, effort: requestedEffort} = ModelId.fromString(params.modelId);
+            const {model: requestedModelName, effort: requestedEffort} = ModelId.fromString(params.modelId);
 
-        const models = await this.codexAcpClient.fetchAvailableModels();
-        const model = models.find(m => m.id === requestedModelName);
-        if (!model) throw new Error(`Unknown model ${params.modelId}`);
+            const models = await this.codexAcpClient.fetchAvailableModels();
+            const model = models.find(m => m.id === requestedModelName);
+            if (!model) throw new Error(`Unknown model ${params.modelId}`);
 
-        let reasoningEffort: ReasoningEffort;
-        if (requestedEffort) {
-            const matchedEffort = findSupportedEffort(model.supportedReasoningEfforts, requestedEffort);
-            if (!matchedEffort) {
-                throw new Error(`Unsupported reasoning effort ${requestedEffort} for model ${requestedModelName}`);
+            let reasoningEffort: ReasoningEffort;
+            if (requestedEffort) {
+                const matchedEffort = findSupportedEffort(model.supportedReasoningEfforts, requestedEffort);
+                if (!matchedEffort) {
+                    throw new Error(`Unsupported reasoning effort ${requestedEffort} for model ${requestedModelName}`);
+                }
+                reasoningEffort = matchedEffort;
+            } else {
+                reasoningEffort = model.defaultReasoningEffort;
             }
-            reasoningEffort = matchedEffort;
-        } else {
-            reasoningEffort = model.defaultReasoningEffort;
-        }
 
-        await this.codexAcpClient.setModelAndEffort(
-            sessionState.sessionId,
-            ModelId.fromComponents(model, reasoningEffort).toString(),
-            sessionState.collaborationMode,
-        );
-        sessionState.availableModels = models;
-        this.applyModelAndEffort(sessionState, model, reasoningEffort);
+            await this.codexAcpClient.setModelAndEffort(
+                sessionState.sessionId,
+                ModelId.fromComponents(model, reasoningEffort).toString(),
+                sessionState.collaborationMode,
+            );
+            sessionState.availableModels = models;
+            this.applyModelAndEffort(sessionState, model, reasoningEffort);
 
-        return {};
+            return {};
+        });
     }
 
     private parseLegacySetSessionModelParams(params: Record<string, unknown>): LegacySetSessionModelRequest {
