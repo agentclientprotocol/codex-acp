@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.7.0...v1.8.0) (2026-09-01)
+
+
+### Features
+
+* AI session title generation and /rename command ([#392](https://github.com/agentclientprotocol/codex-acp/issues/392)) ([4823131](https://github.com/agentclientprotocol/codex-acp/commit/4823131475b3b0d996ccc305e49dcf9fdaa6ee52))
+* support ACP session forks ([#435](https://github.com/agentclientprotocol/codex-acp/issues/435)) ([69ca755](https://github.com/agentclientprotocol/codex-acp/commit/69ca755d9878238aecf0737c0e4568b3bab37be2))
+
+
+### Bug Fixes
+
+* **LLM-25012:** OAuth2 Authentication for MCP Server Connections ([#452](https://github.com/agentclientprotocol/codex-acp/issues/452)) ([06765be](https://github.com/agentclientprotocol/codex-acp/commit/06765be12a7303048722946ece6c2a3b1695e28d))
+* update codex to 0.152.0 ([#455](https://github.com/agentclientprotocol/codex-acp/issues/455)) ([d70e380](https://github.com/agentclientprotocol/codex-acp/commit/d70e3809e7beed8a1c51c59ee206f53d8d9df690))
+
 ## [1.7.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.6.2...v1.7.0) (2026-08-27)
 
 
