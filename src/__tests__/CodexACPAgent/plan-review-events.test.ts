@@ -57,6 +57,7 @@ describe("CodexACPAgent - plan review", () => {
             emitCompletionNotification?: boolean;
             implementationStart?: Promise<TurnStartResponse>;
             permissionResponse?: acp.RequestPermissionResponse | Promise<acp.RequestPermissionResponse>;
+            initialModelId?: string;
         } = {},
     ) {
         // The plan review of these tests is the AIR shape.
@@ -76,6 +77,7 @@ describe("CodexACPAgent - plan review", () => {
             sessionId,
             collaborationMode: PLAN_COLLABORATION_MODE,
             clientCapabilities: ClientCapabilities.from(clientCapabilities),
+            ...(options.initialModelId === undefined ? {} : {currentModelId: options.initialModelId}),
         });
         vi.spyOn(fixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
 
@@ -229,6 +231,49 @@ describe("CodexACPAgent - plan review", () => {
         });
         await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
         expect(turnStart).toHaveBeenCalledTimes(2);
+    });
+
+    it("receipts the captured model when settings change during plan approval", async () => {
+        const permission = deferred<acp.RequestPermissionResponse>();
+        const {promptPromise, sessionState, turnStart, implementationTurn} = await startPlanPrompt(
+            "implement_plan",
+            {
+                initialModelId: "gpt-5.6-sol[xhigh]",
+                permissionResponse: permission.promise,
+            },
+        );
+
+        sessionState.currentModelId = "gpt-5.6-terra[medium]";
+        permission.resolve({outcome: {outcome: "selected", optionId: "implement_plan"}});
+        await vi.waitFor(() => expect(turnStart).toHaveBeenCalledTimes(2));
+        expect(turnStart.mock.calls[1]![0]).toMatchObject({
+            model: "gpt-5.6-sol",
+            effort: "xhigh",
+        });
+
+        implementationTurn.resolve({
+            threadId: sessionId,
+            turn: {
+                id: "implementation-turn",
+                items: [],
+                itemsView: "notLoaded",
+                status: "completed",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            },
+        });
+        const response = await promptPromise;
+
+        expect(response._meta?.["codex"]).toMatchObject({
+            turnConfiguration: {
+                turns: [
+                    {turnId: "plan-turn", requested: {model: "gpt-5.6-sol", effort: "xhigh"}},
+                    {turnId: "implementation-turn", requested: {model: "gpt-5.6-sol", effort: "xhigh"}},
+                ],
+            },
+        });
     });
 
     it.each([
