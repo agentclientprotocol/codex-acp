@@ -1973,6 +1973,7 @@ export class CodexAcpServer {
             case "userMessage":
                 return this.createUserMessageUpdates(item);
             case "hookPrompt":
+            case "functionCallOutput":
             case "sleep":
                 return [];
             case "subAgentActivity":

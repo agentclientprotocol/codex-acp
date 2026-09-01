@@ -27,6 +27,7 @@ const configuredAuthFailureCases: Array<{
             message: "API key was rejected",
             codexErrorInfo: "unauthorized",
             additionalDetails: null,
+            misalignment: null,
         },
         expectedData: {
             message: "API key was rejected",
@@ -39,6 +40,7 @@ const configuredAuthFailureCases: Array<{
             message: "Usage limits were exceeded",
             codexErrorInfo: "usageLimitExceeded",
             additionalDetails: null,
+            misalignment: null,
         },
         expectedData: {
             message: "Usage limits were exceeded",
@@ -55,6 +57,7 @@ const configuredAuthFailureCases: Array<{
                 },
             },
             additionalDetails: "HTTP status 401",
+            misalignment: null,
         },
         expectedData: {
             message: "HTTP status 401",
@@ -81,6 +84,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "Codex is temporarily overloaded.",
             codexErrorInfo: "serverOverloaded",
             additionalDetails: "secret raw details",
+            misalignment: null,
         }, false, typedFailureCapabilities);
 
         expect(result).toMatchObject({
@@ -118,6 +122,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "Codex could not complete the previous turn.",
             codexErrorInfo: "serverOverloaded",
             additionalDetails: "secret foreign-turn details",
+            misalignment: null,
         }, false, typedFailureCapabilities, "foreign-turn");
 
         expect(result).toMatchObject({stopReason: "end_turn"});
@@ -140,6 +145,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "a delayed previous turn failure",
             codexErrorInfo: "serverOverloaded",
             additionalDetails: null,
+            misalignment: null,
         }, false, typedFailureCapabilities, "foreign-turn", true);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
@@ -161,6 +167,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "current turn failed early",
             codexErrorInfo: "serverOverloaded",
             additionalDetails: null,
+            misalignment: null,
         }, false, typedFailureCapabilities, "turn-id", true);
 
         expect(result).toMatchObject({
@@ -182,6 +189,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "Reconnecting... 1/5",
             codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
             additionalDetails: "secret retry details",
+            misalignment: null,
         }, true, typedFailureCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
@@ -214,6 +222,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "Rate limit reached. Please try again later.",
             codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: 429}},
             additionalDetails: "secret rate-limit details",
+            misalignment: null,
         }, true, typedFailureCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
@@ -247,6 +256,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "Authentication required",
             codexErrorInfo: "unauthorized",
             additionalDetails: "secret authentication details",
+            misalignment: null,
         }, false, typedFailureCapabilities);
 
         expect(result).toMatchObject({
@@ -265,6 +275,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "Codex is temporarily overloaded.",
             codexErrorInfo: "serverOverloaded",
             additionalDetails: null,
+            misalignment: null,
         }, false, {_meta: {jetbrains: {air: {version: 2, capabilities: ["sessionFailure"]}}}});
 
         expect(result).toMatchObject({
@@ -282,6 +293,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "legacy fallback",
             codexErrorInfo: "serverOverloaded",
             additionalDetails: null,
+            misalignment: null,
         }, false, {_meta: {jetbrains: {air: {version, capabilities: ["sessionFailure"]}}}} as acp.ClientCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
@@ -315,6 +327,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "raw error",
             codexErrorInfo,
             additionalDetails: null,
+            misalignment: null,
         }, false, typedFailureCapabilities);
 
         expect(result).toMatchObject({
@@ -354,11 +367,13 @@ describe("CodexEventHandler - auth error events", () => {
             message: "first failure",
             codexErrorInfo: "serverOverloaded",
             additionalDetails: null,
+            misalignment: null,
         }, false, typedFailureCapabilities, "turn-1", false, "turn-1");
         const second = await runPromptWithError(sessionState, {
             message: "second failure",
             codexErrorInfo: "internalServerError",
             additionalDetails: null,
+            misalignment: null,
         }, false, typedFailureCapabilities, "turn-2", false, "turn-2");
         const recovered = await runSuccessfulPrompt(sessionState, typedFailureCapabilities, "turn-3");
 
@@ -388,6 +403,7 @@ describe("CodexEventHandler - auth error events", () => {
                 message: "Codex is temporarily overloaded.",
                 codexErrorInfo: "serverOverloaded",
                 additionalDetails: "secret completion details",
+                misalignment: null,
             }),
         );
 
@@ -439,6 +455,7 @@ describe("CodexEventHandler - auth error events", () => {
                     message: "Codex is temporarily overloaded.",
                     codexErrorInfo: "serverOverloaded",
                     additionalDetails: "secret late details",
+                    misalignment: null,
                 },
             },
         });
@@ -502,6 +519,7 @@ describe("CodexEventHandler - auth error events", () => {
                     message: "Reconnecting... 1/5",
                     codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
                     additionalDetails: "secret retry detail",
+                    misalignment: null,
                 },
             },
         });
@@ -562,6 +580,7 @@ describe("CodexEventHandler - auth error events", () => {
                         message: "Codex is temporarily overloaded.",
                         codexErrorInfo: "serverOverloaded",
                         additionalDetails: "secret slash command detail",
+                        misalignment: null,
                     },
                 },
             });
@@ -620,6 +639,7 @@ describe("CodexEventHandler - auth error events", () => {
                         message: "provider failed",
                         codexErrorInfo: "serverOverloaded",
                         additionalDetails: null,
+                        misalignment: null,
                     },
                 },
             });
@@ -643,6 +663,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "You have no usage left.",
             codexErrorInfo: "usageLimitExceeded",
             additionalDetails: null,
+            misalignment: null,
         }, false, typedFailureCapabilities);
 
         expect(result).toMatchObject({
@@ -673,6 +694,7 @@ describe("CodexEventHandler - auth error events", () => {
                     message,
                     codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
                     additionalDetails: null,
+                    misalignment: null,
                 },
             },
         });
@@ -730,6 +752,7 @@ describe("CodexEventHandler - auth error events", () => {
                 },
             },
             additionalDetails: "HTTP status 401",
+            misalignment: null,
         }, true);
 
         expect(response).toMatchObject({
@@ -747,6 +770,7 @@ describe("CodexEventHandler - auth error events", () => {
                             },
                         },
                         additionalDetails: "HTTP status 401",
+                        misalignment: null,
                         turnId: "turn-id",
                         willRetry: true,
                     },
@@ -764,6 +788,7 @@ describe("CodexEventHandler - auth error events", () => {
             message: "Authentication is required",
             codexErrorInfo: "unauthorized",
             additionalDetails: null,
+            misalignment: null,
         });
 
         expect(error).toMatchObject({
