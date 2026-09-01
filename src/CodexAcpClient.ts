@@ -50,6 +50,7 @@ import type {
     ThreadGoal,
     ThreadGoalStatus,
     ThreadResumeParams,
+    ThreadSettings,
     ThreadSourceKind,
     ThreadItem,
     TurnCompletedNotification,
@@ -1141,6 +1142,10 @@ export class CodexAcpClient {
             threadId: sessionId,
             collaborationMode: createCodexCollaborationMode(mode, currentModelId),
         });
+    }
+
+    getThreadSettings(sessionId: string): ThreadSettings | undefined {
+        return this.codexClient.getThreadSettings(sessionId);
     }
 
     private getCollaborationMode(sessionId: string): ModeKind {
