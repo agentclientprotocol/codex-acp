@@ -7,6 +7,7 @@ import {
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     clientSupportsAirCapability,
 } from "../AirExtension";
+import type {AsyncTaskUpdate} from "../async-tasks/AcpAsyncTasks";
 
 /** Temporary typed surface for agentclientprotocol/agent-client-protocol#1992. */
 export type SubagentSessionCapabilities = {
@@ -36,7 +37,8 @@ export type SubagentStateUpdate = {
 export type AcpSessionUpdate =
     | SessionNotification["update"]
     | SubagentSpawnedUpdate
-    | SubagentStateUpdate;
+    | SubagentStateUpdate
+    | AsyncTaskUpdate;
 
 export type AcpSessionNotification = Omit<SessionNotification, "update"> & {
     update: AcpSessionUpdate;

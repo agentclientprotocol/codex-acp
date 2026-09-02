@@ -111,6 +111,7 @@ import {TitleGenerator} from "./TitleGenerator";
 import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
+    AIR_ASYNC_TASKS_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
@@ -120,6 +121,8 @@ import {
     clientSupportsAirCapability,
     JETBRAINS_META_KEY,
 } from "./AirExtension";
+import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
 import {
     type AgentFileChangeReport,
     type AgentFileChangeReportRequest,
@@ -159,6 +162,7 @@ export interface SessionState {
     sessionFailure?: SessionFailure;
     titleGen?: TitleGenerator;
     subagents: CodexSubagentEventRouter;
+    asyncTasks: CodexBackgroundTerminalTasks;
 }
 
 export type SessionFailureCategory =
@@ -362,6 +366,7 @@ export class CodexAcpServer {
                             AIR_SESSION_FAILURE_KEY,
                             AIR_AGENT_FILE_CHANGE_REPORT_KEY,
                             AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
+                            AIR_ASYNC_TASKS_KEY,
                         ],
                     },
                 },
@@ -385,6 +390,15 @@ export class CodexAcpServer {
                 return await this.unstable_setSessionModel(this.parseLegacySetSessionModelParams(methodRequest.params));
             case SESSION_STEERING_METHOD:
                 return await this.executeOrQueueSteeringRequest(this.parseSessionSteerParams(methodRequest.params));
+            case ASYNC_TASK_STOP_METHOD: {
+                const sessionState = this.sessions.get(methodRequest.params.sessionId);
+                if (!sessionState) return {stopped: false};
+                return {
+                    stopped: await this.runWithProcessCheck(
+                        () => sessionState.asyncTasks.stop(methodRequest.params.asyncTaskId),
+                    ),
+                };
+            }
             case GOAL_CONTROL_METHOD:
             case LEGACY_GOAL_CONTROL_METHOD: {
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
@@ -646,6 +660,7 @@ export class CodexAcpServer {
                 clientSupportsSubagents(this.clientCapabilities),
                 new ACPSessionConnection(this.connection, sessionId),
             ),
+            asyncTasks: this.createAsyncTasks(sessionId),
         };
         sessionState.titleGen = new TitleGenerator(
             this.codexAcpClient.appServerClient,
@@ -670,6 +685,7 @@ export class CodexAcpServer {
         }
         if (operation === "resume") {
             this.publishCurrentGoalAsync(sessionState, sessionGeneration);
+            this.publishAsyncTasksAsync(sessionState, sessionGeneration);
         }
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState = sessionState.agentMode.toSessionModeState();
@@ -700,6 +716,15 @@ export class CodexAcpServer {
             return true;
         }
         return a === b;
+    }
+
+    private createAsyncTasks(sessionId: string): CodexBackgroundTerminalTasks {
+        return new CodexBackgroundTerminalTasks(
+            clientSupportsAirCapability(this.clientCapabilities, AIR_ASYNC_TASKS_KEY),
+            sessionId,
+            this.codexAcpClient.appServerClient,
+            new ACPSessionConnection(this.connection, sessionId),
+        );
     }
 
     private getAuthProviderForAuthenticateRequest(request: acp.AuthenticateRequest): string | null {
@@ -802,6 +827,7 @@ export class CodexAcpServer {
         try {
             if (sessionState) {
                 await this.interruptSessionTurn(sessionState, "Close", true);
+                sessionState.asyncTasks.clear();
             } else {
                 logger.log("Close request received for unknown local session", {sessionId: params.sessionId});
             }
@@ -1535,6 +1561,15 @@ export class CodexAcpServer {
         void this.publishCurrentGoalBestEffort(sessionState, sessionGeneration, true);
     }
 
+    private publishAsyncTasksAsync(sessionState: SessionState, sessionGeneration: number): void {
+        if (!this.sessionPublishIsCurrent(sessionState, sessionGeneration)) return;
+        void sessionState.asyncTasks.sync().catch((error) => {
+            if (this.sessionPublishIsCurrent(sessionState, sessionGeneration)) {
+                logger.error(`Failed to list background terminals for ${sessionState.sessionId}`, error);
+            }
+        });
+    }
+
     private async publishCurrentGoalBestEffort(
         sessionState: SessionState,
         sessionGeneration: number,
@@ -1697,6 +1732,7 @@ export class CodexAcpServer {
                 clientSupportsSubagents(this.clientCapabilities),
                 new ACPSessionConnection(this.connection, sessionId),
             ),
+            asyncTasks: this.createAsyncTasks(sessionId),
         };
         sessionState.titleGen = new TitleGenerator(
             this.codexAcpClient.appServerClient,
@@ -1706,6 +1742,7 @@ export class CodexAcpServer {
         );
         this.sessions.set(sessionId, sessionState);
         subscribed = false;
+        this.publishAsyncTasksAsync(sessionState, requestedSessionGeneration);
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.pendingMcpStartupSessions.set(sessionId, {
@@ -2554,6 +2591,26 @@ export class CodexAcpServer {
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
                     await observeInteraction(event);
+                    const startedCommand = event.method === "item/started"
+                        && event.params.threadId === sessionState.sessionId
+                        && event.params.item.type === "commandExecution"
+                        ? event.params.item
+                        : null;
+                    if (startedCommand !== null) {
+                        sessionState.asyncTasks.observeCommandStarted(startedCommand);
+                    }
+                    if (event.method === "item/completed"
+                        && event.params.threadId === sessionState.sessionId
+                        && event.params.item.type === "commandExecution") {
+                        await sessionState.asyncTasks.observeCommandCompleted(event.params.item);
+                    }
+                    if ((event.method === "item/started" && event.params.threadId === sessionState.sessionId && startedCommand === null)
+                        || (event.method === "turn/completed" && event.params.threadId === sessionState.sessionId)) {
+                        this.publishAsyncTasksAsync(
+                            sessionState,
+                            this.getSessionGeneration(sessionState.sessionId),
+                        );
+                    }
                     if (!promptNotificationsActive) {
                         await promptEventHandler.handleSessionScopedNotification(event);
                         return;

@@ -81,6 +81,13 @@ import type {
     PermissionsRequestApprovalResponse,
     ItemCompletedNotification,
 } from "./app-server/v2";
+import type {
+    ThreadBackgroundTerminalsRequest,
+    ThreadBackgroundTerminalsTerminateParams,
+    ThreadBackgroundTerminalsTerminateResponse,
+    ThreadBackgroundTerminalsListParams,
+    ThreadBackgroundTerminalsListResponse,
+} from "./async-tasks/BackgroundTerminalApi";
 
 export interface ApprovalHandler {
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
@@ -580,6 +587,14 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/compact/start", params: params });
     }
 
+    async threadBackgroundTerminalsList(params: ThreadBackgroundTerminalsListParams): Promise<ThreadBackgroundTerminalsListResponse> {
+        return await this.sendRequest({method: "thread/backgroundTerminals/list", params});
+    }
+
+    async threadBackgroundTerminalsTerminate(params: ThreadBackgroundTerminalsTerminateParams): Promise<ThreadBackgroundTerminalsTerminateResponse> {
+        return await this.sendRequest({method: "thread/backgroundTerminals/terminate", params});
+    }
+
     async threadGoalSet(params: ThreadGoalSetParams): Promise<ThreadGoalSetResponse> {
         return await this.sendRequest({ method: "thread/goal/set", params: params });
     }
@@ -1016,7 +1031,7 @@ export type CompactionCompletedNotification =
     | { method: "thread/compacted", params: Extract<ServerNotification, { method: "thread/compacted" }>["params"] }
     | { method: "item/completed", params: ItemCompletedNotification & { item: Extract<ItemCompletedNotification["item"], { type: "contextCompaction" }> } };
 
-type CodexRequest = DistributiveOmit<ClientRequest, "id">
+type CodexRequest = DistributiveOmit<ClientRequest, "id"> | ThreadBackgroundTerminalsRequest
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>

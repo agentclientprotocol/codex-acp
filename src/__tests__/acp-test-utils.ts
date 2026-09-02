@@ -15,6 +15,7 @@ import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
+import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTerminalTasks";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -412,6 +413,12 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         subagents: new CodexSubagentEventRouter(
             sessionId,
             false,
+            new ACPSessionConnection({notify: vi.fn(), request: vi.fn()} as AcpClientConnection, sessionId),
+        ),
+        asyncTasks: new CodexBackgroundTerminalTasks(
+            false,
+            sessionId,
+            {} as CodexAppServerClient,
             new ACPSessionConnection({notify: vi.fn(), request: vi.fn()} as AcpClientConnection, sessionId),
         ),
         ...overrides,

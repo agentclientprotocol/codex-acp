@@ -16,6 +16,7 @@ import {
     GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
+import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -43,6 +44,11 @@ const goalControlParamsParser = z.discriminatedUnion("action", [
         action: z.enum(["pause", "resume", "clear"]),
     }).passthrough(),
 ]);
+
+const asyncTaskStopParamsParser = z.object({
+    sessionId: z.string().trim().min(1),
+    asyncTaskId: z.string().trim().min(1),
+}).passthrough();
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
@@ -161,6 +167,7 @@ function startAcpServer() {
         .onRequest("authentication/logout", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/logout", ctx.params))
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
+        .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .connect(acpJsonStream);
 }
