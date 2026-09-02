@@ -1292,12 +1292,16 @@ function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
                 return {type: "text", text: `${link}\n${context}`, text_elements: []};
             }
             case "audio":
-                return null;
+                return {type: "audio", url: audioDataUrl(block)};
         }
     }).filter((block): block is UserInput => block !== null);
 }
 
 function imageDataUrl(block: acp.ContentBlock & { type: "image" }): string {
+    return `data:${block.mimeType};base64,${block.data}`;
+}
+
+function audioDataUrl(block: acp.ContentBlock & { type: "audio" }): string {
     return `data:${block.mimeType};base64,${block.data}`;
 }
 
