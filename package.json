@@ -37,6 +37,7 @@
     "example:steering": "node --import tsx examples/steering.ts",
     "example:steering:multistep": "node --import tsx examples/steering.ts",
     "generate-types": "./node_modules/.bin/codex app-server generate-ts --out src/app-server",
+    "check:generated-types": "npm run generate-types && git diff --exit-code -- src/app-server",
     "release:preflight": "bash scripts/release-preflight.sh",
     "test": "vitest run --no-file-parallelism --retry=2",
     "test:e2e": "npm run build && RUN_E2E_TESTS=true vitest run --no-file-parallelism --retry=2 src/__tests__/CodexACPAgent/e2e",
@@ -56,6 +57,9 @@
   "author": "Agent Client Protocol",
   "license": "Apache-2.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.0",
@@ -68,7 +72,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@openai/codex": "^0.152.0",
+    "@openai/codex": "0.152.0",
     "diff": "^9.0.0",
     "open": "^11.0.1",
     "vscode-jsonrpc": "^9.0.1",

@@ -17,10 +17,12 @@ import type {JsonValue} from "../app-server/serde_json/JsonValue";
 
 type JsonObject = {[key: string]: JsonValue | undefined};
 type McpSession = {transport: StreamableHTTPServerTransport, server: McpServer};
+type FallbackConfigFactory = (cwd: string) => Promise<JsonObject>;
+const MAX_THREAD_CONFIGS = 256;
 
 export class CodexThreadToolsMcpServer {
     private readonly authorization = `Bearer ${randomUUID()}`;
-    private readonly executor: CodexThreadToolExecutor;
+    private executor: CodexThreadToolExecutor | null = null;
     private readonly sessions = new Map<string, McpSession>();
     private readonly threadConfigs = new Map<string, JsonObject>();
     private httpServer: HttpServer | null = null;
@@ -29,21 +31,44 @@ export class CodexThreadToolsMcpServer {
 
     constructor(
         client: CodexAppServerClient,
-        createFallbackConfig: (cwd: string) => Promise<JsonObject> = async () => this.threadToolsConfig(),
+        createFallbackConfig?: FallbackConfigFactory,
     ) {
+        this.reconnect(client, createFallbackConfig);
+    }
+
+    suspend(): void {
+        this.executor = null;
+    }
+
+    reconnect(client: CodexAppServerClient, createFallbackConfig?: FallbackConfigFactory): void {
+        const fallback = createFallbackConfig ?? (() => this.threadToolsConfig());
         this.executor = new CodexThreadToolExecutor(
             client,
-            async (threadId, cwd) => this.threadConfigs.get(threadId) ?? createFallbackConfig(cwd),
+            async (threadId, cwd) => this.getThreadConfig(threadId) ?? fallback(cwd),
             (threadId, config) => this.registerThreadConfig(threadId, config),
         );
     }
 
     registerThreadConfig(threadId: string, config: JsonObject): void {
+        this.threadConfigs.delete(threadId);
         this.threadConfigs.set(threadId, structuredClone(config));
+        while (this.threadConfigs.size > MAX_THREAD_CONFIGS) {
+            const oldestThreadId = this.threadConfigs.keys().next().value;
+            if (oldestThreadId === undefined) break;
+            this.threadConfigs.delete(oldestThreadId);
+        }
     }
 
     forgetThreadConfig(threadId: string): void {
         this.threadConfigs.delete(threadId);
+    }
+
+    private getThreadConfig(threadId: string): JsonObject | undefined {
+        const config = this.threadConfigs.get(threadId);
+        if (config === undefined) return undefined;
+        this.threadConfigs.delete(threadId);
+        this.threadConfigs.set(threadId, config);
+        return config;
     }
 
     async config(): Promise<JsonObject> {
@@ -62,6 +87,7 @@ export class CodexThreadToolsMcpServer {
     }
 
     async close(): Promise<void> {
+        this.suspend();
         await this.startPromise?.catch(() => {});
         const server = this.httpServer;
         this.httpServer = null;
@@ -172,7 +198,9 @@ export class CodexThreadToolsMcpServer {
         server.setRequestHandler(ListToolsRequestSchema, async () => ({tools: THREAD_TOOLS}));
         server.setRequestHandler(CallToolRequestSchema, async (request, context) => {
             try {
-                const value = await this.executor.execute(
+                const executor = this.executor;
+                if (executor === null) throw new Error("Codex is reconnecting. Retry the thread tool call.");
+                const value = await executor.execute(
                     request.params.name,
                     request.params.arguments ?? {},
                     context._meta,

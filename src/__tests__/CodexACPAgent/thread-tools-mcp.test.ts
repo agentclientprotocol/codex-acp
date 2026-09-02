@@ -2,6 +2,7 @@ import {afterEach, describe, expect, it, vi} from "vitest";
 import {Client} from "@modelcontextprotocol/sdk/client/index.js";
 import {StreamableHTTPClientTransport} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type {CodexAppServerClient} from "../../CodexAppServerClient";
+import type {JsonValue} from "../../app-server/serde_json/JsonValue";
 import {THREAD_TOOLS} from "../../thread-tools-mcp/catalog";
 import {CodexThreadToolExecutor} from "../../thread-tools-mcp/executor";
 import {toolResult} from "../../thread-tools-mcp/output";
@@ -44,6 +45,30 @@ describe("Codex thread tools MCP server", () => {
 
         const [config] = await Promise.all([server.config(), server.close()]);
         expect(config["url"]).not.toContain("null");
+    });
+
+    it("keeps the MCP endpoint while the app server reconnects", async () => {
+        const firstThreadList = vi.fn().mockResolvedValue({data: [], nextCursor: null});
+        server = new CodexThreadToolsMcpServer({threadList: firstThreadList} as unknown as CodexAppServerClient);
+        const config = await server.config();
+        const url = new URL(config["url"] as string);
+        const authorization = (config["http_headers"] as {Authorization: string}).Authorization;
+        client = new Client({name: "thread-tools-test", version: "1.0.0"});
+        await client.connect(new StreamableHTTPClientTransport(url, {
+            requestInit: {headers: {Authorization: authorization}},
+        }) as unknown as Parameters<Client["connect"]>[0]);
+
+        server.suspend();
+        const suspended = await client.callTool({name: "list_threads", arguments: {}, _meta: toolMetadata()});
+        expect(suspended).toMatchObject({isError: true});
+
+        const replacementThreadList = vi.fn().mockResolvedValue({data: [], nextCursor: null});
+        server.reconnect({threadList: replacementThreadList} as unknown as CodexAppServerClient);
+        const resumed = await client.callTool({name: "list_threads", arguments: {}, _meta: toolMetadata()});
+
+        expect(resumed.isError).not.toBe(true);
+        expect(replacementThreadList).toHaveBeenCalledOnce();
+        expect((await server.config())["url"]).toBe(config["url"]);
     });
 
     it("reads only the requested turn page", async () => {
@@ -98,7 +123,7 @@ describe("Codex thread tools MCP server", () => {
         const sendRequest = vi.fn()
             .mockResolvedValueOnce(resumeResponse())
             .mockResolvedValueOnce({turn: {id: "delegated-turn"}});
-        const executor = createExecutor({threadRead, connection: {sendRequest}});
+        const executor = createExecutor({threadRead, connection: {sendRequest}}, sourceConfig());
 
         await executor.execute(
             "send_message_to_thread",
@@ -109,13 +134,14 @@ describe("Codex thread tools MCP server", () => {
         expect(sendRequest).toHaveBeenNthCalledWith(1, "thread/resume", expect.objectContaining({
             threadId: "target",
             excludeTurns: true,
+            config: {mcp_servers: {codex_acp: {url: "http://127.0.0.1/mcp"}}},
         }));
         expect(sendRequest).toHaveBeenNthCalledWith(2, "turn/start", expect.objectContaining({
             threadId: "target",
             input: [],
             toolOutput: {
                 name: "send_message_to_thread",
-                namespace: "codex_tui",
+                namespace: "codex_acp",
                 output: "<codex_delegation>\n  <source_thread_id>source</source_thread_id>\n  <input>continue</input>\n</codex_delegation>",
             },
         }));
@@ -130,7 +156,7 @@ describe("Codex thread tools MCP server", () => {
                 backwardsCursor: null,
             })
             .mockResolvedValueOnce({thread: thread({id: "fork"})});
-        const executor = createExecutor({threadRead, connection: {sendRequest}});
+        const executor = createExecutor({threadRead, connection: {sendRequest}}, sourceConfig());
 
         await executor.execute("fork_thread", {threadId: "target"}, {threadId: "source", turnId: "source-turn"});
 
@@ -139,6 +165,7 @@ describe("Codex thread tools MCP server", () => {
             threadId: "target",
             beforeTurnId: "current",
             excludeTurns: true,
+            config: {mcp_servers: {codex_acp: {url: "http://127.0.0.1/mcp"}}},
         }));
     });
 
@@ -169,6 +196,10 @@ describe("Codex thread tools MCP server", () => {
             config: {url: "http://127.0.0.1/mcp"},
         }));
         expect(threadSetName).toHaveBeenCalledWith({threadId: "created", name: "Child"});
+        expect(sendRequest).toHaveBeenNthCalledWith(3, "turn/start", expect.objectContaining({
+            threadId: "created",
+            toolOutput: expect.objectContaining({namespace: "codex_acp"}),
+        }));
     });
 
     it("wakes when the latest task turn has completed", async () => {
@@ -204,6 +235,54 @@ describe("Codex thread tools MCP server", () => {
             turnId: "completed",
             limit: 20,
         }));
+    });
+
+    it("keeps task metadata when the latest turn cannot be read", async () => {
+        const threadRead = vi.fn().mockResolvedValue({
+            thread: thread({id: "target", status: {type: "idle"}, historyMode: "paginated"}),
+        });
+        const sendRequest = vi.fn().mockRejectedValue(new Error("history storage is unavailable"));
+        const executor = createExecutor({threadRead, connection: {sendRequest}});
+
+        const result = await executor.execute(
+            "wait_threads",
+            {targets: [{threadId: "target"}], timeoutMs: 0},
+            toolMetadata(),
+        ) as {errors?: unknown[], polls: Array<{latestTurn: unknown}>, wake: {reason: string}};
+
+        expect(result.errors).toBeUndefined();
+        expect(result.polls).toEqual([expect.objectContaining({latestTurn: null})]);
+        expect(result.wake).toMatchObject({reason: "inactiveStatus"});
+    });
+
+    it("reads only text entries from structured function output", async () => {
+        const delegated = "<codex_delegation>\n  <source_thread_id>source</source_thread_id>\n  <input>continue</input>\n</codex_delegation>";
+        const outputTurn = turn("completed", "completed") as Record<string, unknown>;
+        outputTurn["items"] = [{
+            type: "functionCallOutput",
+            id: "output",
+            name: "send_message_to_thread",
+            namespace: "codex_acp",
+            output: [
+                {type: "input_text", text: delegated},
+                {type: "input_image", imageUrl: "data:image/png;base64,AA=="},
+                {type: "input_text", text: ""},
+            ],
+        }];
+        const threadRead = vi.fn().mockResolvedValue({thread: thread({id: "target", historyMode: "paginated"})});
+        const sendRequest = vi.fn().mockResolvedValue({data: [outputTurn], nextCursor: null, backwardsCursor: null});
+        const executor = createExecutor({threadRead, connection: {sendRequest}});
+
+        const result = await executor.execute(
+            "read_thread",
+            {threadId: "target", includeOutputs: true},
+            toolMetadata(),
+        ) as {turns: Array<{items: Array<{codexDelegation: unknown, output: {text: string}}>}>};
+
+        expect(result.turns[0]!.items[0]).toMatchObject({
+            codexDelegation: {sourceThreadId: "source", input: "continue"},
+            output: {text: delegated},
+        });
     });
 
     it("rejects a delegated prompt that grows beyond the wrapped limit", async () => {
@@ -287,9 +366,21 @@ describe("Codex thread tools MCP server", () => {
     });
 });
 
-function createExecutor(client: object): CodexThreadToolExecutor {
-    return new CodexThreadToolExecutor(client as CodexAppServerClient, async () => ({url: "http://127.0.0.1/mcp"}));
+function createExecutor(client: object, config: JsonObject = {url: "http://127.0.0.1/mcp"}): CodexThreadToolExecutor {
+    return new CodexThreadToolExecutor(client as CodexAppServerClient, async () => config);
 }
+
+function sourceConfig(): JsonObject {
+    return {
+        model_provider: "stale-provider",
+        mcp_servers: {
+            codex_acp: {url: "http://127.0.0.1/mcp"},
+            unrelated: {url: "https://example.com/mcp"},
+        },
+    };
+}
+
+type JsonObject = {[key: string]: JsonValue | undefined};
 
 function toolMetadata(): {threadId: string, turnId: string} {
     return {threadId: "source", turnId: "current"};

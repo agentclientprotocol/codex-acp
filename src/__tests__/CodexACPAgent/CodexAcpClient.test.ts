@@ -89,6 +89,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             "account/login/start",
             "account/read",
             "account/updated",
+            "config/read",
             "thread/start",
             "model/list",
             "thread/started",
@@ -920,7 +921,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const threadStartRequest = threadStartSpy.mock.calls[0]![0];
         expect(threadStartRequest.config?.["mcp_servers"]).toEqual({
-            codex_tui: {
+            codex_acp: {
                 url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/),
                 http_headers: {Authorization: expect.stringMatching(/^Bearer /)},
                 default_tools_approval_mode: "approve",
@@ -940,6 +941,49 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 http_headers: {Authorization: "Bearer token"},
             },
         });
+    });
+
+    it("rejects an ACP MCP server that uses the reserved thread-tools name", async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "listSkills").mockResolvedValue({data: []});
+
+        await expect(codexAcpClient.newSession({
+            cwd: "/workspace",
+            mcpServers: [{name: "codex acp", command: "npx", args: ["server"], env: []}],
+        })).rejects.toThrow("codex_acp is reserved");
+    });
+
+    it("rejects a configured MCP server that owns the thread-tools namespace", async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+            config: {mcp_servers: {codex_acp: {url: "https://example.com/mcp"}}},
+            layers: [],
+        } as any);
+
+        await expect(codexAcpClient.newSession({
+            cwd: "/workspace",
+            mcpServers: [],
+        })).rejects.toThrow("already owns the codex_acp namespace");
+    });
+
+    it("honors managed MCP namespace requirements", async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config: {}, layers: []} as any);
+        vi.spyOn(codexAppServerClient.connection, "sendRequest").mockResolvedValue({
+            requirements: {mcpServers: {approved_server: {}}},
+        });
+
+        await expect(codexAcpClient.newSession({
+            cwd: "/workspace",
+            mcpServers: [],
+        })).rejects.toThrow("Managed MCP requirements do not permit");
     });
 
     it('waits for typed mcp startup status updates and returns terminal states', async () => {

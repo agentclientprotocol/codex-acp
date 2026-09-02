@@ -1,6 +1,6 @@
 import type {Tool} from "@modelcontextprotocol/sdk/types.js";
 
-export const THREAD_TOOLS_MCP_NAME = "codex_tui";
+export const THREAD_TOOLS_MCP_NAME = "codex_acp";
 
 const threadId = {type: "string", minLength: 1} as const;
 const prompt = {

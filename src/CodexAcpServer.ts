@@ -20,6 +20,7 @@ import {
     type UrlElicitationRequester
 } from "./CodexAcpClient";
 import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClient";
+import type {CodexThreadToolsMcpServer} from "./thread-tools-mcp/server";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
@@ -259,6 +260,7 @@ export class CodexAcpServer {
     private readonly codexProcessState: CodexProcessState | null;
     private initializeRequest: acp.InitializeRequest | null = null;
     private providerUpdate: Promise<void> | null = null;
+    private closed = false;
 
     constructor(
         connection: AcpClientConnection,
@@ -367,6 +369,12 @@ export class CodexAcpServer {
                 },
             },
         };
+    }
+
+    async close(): Promise<void> {
+        if (this.closed) return;
+        this.closed = true;
+        await this.codexAcpClient.close();
     }
 
     async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -957,7 +965,7 @@ export class CodexAcpServer {
     private async enqueueProviderUpdate(apply: (client: CodexAcpClient) => void): Promise<void> {
         const previous = this.providerUpdate?.catch(() => undefined) ?? Promise.resolve();
         const update = previous.then(async () => {
-            if (this.sessions.size === 0) {
+            if (this.closed || this.sessions.size === 0) {
                 return;
             }
 
@@ -968,12 +976,17 @@ export class CodexAcpServer {
             }
 
             logger.log("Restarting Codex app-server for provider update", {sessionCount: this.sessions.size});
-            const replacement = await this.restartCodexClient();
+            const threadToolsMcpServer = this.codexAcpClient.suspendThreadToolsMcpServer();
+            const replacement = await this.restartCodexClient(threadToolsMcpServer);
             apply(replacement);
             if (this.initializeRequest === null) {
                 throw new Error("Cannot restart Codex app-server before ACP initialization");
             }
             await replacement.initialize(this.initializeRequest);
+            if (this.closed) {
+                await replacement.close();
+                return;
+            }
             this.codexAcpClient = replacement;
             this.availableCommands = this.createAvailableCommands(replacement);
 
@@ -1018,7 +1031,7 @@ export class CodexAcpServer {
         });
     }
 
-    private async restartCodexClient(): Promise<CodexAcpClient> {
+    private async restartCodexClient(threadToolsMcpServer: CodexThreadToolsMcpServer): Promise<CodexAcpClient> {
         const state = this.codexProcessState;
         if (state === null) {
             throw new Error("Codex process state is unavailable");
@@ -1045,6 +1058,7 @@ export class CodexAcpServer {
             new CodexAppServerClient(state.connection.connection),
             state.config,
             state.modelProvider,
+            threadToolsMcpServer,
         );
     }
 

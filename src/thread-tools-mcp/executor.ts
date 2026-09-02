@@ -27,8 +27,9 @@ import {
     turnSummary,
     wakeReason,
 } from "./thread-content";
+import {THREAD_TOOLS_MCP_NAME} from "./catalog";
 
-const NAMESPACE = "codex_tui";
+const NAMESPACE = THREAD_TOOLS_MCP_NAME;
 const DEFAULT_LIST_LIMIT = 10;
 const DEFAULT_READ_TURN_LIMIT = 1;
 const DEFAULT_OUTPUT_CHARS = 2_000;
@@ -195,7 +196,7 @@ export class CodexThreadToolExecutor {
         await resumeThreadWithoutHistory(this.client, {
             threadId,
             excludeTurns: historyMode(thread) === "paginated",
-            config,
+            config: threadToolsConfig(config),
         });
         await this.startDelegatedTurn(threadId, "send_message_to_thread", delegated, model, null);
         return {threadId};
@@ -214,7 +215,7 @@ export class CodexThreadToolExecutor {
             ...(beforeTurnId !== null && {beforeTurnId}),
             ephemeral: source.ephemeral,
             excludeTurns: historyMode(source) === "paginated",
-            config,
+            config: threadToolsConfig(config),
         });
         this.setThreadConfig(response.thread.id, config);
         return {
@@ -305,13 +306,7 @@ export class CodexThreadToolExecutor {
 
     private async pollTarget(target: WaitTarget): Promise<{wake: unknown, poll: unknown}> {
         const thread = await this.readThreadMetadata(target.threadId);
-        const turns = await listThreadTurnsWithFallback(this.client, {
-            threadId: target.threadId,
-            limit: 1,
-            sortDirection: "desc",
-            itemsView: "summary",
-        });
-        const latestTurn = turns.data.at(0) ?? null;
+        const latestTurn = await this.latestTurn(target.threadId);
         const latestItems = latestTurn === null ? [] : await this.latestItems(target.threadId, latestTurn);
         const cursor = JSON.stringify({
             updatedAt: thread.updatedAt,
@@ -338,6 +333,20 @@ export class CodexThreadToolExecutor {
                 latestToolMarker: changed ? tool : null,
             },
         };
+    }
+
+    private async latestTurn(threadId: string): Promise<PaginatedTurn | null> {
+        try {
+            const turns = await listThreadTurnsWithFallback(this.client, {
+                threadId,
+                limit: 1,
+                sortDirection: "desc",
+                itemsView: "summary",
+            });
+            return turns.data.at(0) ?? null;
+        } catch {
+            return null;
+        }
     }
 
     private async latestItems(threadId: string, turn: PaginatedTurn): Promise<ThreadItemEntry[]> {
@@ -428,6 +437,18 @@ function sandboxMode(policy: SandboxPolicy): SandboxMode {
 
 function historyMode(thread: PaginatedThread): "legacy" | "paginated" {
     return thread.historyMode ?? "legacy";
+}
+
+function threadToolsConfig(config: JsonObject): JsonObject {
+    const servers = config["mcp_servers"];
+    if (!isJsonObject(servers)) return {};
+    const server = servers[THREAD_TOOLS_MCP_NAME];
+    if (server === undefined) return {};
+    return {mcp_servers: {[THREAD_TOOLS_MCP_NAME]: structuredClone(server)}};
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function validatedPrompt(arguments_: Record<string, unknown>): string {

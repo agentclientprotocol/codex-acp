@@ -73,6 +73,7 @@ export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata
 import {toCodexSessionLinks} from "./SessionReferences";
 import {CodexThreadToolsMcpServer} from "./thread-tools-mcp/server";
 import {THREAD_TOOLS_MCP_NAME} from "./thread-tools-mcp/catalog";
+import {CodexThreadToolsConfigPolicy} from "./thread-tools-mcp/config";
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -121,20 +122,34 @@ export class CodexAcpClient {
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
     private readonly subagents: CodexSubagentSubscriptions;
     private readonly threadToolsMcpServer: CodexThreadToolsMcpServer;
+    private readonly threadToolsConfigPolicy: CodexThreadToolsConfigPolicy;
     private skillExtraRoots: string[] = [];
     private configPath: string | null = null;
 
 
-    constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
+    constructor(
+        codexClient: CodexAppServerClient,
+        codexConfig?: JsonObject,
+        modelProvider?: string,
+        threadToolsMcpServer?: CodexThreadToolsMcpServer,
+    ) {
         this.codexClient = codexClient;
         this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
         this.gatewayConfig = null;
         this.subagents = new CodexSubagentSubscriptions(codexClient);
-        this.threadToolsMcpServer = new CodexThreadToolsMcpServer(
-            codexClient,
-            cwd => this.createSessionConfig(cwd, [], []),
-        );
+        this.threadToolsConfigPolicy = new CodexThreadToolsConfigPolicy(codexClient);
+        this.threadToolsMcpServer = threadToolsMcpServer ?? new CodexThreadToolsMcpServer(codexClient);
+        this.threadToolsMcpServer.reconnect(codexClient, cwd => this.createSessionConfig(cwd, [], []));
+    }
+
+    suspendThreadToolsMcpServer(): CodexThreadToolsMcpServer {
+        this.threadToolsMcpServer.suspend();
+        return this.threadToolsMcpServer;
+    }
+
+    async close(): Promise<void> {
+        await this.threadToolsMcpServer.close();
     }
 
     get appServerClient(): CodexAppServerClient {
@@ -720,10 +735,13 @@ export class CodexAcpClient {
             name: sanitizeMcpServerName(mcp.name),
             server: mcp,
         }));
+        const existingNames = await this.threadToolsConfigPolicy.validate(
+            projectPath,
+            requestedServers.map(mcp => mcp.name),
+        );
         let serversToConfigure = requestedServers;
         if (requestedServers.length > 0 && shouldDeduplicateMcpConflicts()) {
             // Prevents Codex from deep-merging incompatible field types, such as url and stdio schemas.
-            const existingNames = await this.getConfigMcpServerNames(projectPath);
             serversToConfigure = requestedServers.filter(mcp => !existingNames.has(mcp.name));
         }
         return {
@@ -733,20 +751,6 @@ export class CodexAcpClient {
                 [THREAD_TOOLS_MCP_NAME]: await this.threadToolsMcpServer.config(),
             },
         };
-    }
-
-    private async getConfigMcpServerNames(projectPath: string): Promise<Set<string>> {
-        const response = await this.codexClient.configRead({ includeLayers: true, cwd: projectPath });
-        const effectiveMcpServers = response?.config?.["mcp_servers"];
-        const configLayers = response?.layers ?? [];
-        const layerMcpServers = configLayers.map(layer => {
-            return isJsonObject(layer.config) ? layer.config["mcp_servers"] : undefined;
-        });
-        const configuredMcpServers = [effectiveMcpServers, ...layerMcpServers].filter(isJsonObject);
-        if (configuredMcpServers.length === 0) {
-            return new Set();
-        }
-        return new Set(configuredMcpServers.flatMap(server => Object.keys(server)));
     }
 
     getModelProvider(): string | null {
@@ -1446,7 +1450,7 @@ function arraysEqual(left: string[], right: string[]): boolean {
     return left.every((value, index) => value === right[index]);
 }
 
-function isJsonObject(value: JsonValue | undefined): value is JsonObject {
+function isJsonObject(value: unknown): value is JsonObject {
     return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 

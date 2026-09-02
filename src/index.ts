@@ -138,6 +138,7 @@ function startAcpServer() {
                 if (codexAcpServer === agent) {
                     codexAcpServer = null;
                 }
+                void agent.close().catch(error => logger.error("Failed to close the Codex ACP server", error));
             });
         })
         .onRequest(acp.methods.agent.initialize, (ctx) => getAgent().initialize(ctx.params))

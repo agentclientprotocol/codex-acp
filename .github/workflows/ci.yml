@@ -25,7 +25,25 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Check generated app-server types
+        run: npm run check:generated-types
       - name: Run unit tests
         run: npm test
       - name: Bundle binaries
         run: npm run bundle:all
+
+  node-20:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test the thread tools transport
+        run: npm test -- --run src/__tests__/CodexACPAgent/thread-tools-mcp.test.ts

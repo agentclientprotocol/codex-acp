@@ -1,8 +1,9 @@
 import type {Thread, UserInput} from "../app-server/v2";
 import type {PaginatedThread, PaginatedThreadItem, PaginatedTurn, ThreadItemEntry} from "./app-server-api";
+import {THREAD_TOOLS_MCP_NAME} from "./catalog";
 import {truncate} from "./output";
 
-const NAMESPACE = "codex_tui";
+const LEGACY_NAMESPACE = "codex_tui";
 const DEFAULT_OUTPUT_CHARS = 2_000;
 
 export function threadSummary(thread: PaginatedThread): unknown {
@@ -36,9 +37,10 @@ function summarizeItem(item: PaginatedThreadItem, includeOutputs: boolean, outpu
         case "hookPrompt": return {type: item.type, id: item.id, fragmentCount: item.fragments.length};
         case "functionCallOutput": {
             const summary: Record<string, unknown> = {type: item.type, id: item.id, name: item.name, namespace: item.namespace};
-            const delegation = parseDelegatedOutput(item.name, item.namespace, item.output);
+            const text = outputText(item.output);
+            const delegation = parseDelegatedOutput(item.name, item.namespace, text);
             if (delegation !== null) summary["codexDelegation"] = delegation;
-            if (includeOutputs) summary["output"] = outputSummary(outputText(item.output), outputChars);
+            if (includeOutputs) summary["output"] = outputSummary(text ?? "[non-text output]", outputChars);
             return summary;
         }
         case "agentMessage": return {type: item.type, id: item.id, text: truncate(item.text, DEFAULT_OUTPUT_CHARS), phase: item.phase};
@@ -146,9 +148,11 @@ export function wakeReason(thread: Thread, turn: PaginatedTurn | null, changed: 
     }
 }
 
-function parseDelegatedOutput(name: string, namespace: string | null, output: unknown): unknown {
-    if ((namespace !== NAMESPACE && namespace !== "codex_app") || (name !== "create_thread" && name !== "send_message_to_thread")) return null;
-    return parseDelegatedPrompt(outputText(output));
+function parseDelegatedOutput(name: string, namespace: string | null, output: string | null): unknown {
+    if ((namespace !== THREAD_TOOLS_MCP_NAME && namespace !== LEGACY_NAMESPACE && namespace !== "codex_app")
+        || (name !== "create_thread" && name !== "send_message_to_thread")
+        || output === null) return null;
+    return parseDelegatedPrompt(output);
 }
 
 function parseDelegatedPrompt(value: string): {sourceThreadId: string, input: string} | null {
@@ -166,8 +170,17 @@ function unxml(value: string): string {
     return value.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
 }
 
-function outputText(value: unknown): string {
-    return typeof value === "string" ? value : JSON.stringify(value);
+function outputText(value: unknown): string | null {
+    if (typeof value === "string") return value;
+    if (!Array.isArray(value)) return null;
+    const parts = value.flatMap(item => {
+        if (item === null || typeof item !== "object" || Array.isArray(item)) return [];
+        const content = item as Record<string, unknown>;
+        return content["type"] === "input_text" && typeof content["text"] === "string" && content["text"].trim().length > 0
+            ? [content["text"]]
+            : [];
+    });
+    return parts.length === 0 ? null : parts.join("\n");
 }
 
 function outputSummary(text: string, limit: number): unknown {
