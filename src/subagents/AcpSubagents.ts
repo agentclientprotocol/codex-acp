@@ -1,13 +1,11 @@
 import type {
     ClientCapabilities,
     SessionCapabilities,
-    SessionNotification,
 } from "@agentclientprotocol/sdk";
 import {
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     clientSupportsAirCapability,
 } from "../AirExtension";
-import type {AsyncTaskUpdate} from "../async-tasks/AcpAsyncTasks";
 
 /** Temporary typed surface for agentclientprotocol/agent-client-protocol#1992. */
 export type SubagentSessionCapabilities = {
@@ -34,16 +32,6 @@ export type SubagentStateUpdate = {
     _meta?: Record<string, unknown> | null;
 };
 
-export type AcpSessionUpdate =
-    | SessionNotification["update"]
-    | SubagentSpawnedUpdate
-    | SubagentStateUpdate
-    | AsyncTaskUpdate;
-
-export type AcpSessionNotification = Omit<SessionNotification, "update"> & {
-    update: AcpSessionUpdate;
-};
-
 export type SubagentAwareSessionCapabilities = SessionCapabilities & {
     subagents?: Record<string, never>;
 };
@@ -59,11 +47,4 @@ export function clientSupportsSubagents(
     }
 
     return clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY);
-}
-
-/** The only cast needed until the TypeScript SDK publishes PR #1992. */
-export function asSdkSessionNotification(
-    notification: AcpSessionNotification,
-): SessionNotification {
-    return notification as SessionNotification;
 }

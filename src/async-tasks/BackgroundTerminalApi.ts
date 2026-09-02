@@ -1,12 +1,8 @@
-/** Experimental app-server API types that `generate-ts` does not export yet. */
+/** The fields used from an API that stable `generate-ts` output omits. */
 export type ThreadBackgroundTerminal = {
     itemId: string;
     processId: string;
     command: string;
-    cwd: string;
-    osPid: number | null;
-    cpuPercent: number | null;
-    rssKb: number | null;
 };
 
 export type ThreadBackgroundTerminalsListParams = {

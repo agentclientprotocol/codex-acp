@@ -12,11 +12,15 @@ The adapter emits no async task updates when the client does not advertise this 
 
 The adapter uses `thread/backgroundTerminals/list` as the source of active processes. It maps each active process to `async_task_spawned`.
 
-The command item ID is both the async task ID and the related tool call ID. The app-server process ID remains an internal control handle.
+For a root command, the command item ID is both the async task ID and the related tool call ID. A child command prefixes its task ID with the child thread ID. The prefix keeps task IDs distinct across native subagent sessions. The related tool call ID remains the command item ID.
+
+The adapter publishes a child command on its native subagent session. The app-server process ID remains an internal control handle.
 
 The existing command card owns the command output. Therefore, a background terminal task sets `showInTranscript` to `false`.
 
 When the command ends, the adapter emits `async_task_state_update` with `completed` or `failed`.
+
+The active-terminal list repairs a lost completion event. The adapter reports `stopped` when an announced terminal disappears from that list.
 
 ## Stop request
 

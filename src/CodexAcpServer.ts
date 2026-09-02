@@ -1563,11 +1563,7 @@ export class CodexAcpServer {
 
     private publishAsyncTasksAsync(sessionState: SessionState, sessionGeneration: number): void {
         if (!this.sessionPublishIsCurrent(sessionState, sessionGeneration)) return;
-        void sessionState.asyncTasks.sync().catch((error) => {
-            if (this.sessionPublishIsCurrent(sessionState, sessionGeneration)) {
-                logger.error(`Failed to list background terminals for ${sessionState.sessionId}`, error);
-            }
-        });
+        sessionState.asyncTasks.refresh();
     }
 
     private async publishCurrentGoalBestEffort(
@@ -2591,26 +2587,6 @@ export class CodexAcpServer {
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
                     await observeInteraction(event);
-                    const startedCommand = event.method === "item/started"
-                        && event.params.threadId === sessionState.sessionId
-                        && event.params.item.type === "commandExecution"
-                        ? event.params.item
-                        : null;
-                    if (startedCommand !== null) {
-                        sessionState.asyncTasks.observeCommandStarted(startedCommand);
-                    }
-                    if (event.method === "item/completed"
-                        && event.params.threadId === sessionState.sessionId
-                        && event.params.item.type === "commandExecution") {
-                        await sessionState.asyncTasks.observeCommandCompleted(event.params.item);
-                    }
-                    if ((event.method === "item/started" && event.params.threadId === sessionState.sessionId && startedCommand === null)
-                        || (event.method === "turn/completed" && event.params.threadId === sessionState.sessionId)) {
-                        this.publishAsyncTasksAsync(
-                            sessionState,
-                            this.getSessionGeneration(sessionState.sessionId),
-                        );
-                    }
                     if (!promptNotificationsActive) {
                         await promptEventHandler.handleSessionScopedNotification(event);
                         return;
