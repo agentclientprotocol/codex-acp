@@ -159,6 +159,9 @@ export interface SessionState {
     sessionFailure?: SessionFailure;
     titleGen?: TitleGenerator;
     subagents: CodexSubagentEventRouter;
+    // Fork creation releases the app-server writer so another ACP process can load it.
+    // A direct prompt must reacquire that subscription first.
+    resumeBeforePrompt: boolean;
 }
 
 export type SessionFailureCategory =
@@ -646,6 +649,7 @@ export class CodexAcpServer {
                 clientSupportsSubagents(this.clientCapabilities),
                 new ACPSessionConnection(this.connection, sessionId),
             ),
+            resumeBeforePrompt: operation === "fork",
         };
         sessionState.titleGen = new TitleGenerator(
             this.codexAcpClient.appServerClient,
@@ -1697,6 +1701,7 @@ export class CodexAcpServer {
                 clientSupportsSubagents(this.clientCapabilities),
                 new ACPSessionConnection(this.connection, sessionId),
             ),
+            resumeBeforePrompt: false,
         };
         sessionState.titleGen = new TitleGenerator(
             this.codexAcpClient.appServerClient,
@@ -2486,6 +2491,15 @@ export class CodexAcpServer {
             prompt: params.prompt,
         });
         const sessionState = this.getSessionState(params.sessionId);
+        if (sessionState.resumeBeforePrompt) {
+            await this.runWithProcessCheck(() => this.codexAcpClient.resumeSession({
+                sessionId: sessionState.sessionId,
+                cwd: sessionState.cwd,
+                additionalDirectories: sessionState.additionalDirectories,
+                mcpServers: sessionState.mcpServers ?? [],
+            }));
+            sessionState.resumeBeforePrompt = false;
+        }
         const agentFileChangeReportRequest = clientSupportsAgentFileChangeReports(this.clientCapabilities)
             ? parseAgentFileChangeReportRequest(params._meta)
             : null;
