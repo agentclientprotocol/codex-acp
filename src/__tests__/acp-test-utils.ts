@@ -409,6 +409,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         goalRevision: 0,
         sessionTitle: null,
         sessionTitleSource: "unknown",
+        resumeBeforePrompt: false,
         subagents: new CodexSubagentEventRouter(
             sessionId,
             false,
