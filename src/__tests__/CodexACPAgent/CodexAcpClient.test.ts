@@ -87,6 +87,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             "account/login/start",
             "account/read",
             "account/updated",
+            "permissionProfile/list",
             "thread/start",
             "model/list",
             "thread/started",
@@ -512,6 +513,45 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(threadStartRequest.config?.["sandbox_workspace_write"]).toEqual({
             writable_roots: ["/workspace/extra"],
         });
+    });
+
+    it('loads every page of cwd-aware permission profiles for a new session', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        const listPermissionProfilesSpy = vi.spyOn(codexAppServerClient, "listPermissionProfiles")
+            .mockResolvedValueOnce({
+                data: [{id: ":workspace", description: null, allowed: true}],
+                nextCursor: "next-page",
+            })
+            .mockResolvedValueOnce({
+                data: [{id: "team-default", description: "Team default permissions", allowed: true}],
+                nextCursor: null,
+            });
+        vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            modelProvider: "openai",
+            reasoningEffort: "medium",
+            serviceTier: null,
+            activePermissionProfile: {id: "team-default", extends: ":workspace"},
+        } as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        const session = await codexAcpClient.newSession({cwd: "/workspace", mcpServers: []});
+
+        expect(listPermissionProfilesSpy).toHaveBeenNthCalledWith(1, {cwd: "/workspace", cursor: null});
+        expect(listPermissionProfilesSpy).toHaveBeenNthCalledWith(2, {cwd: "/workspace", cursor: "next-page"});
+        expect(session.activePermissionProfileId).toBe("team-default");
+        expect(session.permissionProfiles).toEqual([
+            {id: ":workspace", description: null, allowed: true},
+            {id: "team-default", description: "Team default permissions", allowed: true},
+        ]);
     });
 
     it('applies ACP additional directories to resumed and loaded sessions explicitly', async () => {
@@ -1090,6 +1130,48 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             writableRoots: ["/workspace/extra"],
         });
         expect(turnStartSpy.mock.calls[0]![0].approvalsReviewer).toBe("auto_review");
+    });
+
+    it('uses a custom permission profile without a legacy sandbox policy', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const availableAgentModes = AgentMode.all([{
+            id: "team-default",
+            description: "Team default permissions",
+            allowed: true,
+        }]);
+        const permissionProfileMode = availableAgentModes.find(mode => mode.permissionProfileId === "team-default")!;
+
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        const turnStartSpy = vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({
+            turn: {id: "turn-id", items: [], status: "inProgress", error: null}
+        } as any);
+        vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
+            threadId: "session-id",
+            turn: {id: "turn-id", items: [], status: "completed", error: null}
+        } as any);
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(createTestSessionState({
+            sessionId: "session-id",
+            cwd: "/workspace",
+            additionalDirectories: ["/workspace/extra"],
+            agentMode: permissionProfileMode,
+            availableAgentModes,
+        }));
+
+        await codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Hello"}],
+        });
+
+        expect(turnStartSpy.mock.calls[0]![0]).toMatchObject({
+            approvalPolicy: "on-request",
+            approvalsReviewer: "user",
+            permissions: "team-default",
+            runtimeWorkspaceRoots: ["/workspace", "/workspace/extra"],
+        });
+        expect(turnStartSpy.mock.calls[0]![0]).not.toHaveProperty("sandboxPolicy");
     });
 
     function loadNotifications(){

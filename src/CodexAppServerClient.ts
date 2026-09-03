@@ -28,6 +28,8 @@ import type {
     McpServerStatusUpdatedNotification,
     ModelListParams,
     ModelListResponse,
+    PermissionProfileListParams,
+    PermissionProfileListResponse,
     ReviewStartParams,
     ReviewStartResponse,
     SkillsExtraRootsSetParams,
@@ -279,11 +281,11 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "initialize", params: params });
     }
 
-    async turnStart(params: TurnStartParams): Promise<TurnStartResponse> {
+    async turnStart(params: ExperimentalTurnStartParams): Promise<TurnStartResponse> {
         return await this.sendRequest({ method: "turn/start", params: params });
     }
 
-    async runTurn(params: TurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
+    async runTurn(params: ExperimentalTurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
             capturedCompletions.push(event);
@@ -704,6 +706,10 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "model/list", params });
     }
 
+    async listPermissionProfiles(params: PermissionProfileListParams): Promise<PermissionProfileListResponse> {
+        return await this.sendRequest({ method: "permissionProfile/list", params });
+    }
+
     async skillsExtraRootsSet(params: SkillsExtraRootsSetParams): Promise<void> {
         return await this.sendRequest({ method: "skills/extraRoots/set", params });
     }
@@ -1038,6 +1044,13 @@ export interface ExperimentalThreadSettingsUpdateParams {
         };
     };
 }
+
+export type ExperimentalTurnStartParams = TurnStartParams & {
+    // Codex 0.147 accepts a profile id on the wire even though its generated
+    // PermissionProfileSelectionParams type currently describes an object.
+    permissions?: string | null;
+    runtimeWorkspaceRoots?: string[] | null;
+};
 
 type McpServerStartupSnapshot = {
     status: McpServerStartupState;
