@@ -929,6 +929,7 @@ export class CodexAcpClient {
                 sandbox: "read-only",
                 developerInstructions: AGENT_FILE_CHANGE_REPORT_DEVELOPER_INSTRUCTIONS,
                 ephemeral: true,
+                excludeTurns: true,
             });
             void forkPromise.then(fork => {
                 if (lateStopReason !== null && forkThreadId === null) {
