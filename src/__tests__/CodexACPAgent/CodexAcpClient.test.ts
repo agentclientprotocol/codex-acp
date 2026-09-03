@@ -3899,8 +3899,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: {usedPercent: 25, resetsAt: null, windowDurationMins: 10080},
                 credits: {hasCredits: false, unlimited: false, balance: "0"},
                 individualLimit: {
-                    limit: "$50",
-                    used: "$14",
+                    limit: "25000",
+                    used: "8000",
                     remainingPercent: 72,
                     resetsAt: Date.UTC(2026, 8, 30, 12) / 1000,
                 },
@@ -3924,7 +3924,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(dump).toContain("**Codex Weekly limit:** 75% left");
         expect(dump).toContain("**Codex Credits:** 0");
         expect(dump).toContain(
-            "**Codex individual spend limit:** 72% left ($14 used / $50; resets Sep 30)",
+            "**Codex individual spend limit:** 72% left (8,000 of 25,000 credits used; resets Sep 30)",
         );
     });
 
@@ -4095,6 +4095,73 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 planType: null,
                 rateLimitReachedType: null,
             }
+        });
+    });
+
+    it ('should apply a missing-id rate-limit update to the codex bucket', async () => {
+        const sessionId = "test-session-id";
+        const rateLimits: RateLimitsMap = new Map([
+            ["codex", {
+                limitId: "codex",
+                limitName: "Codex",
+                snapshot: {
+                    limitId: "codex",
+                    limitName: "Codex",
+                    primary: {usedPercent: 10, resetsAt: null, windowDurationMins: 300},
+                    secondary: {usedPercent: 20, resetsAt: null, windowDurationMins: 10080},
+                    credits: {hasCredits: true, unlimited: false, balance: "25"},
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                },
+            }],
+            ["codex_other", {
+                limitId: "codex_other",
+                limitName: "Other",
+                snapshot: {
+                    limitId: "codex_other",
+                    limitName: "Other",
+                    primary: {usedPercent: 30, resetsAt: null, windowDurationMins: 60},
+                    secondary: null,
+                    credits: null,
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                },
+            }],
+        ]);
+        const {mockFixture, sessionState} = setupPromptFixture({sessionId, rateLimits});
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{type: "text", text: "test"}],
+        });
+        mockFixture.sendServerNotification({
+            method: "account/rateLimits/updated",
+            params: {
+                rateLimits: {
+                    limitId: null,
+                    limitName: null,
+                    primary: null,
+                    secondary: {usedPercent: 40, resetsAt: null, windowDurationMins: 10080},
+                    credits: null,
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                },
+            },
+        });
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+
+        expect([...sessionState.rateLimits!.keys()]).toEqual(["codex", "codex_other"]);
+        expect(sessionState.rateLimits!.get("codex")!.snapshot).toMatchObject({
+            limitId: "codex",
+            primary: null,
+            secondary: {usedPercent: 40, resetsAt: null, windowDurationMins: 10080},
+            credits: {hasCredits: true, unlimited: false, balance: "25"},
         });
     });
 });

@@ -534,15 +534,31 @@ export class CodexCommands {
 
         if (rateLimits.individualLimit) {
             const limit = rateLimits.individualLimit;
-            const percentLeft = Math.round(limit.remainingPercent);
-            const resetDate = new Date(limit.resetsAt * 1000)
-                .toLocaleDateString("en-US", {month: "short", day: "numeric"});
-            lines.push(
-                `**${prefix}individual spend limit:** ${percentLeft}% left (${limit.used} used / ${limit.limit}; resets ${resetDate})`,
-            );
+            const used = this.formatCreditAmount(limit.used);
+            const total = this.formatCreditAmount(limit.limit);
+            if (used !== null && total !== null) {
+                const percentLeft = Math.round(Math.min(100, Math.max(0, limit.remainingPercent)));
+                const resetDate = new Date(limit.resetsAt * 1000)
+                    .toLocaleDateString("en-US", {month: "short", day: "numeric"});
+                lines.push(
+                    `**${prefix}individual spend limit:** ${percentLeft}% left (${used} of ${total} credits used; resets ${resetDate})`,
+                );
+            }
         }
 
         return lines;
+    }
+
+    private formatCreditAmount(raw: string): string | null {
+        const trimmed = raw.trim();
+        if (trimmed.length === 0) {
+            return null;
+        }
+        const value = Number(trimmed);
+        if (!Number.isFinite(value) || value < 0) {
+            return null;
+        }
+        return Math.round(value).toLocaleString("en-US");
     }
 
     private formatWindowLabel(windowDurationMins: number | null): string {

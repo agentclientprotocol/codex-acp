@@ -8,8 +8,8 @@ export type RateLimitEntry = {
 
 export type RateLimitsMap = Map<string, RateLimitEntry>;
 
-function rateLimitId(snapshot: RateLimitSnapshot, fallback = "unknown"): string {
-    return snapshot.limitId ?? snapshot.limitName ?? fallback;
+function rateLimitId(snapshot: RateLimitSnapshot, fallback = "codex"): string {
+    return snapshot.limitId ?? fallback;
 }
 
 export function createRateLimitsMap(response: GetAccountRateLimitsResponse): RateLimitsMap {
@@ -37,14 +37,11 @@ export function mergeRateLimitSnapshot(
     update: RateLimitSnapshot,
 ): RateLimitSnapshot {
     return {
-        limitId: update.limitId ?? previous.limitId,
-        limitName: update.limitName ?? previous.limitName,
-        primary: update.primary ?? previous.primary,
-        secondary: update.secondary ?? previous.secondary,
+        ...update,
+        limitId: update.limitId ?? "codex",
         credits: update.credits ?? previous.credits,
         individualLimit: update.individualLimit ?? previous.individualLimit,
         spendControlReached: update.spendControlReached ?? previous.spendControlReached,
         planType: update.planType ?? previous.planType,
-        rateLimitReachedType: update.rateLimitReachedType ?? previous.rateLimitReachedType,
     };
 }

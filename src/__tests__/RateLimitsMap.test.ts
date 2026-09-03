@@ -33,19 +33,25 @@ describe("RateLimitsMap", () => {
         expect([...result.keys()]).toEqual(["codex", "fast"]);
     });
 
-    it("does not erase known fields when applying a sparse update", () => {
+    it("preserves account metadata but replaces usage windows from a sparse update", () => {
         const previous = snapshot({
             primary: {usedPercent: 15, resetsAt: 100, windowDurationMins: 300},
+            secondary: {usedPercent: 20, resetsAt: 150, windowDurationMins: 10080},
             credits: {hasCredits: true, unlimited: false, balance: "10"},
+            rateLimitReachedType: "rate_limit_reached",
         });
         const update = snapshot({
+            limitId: null,
             limitName: null,
             primary: null,
             secondary: {usedPercent: 25, resetsAt: 200, windowDurationMins: 10080},
+            rateLimitReachedType: null,
         });
 
         expect(mergeRateLimitSnapshot(previous, update)).toEqual({
-            ...previous,
+            ...update,
+            limitId: "codex",
+            credits: previous.credits,
             secondary: update.secondary,
         });
     });

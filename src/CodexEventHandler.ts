@@ -1283,16 +1283,11 @@ export class CodexEventHandler {
         if (!this.sessionState.rateLimits) {
             this.sessionState.rateLimits = new Map();
         }
-        const explicitLimitId = params.rateLimits.limitId ?? params.rateLimits.limitName;
-        const existingEntry = explicitLimitId === null
-            ? (this.sessionState.rateLimits.size === 1
-                ? this.sessionState.rateLimits.values().next().value
-                : undefined)
-            : this.sessionState.rateLimits.get(explicitLimitId);
-        const limitId = explicitLimitId ?? existingEntry?.limitId ?? "unknown";
+        const limitId = params.rateLimits.limitId ?? "codex";
+        const existingEntry = this.sessionState.rateLimits.get(limitId);
         const snapshot = existingEntry
             ? mergeRateLimitSnapshot(existingEntry.snapshot, params.rateLimits)
-            : params.rateLimits;
+            : {...params.rateLimits, limitId};
         this.sessionState.rateLimits.set(limitId, {
             limitId: limitId,
             limitName: snapshot.limitName ?? existingEntry?.limitName ?? limitId,
