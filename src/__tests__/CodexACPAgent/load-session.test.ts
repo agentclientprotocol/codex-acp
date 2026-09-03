@@ -26,6 +26,8 @@ describe("CodexACPAgent - loadSession", () => {
             preview: id,
             ephemeral: false,
             modelProvider: "openai",
+            model: null,
+            reasoningEffort: null,
             createdAt: 1,
             updatedAt: 2,
             recencyAt: null,
@@ -97,6 +99,7 @@ describe("CodexACPAgent - loadSession", () => {
             phase: null,
             memoryCitation: null,
             delivery: null,
+            questions: null,
         }]);
         const firstChildTurn = child.turns[0]!;
         child.turns.push({
@@ -114,6 +117,7 @@ describe("CodexACPAgent - loadSession", () => {
                 phase: null,
                 memoryCitation: null,
                 delivery: null,
+                questions: null,
             }],
         });
         appServer.threadResume = vi.fn().mockResolvedValue({
@@ -207,6 +211,8 @@ describe("CodexACPAgent - loadSession", () => {
             preview: "Hi",
             ephemeral: false,
             modelProvider: "openai",
+            model: null,
+            reasoningEffort: null,
             createdAt: 123,
             updatedAt: 124,
             recencyAt: null,
@@ -249,6 +255,7 @@ describe("CodexACPAgent - loadSession", () => {
                             phase: null,
                             memoryCitation: null,
                             delivery: null,
+                            questions: null,
                         },
                         {
                             type: "reasoning",
@@ -436,6 +443,8 @@ describe("CodexACPAgent - loadSession", () => {
             preview: "",
             ephemeral: false,
             modelProvider: "openai",
+            model: null,
+            reasoningEffort: null,
             createdAt: 0,
             updatedAt: 0,
             recencyAt: null,
@@ -651,6 +660,8 @@ describe("CodexACPAgent - loadSession", () => {
                 preview: "List the files",
                 ephemeral: false,
                 modelProvider: "openai",
+                model: null,
+                reasoningEffort: null,
                 createdAt: 123,
                 updatedAt: 124,
                 recencyAt: null,
@@ -701,6 +712,7 @@ describe("CodexACPAgent - loadSession", () => {
                                 phase: null,
                                 memoryCitation: null,
                                 delivery: null,
+                                questions: null,
                             },
                         ],
                     },
@@ -789,6 +801,8 @@ describe("CodexACPAgent - loadSession", () => {
             preview: "",
             ephemeral: false,
             modelProvider: "openai",
+            model: null,
+            reasoningEffort: null,
             createdAt: 0,
             updatedAt: 0,
             recencyAt: null,
