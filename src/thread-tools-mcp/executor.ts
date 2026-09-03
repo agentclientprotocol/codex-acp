@@ -18,7 +18,7 @@ import {
     startThread,
     startToolTurn,
 } from "./app-server-api";
-import {truncate} from "./output";
+import {MAX_TOOL_RESPONSE_BYTES, truncate} from "./output";
 import {
     latestAgentMessage,
     latestToolMarker,
@@ -97,7 +97,7 @@ export class CodexThreadToolExecutor {
                 unavailableSources: [],
             };
             const value = {threads, nextCursor: response.nextCursor};
-            if (response.data.length <= 1 || Buffer.byteLength(JSON.stringify(value)) <= 999) return value;
+            if (response.data.length <= 1 || Buffer.byteLength(JSON.stringify(value)) <= MAX_TOOL_RESPONSE_BYTES) return value;
             limit = Math.max(1, Math.floor(limit / 2));
         }
     }

@@ -21,6 +21,12 @@ The server provides the TUI thread tool set. It sends delegation through
 `toolOutput`. It uses the paginated turn and item methods for reads. It does not
 copy another thread into the current prompt.
 
+An MCP result starts removing low-priority reasoning and lifecycle items above
+12 KiB. It reports the count in `omittedItems`. The hard result limit is 128
+KiB. Above that limit, the server shortens long payload fields or removes
+complete tool items. It keeps user messages, agent messages, and plans. It does
+not replace useful item text with an empty string.
+
 The adapter keeps the full session config for recently loaded threads. A child
 task inherits that config. The bounded cache holds up to 256 thread configs.
 Resume and fork requests receive only the `codex_acp` MCP override. Legacy app

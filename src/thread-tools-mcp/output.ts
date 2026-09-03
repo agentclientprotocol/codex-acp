@@ -1,4 +1,29 @@
-const MAX_RESPONSE_BYTES = 999;
+export const MAX_TOOL_RESPONSE_BYTES = 128 * 1024;
+
+export const LOW_PRIORITY_RESPONSE_BYTES = 12 * 1024;
+
+const MAX_ERROR_CHARS = 2_000;
+const PAYLOAD_LIMITS = [16_384, 8_192, 4_096, 2_048, 1_024, 512, 256];
+const LOW_PRIORITY_ITEM_TYPES = new Set([
+    "reasoning",
+    "hookPrompt",
+    "contextCompaction",
+    "sleep",
+    "enteredReviewMode",
+    "exitedReviewMode",
+]);
+const REMOVABLE_ITEM_TYPES = [
+    "commandExecution",
+    "fileChange",
+    "functionCallOutput",
+    "mcpToolCall",
+    "dynamicToolCall",
+    "collabAgentToolCall",
+    "subAgentActivity",
+    "webSearch",
+    "imageView",
+    "imageGeneration",
+];
 
 export function toolResult(value: unknown): {content: Array<{type: "text", text: string}>} {
     return {content: [{type: "text", text: boundedJson(value)}]};
@@ -7,7 +32,7 @@ export function toolResult(value: unknown): {content: Array<{type: "text", text:
 export function toolError(error: unknown): {content: Array<{type: "text", text: string}>, isError: true} {
     const message = error instanceof Error ? error.message : String(error);
     return {
-        content: [{type: "text", text: truncate(message, Math.floor(MAX_RESPONSE_BYTES / 4) - 1)}],
+        content: [{type: "text", text: truncate(message, MAX_ERROR_CHARS)}],
         isError: true,
     };
 }
@@ -20,19 +45,33 @@ export function truncate(text: string, limit: number): string {
 }
 
 function boundedJson(value: unknown): string {
-    let current = structuredClone(value);
-    let limit = Math.floor(MAX_RESPONSE_BYTES / 2);
-    while (true) {
-        const text = JSON.stringify(current);
-        if (Buffer.byteLength(text) <= MAX_RESPONSE_BYTES) return text;
-        if (limit === 0) {
-            if (pruneResponse(current)) continue;
-            throw new Error("Thread tool response exceeded the maximum context budget");
-        }
-        limit = Math.floor(limit / 2);
+    const current = structuredClone(value);
+    const original = JSON.stringify(current);
+    if (Buffer.byteLength(original) <= LOW_PRIORITY_RESPONSE_BYTES) return original;
+
+    if (removeLowPriorityItems(current) && isRecord(current)) current["truncated"] = true;
+    const compacted = serializeWithinBudget(current);
+    if (compacted !== null) return compacted;
+
+    for (const limit of PAYLOAD_LIMITS) {
         truncateValue(current, limit);
         if (isRecord(current)) current["truncated"] = true;
+        const text = serializeWithinBudget(current);
+        if (text !== null) return text;
     }
+
+    while (pruneResponse(current)) {
+        if (isRecord(current)) current["truncated"] = true;
+        const text = serializeWithinBudget(current);
+        if (text !== null) return text;
+    }
+
+    throw new Error("Thread tool response exceeded the maximum context budget");
+}
+
+function serializeWithinBudget(value: unknown): string | null {
+    const text = JSON.stringify(value);
+    return Buffer.byteLength(text) <= MAX_TOOL_RESPONSE_BYTES ? text : null;
 }
 
 function truncateValue(value: unknown, limit: number): void {
@@ -76,15 +115,13 @@ function pruneResponse(value: unknown): boolean {
     if (!isRecord(value)) return false;
     const turns = value["turns"];
     if (Array.isArray(turns)) {
-        const turn = [...turns].reverse().find(item => isRecord(item) && Array.isArray(item["items"]) && item["items"].length > 0);
-        if (isRecord(turn) && Array.isArray(turn["items"])) {
-            turn["items"].shift();
-            return true;
-        }
+        if (pruneTurnItem(turns)) return true;
     }
     const threads = value["threads"];
     if (Array.isArray(threads) && threads.length > 1) {
         threads.pop();
+        const omittedThreads = value["omittedThreads"];
+        value["omittedThreads"] = typeof omittedThreads === "number" ? omittedThreads + 1 : 1;
         return true;
     }
     const polls = value["polls"];
@@ -110,6 +147,37 @@ function pruneResponse(value: unknown): boolean {
         }
     }
     return false;
+}
+
+function pruneTurnItem(turns: unknown[]): boolean {
+    for (const type of REMOVABLE_ITEM_TYPES) {
+        for (const turn of [...turns].reverse()) {
+            if (!isRecord(turn) || !Array.isArray(turn["items"]) || turn["items"].length <= 1) continue;
+            const index = turn["items"].findIndex(item => isRecord(item) && item["type"] === type);
+            if (index < 0) continue;
+            turn["items"].splice(index, 1);
+            const omittedItems = turn["omittedItems"];
+            turn["omittedItems"] = typeof omittedItems === "number" ? omittedItems + 1 : 1;
+            return true;
+        }
+    }
+    return false;
+}
+
+function removeLowPriorityItems(value: unknown): boolean {
+    if (!isRecord(value) || !Array.isArray(value["turns"])) return false;
+    let changed = false;
+    for (const turn of value["turns"]) {
+        if (!isRecord(turn) || !Array.isArray(turn["items"])) continue;
+        const retainedItems = turn["items"].filter(item => !isRecord(item) || !LOW_PRIORITY_ITEM_TYPES.has(String(item["type"])));
+        const omittedItems = turn["items"].length - retainedItems.length;
+        if (omittedItems === 0) continue;
+        turn["items"] = retainedItems;
+        const previousCount = turn["omittedItems"];
+        turn["omittedItems"] = (typeof previousCount === "number" ? previousCount : 0) + omittedItems;
+        changed = true;
+    }
+    return changed;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -5,7 +5,7 @@ import type {CodexAppServerClient} from "../../CodexAppServerClient";
 import type {JsonValue} from "../../app-server/serde_json/JsonValue";
 import {THREAD_TOOLS} from "../../thread-tools-mcp/catalog";
 import {CodexThreadToolExecutor} from "../../thread-tools-mcp/executor";
-import {toolResult} from "../../thread-tools-mcp/output";
+import {LOW_PRIORITY_RESPONSE_BYTES, MAX_TOOL_RESPONSE_BYTES, toolResult} from "../../thread-tools-mcp/output";
 import {CodexThreadToolsMcpServer} from "../../thread-tools-mcp/server";
 
 describe("Codex thread tools MCP server", () => {
@@ -440,21 +440,75 @@ describe("Codex thread tools MCP server", () => {
         )).resolves.toBeDefined();
     });
 
-    it("reduces an oversized thread list instead of failing", () => {
-        const threads = Array.from({length: 10}, (_, index) => ({
+    it("bounds an oversized thread list without blanking its text", () => {
+        const threads = Array.from({length: 50}, (_, index) => ({
             id: `00000000-0000-7000-8000-${String(index).padStart(12, "0")}`,
             kind: "codex",
-            title: "title".repeat(20),
-            summary: "summary".repeat(50),
+            title: "title".repeat(1_000),
+            summary: "summary".repeat(1_000),
             status: "idle",
-            cwd: "/workspace/project",
+            cwd: `/workspace/${"project".repeat(1_000)}`,
             updatedAt: 1,
         }));
 
         const text = toolResult({schemaVersion: 4, threads}).content.at(0)!.text;
+        const result = JSON.parse(text) as {threads: Array<{title: string, summary: string, cwd: string}>, truncated: boolean};
 
-        expect(Buffer.byteLength(text)).toBeLessThanOrEqual(999);
-        expect((JSON.parse(text) as {threads: unknown[]}).threads.length).toBeLessThan(threads.length);
+        expect(Buffer.byteLength(text)).toBeLessThanOrEqual(MAX_TOOL_RESPONSE_BYTES);
+        expect(result.truncated).toBe(true);
+        expect(result.threads).not.toHaveLength(0);
+        expect(result.threads.every(thread => thread.title.length > 0 && thread.summary.length > 0 && thread.cwd.length > 0)).toBe(true);
+    });
+
+    it("removes low-priority items above the soft response limit", () => {
+        const response = {
+            turns: [{
+                id: "turn",
+                items: [
+                    {type: "reasoning", id: "reasoning", summary: ["r".repeat(LOW_PRIORITY_RESPONSE_BYTES)]},
+                    {type: "agentMessage", id: "answer", text: "useful answer"},
+                ],
+            }],
+        };
+
+        const text = toolResult(response).content.at(0)!.text;
+        const result = JSON.parse(text) as {
+            turns: Array<{items: Array<{type: string, text?: string}>, omittedItems: number}>,
+            truncated: boolean,
+        };
+
+        expect(Buffer.byteLength(text)).toBeLessThan(LOW_PRIORITY_RESPONSE_BYTES);
+        expect(result.truncated).toBe(true);
+        expect(result.turns[0]).toEqual({
+            id: "turn",
+            items: [{type: "agentMessage", id: "answer", text: "useful answer"}],
+            omittedItems: 1,
+        });
+    });
+
+    it("removes complete low-value items when text truncation cannot fit", () => {
+        const turns = Array.from({length: 10}, (_, turnIndex) => ({
+            id: `turn-${turnIndex}`,
+            items: Array.from({length: 20}, (_, itemIndex) => ({
+                type: itemIndex === 19 ? "agentMessage" : "reasoning",
+                id: `${"identity".repeat(150)}-${turnIndex}-${itemIndex}`,
+                text: "useful response",
+                summary: ["useful reasoning"],
+            })),
+        }));
+
+        const text = toolResult({schemaVersion: 1, turns}).content.at(0)!.text;
+        const result = JSON.parse(text) as {
+            turns: Array<{items: Array<{text?: string, summary?: string[]}>, omittedItems?: number}>,
+            truncated: boolean,
+        };
+
+        expect(Buffer.byteLength(text)).toBeLessThanOrEqual(MAX_TOOL_RESPONSE_BYTES);
+        expect(result.truncated).toBe(true);
+        expect(result.turns.every(turn => turn.omittedItems === 19)).toBe(true);
+        expect(result.turns.every(turn => turn.items.length > 0)).toBe(true);
+        expect(result.turns.flatMap(turn => turn.items).every(item => (item as {type?: string}).type !== "reasoning")).toBe(true);
+        expect(result.turns.flatMap(turn => turn.items).every(item => item.text !== "" && item.summary?.every(value => value !== "") !== false)).toBe(true);
     });
 });
 
