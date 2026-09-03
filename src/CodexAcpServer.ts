@@ -261,6 +261,7 @@ export class CodexAcpServer {
     private readonly goalControlGenerations: Map<string, number>;
     private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
     private readonly codexProcessState: CodexProcessState | null;
+    private codexProcessGeneration = 0;
     private initializeRequest: acp.InitializeRequest | null = null;
     private providerUpdate: Promise<void> | null = null;
 
@@ -295,6 +296,7 @@ export class CodexAcpServer {
         this.terminalOutputMode = "terminal_output_delta";
         this.booleanConfigOptionsSupported = false;
         this.availableCommands = this.createAvailableCommands(codexAcpClient);
+        this.observeCodexProcess();
     }
 
     private createAvailableCommands(client: CodexAcpClient): CodexCommands {
@@ -1003,6 +1005,9 @@ export class CodexAcpServer {
             }
 
             logger.log("Restarting Codex app-server for provider update", {sessionCount: this.sessions.size});
+            for (const session of this.sessions.values()) {
+                session.asyncTasks.prepareForAppServerReplacement();
+            }
             await this.finishAllAsyncTasks("stopped", "before the provider restart");
             const replacement = await this.restartCodexClient();
             apply(replacement);
@@ -1056,6 +1061,16 @@ export class CodexAcpServer {
         });
     }
 
+    private observeCodexProcess(): void {
+        const process = this.codexProcessState?.connection.process;
+        if (!process) return;
+        const generation = ++this.codexProcessGeneration;
+        process.once("exit", () => {
+            if (generation !== this.codexProcessGeneration) return;
+            void this.finishAllAsyncTasks("failed", "after the Codex process exited");
+        });
+    }
+
     private async restartCodexClient(): Promise<CodexAcpClient> {
         const state = this.codexProcessState;
         if (state === null) {
@@ -1063,6 +1078,7 @@ export class CodexAcpServer {
         }
 
         const previous = state.connection;
+        this.codexProcessGeneration += 1;
         const exited = previous.process.exitCode === null
             ? once(previous.process, "exit")
             : Promise.resolve();
@@ -1079,6 +1095,7 @@ export class CodexAcpServer {
         state.stderr = "";
         state.connection = startCodexConnection(state.codexPath);
         this.captureStderr();
+        this.observeCodexProcess();
         return new CodexAcpClient(
             new CodexAppServerClient(state.connection.connection),
             state.config,

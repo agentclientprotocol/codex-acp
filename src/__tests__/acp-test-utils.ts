@@ -2,8 +2,8 @@ import * as acp from "@agentclientprotocol/sdk";
 import type {CreateElicitationResponse, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
 import {CodexAcpClient} from '../CodexAcpClient';
 import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';
-import {startCodexConnection} from "../CodexJsonRpcConnection";
-import {CodexAcpServer, type SessionState} from "../CodexAcpServer";
+import {type CodexConnection, startCodexConnection} from "../CodexJsonRpcConnection";
+import {CodexAcpServer, type CodexProcessState, type SessionState} from "../CodexAcpServer";
 import {ACPSessionConnection, type AcpClientConnection} from "../ACPSessionConnection";
 import type {ServerNotification} from "../app-server";
 import type {MessageConnection} from "vscode-jsonrpc/node";
@@ -88,6 +88,7 @@ export interface ConnectionConfig {
     connection: MessageConnection;
     getExitCode: () => number | null;
     acpConnection?: AcpConnectionConfig;
+    codexProcessState?: CodexProcessState;
 }
 
 export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
@@ -107,6 +108,7 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         undefined,
         config.getExitCode,
         undefined,
+        config.codexProcessState,
     );
 
     const transportEvents: CodexConnectionEvent[] = [];
@@ -269,6 +271,7 @@ export interface CodexMockTestFixture extends TestFixture {
  */
 export function createCodexMockTestFixture(
     restartCodexClient?: () => Promise<CodexAcpClient>,
+    process?: CodexConnection["process"],
 ): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
@@ -317,6 +320,13 @@ export function createCodexMockTestFixture(
     const baseFixture = createBaseTestFixture({
         connection: mockCodexConnection,
         getExitCode: () => null,
+        ...(process ? {codexProcessState: {
+            connection: {connection: mockCodexConnection, process},
+            codexPath: undefined,
+            config: undefined,
+            modelProvider: undefined,
+            stderr: "",
+        }} : {}),
         acpConnection: {
             connection: acpConnection,
             events: acpConnectionEvents,

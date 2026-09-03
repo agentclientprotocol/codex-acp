@@ -368,18 +368,19 @@ export class CodexEventHandler {
 
     async handleNotification(notification: ServerNotification) {
         await this.flushPendingErrors();
-        const asyncTaskSessionId = this.subagents.notificationSessionId(notification);
-        const handledAsyncTasksFirst = notification.method === "turn/completed"
-            && asyncTaskSessionId !== this.sessionState.sessionId;
-        if (handledAsyncTasksFirst) {
-            await this.sessionState.asyncTasks.handleNotification(notification, asyncTaskSessionId);
+        const closingChildren = this.subagents.closingChildSessions(notification);
+        for (const child of closingChildren) {
+            await this.sessionState.asyncTasks.reconcile(child.threadId, child.sessionId);
         }
         const handledBySubagents = await this.subagents.handle(notification);
         for (const buffered of this.subagents.takeBufferedNotifications()) {
             await this.handleNotification(buffered);
         }
-        if (!handledAsyncTasksFirst && !handledBySubagents) {
-            await this.sessionState.asyncTasks.handleNotification(notification, asyncTaskSessionId);
+        if (!handledBySubagents) {
+            await this.sessionState.asyncTasks.handleNotification(
+                notification,
+                this.subagents.notificationSessionId(notification),
+            );
         }
         if (handledBySubagents) return;
         if (this.subagents.shouldIgnore(notification)) {

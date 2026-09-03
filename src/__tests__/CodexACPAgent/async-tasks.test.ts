@@ -1,7 +1,9 @@
 import {describe, expect, it, vi} from "vitest";
+import {EventEmitter} from "node:events";
 import type {ThreadItem} from "../../app-server/v2";
 import {ACPSessionConnection, type UpdateSessionEvent} from "../../ACPSessionConnection";
 import type {CodexAppServerClient} from "../../CodexAppServerClient";
+import type {CodexConnection} from "../../CodexJsonRpcConnection";
 import {CodexBackgroundTerminalTasks} from "../../async-tasks/CodexBackgroundTerminalTasks";
 import {ASYNC_TASK_STOP_METHOD} from "../../async-tasks/AsyncTaskExtension";
 import {CodexSubagentEventRouter} from "../../subagents/CodexSubagentEventRouter";
@@ -110,6 +112,31 @@ describe("Codex background terminal tasks", () => {
         });
     });
 
+    it("publishes a spawn before a completion that races with discovery", async () => {
+        const markerStarted = deferred<void>();
+        const releaseMarker = deferred<void>();
+        const fixture = createFixture(true, async update => {
+            if (update.sessionUpdate !== "tool_call_update") return;
+            markerStarted.resolve();
+            await releaseMarker.promise;
+        });
+        fixture.list.mockResolvedValue(page([terminal()]));
+
+        const sync = fixture.tasks.sync();
+        await markerStarted.promise;
+        const completion = fixture.tasks.handleNotification(
+            completed({...command(), status: "completed", exitCode: 0}),
+            "thread-1",
+        );
+        releaseMarker.resolve();
+        await Promise.all([sync, completion]);
+
+        const spawnIndex = fixture.updates.findIndex(update => update.sessionUpdate === "async_task_spawned");
+        const terminalIndex = fixture.updates.findIndex(update => update.sessionUpdate === "async_task_state_update");
+        expect(spawnIndex).toBeGreaterThanOrEqual(0);
+        expect(terminalIndex).toBeGreaterThan(spawnIndex);
+    });
+
     it("retries a terminal update that the client rejected", async () => {
         let rejectTerminalUpdate = true;
         const fixture = createFixture(true, async update => {
@@ -201,6 +228,52 @@ describe("Codex background terminal tasks", () => {
             ]);
     });
 
+    it("finishes tasks while app-server queries are suspended for replacement", async () => {
+        const fixture = createFixture();
+        fixture.list.mockResolvedValue(page([terminal()]));
+        await fixture.tasks.sync();
+
+        fixture.tasks.prepareForAppServerReplacement();
+        await fixture.tasks.finishAll("stopped");
+
+        expect(fixture.updates.at(-1)).toMatchObject({
+            sessionUpdate: "async_task_state_update",
+            asyncTaskId: "command-1",
+            state: "stopped",
+        });
+    });
+
+    it("fails announced tasks as soon as the app-server process exits", async () => {
+        const process = Object.assign(new EventEmitter(), {
+            stderr: new EventEmitter(),
+            stdin: {end: vi.fn()},
+            exitCode: null,
+        }) as unknown as CodexConnection["process"];
+        const fixture = createCodexMockTestFixture(undefined, process);
+        const sessionState = createTestSessionState({sessionId: "thread-1"});
+        sessionState.asyncTasks = new CodexBackgroundTerminalTasks(
+            true,
+            sessionState.sessionId,
+            fixture.getCodexAppServerClient(),
+            new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId),
+        );
+        vi.spyOn(fixture.getCodexAppServerClient(), "threadBackgroundTerminalsList")
+            .mockResolvedValue(page([terminal()]));
+        await sessionState.asyncTasks.sync();
+        // @ts-expect-error - register the local session for process lifecycle checks
+        fixture.getCodexAcpAgent().sessions.set(sessionState.sessionId, sessionState);
+
+        process.emit("exit", 1);
+
+        await vi.waitFor(() => {
+            const terminalUpdate = fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === "sessionUpdate")
+                .map(event => event.args[0].update)
+                .find(update => update.sessionUpdate === "async_task_state_update");
+            expect(terminalUpdate).toMatchObject({asyncTaskId: "command-1", state: "failed"});
+        });
+    });
+
     it("keeps a task stoppable when termination is rejected or fails", async () => {
         const fixture = createFixture();
         fixture.list.mockResolvedValue(page([terminal()]));
@@ -226,13 +299,13 @@ describe("Codex background terminal tasks", () => {
             }
         });
         fixture.list.mockResolvedValue(page([terminal()]));
-        fixture.terminate.mockResolvedValue({terminated: true});
+        fixture.terminate.mockResolvedValueOnce({terminated: true});
         await fixture.tasks.sync();
 
         await expect(fixture.tasks.stop("command-1")).rejects.toThrow("client disconnected");
         await expect(fixture.tasks.stop("command-1")).resolves.toBe(true);
 
-        expect(fixture.terminate).toHaveBeenCalledTimes(2);
+        expect(fixture.terminate).toHaveBeenCalledOnce();
         expect(fixture.updates.filter(update => update.sessionUpdate === "async_task_state_update"))
             .toEqual([expect.objectContaining({state: "stopped"})]);
     });
@@ -332,6 +405,30 @@ describe("Codex background terminal tasks", () => {
         expect(fixture.updates.filter(update => update.sessionUpdate === "async_task_spawned")).toHaveLength(1);
     });
 
+    it("discards an in-flight list result after app-server replacement", async () => {
+        const fixture = createFixture();
+        const oldListing = deferred<ThreadBackgroundTerminalsListResponse>();
+        fixture.list.mockReturnValue(oldListing.promise);
+        const replacementList = vi.fn().mockResolvedValue(page([
+            terminal({itemId: "command-2", processId: "84"}),
+        ]));
+        const replacement = {
+            threadBackgroundTerminalsList: replacementList,
+            threadBackgroundTerminalsTerminate: vi.fn(),
+        } as unknown as CodexAppServerClient;
+
+        const oldSync = fixture.tasks.sync();
+        fixture.tasks.prepareForAppServerReplacement();
+        fixture.tasks.setAppServer(replacement);
+        const replacementSync = fixture.tasks.sync();
+        oldListing.resolve(page([terminal()]));
+        await Promise.all([oldSync, replacementSync]);
+
+        expect(replacementList).toHaveBeenCalledOnce();
+        expect(fixture.updates.filter(update => update.sessionUpdate === "async_task_spawned"))
+            .toEqual([expect.objectContaining({asyncTaskId: "command-2"})]);
+    });
+
     it("does not publish an in-flight list result after clear", async () => {
         const fixture = createFixture();
         const listing = deferred<ThreadBackgroundTerminalsListResponse>();
@@ -345,7 +442,11 @@ describe("Codex background terminal tasks", () => {
         expect(fixture.updates).toEqual([]);
     });
 
-    it("publishes a child terminal on its native subagent session", async () => {
+    it.each([
+        ["turn completion", () => turnCompleted("child-1")],
+        ["activity interruption", childInterrupted],
+        ["collaboration completion", childCompletedByCollaboration],
+    ])("publishes a child terminal before %s closes its session", async (_name, terminalNotification) => {
         const fixture = createCodexMockTestFixture();
         await fixture.getCodexAcpAgent().initialize({
             protocolVersion: 1,
@@ -374,7 +475,7 @@ describe("Codex background terminal tasks", () => {
             childSpawned(),
             childMaterialized(),
             started(command(), "child-1"),
-            turnCompleted("child-1"),
+            terminalNotification(),
         ]);
 
         await vi.waitFor(() => {
@@ -559,11 +660,36 @@ function childMaterialized() {
     });
 }
 
+function childInterrupted() {
+    return started({
+        type: "subAgentActivity",
+        id: "child-activity-terminal",
+        kind: "interrupted",
+        agentThreadId: "child-1",
+        agentPath: "/root/worker",
+    });
+}
+
+function childCompletedByCollaboration() {
+    return started({
+        type: "collabAgentToolCall",
+        id: "wait-child",
+        tool: "wait",
+        status: "completed",
+        senderThreadId: "thread-1",
+        receiverThreadIds: ["child-1"],
+        prompt: null,
+        model: null,
+        reasoningEffort: null,
+        agentsStates: {"child-1": {status: "completed", message: null}},
+    });
+}
+
 function deferred<T>() {
-    let resolve!: (value: T) => void;
+    let resolve!: (value?: T) => void;
     let reject!: (reason?: unknown) => void;
     const promise = new Promise<T>((innerResolve, innerReject) => {
-        resolve = innerResolve;
+        resolve = innerResolve as (value?: T) => void;
         reject = innerReject;
     });
     return {promise, resolve, reject};

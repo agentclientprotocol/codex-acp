@@ -213,6 +213,8 @@ describe("Configurable LLM providers (providers/*)", () => {
         const sessions = (agent as unknown as {sessions: Map<string, ReturnType<typeof createTestSessionState>>}).sessions;
         const firstSession = createTestSessionState({sessionId: "thread-1", cwd: "/one"});
         const secondSession = createTestSessionState({sessionId: "thread-2", cwd: "/two"});
+        const firstSessionPrepare = vi.spyOn(firstSession.asyncTasks, "prepareForAppServerReplacement");
+        const secondSessionPrepare = vi.spyOn(secondSession.asyncTasks, "prepareForAppServerReplacement");
         const firstSessionSetAppServer = vi.spyOn(firstSession.asyncTasks, "setAppServer");
         const secondSessionSetAppServer = vi.spyOn(secondSession.asyncTasks, "setAppServer");
         sessions.set("thread-1", firstSession);
@@ -228,6 +230,8 @@ describe("Configurable LLM providers (providers/*)", () => {
         expect(restart).toHaveBeenCalledTimes(1);
         expect(firstGatewayReplacement.getModelProvider()).toBe(CUSTOM_GATEWAY_PROVIDER_ID);
         expect(firstGatewayResume).toHaveBeenCalledTimes(2);
+        expect(firstSessionPrepare).toHaveBeenCalledOnce();
+        expect(secondSessionPrepare).toHaveBeenCalledOnce();
         expect(firstSessionSetAppServer).toHaveBeenCalledWith(firstGatewayReplacement.appServerClient);
         expect(secondSessionSetAppServer).toHaveBeenCalledWith(firstGatewayReplacement.appServerClient);
         expect(firstGatewayResume).toHaveBeenCalledWith(expect.objectContaining({sessionId: "thread-1", cwd: "/one"}));
