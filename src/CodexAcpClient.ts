@@ -32,6 +32,7 @@ import {sanitizeMcpServerName} from "./McpServerName";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
+    GetAccountRateLimitsResponse,
     GetAccountResponse,
     ListMcpServerStatusResponse,
     McpServerOauthLoginCompletedNotification,
@@ -471,6 +472,10 @@ export class CodexAcpClient {
 
     async getAccount(): Promise<GetAccountResponse> {
         return this.codexClient.accountRead({refreshToken: false});
+    }
+
+    async getRateLimits(): Promise<GetAccountRateLimitsResponse> {
+        return this.codexClient.accountRateLimitsRead();
     }
 
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
