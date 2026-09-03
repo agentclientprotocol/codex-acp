@@ -147,6 +147,23 @@ describe("Codex thread tools MCP server", () => {
         expect(result.page.nextCursor).toBe("next");
     });
 
+    it("limits an excessive turn page request", async () => {
+        const threadRead = vi.fn().mockResolvedValue({thread: thread({historyMode: "paginated"})});
+        const sendRequest = vi.fn().mockResolvedValue({data: [], nextCursor: "next", backwardsCursor: null});
+        const executor = createExecutor({threadRead, connection: {sendRequest}});
+
+        const result = await executor.execute("read_thread", {threadId: "target", turnLimit: 50}, toolMetadata()) as {
+            page: {limit: number, requestedLimit: number, notice: string};
+        };
+
+        expect(sendRequest).toHaveBeenCalledWith("thread/turns/list", expect.objectContaining({limit: 10}));
+        expect(result.page).toMatchObject({
+            limit: 10,
+            requestedLimit: 50,
+            notice: "Requested turnLimit 50 was limited to 10.",
+        });
+    });
+
     it("falls back to legacy history when turn pagination is unavailable", async () => {
         const legacyTurn = turn("legacy", "completed");
         const threadRead = vi.fn().mockImplementation(async ({includeTurns}: {includeTurns: boolean}) => ({

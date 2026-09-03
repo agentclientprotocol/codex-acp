@@ -27,6 +27,9 @@ KiB. Above that limit, the server shortens long payload fields or removes
 complete tool items. It keeps user messages, agent messages, and plans. It does
 not replace useful item text with an empty string.
 
+`read_thread` accepts a maximum of 10 turns per page. A larger request uses 10
+turns and reports the requested value in the page metadata.
+
 The adapter keeps the full session config for recently loaded threads. A child
 task inherits that config. The bounded cache holds up to 256 thread configs.
 Resume and fork requests receive only the `codex_acp` MCP override. Legacy app

@@ -32,6 +32,7 @@ import {THREAD_TOOLS_MCP_NAME} from "./catalog";
 const NAMESPACE = THREAD_TOOLS_MCP_NAME;
 const DEFAULT_LIST_LIMIT = 10;
 const DEFAULT_READ_TURN_LIMIT = 1;
+const MAX_READ_TURN_LIMIT = 10;
 const DEFAULT_OUTPUT_CHARS = 2_000;
 const MAX_WAIT_TIMEOUT_MS = 120_000;
 const WAIT_REFRESH_MS = 1_000;
@@ -105,10 +106,11 @@ export class CodexThreadToolExecutor {
     private async readThread(arguments_: Record<string, unknown>): Promise<unknown> {
         assertOnlyKeys(arguments_, ["threadId", "cursor", "turnLimit", "includeOutputs", "maxOutputCharsPerItem"]);
         const threadId = requiredString(arguments_, "threadId");
-        const turnLimit = optionalInteger(arguments_, "turnLimit") ?? DEFAULT_READ_TURN_LIMIT;
+        const requestedTurnLimit = optionalInteger(arguments_, "turnLimit") ?? DEFAULT_READ_TURN_LIMIT;
         const outputChars = optionalInteger(arguments_, "maxOutputCharsPerItem") ?? DEFAULT_OUTPUT_CHARS;
         const includeOutputs = optionalBoolean(arguments_, "includeOutputs") ?? false;
-        if (turnLimit < 1 || turnLimit > 10) throw new Error("turnLimit must be between 1 and 10");
+        if (requestedTurnLimit < 1) throw new Error("turnLimit must be at least 1");
+        const turnLimit = Math.min(requestedTurnLimit, MAX_READ_TURN_LIMIT);
         if (outputChars < 0 || outputChars > 20_000) throw new Error("maxOutputCharsPerItem must be between 0 and 20000");
         const [thread, page] = await Promise.all([
             this.readThreadMetadata(threadId),
@@ -137,6 +139,10 @@ export class CodexThreadToolExecutor {
                 limit: turnLimit,
                 hasMore: page.nextCursor != null,
                 nextCursor: page.nextCursor ?? null,
+                ...(requestedTurnLimit > MAX_READ_TURN_LIMIT && {
+                    requestedLimit: requestedTurnLimit,
+                    notice: `Requested turnLimit ${requestedTurnLimit} was limited to ${MAX_READ_TURN_LIMIT}.`,
+                }),
             },
             turns: page.data.map(turn => turnSummary(turn, includeOutputs, outputChars)),
         };
