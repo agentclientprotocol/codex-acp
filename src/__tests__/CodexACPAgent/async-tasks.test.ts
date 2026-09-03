@@ -37,11 +37,12 @@ describe("Codex background terminal tasks", () => {
         );
         // @ts-expect-error - register the local session for session-generation checks
         fixture.getCodexAcpAgent().sessions.set(sessionState.sessionId, sessionState);
+        const rawCommand = "/bin/zsh -lc 'npm run build'";
         vi.spyOn(fixture.getCodexAppServerClient(), "threadBackgroundTerminalsList")
-            .mockResolvedValue(page([terminal()]));
+            .mockResolvedValue(page([terminal({command: rawCommand})]));
 
         await setupPromptAndSendNotifications(fixture, sessionState.sessionId, sessionState, [
-            started(command()),
+            started(command({command: rawCommand})),
             started({type: "reasoning", id: "reasoning-1", summary: [], content: []}),
         ]);
 
@@ -52,6 +53,7 @@ describe("Codex background terminal tasks", () => {
                 .filter(update => update.sessionUpdate === "async_task_spawned");
             expect(taskUpdates).toEqual([expect.objectContaining({
                 asyncTaskId: "command-1",
+                name: "npm run build",
                 toolCallId: "command-1",
             })]);
         });
@@ -61,7 +63,7 @@ describe("Codex background terminal tasks", () => {
         const fixture = createFixture();
         fixture.list.mockResolvedValue(page([terminal()]));
 
-        await fixture.tasks.handleNotification(started(command()), "thread-1");
+        await fixture.tasks.handleNotification(started(command()), "thread-1", "python -m http.server");
         await fixture.tasks.sync();
 
         expect(fixture.updates).toEqual([
@@ -573,7 +575,7 @@ function page(data: ThreadBackgroundTerminal[], nextCursor: string | null = null
     return {data, nextCursor};
 }
 
-function command(): CommandExecutionItem {
+function command(overrides: Partial<CommandExecutionItem> = {}): CommandExecutionItem {
     return {
         type: "commandExecution",
         id: "command-1",
@@ -588,6 +590,7 @@ function command(): CommandExecutionItem {
         aggregatedOutput: null,
         exitCode: null,
         durationMs: null,
+        ...overrides,
     };
 }
 

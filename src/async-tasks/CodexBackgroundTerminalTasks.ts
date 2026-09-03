@@ -20,7 +20,7 @@ type Task = {
     asyncTaskId: string;
     processId: string;
     itemId: string;
-    command: string;
+    name: string;
     publication: "unpublished" | "publishing" | "published";
     announcement: Promise<void> | null;
     terminalUpdate: Promise<void> | null;
@@ -54,13 +54,17 @@ export class CodexBackgroundTerminalTasks {
         private readonly session: ACPSessionConnection,
     ) {}
 
-    async handleNotification(notification: ServerNotification, sessionId: string): Promise<void> {
+    async handleNotification(
+        notification: ServerNotification,
+        sessionId: string,
+        commandTitle?: string,
+    ): Promise<void> {
         if (!this.isActive()) return;
         const threadId = notificationThreadId(notification);
         if (threadId === null) return;
 
         if (notification.method === "item/started" && notification.params.item.type === "commandExecution") {
-            this.observeCommandStarted(notification.params.item, threadId, sessionId);
+            this.observeCommandStarted(notification.params.item, threadId, sessionId, commandTitle);
             return;
         }
         if (notification.method === "item/completed" && notification.params.item.type === "commandExecution") {
@@ -80,13 +84,14 @@ export class CodexBackgroundTerminalTasks {
         item: CommandExecutionItem,
         threadId: string,
         sessionId: string,
+        commandTitle?: string,
     ): void {
         if (!this.isActive() || item.processId === null) return;
         this.remember(threadId, sessionId, {
             itemId: item.id,
             processId: item.processId,
             command: item.command,
-        });
+        }, commandTitle);
     }
 
     private async observeCommandCompleted(
@@ -291,7 +296,7 @@ export class CodexBackgroundTerminalTasks {
         await this.session.update({
             sessionUpdate: "async_task_spawned",
             asyncTaskId: task.asyncTaskId,
-            name: task.command,
+            name: task.name,
             taskType: "shell",
             showInTranscript: false,
             canStop: true,
@@ -303,11 +308,13 @@ export class CodexBackgroundTerminalTasks {
         threadId: string,
         sessionId: string,
         terminal: ThreadBackgroundTerminal,
+        commandTitle?: string,
     ): Task {
         const asyncTaskId = wireTaskId(this.rootSessionId, threadId, terminal.itemId);
         const existing = this.tasks.get(asyncTaskId);
         if (existing) {
             existing.processId = terminal.processId;
+            if (commandTitle !== undefined) existing.name = commandTitle;
             return existing;
         }
         const task: Task = {
@@ -316,7 +323,7 @@ export class CodexBackgroundTerminalTasks {
             asyncTaskId,
             processId: terminal.processId,
             itemId: terminal.itemId,
-            command: terminal.command,
+            name: commandTitle ?? terminal.command,
             publication: "unpublished",
             announcement: null,
             terminalUpdate: null,

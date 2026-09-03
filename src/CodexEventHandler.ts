@@ -376,17 +376,24 @@ export class CodexEventHandler {
         for (const buffered of this.subagents.takeBufferedNotifications()) {
             await this.handleNotification(buffered);
         }
+        const ignoredBySubagents = !handledBySubagents && this.subagents.shouldIgnore(notification);
+        let updateEvent: UpdateSessionEvent | null | undefined;
+        if (!handledBySubagents
+            && !ignoredBySubagents
+            && notification.method === "item/started"
+            && notification.params.item.type === "commandExecution") {
+            updateEvent = await this.createUpdateEvent(notification);
+        }
         if (!handledBySubagents) {
             await this.sessionState.asyncTasks.handleNotification(
                 notification,
                 this.subagents.notificationSessionId(notification),
+                toolCallTitle(updateEvent),
             );
         }
         if (handledBySubagents) return;
-        if (this.subagents.shouldIgnore(notification)) {
-            return;
-        }
-        const updateEvent = await this.createUpdateEvent(notification);
+        if (ignoredBySubagents) return;
+        if (updateEvent === undefined) updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
             await this.session.update(updateEvent, this.subagents.notificationSessionId(notification));
         }
@@ -1333,4 +1340,9 @@ export class CodexEventHandler {
         }
         return createGuardianApprovalReviewToolCall(params);
     }
+}
+
+function toolCallTitle(update: UpdateSessionEvent | null | undefined): string | undefined {
+    if (update?.sessionUpdate !== "tool_call") return undefined;
+    return update.title;
 }
