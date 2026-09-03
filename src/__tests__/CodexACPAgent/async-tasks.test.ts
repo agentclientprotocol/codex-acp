@@ -75,7 +75,6 @@ describe("Codex background terminal tasks", () => {
                 asyncTaskId: "command-1",
                 name: "python -m http.server",
                 taskType: "shell",
-                description: "python -m http.server",
                 showInTranscript: false,
                 canStop: true,
                 toolCallId: "command-1",

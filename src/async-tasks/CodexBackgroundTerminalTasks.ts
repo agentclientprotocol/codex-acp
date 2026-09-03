@@ -293,7 +293,6 @@ export class CodexBackgroundTerminalTasks {
             asyncTaskId: task.asyncTaskId,
             name: task.command,
             taskType: "shell",
-            description: task.command,
             showInTranscript: false,
             canStop: true,
             toolCallId: task.itemId,

@@ -5,7 +5,7 @@ export type AsyncTaskSpawnedUpdate = {
     asyncTaskId: string;
     name: string;
     taskType: string;
-    description: string;
+    description?: string;
     showInTranscript: boolean;
     canStop: boolean;
     outputFilePath?: string;
