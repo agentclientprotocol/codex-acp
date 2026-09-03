@@ -199,6 +199,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         const nativeReplacement = createCodexMockTestFixture().getCodexAcpClient();
         vi.spyOn(firstGatewayReplacement, "initialize").mockResolvedValue();
         const firstGatewayResume = vi.spyOn(firstGatewayReplacement, "resumeSession").mockResolvedValue({} as never);
+        const firstGatewayReconnect = vi.spyOn(firstGatewayReplacement, "reconnectThreadToolsMcpServer");
         vi.spyOn(secondGatewayReplacement, "initialize").mockResolvedValue();
         const secondGatewayResume = vi.spyOn(secondGatewayReplacement, "resumeSession").mockResolvedValue({} as never);
         vi.spyOn(nativeReplacement, "initialize").mockResolvedValue();
@@ -226,6 +227,10 @@ describe("Configurable LLM providers (providers/*)", () => {
         expect(firstGatewayResume).toHaveBeenCalledTimes(2);
         expect(firstGatewayResume).toHaveBeenCalledWith(expect.objectContaining({sessionId: "thread-1", cwd: "/one"}));
         expect(firstGatewayResume).toHaveBeenCalledWith(expect.objectContaining({sessionId: "thread-2", cwd: "/two"}));
+        expect(firstGatewayReconnect).toHaveBeenCalledOnce();
+        expect(firstGatewayReconnect.mock.invocationCallOrder[0]).toBeGreaterThan(
+            firstGatewayResume.mock.invocationCallOrder.at(-1)!,
+        );
 
         await agent.setProvider({
             providerId: OPENAI_PROVIDER_ID,
@@ -260,6 +265,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         const failedResume = vi.spyOn(failedReplacement, "resumeSession")
             .mockRejectedValueOnce(new Error("thread-1 failed"))
             .mockResolvedValue({} as never);
+        const failedReconnect = vi.spyOn(failedReplacement, "reconnectThreadToolsMcpServer");
         vi.spyOn(recoveredReplacement, "initialize").mockResolvedValue();
         const recoveredResume = vi.spyOn(recoveredReplacement, "resumeSession").mockResolvedValue({} as never);
         const restart = vi.fn()
@@ -279,6 +285,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         })).rejects.toThrow("Failed to resume 1 session(s)");
 
         expect(failedResume).toHaveBeenCalledTimes(2);
+        expect(failedReconnect).toHaveBeenCalledOnce();
 
         await expect(agent.setProvider({
             providerId: OPENAI_PROVIDER_ID,

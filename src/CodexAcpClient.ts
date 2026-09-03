@@ -139,13 +139,17 @@ export class CodexAcpClient {
         this.gatewayConfig = null;
         this.subagents = new CodexSubagentSubscriptions(codexClient);
         this.threadToolsConfigPolicy = new CodexThreadToolsConfigPolicy(codexClient);
-        this.threadToolsMcpServer = threadToolsMcpServer ?? new CodexThreadToolsMcpServer(codexClient);
-        this.threadToolsMcpServer.reconnect(codexClient, cwd => this.createSessionConfig(cwd, [], []));
+        this.threadToolsMcpServer = threadToolsMcpServer
+            ?? new CodexThreadToolsMcpServer(codexClient, cwd => this.createSessionConfig(cwd, [], []));
     }
 
     suspendThreadToolsMcpServer(): CodexThreadToolsMcpServer {
         this.threadToolsMcpServer.suspend();
         return this.threadToolsMcpServer;
+    }
+
+    reconnectThreadToolsMcpServer(): void {
+        this.threadToolsMcpServer.reconnect(this.codexClient, cwd => this.createSessionConfig(cwd, [], []));
     }
 
     async close(): Promise<void> {
@@ -731,6 +735,12 @@ export class CodexAcpClient {
             }])),
         };
         const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
+        const configuredServers = isJsonObject(configWithWorkspaceRoots["mcp_servers"])
+            ? configWithWorkspaceRoots["mcp_servers"]
+            : {};
+        if (Object.hasOwn(configuredServers, THREAD_TOOLS_MCP_NAME)) {
+            throw new Error(`A configured MCP server already owns the ${THREAD_TOOLS_MCP_NAME} namespace`);
+        }
         const requestedServers = mcpServers.map(mcp => ({
             name: sanitizeMcpServerName(mcp.name),
             server: mcp,
@@ -739,14 +749,16 @@ export class CodexAcpClient {
             projectPath,
             requestedServers.map(mcp => mcp.name),
         );
+        const configuredNames = new Set([...existingNames, ...Object.keys(configuredServers)]);
         let serversToConfigure = requestedServers;
         if (requestedServers.length > 0 && shouldDeduplicateMcpConflicts()) {
             // Prevents Codex from deep-merging incompatible field types, such as url and stdio schemas.
-            serversToConfigure = requestedServers.filter(mcp => !existingNames.has(mcp.name));
+            serversToConfigure = requestedServers.filter(mcp => !configuredNames.has(mcp.name));
         }
         return {
             ...configWithWorkspaceRoots,
             "mcp_servers": {
+                ...configuredServers,
                 ...Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
                 [THREAD_TOOLS_MCP_NAME]: await this.threadToolsMcpServer.config(),
             },

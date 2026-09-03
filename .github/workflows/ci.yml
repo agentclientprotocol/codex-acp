@@ -45,5 +45,7 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
-      - name: Test the thread tools transport
-        run: npm test -- --run src/__tests__/CodexACPAgent/thread-tools-mcp.test.ts
+      - name: Run unit tests
+        run: npm test
+      - name: Build
+        run: npm run build

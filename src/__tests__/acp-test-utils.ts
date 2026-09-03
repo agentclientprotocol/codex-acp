@@ -14,6 +14,7 @@ import {AgentMode} from "../AgentMode";
 import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
+import type {JsonValue} from "../app-server/serde_json/JsonValue";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
 
 export type MethodCallEvent = { method: string; args: any[] };
@@ -87,6 +88,7 @@ export interface ConnectionConfig {
     connection: MessageConnection;
     getExitCode: () => number | null;
     acpConnection?: AcpConnectionConfig;
+    codexConfig?: {[key: string]: JsonValue | undefined};
 }
 
 export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
@@ -99,7 +101,7 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
     });
 
     const codexAppServerClient = new CodexAppServerClient(config.connection);
-    const codexAcpClient = new CodexAcpClient(codexAppServerClient);
+    const codexAcpClient = new CodexAcpClient(codexAppServerClient, config.codexConfig);
     const codexAcpAgent = new CodexAcpServer(
         acpConnection,
         codexAcpClient,
@@ -268,6 +270,7 @@ export interface CodexMockTestFixture extends TestFixture {
  */
 export function createCodexMockTestFixture(
     restartCodexClient?: () => Promise<CodexAcpClient>,
+    codexConfig?: {[key: string]: JsonValue | undefined},
 ): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
@@ -320,7 +323,8 @@ export function createCodexMockTestFixture(
             connection: acpConnection,
             events: acpConnectionEvents,
             eventHandlers: acpEventHandlers,
-        }
+        },
+        ...(codexConfig !== undefined && {codexConfig}),
     });
     if (restartCodexClient) {
         vi.spyOn(baseFixture.getCodexAcpAgent() as any, "restartCodexClient")

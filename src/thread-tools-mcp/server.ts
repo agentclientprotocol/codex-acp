@@ -28,6 +28,7 @@ export class CodexThreadToolsMcpServer {
     private httpServer: HttpServer | null = null;
     private startPromise: Promise<void> | null = null;
     private port: number | null = null;
+    private closed = false;
 
     constructor(
         client: CodexAppServerClient,
@@ -41,6 +42,7 @@ export class CodexThreadToolsMcpServer {
     }
 
     reconnect(client: CodexAppServerClient, createFallbackConfig?: FallbackConfigFactory): void {
+        this.assertOpen();
         const fallback = createFallbackConfig ?? (() => this.threadToolsConfig());
         this.executor = new CodexThreadToolExecutor(
             client,
@@ -50,6 +52,7 @@ export class CodexThreadToolsMcpServer {
     }
 
     registerThreadConfig(threadId: string, config: JsonObject): void {
+        this.assertOpen();
         this.threadConfigs.delete(threadId);
         this.threadConfigs.set(threadId, structuredClone(config));
         while (this.threadConfigs.size > MAX_THREAD_CONFIGS) {
@@ -72,6 +75,7 @@ export class CodexThreadToolsMcpServer {
     }
 
     async config(): Promise<JsonObject> {
+        this.assertOpen();
         await this.start();
         if (this.port === null) throw new Error("The thread tools MCP server closed while it started");
         return {
@@ -87,22 +91,30 @@ export class CodexThreadToolsMcpServer {
     }
 
     async close(): Promise<void> {
-        this.suspend();
+        if (this.closed) return;
+        this.closed = true;
+        this.executor = null;
         await this.startPromise?.catch(() => {});
         const server = this.httpServer;
+        const sessions = Array.from(this.sessions.values());
         this.httpServer = null;
         this.port = null;
         this.startPromise = null;
-        await Promise.all(Array.from(this.sessions.values(), session => session.server.close()));
         this.sessions.clear();
         this.threadConfigs.clear();
-        if (server === null) return;
-        await new Promise<void>((resolve, reject) => {
-            server.close(error => error === undefined ? resolve() : reject(error));
-        });
+        const closes: Promise<unknown>[] = sessions.map(session => session.server.close());
+        if (server !== null) {
+            closes.push(new Promise<void>((resolve, reject) => {
+                server.close(error => error === undefined ? resolve() : reject(error));
+            }));
+        }
+        const results = await Promise.allSettled(closes);
+        const errors = results.flatMap(result => result.status === "rejected" ? [result.reason] : []);
+        if (errors.length > 0) throw new AggregateError(errors, "Failed to close the thread tools MCP server");
     }
 
     private async start(): Promise<void> {
+        this.assertOpen();
         if (this.httpServer !== null) return;
         this.startPromise ??= this.listen().catch(error => {
             this.startPromise = null;
@@ -216,5 +228,9 @@ export class CodexThreadToolsMcpServer {
 
     private async threadToolsConfig(): Promise<JsonObject> {
         return {mcp_servers: {[THREAD_TOOLS_MCP_NAME]: await this.config()}};
+    }
+
+    private assertOpen(): void {
+        if (this.closed) throw new Error("The thread tools MCP server is closed");
     }
 }

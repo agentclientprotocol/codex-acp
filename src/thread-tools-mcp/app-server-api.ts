@@ -1,5 +1,16 @@
 import type {CodexAppServerClient} from "../CodexAppServerClient";
-import type {Thread, ThreadForkResponse, ThreadItem, ThreadResumeResponse, Turn} from "../app-server/v2";
+import type {
+    Thread,
+    ThreadForkResponse,
+    ThreadItem,
+    ThreadItemEntry,
+    ThreadItemsListParams,
+    ThreadItemsListResponse,
+    ThreadResumeResponse,
+    ThreadTurnsListParams,
+    ThreadTurnsListResponse,
+    Turn,
+} from "../app-server/v2";
 
 export type PaginatedThread = Thread & {
     historyMode?: "legacy" | "paginated";
@@ -11,21 +22,9 @@ export type PaginatedThreadResumeResponse = ThreadResumeResponse & {
     activePermissionProfile?: {id: string} | null;
 };
 
-export type FunctionCallOutputItem = {
-    type: "functionCallOutput";
-    id: string;
-    name: string;
-    namespace: string | null;
-    output: string | unknown[];
-};
-
-export type PaginatedThreadItem = ThreadItem | FunctionCallOutputItem;
-export type PaginatedTurn = Omit<Turn, "items"> & {items: PaginatedThreadItem[]};
-
-export type ThreadItemEntry = {
-    turnId: string;
-    item: PaginatedThreadItem;
-};
+export type PaginatedTurn = Turn;
+export type PaginatedThreadItem = ThreadItem;
+export type {ThreadItemEntry};
 
 type Page<T> = {
     data: T[];
@@ -35,14 +34,8 @@ type Page<T> = {
 
 export async function listThreadTurns(
     client: CodexAppServerClient,
-    params: {
-        threadId: string;
-        cursor?: string | null;
-        limit?: number | null;
-        sortDirection?: "asc" | "desc" | null;
-        itemsView?: "notLoaded" | "summary" | "full" | null;
-    },
-): Promise<Page<PaginatedTurn>> {
+    params: ThreadTurnsListParams,
+): Promise<ThreadTurnsListResponse> {
     return await client.connection.sendRequest("thread/turns/list", params);
 }
 
@@ -90,14 +83,8 @@ export async function forkThreadWithoutHistory(
 
 export async function listThreadItems(
     client: CodexAppServerClient,
-    params: {
-        threadId: string;
-        turnId?: string | null;
-        cursor?: string | null;
-        limit?: number | null;
-        sortDirection?: "asc" | "desc" | null;
-    },
-): Promise<Page<ThreadItemEntry>> {
+    params: ThreadItemsListParams,
+): Promise<ThreadItemsListResponse> {
     return await client.connection.sendRequest("thread/items/list", params);
 }
 
@@ -149,7 +136,9 @@ export async function startToolTurn(
 }
 
 function isHistoryPaginationUnsupported(error: unknown): boolean {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === -32601) return true;
+    const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+    if (code === -32601) return true;
+    if (code !== -32600 && code !== -32602) return false;
     const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
     const fields = ["historymode", "history mode", "excludeturns", "exclude turns", "thread/turns/list", "thread/items/list"];
     return fields.some(field => message.includes(field))

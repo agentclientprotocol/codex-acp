@@ -15,7 +15,7 @@ existing app-server connection. The adapter adds its URL and token only to the
 in-memory thread configuration under the reserved `codex_acp` MCP name.
 
 The server keeps its HTTP endpoint during an app-server restart. It rejects
-calls while suspended and reconnects before the adapter resumes ACP sessions.
+calls while suspended and reconnects after the adapter resumes ACP sessions.
 
 The server provides the TUI thread tool set. It sends delegation through
 `toolOutput`. It uses the paginated turn and item methods for reads. It does not
@@ -26,11 +26,11 @@ task inherits that config. The bounded cache holds up to 256 thread configs.
 Resume and fork requests receive only the `codex_acp` MCP override. Legacy app
 servers use the non-paginated history methods.
 
-`catalog.ts` owns the public MCP schemas. `config.ts` checks the MCP namespace
-and managed policy. `executor.ts` maps each tool to an app-server operation.
+`catalog.ts` owns the public MCP schemas. `config.ts` checks the MCP namespace.
+The app server enforces its managed configuration when it consumes the session
+config. `executor.ts` maps each tool to an app-server operation.
 `thread-content.ts` maps thread data to tool results. `server.ts` owns the HTTP
 transport and its lifetime. `output.ts` limits model content. `app-server-api.ts`
-contains the new app-server calls until the stable generated SDK exposes them.
+contains compatibility fallbacks and fields that the generated SDK omits.
 
 The runtime pins the Codex package used to generate the checked API schema.
-`app-server-api.ts` isolates experimental calls that the stable schema omits.

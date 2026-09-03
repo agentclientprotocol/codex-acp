@@ -970,20 +970,48 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         })).rejects.toThrow("already owns the codex_acp namespace");
     });
 
-    it("honors managed MCP namespace requirements", async () => {
-        const mockFixture = createCodexMockTestFixture();
+    it("preserves MCP servers from CODEX_CONFIG", async () => {
+        const mockFixture = createCodexMockTestFixture(undefined, {
+            mcp_servers: {configured: {url: "https://example.com/configured"}},
+        });
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
         vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config: {}, layers: []} as any);
-        vi.spyOn(codexAppServerClient.connection, "sendRequest").mockResolvedValue({
-            requirements: {mcpServers: {approved_server: {}}},
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config: {}} as any);
+        const threadStart = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+            thread: {id: "thread-id"},
+            model: "gpt-5",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
         });
+
+        await codexAcpClient.newSession({
+            cwd: "/workspace",
+            mcpServers: [],
+        });
+
+        expect(threadStart.mock.calls[0]![0].config?.["mcp_servers"]).toEqual(expect.objectContaining({
+            configured: {url: "https://example.com/configured"},
+            codex_acp: expect.any(Object),
+        }));
+    });
+
+    it("rejects the reserved namespace in CODEX_CONFIG", async () => {
+        const mockFixture = createCodexMockTestFixture(undefined, {
+            mcp_servers: {codex_acp: {url: "https://example.com/configured"}},
+        });
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
 
         await expect(codexAcpClient.newSession({
             cwd: "/workspace",
             mcpServers: [],
-        })).rejects.toThrow("Managed MCP requirements do not permit");
+        })).rejects.toThrow("already owns the codex_acp namespace");
     });
 
     it('waits for typed mcp startup status updates and returns terminal states', async () => {

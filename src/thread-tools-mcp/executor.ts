@@ -79,7 +79,7 @@ export class CodexThreadToolExecutor {
         if (limit < 1 || limit > 50) throw new Error("limit must be between 1 and 50");
         while (true) {
             const response = await this.client.threadList({
-                cursor: optionalString(arguments_, "cursor"),
+                cursor: optionalCursor(arguments_, "cursor"),
                 limit,
                 sortKey: "updated_at",
                 sortDirection: "desc",
@@ -114,7 +114,7 @@ export class CodexThreadToolExecutor {
             this.readThreadMetadata(threadId),
             listThreadTurnsWithFallback(this.client, {
                 threadId,
-                cursor: optionalString(arguments_, "cursor"),
+                cursor: optionalCursor(arguments_, "cursor"),
                 limit: turnLimit,
                 sortDirection: "desc",
                 itemsView: "full",
@@ -155,7 +155,7 @@ export class CodexThreadToolExecutor {
             threadId: context.threadId,
             excludeTurns: historyMode(sourceThread) === "paginated",
         });
-        const config = await this.getThreadConfig(context.threadId, sourceThread.cwd);
+        const config = withoutWebSearch(await this.getThreadConfig(context.threadId, sourceThread.cwd));
         const activePermissionProfile = source.activePermissionProfile;
         const started = await startThread(this.client, {
             cwd: sourceThread.cwd,
@@ -222,7 +222,7 @@ export class CodexThreadToolExecutor {
             environment: {type: "same-directory"},
             sourceThreadId,
             threadId: response.thread.id,
-            continuation: "The fork contains completed history only. If the source task was running, the active turn and unfinished response are not in the child. Send a follow-up message only if work must continue there.",
+            continuation: `The fork contains completed history only. If the source task was running, the active turn and unfinished response are not in the child. Send a follow-up message to threadId ${response.thread.id} only if work must continue there.`,
         };
     }
 
@@ -261,7 +261,7 @@ export class CodexThreadToolExecutor {
         const targets = array(arguments_, "targets").map(value => {
             const target = record(value);
             assertOnlyKeys(target, ["threadId", "afterCursor"]);
-            return {threadId: requiredString(target, "threadId"), afterCursor: optionalString(target, "afterCursor")};
+            return {threadId: requiredString(target, "threadId"), afterCursor: optionalCursor(target, "afterCursor")};
         });
         if (targets.length < 1 || targets.length > 8) throw new Error("targets must contain between 1 and 8 tasks");
         const ids = new Set(targets.map(target => canonicalThreadId(target.threadId)));
@@ -447,6 +447,12 @@ function threadToolsConfig(config: JsonObject): JsonObject {
     return {mcp_servers: {[THREAD_TOOLS_MCP_NAME]: structuredClone(server)}};
 }
 
+function withoutWebSearch(config: JsonObject): JsonObject {
+    const result = structuredClone(config);
+    delete result["web_search"];
+    return result;
+}
+
 function isJsonObject(value: unknown): value is JsonObject {
     return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -491,6 +497,13 @@ function optionalString(value: Record<string, unknown>, name: string): string | 
     const result = stringValue(value[name]);
     if (result === null) throw new Error(`Invalid tool arguments: ${name} must be a non-empty string`);
     return result;
+}
+
+function optionalCursor(value: Record<string, unknown>, name: string): string | null {
+    const field = value[name];
+    if (field === undefined) return null;
+    if (typeof field !== "string") throw new Error(`Invalid tool arguments: ${name} must be a string`);
+    return field;
 }
 
 function stringValue(value: unknown): string | null {

@@ -1006,6 +1006,8 @@ export class CodexAcpServer {
                     logger.error(`Failed to resume session ${session.sessionId} after provider restart`, error);
                 }
             }
+            if (this.closed) return;
+            replacement.reconnectThreadToolsMcpServer();
             if (resumeErrors.length > 0) {
                 throw new AggregateError(resumeErrors, `Failed to resume ${resumeErrors.length} session(s) after provider restart`);
             }

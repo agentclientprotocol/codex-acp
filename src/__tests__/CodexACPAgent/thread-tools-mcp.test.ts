@@ -44,7 +44,47 @@ describe("Codex thread tools MCP server", () => {
         server = new CodexThreadToolsMcpServer({} as CodexAppServerClient);
 
         const [config] = await Promise.all([server.config(), server.close()]);
+
         expect(config["url"]).not.toContain("null");
+        await expect(server.config()).rejects.toThrow("is closed");
+    });
+
+    it("does not restart after it closes", async () => {
+        server = new CodexThreadToolsMcpServer({} as CodexAppServerClient);
+        await server.close();
+
+        await expect(server.config()).rejects.toThrow("is closed");
+        expect(() => server!.reconnect({} as CodexAppServerClient)).toThrow("is closed");
+    });
+
+    it("rejects an unknown HTTP session", async () => {
+        server = new CodexThreadToolsMcpServer({} as CodexAppServerClient);
+        const config = await server.config();
+
+        const response = await fetch(config["url"] as string, {
+            method: "DELETE",
+            headers: {
+                Authorization: (config["http_headers"] as {Authorization: string}).Authorization,
+                "mcp-session-id": "missing",
+            },
+        });
+
+        expect(response.status).toBe(400);
+    });
+
+    it("finishes transport cleanup when a protocol session fails to close", async () => {
+        server = new CodexThreadToolsMcpServer({} as CodexAppServerClient);
+        const config = await server.config();
+        const closeSession = vi.fn().mockRejectedValue(new Error("session close failed"));
+        const sessions = (server as unknown as {
+            sessions: Map<string, {transport: unknown, server: {close(): Promise<void>}}>,
+        }).sessions;
+        sessions.set("broken", {transport: {}, server: {close: closeSession}});
+
+        await expect(server.close()).rejects.toThrow("Failed to close the thread tools MCP server");
+
+        expect(closeSession).toHaveBeenCalledOnce();
+        await expect(fetch(config["url"] as string)).rejects.toThrow();
     });
 
     it("keeps the MCP endpoint while the app server reconnects", async () => {
@@ -76,13 +116,14 @@ describe("Codex thread tools MCP server", () => {
         const sendRequest = vi.fn().mockResolvedValue({data: [], nextCursor: "next", backwardsCursor: null});
         const executor = createExecutor({threadRead, connection: {sendRequest}});
 
-        const result = await executor.execute("read_thread", {threadId: "target", turnLimit: 2}, toolMetadata()) as {
+        const result = await executor.execute("read_thread", {threadId: "target", cursor: "", turnLimit: 2}, toolMetadata()) as {
             page: {nextCursor: string | null};
         };
 
         expect(threadRead).toHaveBeenCalledWith({threadId: "target", includeTurns: false});
         expect(sendRequest).toHaveBeenCalledWith("thread/turns/list", expect.objectContaining({
             threadId: "target",
+            cursor: "",
             limit: 2,
             itemsView: "full",
         }));
@@ -94,7 +135,8 @@ describe("Codex thread tools MCP server", () => {
         const threadRead = vi.fn().mockImplementation(async ({includeTurns}: {includeTurns: boolean}) => ({
             thread: thread({turns: includeTurns ? [legacyTurn] : []}),
         }));
-        const sendRequest = vi.fn().mockRejectedValue(new Error("thread/turns/list is unavailable before first user message"));
+        const unavailable = Object.assign(new Error("thread/turns/list is unavailable before first user message"), {code: -32601});
+        const sendRequest = vi.fn().mockRejectedValue(unavailable);
         const executor = createExecutor({threadRead, connection: {sendRequest}});
 
         const result = await executor.execute(
@@ -106,6 +148,21 @@ describe("Codex thread tools MCP server", () => {
         expect(result.turns).toEqual([expect.objectContaining({id: "legacy"})]);
         expect(result.page.hasMore).toBe(false);
         expect(threadRead).toHaveBeenCalledWith({threadId: "target", includeTurns: true});
+    });
+
+    it("does not retry pagination after an unrelated app-server error", async () => {
+        const error = new Error("thread/turns/list historyMode storage failed");
+        const threadRead = vi.fn().mockResolvedValue({thread: thread({historyMode: "paginated"})});
+        const sendRequest = vi.fn().mockRejectedValue(error);
+        const executor = createExecutor({threadRead, connection: {sendRequest}});
+
+        await expect(executor.execute(
+            "read_thread",
+            {threadId: "target"},
+            toolMetadata(),
+        )).rejects.toBe(error);
+
+        expect(sendRequest).toHaveBeenCalledOnce();
     });
 
     it("rejects an invalid optional boolean", async () => {
@@ -176,7 +233,12 @@ describe("Codex thread tools MCP server", () => {
             .mockResolvedValueOnce(resumeResponse())
             .mockResolvedValueOnce({thread: thread({id: "created"})})
             .mockResolvedValueOnce({turn: {id: "created-turn"}});
-        const executor = createExecutor({threadRead, threadSetName, connection: {sendRequest}});
+        const setThreadConfig = vi.fn();
+        const executor = createExecutor(
+            {threadRead, threadSetName, connection: {sendRequest}},
+            sourceConfig(),
+            setThreadConfig,
+        );
 
         await executor.execute(
             "create_thread",
@@ -193,13 +255,26 @@ describe("Codex thread tools MCP server", () => {
             approvalsReviewer: "user",
             sandbox: "workspace-write",
             runtimeWorkspaceRoots: ["/workspace"],
-            config: {url: "http://127.0.0.1/mcp"},
+            config: {
+                model_provider: "stale-provider",
+                mcp_servers: {
+                    codex_acp: {url: "http://127.0.0.1/mcp"},
+                    unrelated: {url: "https://example.com/mcp"},
+                },
+            },
         }));
         expect(threadSetName).toHaveBeenCalledWith({threadId: "created", name: "Child"});
         expect(sendRequest).toHaveBeenNthCalledWith(3, "turn/start", expect.objectContaining({
             threadId: "created",
             toolOutput: expect.objectContaining({namespace: "codex_acp"}),
         }));
+        expect(setThreadConfig).toHaveBeenCalledWith("created", {
+            model_provider: "stale-provider",
+            mcp_servers: {
+                codex_acp: {url: "http://127.0.0.1/mcp"},
+                unrelated: {url: "https://example.com/mcp"},
+            },
+        });
     });
 
     it("wakes when the latest task turn has completed", async () => {
@@ -366,8 +441,12 @@ describe("Codex thread tools MCP server", () => {
     });
 });
 
-function createExecutor(client: object, config: JsonObject = {url: "http://127.0.0.1/mcp"}): CodexThreadToolExecutor {
-    return new CodexThreadToolExecutor(client as CodexAppServerClient, async () => config);
+function createExecutor(
+    client: object,
+    config: JsonObject = {url: "http://127.0.0.1/mcp"},
+    setThreadConfig: (threadId: string, config: JsonObject) => void = () => {},
+): CodexThreadToolExecutor {
+    return new CodexThreadToolExecutor(client as CodexAppServerClient, async () => config, setThreadConfig);
 }
 
 function sourceConfig(): JsonObject {
@@ -377,6 +456,7 @@ function sourceConfig(): JsonObject {
             codex_acp: {url: "http://127.0.0.1/mcp"},
             unrelated: {url: "https://example.com/mcp"},
         },
+        web_search: "live",
     };
 }
 
