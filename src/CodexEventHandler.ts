@@ -368,16 +368,18 @@ export class CodexEventHandler {
 
     async handleNotification(notification: ServerNotification) {
         await this.flushPendingErrors();
+        const asyncTaskSessionId = this.subagents.notificationSessionId(notification);
+        const handledAsyncTasksFirst = notification.method === "turn/completed"
+            && asyncTaskSessionId !== this.sessionState.sessionId;
+        if (handledAsyncTasksFirst) {
+            await this.sessionState.asyncTasks.handleNotification(notification, asyncTaskSessionId);
+        }
         const handledBySubagents = await this.subagents.handle(notification);
         for (const buffered of this.subagents.takeBufferedNotifications()) {
             await this.handleNotification(buffered);
         }
-        // The subagent router owns child turn completion, but async tasks also use that boundary for reconciliation.
-        if (!handledBySubagents || notification.method === "turn/completed") {
-            await this.sessionState.asyncTasks.handleNotification(
-                notification,
-                this.subagents.notificationSessionId(notification),
-            );
+        if (!handledAsyncTasksFirst && !handledBySubagents) {
+            await this.sessionState.asyncTasks.handleNotification(notification, asyncTaskSessionId);
         }
         if (handledBySubagents) return;
         if (this.subagents.shouldIgnore(notification)) {

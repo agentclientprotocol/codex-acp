@@ -62,16 +62,23 @@ describe("Codex background terminal tasks", () => {
         await fixture.tasks.handleNotification(started(command()), "thread-1");
         await fixture.tasks.sync();
 
-        expect(fixture.updates).toEqual([{
-            sessionUpdate: "async_task_spawned",
-            asyncTaskId: "command-1",
-            name: "python -m http.server",
-            taskType: "shell",
-            description: "python -m http.server",
-            showInTranscript: false,
-            canStop: true,
-            toolCallId: "command-1",
-        }]);
+        expect(fixture.updates).toEqual([
+            {
+                sessionUpdate: "tool_call_update",
+                toolCallId: "command-1",
+                _meta: {jetbrains: {air: {asyncTasks: {backgrounded: true}}}},
+            },
+            {
+                sessionUpdate: "async_task_spawned",
+                asyncTaskId: "command-1",
+                name: "python -m http.server",
+                taskType: "shell",
+                description: "python -m http.server",
+                showInTranscript: false,
+                canStop: true,
+                toolCallId: "command-1",
+            },
+        ]);
     });
 
     it("does not publish a command that completes before it becomes background work", async () => {
@@ -162,6 +169,38 @@ describe("Codex background terminal tasks", () => {
         await expect(fixture.tasks.stop("command-1")).resolves.toBe(false);
     });
 
+    it("uses the replacement app-server client for stop requests", async () => {
+        const fixture = createFixture();
+        fixture.list.mockResolvedValue(page([terminal()]));
+        await fixture.tasks.sync();
+        const replacementTerminate = vi.fn().mockResolvedValue({terminated: true});
+        fixture.tasks.setAppServer({
+            threadBackgroundTerminalsTerminate: replacementTerminate,
+        } as unknown as CodexAppServerClient);
+
+        await expect(fixture.tasks.stop("command-1")).resolves.toBe(true);
+
+        expect(fixture.terminate).not.toHaveBeenCalled();
+        expect(replacementTerminate).toHaveBeenCalledWith({threadId: "thread-1", processId: "42"});
+    });
+
+    it("fails every announced task after the app-server exits", async () => {
+        const fixture = createFixture();
+        fixture.list.mockResolvedValue(page([
+            terminal(),
+            terminal({itemId: "command-2", processId: "84"}),
+        ]));
+        await fixture.tasks.sync();
+
+        await fixture.tasks.finishAll("failed");
+
+        expect(fixture.updates.filter(update => update.sessionUpdate === "async_task_state_update"))
+            .toEqual([
+                expect.objectContaining({asyncTaskId: "command-1", state: "failed"}),
+                expect.objectContaining({asyncTaskId: "command-2", state: "failed"}),
+            ]);
+    });
+
     it("keeps a task stoppable when termination is rejected or fails", async () => {
         const fixture = createFixture();
         fixture.list.mockResolvedValue(page([terminal()]));
@@ -247,7 +286,7 @@ describe("Codex background terminal tasks", () => {
             threadId: "thread-1",
             cursor: "42",
         });
-        expect(fixture.updates).toHaveLength(2);
+        expect(fixture.updates.filter(update => update.sessionUpdate === "async_task_spawned")).toHaveLength(2);
     });
 
     it("rejects a repeated background terminal cursor", async () => {
@@ -271,6 +310,22 @@ describe("Codex background terminal tasks", () => {
         const first = fixture.tasks.sync();
         const second = fixture.tasks.sync();
         listing.resolve(page([terminal()]));
+        await Promise.all([first, second]);
+
+        expect(fixture.list).toHaveBeenCalledTimes(2);
+        expect(fixture.updates.filter(update => update.sessionUpdate === "async_task_spawned")).toHaveLength(1);
+    });
+
+    it("runs a trailing refresh after the in-flight request fails", async () => {
+        const fixture = createFixture();
+        const listing = deferred<ThreadBackgroundTerminalsListResponse>();
+        fixture.list
+            .mockReturnValueOnce(listing.promise)
+            .mockResolvedValueOnce(page([terminal()]));
+
+        const first = fixture.tasks.sync();
+        const second = fixture.tasks.sync();
+        listing.reject(new Error("temporary list failure"));
         await Promise.all([first, second]);
 
         expect(fixture.list).toHaveBeenCalledTimes(2);
@@ -319,7 +374,6 @@ describe("Codex background terminal tasks", () => {
             childSpawned(),
             childMaterialized(),
             started(command(), "child-1"),
-            started({type: "reasoning", id: "reasoning-1", summary: [], content: []}, "child-1"),
             turnCompleted("child-1"),
         ]);
 
@@ -332,14 +386,17 @@ describe("Codex background terminal tasks", () => {
                 sessionId: "child-1",
                 update: {asyncTaskId: "child-1:command-1", toolCallId: "command-1"},
             });
-            const stopped = fixture.getAcpConnectionEvents([])
+            const childTerminalIndex = fixture.getAcpConnectionEvents([])
                 .filter(event => event.method === "sessionUpdate")
                 .map(event => event.args[0])
-                .find(event => event.update.sessionUpdate === "async_task_state_update");
-            expect(stopped).toMatchObject({
-                sessionId: "child-1",
-                update: {asyncTaskId: "child-1:command-1", state: "stopped"},
-            });
+                .findIndex(event => event.update.sessionUpdate === "subagent_state_update"
+                    && event.update.subagentSessionId === "child-1");
+            const taskSpawnIndex = fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === "sessionUpdate")
+                .map(event => event.args[0])
+                .findIndex(event => event.update.sessionUpdate === "async_task_spawned");
+            expect(taskSpawnIndex).toBeGreaterThanOrEqual(0);
+            expect(childTerminalIndex).toBeGreaterThan(taskSpawnIndex);
         });
 
         const terminate = vi.spyOn(fixture.getCodexAppServerClient(), "threadBackgroundTerminalsTerminate")
@@ -347,8 +404,8 @@ describe("Codex background terminal tasks", () => {
         await expect(fixture.getCodexAcpAgent().extMethod(ASYNC_TASK_STOP_METHOD, {
             sessionId: sessionState.sessionId,
             asyncTaskId: "child-1:command-1",
-        })).resolves.toEqual({stopped: false});
-        expect(terminate).not.toHaveBeenCalled();
+        })).resolves.toEqual({stopped: true});
+        expect(terminate).toHaveBeenCalledWith({threadId: "child-1", processId: "42"});
     });
 
     it("routes a child task stop to its owning Codex thread", async () => {
@@ -504,8 +561,10 @@ function childMaterialized() {
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
-    const promise = new Promise<T>(innerResolve => {
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((innerResolve, innerReject) => {
         resolve = innerResolve;
+        reject = innerReject;
     });
-    return {promise, resolve};
+    return {promise, resolve, reject};
 }

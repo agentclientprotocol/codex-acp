@@ -90,14 +90,31 @@ describe("CodexACPAgent - loadSession", () => {
                 agentPath: "/root/orphan_child",
             },
         ]);
-        const child = makeThread("child-history", [{
-            type: "agentMessage",
-            id: "child-history-message-1",
-            text: "Persisted first-generation output",
-            phase: null,
-            memoryCitation: null,
-            delivery: null,
-        }]);
+        const child = makeThread("child-history", [
+            {
+                type: "commandExecution",
+                id: "child-command-1",
+                pluginId: null,
+                scriptPath: null,
+                command: "python -m http.server",
+                cwd: "/workspace",
+                processId: "42",
+                source: "unifiedExecStartup",
+                status: "inProgress",
+                commandActions: [],
+                aggregatedOutput: null,
+                exitCode: null,
+                durationMs: null,
+            },
+            {
+                type: "agentMessage",
+                id: "child-history-message-1",
+                text: "Persisted first-generation output",
+                phase: null,
+                memoryCitation: null,
+                delivery: null,
+            },
+        ]);
         const firstChildTurn = child.turns[0]!;
         child.turns.push({
             id: "turn-child-history-2",
@@ -129,11 +146,17 @@ describe("CodexACPAgent - loadSession", () => {
             if (threadId === "orphan-history") return Promise.reject(new Error("missing child history"));
             return Promise.resolve({thread: threadId === root.id ? root : child});
         });
+        appServer.threadBackgroundTerminalsList = vi.fn().mockImplementation(({threadId}) => Promise.resolve({
+            data: threadId === "child-history"
+                ? [{itemId: "child-command-1", processId: "42", command: "python -m http.server"}]
+                : [],
+            nextCursor: null,
+        }));
 
         await agent.initialize({
             protocolVersion: 1,
             clientCapabilities: {
-                _meta: {jetbrains: {air: {version: 1, capabilities: ["nativeSubagentSessions"]}}},
+                _meta: {jetbrains: {air: {version: 1, capabilities: ["nativeSubagentSessions", "asyncTasks"]}}},
             },
         });
         await agent.loadSession({sessionId: root.id, cwd: "/workspace", mcpServers: []});
@@ -144,12 +167,18 @@ describe("CodexACPAgent - loadSession", () => {
         const firstSpawnIndex = updates.findIndex(({update}) => update.subagentSessionId === "child-history"
             && update.sessionUpdate === "subagent_spawned");
         const firstOutputIndex = updates.findIndex(({update}) => update.messageId === "child-history-message-1");
+        const childTaskIndex = updates.findIndex(({update}) => update.sessionUpdate === "async_task_spawned"
+            && update.asyncTaskId === "child-history:child-command-1");
+        const firstTerminalIndex = updates.findIndex(({update}) => update.sessionUpdate === "subagent_state_update"
+            && update.subagentSessionId === "child-history");
         const secondSpawnIndex = updates.findIndex(({update}) => update.subagentSessionId === "child-history:generation:2"
             && update.sessionUpdate === "subagent_spawned");
         const secondOutputIndex = updates.findIndex(({update}) => update.messageId === "child-history-message-2");
         const orphanTerminalIndex = updates.findIndex(({update}) => update.subagentSessionId === "orphan-history"
             && update.state === "disconnected");
         expect(firstOutputIndex).toBeGreaterThan(firstSpawnIndex);
+        expect(childTaskIndex).toBeGreaterThan(firstSpawnIndex);
+        expect(firstTerminalIndex).toBeGreaterThan(childTaskIndex);
         expect(secondSpawnIndex).toBeGreaterThan(firstOutputIndex);
         expect(secondOutputIndex).toBeGreaterThan(secondSpawnIndex);
         expect(orphanTerminalIndex).toBeGreaterThan(secondOutputIndex);

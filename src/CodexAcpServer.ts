@@ -391,6 +391,9 @@ export class CodexAcpServer {
             case SESSION_STEERING_METHOD:
                 return await this.executeOrQueueSteeringRequest(this.parseSessionSteerParams(methodRequest.params));
             case ASYNC_TASK_STOP_METHOD: {
+                if (this.providerUpdate !== null) {
+                    await this.providerUpdate;
+                }
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
                 if (!sessionState) return {stopped: false};
                 return {
@@ -668,7 +671,7 @@ export class CodexAcpServer {
             sessionState.cwd,
             () => sessionState.sessionTitleSource,
         );
-        this.sessions.set(sessionId, sessionState);
+        this.installSessionState(sessionState);
         resumeSubscribed = false;
 
         const canPublishSessionUpdates = operation !== "fork";
@@ -727,6 +730,11 @@ export class CodexAcpServer {
         );
     }
 
+    private installSessionState(sessionState: SessionState): void {
+        this.sessions.get(sessionState.sessionId)?.asyncTasks.clear();
+        this.sessions.set(sessionState.sessionId, sessionState);
+    }
+
     private getAuthProviderForAuthenticateRequest(request: acp.AuthenticateRequest): string | null {
         if (isCodexAuthRequest(request) && request.methodId === "gateway") {
             return "custom-gateway";
@@ -747,6 +755,7 @@ export class CodexAcpServer {
         } = await this.getOrCreateSessionWithHistory(params);
 
         await this.streamThreadHistory(sessionId, thread);
+        await this.getSessionState(sessionId).asyncTasks.reconcile();
 
         logger.log("Session loaded", {
             sessionId: sessionId,
@@ -994,6 +1003,7 @@ export class CodexAcpServer {
             }
 
             logger.log("Restarting Codex app-server for provider update", {sessionCount: this.sessions.size});
+            await this.finishAllAsyncTasks("stopped", "before the provider restart");
             const replacement = await this.restartCodexClient();
             apply(replacement);
             if (this.initializeRequest === null) {
@@ -1005,6 +1015,7 @@ export class CodexAcpServer {
 
             const resumeErrors: unknown[] = [];
             for (const session of this.sessions.values()) {
+                session.asyncTasks.setAppServer(replacement.appServerClient);
                 try {
                     await replacement.resumeSession({
                         sessionId: session.sessionId,
@@ -1013,6 +1024,7 @@ export class CodexAcpServer {
                         mcpServers: session.mcpServers ?? [],
                     });
                     session.authProvider = replacement.getModelProvider();
+                    session.asyncTasks.refresh();
                     logger.log("Resumed session after provider restart", {sessionId: session.sessionId});
                 } catch (error) {
                     resumeErrors.push(error);
@@ -1736,9 +1748,8 @@ export class CodexAcpServer {
             sessionState.cwd,
             () => sessionState.sessionTitleSource,
         );
-        this.sessions.set(sessionId, sessionState);
+        this.installSessionState(sessionState);
         subscribed = false;
-        this.publishAsyncTasksAsync(sessionState, requestedSessionGeneration);
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.pendingMcpStartupSessions.set(sessionId, {
@@ -1847,6 +1858,15 @@ export class CodexAcpServer {
                                     new Set([...ancestry, item.agentThreadId]),
                                     threadCache,
                                 );
+                                try {
+                                    await sessionState.asyncTasks.recover(
+                                        item.agentThreadId,
+                                        childSessionId,
+                                        commandItemIds(childTurn.items),
+                                    );
+                                } catch (error) {
+                                    logger.error(`Failed to restore background terminals for ${item.agentThreadId}`, error);
+                                }
                             }
                         }
                     }
@@ -3080,11 +3100,22 @@ export class CodexAcpServer {
                 throw new RequestError(requestErrorCode, `VC++ redistributable should be installed`);
             }
             if (exitCode !== null) {
+                await this.finishAllAsyncTasks("failed", "after the Codex process exited");
                 const stderr = this.getRecentStderr().trim();
                 const detail = stderr ? `:\n${stderr}` : "";
                 throw new RequestError(requestErrorCode, `Codex process has exited with code ${exitCode}${detail}`);
             }
             throw err;
+        }
+    }
+
+    private async finishAllAsyncTasks(state: "failed" | "stopped", reason: string): Promise<void> {
+        for (const session of this.sessions.values()) {
+            try {
+                await session.asyncTasks.finishAll(state);
+            } catch (error) {
+                logger.error(`Failed to finish background terminal tasks ${reason}`, error);
+            }
         }
     }
 
@@ -3155,6 +3186,12 @@ function mergeHistoryUpdates(
     }
 
     return merged;
+}
+
+function commandItemIds(items: ThreadItem[]): Set<string> {
+    return new Set(items
+        .filter((item): item is Extract<ThreadItem, {type: "commandExecution"}> => item.type === "commandExecution")
+        .map(item => item.id));
 }
 
 function historyUpdateKey(update: UpdateSessionEvent): string | null {

@@ -2,6 +2,12 @@ import type {ServerNotification} from "../app-server";
 import type {ThreadItem} from "../app-server/v2";
 import type {ACPSessionConnection} from "../ACPSessionConnection";
 import type {CodexAppServerClient} from "../CodexAppServerClient";
+import {
+    AIR_ASYNC_TASKS_BACKGROUNDED_KEY,
+    AIR_ASYNC_TASKS_KEY,
+    AIR_META_KEY,
+    JETBRAINS_META_KEY,
+} from "../AirExtension";
 import {logger} from "../Logger";
 import type {ThreadBackgroundTerminal} from "./BackgroundTerminalApi";
 
@@ -34,7 +40,7 @@ export class CodexBackgroundTerminalTasks {
     constructor(
         readonly enabled: boolean,
         private readonly rootSessionId: string,
-        private readonly appServer: CodexAppServerClient,
+        private appServer: CodexAppServerClient,
         private readonly session: ACPSessionConnection,
     ) {}
 
@@ -51,7 +57,11 @@ export class CodexBackgroundTerminalTasks {
             await this.observeCommandCompleted(notification.params.item, threadId);
             return;
         }
-        if (notification.method === "item/started" || notification.method === "turn/completed") {
+        if (notification.method === "turn/completed") {
+            await this.reconcile(threadId, sessionId);
+            return;
+        }
+        if (notification.method === "item/started") {
             this.refresh(threadId, sessionId);
         }
     }
@@ -79,9 +89,45 @@ export class CodexBackgroundTerminalTasks {
     }
 
     refresh(threadId: string = this.rootSessionId, sessionId: string = this.rootSessionId): void {
-        void this.sync(threadId, sessionId).catch((error) => {
+        void this.reconcile(threadId, sessionId);
+    }
+
+    async reconcile(threadId: string = this.rootSessionId, sessionId: string = this.rootSessionId): Promise<void> {
+        try {
+            await this.sync(threadId, sessionId);
+        } catch (error) {
             if (this.isActive()) logger.error(`Failed to list background terminals for ${threadId}`, error);
-        });
+        }
+    }
+
+    setAppServer(appServer: CodexAppServerClient): void {
+        this.appServer = appServer;
+    }
+
+    async recover(threadId: string, sessionId: string, itemIds: ReadonlySet<string>): Promise<void> {
+        if (!this.isActive() || itemIds.size === 0) return;
+        const terminals = await this.listAll(threadId);
+        for (const terminal of terminals) {
+            if (!this.isActive()) return;
+            if (!itemIds.has(terminal.itemId)) continue;
+            const task = this.remember(threadId, sessionId, terminal);
+            if (!task.announced && task.state === "running") await this.announce(task);
+        }
+    }
+
+    async finishAll(state: TerminalState): Promise<void> {
+        if (!this.isActive()) return;
+        const errors: unknown[] = [];
+        for (const task of this.tasks.values()) {
+            try {
+                await this.finish(task, state);
+            } catch (error) {
+                errors.push(error);
+            }
+        }
+        if (errors.length > 0) {
+            throw new AggregateError(errors, `Failed to finish ${errors.length} background terminal task(s)`);
+        }
     }
 
     async sync(
@@ -159,15 +205,37 @@ export class CodexBackgroundTerminalTasks {
     }
 
     private async syncUntilCurrent(threadId: string, pending: PendingSync): Promise<void> {
+        let hasFailure = false;
+        let failure: unknown;
         do {
             pending.requested = false;
-            await this.syncThread(threadId, pending.sessionId);
+            try {
+                await this.syncThread(threadId, pending.sessionId);
+                hasFailure = false;
+            } catch (error) {
+                hasFailure = true;
+                failure = error;
+            }
         } while (pending.requested && this.isActive());
+        if (hasFailure) throw failure;
     }
 
     private async announce(task: Task): Promise<void> {
         task.announced = true;
         try {
+            await this.session.update({
+                sessionUpdate: "tool_call_update",
+                toolCallId: task.itemId,
+                _meta: {
+                    [JETBRAINS_META_KEY]: {
+                        [AIR_META_KEY]: {
+                            [AIR_ASYNC_TASKS_KEY]: {
+                                [AIR_ASYNC_TASKS_BACKGROUNDED_KEY]: true,
+                            },
+                        },
+                    },
+                },
+            }, task.sessionId);
             await this.session.update({
                 sessionUpdate: "async_task_spawned",
                 asyncTaskId: task.asyncTaskId,
