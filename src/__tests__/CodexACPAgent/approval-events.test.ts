@@ -11,7 +11,7 @@ import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
 import {ApprovalOptionId} from "../../permissions/option-ids";
 
-type CommandParams = Omit<CommandExecutionRequestApprovalParams, "availableDecisions"> & {
+type CommandParams = CommandExecutionRequestApprovalParams & {
     additionalPermissions?: AdditionalPermissionProfile | null;
     availableDecisions?: unknown;
 };

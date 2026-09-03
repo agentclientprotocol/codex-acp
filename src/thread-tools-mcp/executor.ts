@@ -169,7 +169,7 @@ export class CodexThreadToolExecutor {
                 : {permissions: activePermissionProfile.id}),
             ephemeral: sourceThread.ephemeral,
             projectId: sourceThread.projectId,
-            ...(historyMode(sourceThread) === "paginated" && {historyMode: "paginated" as const}),
+            historyMode: historyMode(sourceThread) === "paginated" ? "paginated" : undefined,
             runtimeWorkspaceRoots: source.runtimeWorkspaceRoots,
             config,
         });

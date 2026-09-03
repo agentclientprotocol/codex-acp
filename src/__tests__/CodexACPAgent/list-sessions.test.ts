@@ -14,7 +14,6 @@ describe("CodexACPAgent - list sessions", () => {
 
         const threadA: Thread = {
             id: "sess-1",
-            extra: null,
             sessionId: "sess-1",
             parentThreadId: null,
             threadSource: null,
@@ -34,7 +33,6 @@ describe("CodexACPAgent - list sessions", () => {
             projectId: null,
             historyMode: "legacy",
             source: "cli",
-            canAcceptDirectInput: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
@@ -43,7 +41,6 @@ describe("CodexACPAgent - list sessions", () => {
         };
         const threadB: Thread = {
             id: "sess-2",
-            extra: null,
             sessionId: "sess-2",
             parentThreadId: null,
             threadSource: null,
@@ -63,7 +60,6 @@ describe("CodexACPAgent - list sessions", () => {
             projectId: null,
             historyMode: "legacy",
             source: "cli",
-            canAcceptDirectInput: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
@@ -111,7 +107,6 @@ describe("CodexACPAgent - list sessions", () => {
 
         const matchingThread: Thread = {
             id: "sess-win",
-            extra: null,
             sessionId: "sess-win",
             parentThreadId: null,
             threadSource: null,
@@ -131,7 +126,6 @@ describe("CodexACPAgent - list sessions", () => {
             projectId: null,
             historyMode: "legacy",
             source: "cli",
-            canAcceptDirectInput: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
@@ -181,7 +175,6 @@ describe("CodexACPAgent - list sessions", () => {
 
         const thread: Thread = {
             id: "sess-1",
-            extra: null,
             sessionId: "sess-1",
             parentThreadId: null,
             threadSource: null,
@@ -201,7 +194,6 @@ describe("CodexACPAgent - list sessions", () => {
             projectId: null,
             historyMode: "legacy",
             source: "cli",
-            canAcceptDirectInput: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
@@ -264,7 +256,6 @@ describe("CodexACPAgent - list sessions", () => {
         });
         const thread: Thread = {
             id: "sess-1",
-            extra: null,
             sessionId: "sess-1",
             parentThreadId: null,
             threadSource: null,
@@ -284,7 +275,6 @@ describe("CodexACPAgent - list sessions", () => {
             projectId: null,
             historyMode: "legacy",
             source: "cli",
-            canAcceptDirectInput: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,

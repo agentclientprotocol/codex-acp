@@ -19,7 +19,6 @@ describe("CodexACPAgent - loadSession", () => {
         appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
         const makeThread = (id: string, items: Thread["turns"][number]["items"]): Thread => ({
             id,
-            extra: null,
             sessionId: id,
             parentThreadId: id === "root-history" ? null : "root-history",
             threadSource: null,
@@ -39,7 +38,6 @@ describe("CodexACPAgent - loadSession", () => {
             projectId: null,
             historyMode: "legacy",
             source: "cli",
-            canAcceptDirectInput: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
@@ -202,7 +200,6 @@ describe("CodexACPAgent - loadSession", () => {
 
         const thread: Thread = {
             id: "session-1",
-            extra: null,
             sessionId: "session-1",
             parentThreadId: null,
             threadSource: null,
@@ -222,7 +219,6 @@ describe("CodexACPAgent - loadSession", () => {
             projectId: null,
             historyMode: "legacy",
             source: "cli",
-            canAcceptDirectInput: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
@@ -433,7 +429,6 @@ describe("CodexACPAgent - loadSession", () => {
         });
         const thread: Thread = {
             id: "session-1",
-            extra: null,
             sessionId: "session-1",
             parentThreadId: null,
             threadSource: null,
@@ -453,7 +448,6 @@ describe("CodexACPAgent - loadSession", () => {
             projectId: null,
             historyMode: "legacy",
             source: "cli",
-            canAcceptDirectInput: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
@@ -650,7 +644,6 @@ describe("CodexACPAgent - loadSession", () => {
 
             const thread: Thread = {
                 id: "session-legacy",
-                extra: null,
                 sessionId: "session-legacy",
                 parentThreadId: null,
                 threadSource: null,
@@ -670,7 +663,6 @@ describe("CodexACPAgent - loadSession", () => {
                 projectId: null,
                 historyMode: "legacy",
                 source: "vscode",
-                canAcceptDirectInput: null,
                 agentNickname: null,
                 agentRole: null,
                 gitInfo: null,
@@ -790,7 +782,6 @@ describe("CodexACPAgent - loadSession", () => {
         });
         const thread: Thread = {
             id: "session-1",
-            extra: null,
             sessionId: "session-1",
             parentThreadId: null,
             threadSource: null,
@@ -810,7 +801,6 @@ describe("CodexACPAgent - loadSession", () => {
             projectId: null,
             historyMode: "legacy",
             source: "cli",
-            canAcceptDirectInput: null,
             agentNickname: null,
             agentRole: null,
             gitInfo: null,
