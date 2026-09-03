@@ -1,5 +1,8 @@
 import {describe, expect, it, vi} from "vitest";
-import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
+import {
+    createCodexMockTestFixture,
+    createTestModel,
+} from "../acp-test-utils";
 import {AgentMode, MODE_CONFIG_ID} from "../../AgentMode";
 import {
     MODEL_CONFIG_ID,
@@ -49,9 +52,11 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
         collaborationMode: "default",
         additionalDirectories: [],
     });
+    const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate")
+        .mockResolvedValue(undefined);
 
     const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
-    return {fixture, codexAcpAgent, codexAcpClient, response};
+    return {fixture, codexAcpAgent, codexAcpClient, response, update};
 }
 
 describe("Session config options", () => {
@@ -173,8 +178,7 @@ describe("Session config options", () => {
 
     it("changes collaboration mode without starting a model turn", async () => {
         const {fast} = buildModels();
-        const {codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
-        const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
 
         const result = await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
@@ -192,8 +196,7 @@ describe("Session config options", () => {
 
     it("toggles collaboration mode with /plan without starting a model turn", async () => {
         const {fast} = buildModels();
-        const {fixture, codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
-        const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
+        const {fixture, codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
         const turnStart = vi.spyOn(fixture.getCodexAppServerClient(), "turnStart");
 
         const enabledResponse = await codexAcpAgent.prompt({
@@ -247,7 +250,7 @@ describe("Session config options", () => {
 
     it("changes the model and keeps the current reasoning effort when supported", async () => {
         const {fast, slow} = buildModels();
-        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast, slow]);
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast, slow]);
 
         await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
@@ -256,6 +259,11 @@ describe("Session config options", () => {
         });
 
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("slow-model[medium]");
+        expect(update).toHaveBeenCalledWith({
+            threadId: "session-id",
+            model: "slow-model",
+            effort: "medium",
+        });
     });
 
     it("falls back to the new model's default effort when the current effort is unsupported", async () => {
@@ -273,7 +281,7 @@ describe("Session config options", () => {
 
     it("changes only the reasoning effort", async () => {
         const {fast} = buildModels();
-        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast]);
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
 
         await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
@@ -282,6 +290,11 @@ describe("Session config options", () => {
         });
 
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("fast-model[high]");
+        expect(update).toHaveBeenCalledWith({
+            threadId: "session-id",
+            model: "fast-model",
+            effort: "high",
+        });
     });
 
     it("refreshes the cached model list when unstable_setSessionModel picks a freshly fetched model", async () => {
@@ -309,6 +322,7 @@ describe("Session config options", () => {
             defaultReasoningEffort: "medium",
         });
         vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue([fast, extraModel]);
+        vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
 
         await codexAcpAgent.unstable_setSessionModel({
             sessionId: "session-id",

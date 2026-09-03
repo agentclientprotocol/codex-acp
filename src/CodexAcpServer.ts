@@ -729,6 +729,7 @@ export class CodexAcpServer {
             availableModelCount: modelState.availableModels.length
         });
         return {
+            sessionId,
             models: modelState,
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
@@ -1103,10 +1104,10 @@ export class CodexAcpServer {
                 await this.applyCollaborationModeChange(sessionState, this.stringConfigValue(params));
                 break;
             case MODEL_CONFIG_ID:
-                this.applyModelChange(sessionState, this.stringConfigValue(params));
+                await this.applyModelChange(sessionState, this.stringConfigValue(params));
                 break;
             case REASONING_EFFORT_CONFIG_ID:
-                this.applyReasoningEffortChange(sessionState, this.stringConfigValue(params));
+                await this.applyReasoningEffortChange(sessionState, this.stringConfigValue(params));
                 break;
             default:
                 throw RequestError.invalidParams();
@@ -1149,7 +1150,7 @@ export class CodexAcpServer {
         sessionState.collaborationMode = mode;
     }
 
-    private applyModelChange(sessionState: SessionState, value: string): void {
+    private async applyModelChange(sessionState: SessionState, value: string): Promise<void> {
         const model = sessionState.availableModels.find(m => m.id === value);
         if (!model) {
             const currentModel = ModelId.fromString(sessionState.currentModelId).model;
@@ -1161,16 +1162,22 @@ export class CodexAcpServer {
         const currentEffort = ModelId.fromString(sessionState.currentModelId).effort;
         const effort = findSupportedEffort(model.supportedReasoningEfforts, currentEffort)
             ?? model.defaultReasoningEffort;
+        await this.codexAcpClient.setModelAndEffort(
+            sessionState.sessionId,
+            ModelId.fromComponents(model, effort).toString(),
+        );
         this.applyModelAndEffort(sessionState, model, effort);
     }
 
-    private applyReasoningEffortChange(sessionState: SessionState, value: string): void {
+    private async applyReasoningEffortChange(sessionState: SessionState, value: string): Promise<void> {
         const effort = findSupportedEffort(sessionState.supportedReasoningEfforts, value);
         if (!effort) {
             throw RequestError.invalidParams();
         }
         const {model} = ModelId.fromString(sessionState.currentModelId);
-        sessionState.currentModelId = ModelId.create(model, effort).toString();
+        const currentModelId = ModelId.create(model, effort).toString();
+        await this.codexAcpClient.setModelAndEffort(sessionState.sessionId, currentModelId);
+        sessionState.currentModelId = currentModelId;
     }
 
     private applyModelAndEffort(sessionState: SessionState, model: Model, effort: ReasoningEffort): void {
@@ -1206,6 +1213,10 @@ export class CodexAcpServer {
         }
 
         sessionState.availableModels = models;
+        await this.codexAcpClient.setModelAndEffort(
+            sessionState.sessionId,
+            ModelId.fromComponents(model, reasoningEffort).toString(),
+        );
         this.applyModelAndEffort(sessionState, model, reasoningEffort);
 
         return {};

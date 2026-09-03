@@ -3,6 +3,7 @@ import type {
     ClientRequest,
     InitializeParams,
     InitializeResponse,
+    ReasoningEffort,
     ServerNotification
 } from "./app-server";
 import type {
@@ -553,7 +554,7 @@ export class CodexAppServerClient {
         return this.threadSettings.get(threadId);
     }
 
-    async threadSettingsUpdate(params: ExperimentalThreadSettingsUpdateParams): Promise<void> {
+    async threadSettingsUpdate(params: ThreadSettingsUpdateParams): Promise<void> {
         await this.connection.sendRequest("thread/settings/update", params);
     }
 
@@ -1027,9 +1028,11 @@ type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>
     : never;
 
-export interface ExperimentalThreadSettingsUpdateParams {
+export interface ThreadSettingsUpdateParams {
     threadId: string;
-    collaborationMode: {
+    model?: string;
+    effort?: ReasoningEffort;
+    collaborationMode?: {
         mode: "default" | "plan";
         settings: {
             model: string;
