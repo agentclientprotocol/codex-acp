@@ -511,7 +511,7 @@ export class CodexAcpClient {
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
-        this.threadToolsMcpServer.registerThreadConfig(response.thread.id, config);
+        this.threadToolsMcpServer.registerActiveThreadConfig(response.thread.id, config);
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
@@ -542,7 +542,7 @@ export class CodexAcpClient {
                 this.createModelId(models, model, reasoningEffort).toString(),
             getCollaborationMode: sessionId => this.getCollaborationMode(sessionId),
         });
-        if (forkConfig !== null) this.threadToolsMcpServer.registerThreadConfig(result.sessionId, forkConfig);
+        if (forkConfig !== null) this.threadToolsMcpServer.registerActiveThreadConfig(result.sessionId, forkConfig);
         return result;
     }
 
@@ -557,7 +557,7 @@ export class CodexAcpClient {
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
-        this.threadToolsMcpServer.registerThreadConfig(response.thread.id, config);
+        this.threadToolsMcpServer.registerActiveThreadConfig(response.thread.id, config);
         onSubscribed?.();
         const historyResponse = await this.codexClient.threadRead({
             threadId: response.thread.id,
@@ -594,7 +594,7 @@ export class CodexAcpClient {
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });
-        this.threadToolsMcpServer.registerThreadConfig(response.thread.id, config);
+        this.threadToolsMcpServer.registerActiveThreadConfig(response.thread.id, config);
 
         const codexModels = await this.fetchAvailableModels();
         if (codexModels.length === 0) {

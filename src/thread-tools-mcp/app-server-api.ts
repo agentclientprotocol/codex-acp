@@ -1,36 +1,28 @@
 import type {CodexAppServerClient} from "../CodexAppServerClient";
 import type {
     Thread,
+    ThreadForkParams,
     ThreadForkResponse,
     ThreadItem,
     ThreadItemEntry,
     ThreadItemsListParams,
     ThreadItemsListResponse,
+    ThreadResumeParams,
     ThreadResumeResponse,
+    ThreadStartParams,
+    ThreadStartResponse,
     ThreadTurnsListParams,
     ThreadTurnsListResponse,
     Turn,
+    TurnStartParams,
 } from "../app-server/v2";
 
-export type PaginatedThread = Thread & {
-    historyMode?: "legacy" | "paginated";
-    projectId?: string | null;
-};
-
-export type PaginatedThreadResumeResponse = ThreadResumeResponse & {
-    runtimeWorkspaceRoots?: string[];
-    activePermissionProfile?: {id: string} | null;
-};
+export type PaginatedThread = Thread;
+export type PaginatedThreadResumeResponse = ThreadResumeResponse;
 
 export type PaginatedTurn = Turn;
 export type PaginatedThreadItem = ThreadItem;
 export type {ThreadItemEntry};
-
-type Page<T> = {
-    data: T[];
-    nextCursor: string | null;
-    backwardsCursor: string | null;
-};
 
 export async function listThreadTurns(
     client: CodexAppServerClient,
@@ -42,7 +34,7 @@ export async function listThreadTurns(
 export async function listThreadTurnsWithFallback(
     client: CodexAppServerClient,
     params: Parameters<typeof listThreadTurns>[1],
-): Promise<Page<PaginatedTurn>> {
+): Promise<ThreadTurnsListResponse> {
     try {
         return await listThreadTurns(client, params);
     } catch (error) {
@@ -64,14 +56,7 @@ export async function listThreadTurnsWithFallback(
 
 export async function forkThreadWithoutHistory(
     client: CodexAppServerClient,
-    params: {
-        threadId: string;
-        lastTurnId?: string;
-        beforeTurnId?: string;
-        ephemeral: boolean;
-        excludeTurns: boolean;
-        config: Record<string, unknown>;
-    },
+    params: ThreadForkParams,
 ): Promise<ThreadForkResponse> {
     try {
         return await client.connection.sendRequest("thread/fork", params);
@@ -90,11 +75,7 @@ export async function listThreadItems(
 
 export async function resumeThreadWithoutHistory(
     client: CodexAppServerClient,
-    params: {
-        threadId: string;
-        config?: Record<string, unknown>;
-        excludeTurns: boolean;
-    },
+    params: ThreadResumeParams,
 ): Promise<PaginatedThreadResumeResponse> {
     try {
         return await client.connection.sendRequest("thread/resume", params);
@@ -106,8 +87,8 @@ export async function resumeThreadWithoutHistory(
 
 export async function startThread(
     client: CodexAppServerClient,
-    params: Record<string, unknown>,
-): Promise<{thread: PaginatedThread}> {
+    params: ThreadStartParams,
+): Promise<ThreadStartResponse> {
     try {
         return await client.connection.sendRequest("thread/start", params);
     } catch (error) {
@@ -120,17 +101,7 @@ export async function startThread(
 
 export async function startToolTurn(
     client: CodexAppServerClient,
-    params: {
-        threadId: string;
-        input: [];
-        toolOutput: {
-            name: string;
-            namespace: string;
-            output: string;
-        };
-        model: string | null;
-        sandboxPolicy: unknown;
-    },
+    params: TurnStartParams,
 ): Promise<void> {
     await client.connection.sendRequest("turn/start", params);
 }

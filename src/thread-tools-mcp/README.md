@@ -31,6 +31,7 @@ The app server enforces its managed configuration when it consumes the session
 config. `executor.ts` maps each tool to an app-server operation.
 `thread-content.ts` maps thread data to tool results. `server.ts` owns the HTTP
 transport and its lifetime. `output.ts` limits model content. `app-server-api.ts`
-contains compatibility fallbacks and fields that the generated SDK omits.
+contains compatibility fallbacks around the generated experimental API.
 
-The runtime pins the Codex package used to generate the checked API schema.
+The runtime pins the Codex package used to generate the checked experimental
+API schema.

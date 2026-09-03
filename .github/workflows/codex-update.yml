@@ -76,7 +76,7 @@ jobs:
 
       - name: Install new version of package and commit
         run: |
-          npm install "$CODEX_PACKAGE@$VERSION"
+          npm install --save-exact "$CODEX_PACKAGE@$VERSION"
           npm run generate-types
           git add package.json package-lock.json src/app-server
           git commit -m "fix: update codex to $VERSION"

@@ -69,7 +69,24 @@ describe("Codex thread tools MCP server", () => {
             },
         });
 
-        expect(response.status).toBe(400);
+        expect(response.status).toBe(404);
+    });
+
+    it("retains every active config and bounds only background configs", async () => {
+        server = new CodexThreadToolsMcpServer({} as CodexAppServerClient);
+        const internals = server as unknown as {
+            registerBackgroundThreadConfig(threadId: string, config: JsonObject): void,
+            getThreadConfig(threadId: string): JsonObject | undefined,
+        };
+
+        for (let index = 0; index < 300; index++) {
+            server.registerActiveThreadConfig(`active-${index}`, {index});
+            internals.registerBackgroundThreadConfig(`background-${index}`, {index});
+        }
+
+        expect(internals.getThreadConfig("active-0")).toEqual({index: 0});
+        expect(internals.getThreadConfig("background-0")).toBeUndefined();
+        expect(internals.getThreadConfig("background-299")).toEqual({index: 299});
     });
 
     it("finishes transport cleanup when a protocol session fails to close", async () => {

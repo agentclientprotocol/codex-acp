@@ -1,5 +1,7 @@
 import type {ContentBlock} from "@agentclientprotocol/sdk";
 
+const CODEX_THREAD_ID = /^[A-Za-z0-9._:-]{1,256}$/;
+
 export function toCodexSessionLinks(prompt: ContentBlock[]): ContentBlock[] {
     return prompt.map((block): ContentBlock => {
         if (block.type !== "resource_link") return block;
@@ -20,7 +22,8 @@ function acpSessionId(uri: string): string | null {
     try {
         const parsed = new URL(uri);
         if (parsed.protocol !== "acp-session:" || parsed.hostname !== "reference") return null;
-        return parsed.searchParams.get("sessionId")?.trim() || null;
+        const sessionId = parsed.searchParams.get("sessionId")?.trim();
+        return sessionId !== undefined && CODEX_THREAD_ID.test(sessionId) ? sessionId : null;
     } catch {
         return null;
     }

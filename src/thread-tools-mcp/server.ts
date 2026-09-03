@@ -18,13 +18,14 @@ import type {JsonValue} from "../app-server/serde_json/JsonValue";
 type JsonObject = {[key: string]: JsonValue | undefined};
 type McpSession = {transport: StreamableHTTPServerTransport, server: McpServer};
 type FallbackConfigFactory = (cwd: string) => Promise<JsonObject>;
-const MAX_THREAD_CONFIGS = 256;
+const MAX_BACKGROUND_THREAD_CONFIGS = 256;
 
 export class CodexThreadToolsMcpServer {
     private readonly authorization = `Bearer ${randomUUID()}`;
     private executor: CodexThreadToolExecutor | null = null;
     private readonly sessions = new Map<string, McpSession>();
-    private readonly threadConfigs = new Map<string, JsonObject>();
+    private readonly activeThreadConfigs = new Map<string, JsonObject>();
+    private readonly backgroundThreadConfigs = new Map<string, JsonObject>();
     private httpServer: HttpServer | null = null;
     private startPromise: Promise<void> | null = null;
     private port: number | null = null;
@@ -47,30 +48,40 @@ export class CodexThreadToolsMcpServer {
         this.executor = new CodexThreadToolExecutor(
             client,
             async (threadId, cwd) => this.getThreadConfig(threadId) ?? fallback(cwd),
-            (threadId, config) => this.registerThreadConfig(threadId, config),
+            (threadId, config) => this.registerBackgroundThreadConfig(threadId, config),
         );
     }
 
-    registerThreadConfig(threadId: string, config: JsonObject): void {
+    registerActiveThreadConfig(threadId: string, config: JsonObject): void {
         this.assertOpen();
-        this.threadConfigs.delete(threadId);
-        this.threadConfigs.set(threadId, structuredClone(config));
-        while (this.threadConfigs.size > MAX_THREAD_CONFIGS) {
-            const oldestThreadId = this.threadConfigs.keys().next().value;
+        this.backgroundThreadConfigs.delete(threadId);
+        this.activeThreadConfigs.set(threadId, structuredClone(config));
+    }
+
+    private registerBackgroundThreadConfig(threadId: string, config: JsonObject): void {
+        this.assertOpen();
+        if (this.activeThreadConfigs.has(threadId)) return;
+        this.backgroundThreadConfigs.delete(threadId);
+        this.backgroundThreadConfigs.set(threadId, structuredClone(config));
+        while (this.backgroundThreadConfigs.size > MAX_BACKGROUND_THREAD_CONFIGS) {
+            const oldestThreadId = this.backgroundThreadConfigs.keys().next().value;
             if (oldestThreadId === undefined) break;
-            this.threadConfigs.delete(oldestThreadId);
+            this.backgroundThreadConfigs.delete(oldestThreadId);
         }
     }
 
     forgetThreadConfig(threadId: string): void {
-        this.threadConfigs.delete(threadId);
+        this.activeThreadConfigs.delete(threadId);
+        this.backgroundThreadConfigs.delete(threadId);
     }
 
     private getThreadConfig(threadId: string): JsonObject | undefined {
-        const config = this.threadConfigs.get(threadId);
+        const activeConfig = this.activeThreadConfigs.get(threadId);
+        if (activeConfig !== undefined) return activeConfig;
+        const config = this.backgroundThreadConfigs.get(threadId);
         if (config === undefined) return undefined;
-        this.threadConfigs.delete(threadId);
-        this.threadConfigs.set(threadId, config);
+        this.backgroundThreadConfigs.delete(threadId);
+        this.backgroundThreadConfigs.set(threadId, config);
         return config;
     }
 
@@ -101,7 +112,8 @@ export class CodexThreadToolsMcpServer {
         this.port = null;
         this.startPromise = null;
         this.sessions.clear();
-        this.threadConfigs.clear();
+        this.activeThreadConfigs.clear();
+        this.backgroundThreadConfigs.clear();
         const closes: Promise<unknown>[] = sessions.map(session => session.server.close());
         if (server !== null) {
             closes.push(new Promise<void>((resolve, reject) => {
@@ -142,7 +154,7 @@ export class CodexThreadToolsMcpServer {
                     await protocolServer.connect(transport as unknown as Parameters<McpServer["connect"]>[0]);
                 }
                 if (transport === undefined) {
-                    response.status(400).json({
+                    response.status(404).json({
                         jsonrpc: "2.0",
                         error: {code: -32000, message: "Unknown MCP session"},
                         id: null,
@@ -165,7 +177,7 @@ export class CodexThreadToolsMcpServer {
             const sessionId = request.headers["mcp-session-id"];
             const transport = typeof sessionId === "string" ? this.sessions.get(sessionId)?.transport : undefined;
             if (transport === undefined) {
-                response.status(400).send("Unknown MCP session");
+                response.status(404).send("Unknown MCP session");
                 return;
             }
             await transport.handleRequest(request, response);

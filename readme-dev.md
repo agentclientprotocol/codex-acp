@@ -82,5 +82,5 @@ npm run package:all
 ### Update supported Codex version
 
 1. Update the `@openai/codex` version in `package.json` (under `dependencies`).
-2. Regenerate Codex types in `src/app-server/`: `npm run generate-types`
+2. Regenerate the experimental Codex types in `src/app-server/`: `npm run generate-types`
 3. Ensure there are no type errors or failed tests: `npm run typecheck` and `npm run test`
