@@ -88,17 +88,33 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           codex-version: ${{ env.VERSION }}
           output-file: pr-body.md
-          codex-args: >-
-            -c sandbox_workspace_write.writable_roots=["${{ github.workspace }}/.git"]
           prompt: >
             Finalize the update using codex-update-compat skill.
-            Commit only tracked file changes, and never create an empty commit.
-            If there are changes, the commit message should mention that types or/and tests after the update were fixed.
+            Do not run git commands that write to the repository: the `.git` directory is read-only
+            and the workflow creates the commit for you.
+            If you changed tracked files, write the commit message to codex-commit-msg.txt in the
+            repository root.
+            The commit message should mention that types or/and tests after the update were fixed. 
+            Leave that file absent if you changed nothing.
             When creating the final message do not mention:
             * Validation run details.
             * Commits.
             * Hyperlinks.
             Mention only previously failed tests with failure reasons, also what you changed and why.
+
+      - name: Commit Codex fixes
+        run: |
+          git add -u
+
+          if git diff --cached --quiet; then
+            echo "Codex changed no tracked files"
+          elif [ -s codex-commit-msg.txt ]; then
+            git commit -F codex-commit-msg.txt
+          else
+            git commit -m "fix: fix types and tests after codex update to $VERSION"
+          fi
+
+          rm -f codex-commit-msg.txt
 
       - name: Push branch updates
         run: |
