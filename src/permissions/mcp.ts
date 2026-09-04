@@ -127,6 +127,9 @@ export function buildMcpPermissionRequest(
             correlatedCallId: undefined,
         };
     }
+    if (params.mode !== "url") {
+        throw new Error(`Unsupported MCP elicitation mode: ${params.mode}`);
+    }
     return {
         request: {
             sessionId,

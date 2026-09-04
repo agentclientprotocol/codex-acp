@@ -22,6 +22,7 @@ import {
     GUARDED_TTY_MAX_ARG_COUNT,
     GUARDED_TTY_MAX_SINGLE_ARG_BYTES,
 } from "./GuardedTtyExec";
+import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -60,6 +61,10 @@ const guardedTtyExecParamsParser = z.object({
         .min(1)
         .max(GUARDED_TTY_MAX_ARG_COUNT),
 }).strict();
+const asyncTaskStopParamsParser = z.object({
+    sessionId: z.string().trim().min(1),
+    asyncTaskId: z.string().trim().min(1),
+}).passthrough();
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
@@ -178,6 +183,7 @@ function startAcpServer() {
         .onRequest("authentication/logout", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/logout", ctx.params))
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
+        .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .onRequest(KANDEV_GUARDED_TTY_CAPABILITY_METHOD, guardedTtyCapabilityParamsParser, (ctx) => getAgent().extMethod(KANDEV_GUARDED_TTY_CAPABILITY_METHOD, ctx.params, ctx.signal))
         .onRequest(KANDEV_GUARDED_TTY_EXEC_METHOD, guardedTtyExecParamsParser, (ctx) => getAgent().extMethod(KANDEV_GUARDED_TTY_EXEC_METHOD, ctx.params, ctx.signal))

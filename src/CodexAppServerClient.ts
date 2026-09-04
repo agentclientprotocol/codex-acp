@@ -11,6 +11,7 @@ import type {
     ConfigReadParams,
     ConfigReadResponse,
     GetAccountParams,
+    GetAccountRateLimitsResponse,
     GetAccountResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
@@ -19,6 +20,10 @@ import type {
     LogoutAccountResponse,
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse,
+    McpServerOauthLoginParams,
+    McpServerOauthLoginResponse,
+    McpServerOauthLoginCompletedNotification,
+    McpServerStartupFailureReason,
     McpServerStartupState,
     McpServerStatusUpdatedNotification,
     ModelListParams,
@@ -56,6 +61,8 @@ import type {
     ThreadSettings,
     ThreadStartParams,
     ThreadStartResponse,
+    ThreadSetNameParams,
+    ThreadSetNameResponse,
     ThreadUnsubscribeParams,
     ThreadUnsubscribeResponse,
     ToolRequestUserInputParams,
@@ -80,6 +87,13 @@ import type {
     CommandExecTerminateParams,
     CommandExecTerminateResponse,
 } from "./app-server/v2";
+import type {
+    ThreadBackgroundTerminalsRequest,
+    ThreadBackgroundTerminalsTerminateParams,
+    ThreadBackgroundTerminalsTerminateResponse,
+    ThreadBackgroundTerminalsListParams,
+    ThreadBackgroundTerminalsListResponse,
+} from "./async-tasks/BackgroundTerminalApi";
 
 export interface ApprovalHandler {
     handleCommandExecution(params: CommandExecutionRequestApprovalParams): Promise<CommandExecutionRequestApprovalResponse>;
@@ -95,6 +109,7 @@ export interface ElicitationHandler {
 export type McpStartupFailure = {
     server: string;
     error: string;
+    failureReason?: McpServerStartupFailureReason;
 };
 
 export type McpStartupResult = {
@@ -169,6 +184,7 @@ export class CodexAppServerClient {
                 this.mcpServerStartupStates.set(serverNotification.params.name, {
                     status: serverNotification.params.status,
                     error: serverNotification.params.error,
+                    failureReason: serverNotification.params.failureReason ?? null,
                     version: this.mcpServerStartupVersion,
                 });
                 this.resolveMcpServerStartupResolvers();
@@ -540,6 +556,10 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
+    async threadSetName(params: ThreadSetNameParams): Promise<ThreadSetNameResponse> {
+        return await this.sendRequest({ method: "thread/name/set", params });
+    }
+
     async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
     }
@@ -580,6 +600,14 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/compact/start", params: params });
     }
 
+    async threadBackgroundTerminalsList(params: ThreadBackgroundTerminalsListParams): Promise<ThreadBackgroundTerminalsListResponse> {
+        return await this.sendRequest({method: "thread/backgroundTerminals/list", params});
+    }
+
+    async threadBackgroundTerminalsTerminate(params: ThreadBackgroundTerminalsTerminateParams): Promise<ThreadBackgroundTerminalsTerminateResponse> {
+        return await this.sendRequest({method: "thread/backgroundTerminals/terminate", params});
+    }
+
     async threadGoalSet(params: ThreadGoalSetParams): Promise<ThreadGoalSetResponse> {
         return await this.sendRequest({ method: "thread/goal/set", params: params });
     }
@@ -594,6 +622,29 @@ export class CodexAppServerClient {
 
     async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
         return await this.sendRequest({ method: "mcpServerStatus/list", params });
+    }
+
+    async mcpServerOauthLogin(params: McpServerOauthLoginParams): Promise<McpServerOauthLoginResponse> {
+        return await this.sendRequest({ method: "mcpServer/oauth/login", params });
+    }
+
+    async awaitMcpServerOauthLoginCompleted(
+        name: string,
+        threadId: string,
+    ): Promise<McpServerOauthLoginCompletedNotification> {
+        return await new Promise((resolve) => {
+            let disposable: {dispose(): void} | undefined;
+            disposable = this.connection.onNotification(
+                "mcpServer/oauthLogin/completed",
+                (event: McpServerOauthLoginCompletedNotification) => {
+                    if (event.name !== name || event.threadId !== threadId) {
+                        return;
+                    }
+                    disposable?.dispose();
+                    resolve(event);
+                },
+            );
+        });
     }
 
     async accountLogin(params: LoginAccountParams): Promise<LoginAccountResponse> {
@@ -638,6 +689,10 @@ export class CodexAppServerClient {
 
     async accountRead(params: GetAccountParams): Promise<GetAccountResponse> {
         return await this.sendRequest({ method: "account/read", params: params });
+    }
+
+    async accountRateLimitsRead(): Promise<GetAccountRateLimitsResponse> {
+        return await this.sendRequest({ method: "account/rateLimits/read", params: undefined });
     }
 
     //TODO create type-safe helper
@@ -988,6 +1043,7 @@ export class CodexAppServerClient {
                     failed.push({
                         server: serverName,
                         error: state.error ?? "unknown MCP startup error",
+                        ...(state.failureReason === null ? {} : {failureReason: state.failureReason}),
                     });
                     break;
                 case "cancelled":
@@ -1026,7 +1082,7 @@ export type CompactionCompletedNotification =
     | { method: "thread/compacted", params: Extract<ServerNotification, { method: "thread/compacted" }>["params"] }
     | { method: "item/completed", params: ItemCompletedNotification & { item: Extract<ItemCompletedNotification["item"], { type: "contextCompaction" }> } };
 
-type CodexRequest = DistributiveOmit<ClientRequest, "id">
+type CodexRequest = DistributiveOmit<ClientRequest, "id"> | ThreadBackgroundTerminalsRequest
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>
@@ -1047,6 +1103,7 @@ export interface ExperimentalThreadSettingsUpdateParams {
 type McpServerStartupSnapshot = {
     status: McpServerStartupState;
     error: string | null;
+    failureReason: McpServerStartupFailureReason | null;
     version: number;
 };
 
