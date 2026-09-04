@@ -40,6 +40,14 @@ The npm package includes a compatible `@openai/codex` dependency. Set `CODEX_PAT
 CODEX_PATH=/path/to/codex npx -y @agentclientprotocol/codex-acp
 ```
 
+To try changes that have landed on `main` but are not released yet, install from the
+`preview` channel — every push to `main` publishes one. See
+[docs/RELEASES.md](docs/RELEASES.md#preview-releases).
+
+```bash
+npx -y @agentclientprotocol/codex-acp@preview
+```
+
 ## Authentication
 
 The adapter advertises ACP auth methods during initialization. Clients can authenticate with:
