@@ -61,6 +61,9 @@ describe('CodexACPAgent - initialize', () => {
                     http: true,
                     sse: false,
                 },
+                _meta: {
+                    authStatus: {},
+                },
             },
             authMethods: getCodexAuthMethods(),
             _meta: {

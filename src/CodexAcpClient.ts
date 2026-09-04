@@ -32,6 +32,7 @@ import {sanitizeMcpServerName} from "./McpServerName";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
+    GetAccountRateLimitsResponse,
     GetAccountResponse,
     ListMcpServerStatusResponse,
     McpServerOauthLoginCompletedNotification,
@@ -113,6 +114,12 @@ export class CodexAcpClient {
     private readonly config: JsonObject;
     private readonly modelProvider: string | null;
     private gatewayConfig: GatewayConfig | null;
+    /**
+     * Where the stored gateway routing came from: the `gateway` auth method
+     * (agent-owned authentication) or the ACP `providers/*` API (client-driven
+     * routing). `authStatus` reports only the agent-owned one.
+     */
+    private gatewayConfigSource: GatewayConfigSource | null;
     private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
@@ -126,6 +133,7 @@ export class CodexAcpClient {
         this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
         this.gatewayConfig = null;
+        this.gatewayConfigSource = null;
         this.subagents = new CodexSubagentSubscriptions(codexClient);
     }
 
@@ -164,6 +172,7 @@ export class CodexAcpClient {
             throw RequestError.invalidRequest();
         }
         this.gatewayConfig = null;
+        this.gatewayConfigSource = null;
         switch (authRequest.methodId) {
             case "api-key":
                 return await this.authenticateWithApiKey(authRequest);
@@ -256,7 +265,7 @@ export class CodexAcpClient {
             apiType: GatewayAuthMethod._meta.gateway.protocol,
             headers: gatewaySettings.headers,
             providerName: gatewaySettings.providerName,
-        });
+        }, "authentication");
 
         return true;
     }
@@ -307,6 +316,11 @@ export class CodexAcpClient {
         }
     }
 
+    /**
+     * The provider that actually serves requests, ACP-configured gateway
+     * routing included. Use {@link getAgentConfiguredModelProvider} instead
+     * when asking what the agent itself is configured with (`authStatus`).
+     */
     async getCurrentModelProvider(): Promise<string | null> {
         const sessionModelProvider = this.getModelProvider();
         if (sessionModelProvider !== null) {
@@ -345,7 +359,7 @@ export class CodexAcpClient {
         headers?: Record<string, string> | undefined;
         providerName?: string | undefined;
         apiType: acp.LlmProtocol;
-    }): void {
+    }, source: GatewayConfigSource): void {
         const apiType = params.apiType;
         const wireApi = SUPPORTED_GATEWAY_PROTOCOLS[apiType];
         if (!wireApi) {
@@ -365,6 +379,7 @@ export class CodexAcpClient {
             ...params.headers,
         };
 
+        this.gatewayConfigSource = source;
         this.gatewayConfig = {
             modelProvider: CUSTOM_GATEWAY_PROVIDER_ID,
             config: {
@@ -435,7 +450,7 @@ export class CodexAcpClient {
             apiType: request.apiType,
             baseUrl: request.baseUrl,
             headers: request.headers,
-        });
+        }, "acpProviders");
         logger.log("providers/set applied", {
             providerId: request.providerId,
             apiType: request.apiType,
@@ -452,6 +467,7 @@ export class CodexAcpClient {
         const overrideWasActive = this.gatewayConfig !== null;
         if (request.providerId === OPENAI_PROVIDER_ID) {
             this.gatewayConfig = null;
+            this.gatewayConfigSource = null;
         }
         const current = this.gatewayConfig
             ? {
@@ -471,6 +487,44 @@ export class CodexAcpClient {
 
     async getAccount(): Promise<GetAccountResponse> {
         return this.codexClient.accountRead({refreshToken: false});
+    }
+
+    async getRateLimits(): Promise<GetAccountRateLimitsResponse> {
+        return this.codexClient.accountRateLimitsRead();
+    }
+
+    /**
+     * Presentable name of the gateway the agent itself authenticated against
+     * (the `gateway` auth method), or `null`. Routing that the client
+     * configured through `providers/set` is deliberately not reported here:
+     * `authStatus` describes the agent-owned login only.
+     */
+    getAuthGatewayProviderName(): string | null {
+        return this.gatewayConfigSource === "authentication"
+            ? this.gatewayConfig?.config.name ?? null
+            : null;
+    }
+
+    /** Whether this provider id is client-driven routing set through `providers/set`. */
+    isClientConfiguredProvider(providerId: string | null): boolean {
+        return providerId === CUSTOM_GATEWAY_PROVIDER_ID && this.gatewayConfigSource === "acpProviders";
+    }
+
+    /**
+     * The model provider the agent itself is configured with (launch option or
+     * Codex config), ignoring any ACP-configured gateway routing. The
+     * routing-aware counterpart is {@link getCurrentModelProvider}.
+     */
+    async getAgentConfiguredModelProvider(): Promise<string | null> {
+        const provider = this.getModelProvider();
+        // Routing set through `providers/set` is the client's, not the agent's:
+        // look past it to what the agent itself was started/configured with.
+        const agentProvider = this.isClientConfiguredProvider(provider) ? this.modelProvider : provider;
+        if (agentProvider !== null) {
+            return agentProvider;
+        }
+        const settingsModelProvider = await this.codexClient.configRead({includeLayers: false});
+        return settingsModelProvider?.config?.model_provider ?? null;
     }
 
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
@@ -1335,6 +1389,8 @@ function shouldDeduplicateMcpConflicts(): boolean {
 }
 
 type WireApi = "responses";
+
+type GatewayConfigSource = "authentication" | "acpProviders";
 
 interface GatewayConfig {
     modelProvider: string;
