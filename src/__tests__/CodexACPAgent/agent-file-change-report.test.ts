@@ -185,6 +185,7 @@ describe("agent file-change report lifecycle", () => {
             sandbox: "read-only",
             developerInstructions: expect.any(String),
             ephemeral: true,
+            excludeTurns: true,
         });
         expect(turnStart).toHaveBeenNthCalledWith(2, {
             threadId: "audit-thread",
