@@ -227,7 +227,12 @@ describe('Elicitation Events', () => {
             };
             expect(await fixture.sendServerRequest('mcpServer/elicitation/request', params))
                 .toEqual({ action: 'cancel', content: null, _meta: null });
-            expect(fixture.getAcpConnectionEvents([]).filter(event => event.method === 'sessionUpdate')).toEqual([]);
+            const sessionUpdates = fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === 'sessionUpdate')
+                .map(event => event.args[0].update);
+            expect(sessionUpdates).toEqual([
+                expect.objectContaining({ sessionUpdate: 'tool_call_update', status: 'completed', rawOutput: { action: 'cancel' } }),
+            ]);
             completeTurn();
             await promptPromise;
         });
@@ -453,7 +458,10 @@ describe('Elicitation Events', () => {
             };
             expect(await fixture.sendServerRequest('mcpServer/elicitation/request', params))
                 .toEqual({ action: 'cancel', content: null, _meta: null });
-            expect(fixture.getAcpConnectionEvents([]).filter(event => event.method === 'sessionUpdate')).toEqual([]);
+            const toolStatuses = fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === 'sessionUpdate')
+                .map(event => event.args[0].update.status);
+            expect(toolStatuses).not.toContain('in_progress');
             completeTurn();
             await promptPromise;
         });
@@ -526,7 +534,10 @@ describe('Elicitation Events', () => {
             };
             expect(await fixture.sendServerRequest('mcpServer/elicitation/request', params))
                 .toEqual({ action: 'cancel', content: null, _meta: null });
-            expect(fixture.getAcpConnectionEvents([]).filter(event => event.method === 'sessionUpdate')).toEqual([]);
+            const toolStatuses = fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === 'sessionUpdate')
+                .map(event => event.args[0].update.status);
+            expect(toolStatuses).not.toContain('in_progress');
             completeTurn();
             await promptPromise;
         });
