@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.9.0...v1.10.0) (2026-09-04)
+
+
+### Features
+
+* expose background terminals as async tasks ([#460](https://github.com/agentclientprotocol/codex-acp/issues/460)) ([e31c8c3](https://github.com/agentclientprotocol/codex-acp/commit/e31c8c369ec74f551d017d09abdb6d04d926dcab))
+
+
+### Bug Fixes
+
+* update codex to 0.153.3 ([#476](https://github.com/agentclientprotocol/codex-acp/issues/476)) ([b9f1386](https://github.com/agentclientprotocol/codex-acp/commit/b9f1386e0d14e1322dca5b6574146f8faa6ecea6))
+
 ## [1.9.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.8.0...v1.9.0) (2026-09-04)
 
 
