@@ -217,11 +217,29 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 context.isToolApproval,
                 context.persistOptions,
             );
-            if (correlatedCallId !== undefined && result.action === "accept") {
-                await this.connection.notify(acp.methods.client.session.update, {
-                    sessionId: params.threadId,
-                    update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
-                });
+            if (correlatedCallId !== undefined) {
+                if (result.action === "accept") {
+                    await this.connection.notify(acp.methods.client.session.update, {
+                        sessionId: params.threadId,
+                        update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
+                    });
+                }
+            } else {
+                try {
+                    await this.connection.notify(acp.methods.client.session.update, {
+                        sessionId: params.threadId,
+                        update: {
+                            sessionUpdate: "tool_call_update",
+                            toolCallId: request.toolCall.toolCallId,
+                            status: "completed",
+                            title: request.toolCall.title,
+                            content: request.toolCall.content,
+                            rawOutput: { action: result.action },
+                        },
+                    });
+                } catch (error) {
+                    logger.error("Failed to finalize standalone MCP elicitation tool call", error);
+                }
             }
             return result;
         } catch (error) {
