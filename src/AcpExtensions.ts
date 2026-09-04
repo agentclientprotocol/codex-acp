@@ -13,6 +13,17 @@ import {
 } from "./GoalExtension";
 
 export {
+    AUTH_STATUS_META_KEY,
+    AUTH_STATUS_UPDATE_METHOD,
+    authStatusCapability,
+    sameAuthStatus,
+    type AuthStatus,
+    type AuthStatusCapability,
+    type AuthStatusKind,
+    type AuthStatusUpdateNotification,
+} from "./AuthStatusMeta";
+
+export {
     GOAL_CONTROL_ACTIONS,
     GOAL_CONTROL_METHOD,
     GOAL_EXTENSION_VERSION,
@@ -73,6 +84,12 @@ export function isExtMethodRequest(request: { method: string, params: Record<str
         || request.method === SESSION_STEERING_METHOD;
 }
 
+/**
+ * @deprecated Legacy pull method; it drops the ChatGPT `planType` and predates
+ * the standard `logout` method. Listen to the `authStatus` extension instead:
+ * the agent pushes `_auth/status_update` (see `AuthStatusMeta.ts`), which
+ * follows the upstream auth-identity RFD.
+ */
 export type AuthenticationStatusRequest = { method: "authentication/status", params: {} }
 export type AuthenticationStatusResponse = { type: "api-key" } | { type: "chat-gpt", email: string } | { type: "gateway", name: string } | { type: "unauthenticated" }
 

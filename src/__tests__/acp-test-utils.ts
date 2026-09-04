@@ -15,6 +15,7 @@ import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
+import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -442,6 +443,19 @@ export function createTestModel(overrides?: Partial<Model>): Model {
         isDefault: true,
         ...overrides,
     };
+}
+
+/**
+ * Waits for the connection's first `_auth/status_update`. `initialize` starts
+ * the identity read that produces it and never waits for the read, so a test
+ * that must not race it waits here instead.
+ */
+export async function awaitFirstAuthStatusPush(fixture: TestFixture): Promise<void> {
+    await vi.waitFor(() => {
+        const pushed = fixture.getAcpConnectionEvents([]).some(event =>
+            event.method === "notify" && event.args[0] === AUTH_STATUS_UPDATE_METHOD);
+        expect(pushed).toBe(true);
+    });
 }
 
 export function setupPromptTestSession(sessionOverrides?: Partial<SessionState>) {

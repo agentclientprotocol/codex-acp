@@ -13,6 +13,7 @@ import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {
     AccountRateLimitsUpdatedNotification,
+    AccountUpdatedNotification,
     AgentMessageDeltaNotification,
     CodexErrorInfo,
     CommandExecutionOutputDeltaNotification,
@@ -226,6 +227,8 @@ export class CodexEventHandler {
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly subagents: CodexSubagentEventRouter;
+    /** Connection-level `authStatus` sink; the app-server account push feeds it. */
+    private readonly onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined;
 
     constructor(
         connection: AcpClientConnection,
@@ -238,7 +241,9 @@ export class CodexEventHandler {
             false,
             new ACPSessionConnection(connection, sessionState.sessionId),
         ),
+        onAccountUpdated?: (notification: AccountUpdatedNotification) => void,
     ) {
+        this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
         this.supportsPlanUpdates = supportsPlanUpdates;
         this.supportsTypedSessionFailures = supportsTypedSessionFailures;
@@ -501,6 +506,9 @@ export class CodexEventHandler {
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
                 return null;
+            case "account/updated":
+                this.onAccountUpdated?.(notification.params);
+                return null;
             case "configWarning":
                 return await this.createConfigWarningEvent(notification.params);
             case "warning":
@@ -551,7 +559,6 @@ export class CodexEventHandler {
             case "turn/moderationMetadata":
             case "item/fileChange/outputDelta":
             case "item/fileChange/patchUpdated":
-            case "account/updated":
             case "fs/changed":
             case "mcpServer/startupStatus/updated":
             case "mcpServer/event/stream/notification":

@@ -4,6 +4,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR, type CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
+    awaitFirstAuthStatusPush,
     createCodexMockTestFixture,
     createTestFixture,
     createTestModel,
@@ -38,6 +39,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.initialize({protocolVersion: 1});
         await authFixture.getCodexAcpClient().logout();
+        // `initialize` reads the auth identity without waiting for it, and pushes
+        // it. Let that read land before the dump is cleared, so it cannot appear
+        // in the snapshot of the failing `newSession`.
+        await awaitFirstAuthStatusPush(authFixture);
         authFixture.clearCodexConnectionDump();
 
         await expect(
@@ -59,6 +64,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const unauthenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
         expect(unauthenticatedResponse).toEqual({type: "unauthenticated"});
 
+        await awaitFirstAuthStatusPush(keyFixture);
         keyFixture.clearCodexConnectionDump();
 
         const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}};
@@ -87,6 +93,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             "account/login/start",
             "account/read",
             "account/updated",
+            // Reads the connection auth identity for the `auth/status_update` push
+            // when no session is open yet.
+            "account/read",
             "thread/start",
             "model/list",
             "thread/started",

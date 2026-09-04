@@ -1,4 +1,16 @@
 {
+  "method": "notify",
+  "args": [
+    "_auth/status_update",
+    {
+      "authStatus": {
+        "kind": "none",
+        "label": "Not logged in"
+      }
+    }
+  ]
+}
+{
   "method": "sessionUpdate",
   "args": [
     {

@@ -23,7 +23,16 @@ import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClien
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
-import type {Account, Model, ReasoningEffortOption, Thread, ThreadGoal, ThreadItem, UserInput} from "./app-server/v2";
+import type {
+    Account,
+    AccountUpdatedNotification,
+    Model,
+    ReasoningEffortOption,
+    Thread,
+    ThreadGoal,
+    ThreadItem,
+    UserInput
+} from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
@@ -51,6 +60,10 @@ import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
 import {
+    AUTH_STATUS_META_KEY,
+    AUTH_STATUS_UPDATE_METHOD,
+    authStatusCapability,
+    type AuthStatus,
     GOAL_CONTROL_ACTIONS,
     GOAL_CONTROL_METHOD,
     GOAL_EXTENSION_VERSION,
@@ -106,6 +119,12 @@ import {
 } from "./subagents/AcpSubagents";
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import {nameFromAgentPath} from "./subagents/CodexAgentPath";
+import {
+    fromAccount,
+    fromAccountUpdated,
+    gatewayStatus,
+    sameAuthStatus,
+} from "./AuthStatusMeta";
 import {randomUUID} from "node:crypto";
 import {TitleGenerator} from "./TitleGenerator";
 import {once} from "node:events";
@@ -245,6 +264,8 @@ export class CodexAcpServer {
     private clientCapabilities: acp.ClientCapabilities | null;
     private terminalOutputMode: TerminalOutputMode;
     private booleanConfigOptionsSupported: boolean;
+    /** Last `authStatus` pushed to the client; used to suppress duplicates. */
+    private currentAuthStatus: AuthStatus | null;
 
     private readonly sessions: Map<string, SessionState>;
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
@@ -290,6 +311,7 @@ export class CodexAcpServer {
         this.clientCapabilities = null;
         this.terminalOutputMode = "terminal_output_delta";
         this.booleanConfigOptionsSupported = false;
+        this.currentAuthStatus = null;
         this.availableCommands = this.createAvailableCommands(codexAcpClient);
     }
 
@@ -298,7 +320,7 @@ export class CodexAcpServer {
             this.connection,
             client,
             (operation) => this.runWithProcessCheck(operation),
-            () => this.refreshSessionsAuthState(null)
+            () => this.refreshAuthState(null)
         );
     }
 
@@ -312,6 +334,7 @@ export class CodexAcpServer {
         this.terminalOutputMode = resolveTerminalOutputMode(_params.clientCapabilities);
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
+        this.publishFirstAuthStatusAfterResponse();
         const sessionCapabilities: SubagentAwareSessionCapabilities = {
             resume: { },
             list: { },
@@ -343,7 +366,12 @@ export class CodexAcpServer {
                     acp: false,
                     http: true,
                     sse: false
-                }
+                },
+                _meta: {
+                    // Presence means "this agent pushes `_auth/status_update`". It
+                    // never carries a payload, and the client never asks for one.
+                    [AUTH_STATUS_META_KEY]: authStatusCapability(),
+                },
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
             _meta: {
@@ -478,7 +506,7 @@ export class CodexAcpServer {
     async handleError(e: Error){
         if (e.message.includes("log out") || e.message.includes("cloud requirements")) {
             await this.runWithProcessCheck(() => this.codexAcpClient.logout());
-            await this.refreshSessionsAuthState(null);
+            await this.refreshAuthState(null);
             throw RequestError.internalError(`${(e.message)}\n\nYou have been logged out. Please try again.`);
         }
         const configPath = this.codexAcpClient.getHomePath() ?? "global";
@@ -679,12 +707,14 @@ export class CodexAcpServer {
 
     private async getAuthStateForProvider(authProvider: string | null): Promise<ActiveAuthState> {
         if (!this.authProviderUsesOpenAiAccount(authProvider)) {
+            await this.publishAuthStatus(authProvider, null);
             return {
                 account: null,
                 authConfigured: true,
             };
         }
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        await this.publishAuthStatus(authProvider, accountResponse.account);
         return {
             account: accountResponse.account,
             authConfigured: accountResponse.account !== null || !accountResponse.requiresOpenaiAuth,
@@ -898,7 +928,7 @@ export class CodexAcpServer {
             logger.log("Authenticate request failed");
             throw RequestError.invalidParams();
         }
-        await this.refreshSessionsAuthState(this.getAuthProviderForAuthenticateRequest(_params));
+        await this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params));
         logger.log("Authenticate request completed");
         return { };
     }
@@ -931,7 +961,7 @@ export class CodexAcpServer {
     async logout(_params: acp.LogoutRequest): Promise<void> {
         logger.log("Logout request received");
         await this.runWithProcessCheck(() => this.codexAcpClient.logout());
-        await this.refreshSessionsAuthState(null);
+        await this.refreshAuthState(null);
         logger.log("Logout request completed");
     }
 
@@ -1048,17 +1078,175 @@ export class CodexAcpServer {
         );
     }
 
-    private async refreshSessionsAuthState(authProvider: string | null): Promise<void> {
-        if (this.sessions.size === 0) return;
+    /** Returns whether the auth state was read (and thus the auth status pushed). */
+    private async refreshSessionsAuthState(authProvider: string | null): Promise<boolean> {
+        if (this.sessions.size === 0) return false;
 
         const sessionsToRefresh = [...this.sessions.values()]
             .filter(sessionState => this.authProvidersMatch(sessionState.authProvider, authProvider));
-        if (sessionsToRefresh.length === 0) return;
+        if (sessionsToRefresh.length === 0) return false;
 
         const authState = await this.getAuthStateForProvider(authProvider);
         for (const sessionState of sessionsToRefresh) {
             sessionState.account = authState.account;
             sessionState.authConfigured = authState.authConfigured;
+        }
+        return true;
+    }
+
+    /**
+     * Refreshes the sessions of a provider and makes sure the connection-level
+     * `authStatus` is pushed even when no session matched (the empty-screen
+     * login case). Reuses the session refresh read; never adds a second one.
+     */
+    private async refreshAuthState(authProvider: string | null): Promise<void> {
+        const refreshed = await this.refreshSessionsAuthState(authProvider);
+        if (refreshed) return;
+        try {
+            // Only the push matters here: there is no session for the auth state to land in.
+            await this.getAuthStateForProvider(authProvider ?? this.codexAcpClient.getModelProvider());
+        } catch (error) {
+            logger.log("Failed to refresh auth status", {error: String(error)});
+        }
+    }
+
+    /**
+     * Schedules the connection's first `_auth/status_update`: one account read,
+     * pushed whatever it says, including `none`.
+     *
+     * The push must not overtake the `initialize` response. The JSON-RPC layer
+     * writes that response in the microtask that resolves {@link initialize}, so
+     * the read starts from a check-phase callback, which always runs after it.
+     * `initialize` itself never waits for the read.
+     *
+     * "Unconditional" costs nothing extra here: nothing has been pushed yet on
+     * this connection, so {@link setAuthStatus} cannot suppress this one.
+     */
+    private publishFirstAuthStatusAfterResponse(): void {
+        setImmediate(() => void this.publishAuthStatusRead());
+    }
+
+    /**
+     * Reads the agent-owned identity and pushes it.
+     *
+     * Never rejects: an unreadable source means "nothing to report", not an
+     * error. The client then keeps showing the last pushed value, or "not
+     * reported" when there was none.
+     */
+    private async publishAuthStatusRead(): Promise<void> {
+        let authStatus: AuthStatus;
+        try {
+            authStatus = await this.readAgentAuthIdentity();
+        } catch (error) {
+            logger.log("Cannot determine auth status", {error: String(error)});
+            return;
+        }
+        await this.setAuthStatus(authStatus);
+    }
+
+    /**
+     * Builds the agent-owned auth identity. Routing the client configured
+     * through the ACP `providers/*` API is invisible here: the reported state
+     * is what the agent itself is logged in with. `gateway` stays reserved for
+     * agent-owned gateway state — the `gateway` auth method, or a provider the
+     * user configured in Codex's own config.
+     */
+    private async readAgentAuthIdentity(): Promise<AuthStatus> {
+        const authGatewayName = this.codexAcpClient.getAuthGatewayProviderName();
+        if (authGatewayName !== null) {
+            return gatewayStatus(authGatewayName);
+        }
+        const modelProvider = await this.runWithProcessCheck(() => this.codexAcpClient.getAgentConfiguredModelProvider());
+        if (!this.authProviderUsesOpenAiAccount(modelProvider)) {
+            return gatewayStatus(modelProvider);
+        }
+        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        return fromAccount(accountResponse.account);
+    }
+
+    /**
+     * Pushes `_auth/status_update` for the freshly read account of a provider.
+     * Agent-owned gateway authentication wins; a client-driven provider
+     * override is ignored and the agent-owned login is reported instead.
+     */
+    private async publishAuthStatus(
+        authProvider: string | null,
+        account: Account | null,
+    ): Promise<void> {
+        const authGatewayName = this.codexAcpClient.getAuthGatewayProviderName();
+        if (authGatewayName !== null) {
+            await this.setAuthStatus(gatewayStatus(authGatewayName));
+            return;
+        }
+        if (this.authProviderUsesOpenAiAccount(authProvider)) {
+            await this.setAuthStatus(fromAccount(account));
+            return;
+        }
+        if (this.codexAcpClient.isClientConfiguredProvider(authProvider)) {
+            // The session routes through client-configured providers; the agent-owned
+            // login is a separate question, so read it instead of reporting the
+            // override. A failed read means "nothing to report" — it must never
+            // take the session create down with it.
+            await this.publishAuthStatusRead();
+            return;
+        }
+        await this.setAuthStatus(gatewayStatus(authProvider));
+    }
+
+    /**
+     * Handles the app-server `account/updated` push: the free freshness channel
+     * for logins and logouts happening outside this connection.
+     */
+    handleAccountUpdated(notification: AccountUpdatedNotification): void {
+        void this.applyAccountUpdated(notification);
+    }
+
+    /**
+     * `account/updated` describes the Codex account only. It must never
+     * overwrite an agent-owned gateway status, which no account event can
+     * invalidate; only a gateway logout or a provider change does.
+     */
+    private async applyAccountUpdated(notification: AccountUpdatedNotification): Promise<void> {
+        try {
+            if (this.codexAcpClient.getAuthGatewayProviderName() !== null) {
+                return;
+            }
+            if (this.currentAuthStatus === null) {
+                // Nothing pushed yet, so the account event alone cannot tell whether
+                // the agent routes through its own gateway config: read the full state.
+                await this.publishAuthStatusRead();
+                return;
+            }
+            if (this.currentAuthStatus.kind === "gateway") {
+                return;
+            }
+            await this.setAuthStatus(fromAccountUpdated(notification, this.currentAuthStatus));
+        } catch (error) {
+            logger.log("Failed to apply account update to auth status", {error: String(error)});
+        }
+    }
+
+    /**
+     * Stores `next` and pushes `_auth/status_update`.
+     *
+     * A push goes out only when the payload changed. The identity is read on
+     * many occasions — `initialize`, each session create, each `account/updated`
+     * — and almost all of them see the login already reported.
+     * Clients replace their whole state on each update and tolerate duplicates,
+     * so a repeat is harmless, but it is pure noise all the same.
+     *
+     * The first push of a connection always goes out: nothing was reported yet,
+     * so no payload can equal it.
+     */
+    private async setAuthStatus(next: AuthStatus): Promise<void> {
+        if (sameAuthStatus(this.currentAuthStatus, next)) {
+            return;
+        }
+        this.currentAuthStatus = next;
+        try {
+            await this.connection.notify(AUTH_STATUS_UPDATE_METHOD, {authStatus: next});
+        } catch (error) {
+            logger.log("Failed to send auth status update", {error: String(error)});
         }
     }
 
@@ -2531,6 +2719,7 @@ export class CodexAcpServer {
                 clientSupportsTypedSessionFailures(this.clientCapabilities),
                 this.sessionFailureEpoch,
                 sessionState.subagents,
+                (accountUpdated) => this.handleAccountUpdated(accountUpdated),
             );
             eventHandler = promptEventHandler;
             const permissionLifecycle = this.permissionLifecycleContext(sessionState);
