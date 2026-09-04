@@ -2,6 +2,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
+import {isRecord} from "./permissions/json";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
 import {
     planImplementationApproved,
@@ -1479,8 +1480,9 @@ export class CodexAcpServer {
      * check guards against deleting a queue a later request has since reused).
      *
      * @param params The target session id and the prompt to steer with.
-     * @returns Whether the prompt joined the active turn ("injected"), started a
-     *     new one ("startedNewTurn"), or could not be applied ("failed"); see
+     * @returns Whether the prompt joined the active turn ("injected"), needs a
+     *     host-owned prompt ("promptRequired"), started a new one
+     *     ("startedNewTurn"), or could not be applied ("failed"); see
      *     {@link performSteeringRequest}.
      */
     async executeOrQueueSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
@@ -1518,11 +1520,13 @@ export class CodexAcpServer {
 
     /**
      * Delivers a steering prompt to the session: injects it into the live turn
-     * when there is one, otherwise starts a new turn.
+     * when there is one. On an idle race, an opted-in host keeps ownership of
+     * the content; legacy clients retain the adapter-started turn behavior.
      *
      * @param params The target session id and the prompt to steer with.
-     * @returns "injected" when the prompt joined an existing turn, otherwise the
-     *     outcome of starting a new turn.
+     * @returns "injected" when the prompt joined an existing turn,
+     *     "promptRequired" when the host requested an owned idle fallback, or
+     *     the outcome of starting a legacy fallback turn.
      */
     private async performSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
         logger.log("Steering session requested", {
@@ -1539,6 +1543,9 @@ export class CodexAcpServer {
                 logger.log("Steering session injected", {sessionId: params.sessionId, turnId});
                 return {outcome: "injected"};
             }
+        }
+        if (params._meta?.steering?.idleBehavior === "promptRequired") {
+            return {outcome: "promptRequired", reason: "noRunningTurn"};
         }
         return await this.startNewTurnFromSteering(params);
     }
@@ -1720,9 +1727,24 @@ export class CodexAcpServer {
         if (typeof sessionId !== "string" || !Array.isArray(prompt)) {
             throw RequestError.invalidParams();
         }
+        const meta = params["_meta"];
+        if (meta !== undefined && !isRecord(meta)) {
+            throw RequestError.invalidParams(undefined, "steering _meta must be an object");
+        }
+        const steering = meta?.["steering"];
+        if (steering !== undefined && !isRecord(steering)) {
+            throw RequestError.invalidParams(undefined, "steering _meta.steering must be an object");
+        }
+        const idleBehavior = steering?.["idleBehavior"];
+        if (idleBehavior !== undefined && idleBehavior !== "promptRequired") {
+            throw RequestError.invalidParams(undefined, "unsupported steering idleBehavior");
+        }
         return {
             sessionId: sessionId,
             prompt: prompt as acp.ContentBlock[],
+            ...(idleBehavior === "promptRequired" ? {
+                _meta: {steering: {idleBehavior}},
+            } : {}),
         };
     }
 
