@@ -257,7 +257,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
         params: ToolRequestUserInputParams
     ): Promise<acp.CreateElicitationResponse | null> {
         const request = this.buildUserInputRequest(params);
-        if (params.autoResolutionMs === null) {
+        if (params.autoResolutionMs == null) {
             return await this.connection.request(
                 acp.methods.client.elicitation.create,
                 request,
