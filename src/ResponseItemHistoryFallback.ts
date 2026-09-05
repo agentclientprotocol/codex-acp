@@ -80,12 +80,7 @@ export function parseResponseItemHistoryFallback(
         }
     };
 
-    for (const line of contents.split(/\r?\n/)) {
-        const record = parseJsonRecord(line);
-        if (!record) {
-            continue;
-        }
-
+    for (const record of activeHistoryRecords(contents)) {
         const eventMsgUpdates = createEventMsgUpdates(record);
         if (eventMsgUpdates) {
             pushUpdates(eventMsgUpdates);
@@ -150,6 +145,69 @@ export function parseResponseItemHistoryFallback(
     }
 
     return recoveredFunctionCall ? updates : null;
+}
+
+function activeHistoryRecords(contents: string): JsonRecord[] {
+    const records: JsonRecord[] = [];
+    const turnStartIndices: number[] = [];
+    let hasExplicitTurnStart = false;
+
+    for (const line of contents.split(/\r?\n/)) {
+        const record = parseJsonRecord(line);
+        if (!record) {
+            continue;
+        }
+
+        const payload = eventMsgPayload(record);
+        switch (payload?.["type"]) {
+            case "task_started":
+                turnStartIndices.push(records.length);
+                hasExplicitTurnStart = true;
+                break;
+            case "task_complete":
+                hasExplicitTurnStart = false;
+                break;
+            case "thread_rolled_back": {
+                const numTurns = positiveInteger(payload["num_turns"]);
+                if (numTurns !== null) {
+                    rollbackTurns(records, turnStartIndices, numTurns);
+                }
+                hasExplicitTurnStart = false;
+                continue;
+            }
+            case "user_message":
+                if (!hasExplicitTurnStart) {
+                    turnStartIndices.push(records.length);
+                }
+                break;
+        }
+
+        records.push(record);
+    }
+
+    return records;
+}
+
+function eventMsgPayload(record: JsonRecord): JsonRecord | null {
+    return record["type"] === "event_msg" ? asRecord(record["payload"]) : null;
+}
+
+function positiveInteger(value: unknown): number | null {
+    return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function rollbackTurns(records: JsonRecord[], turnStartIndices: number[], numTurns: number): void {
+    let retainedLength = records.length;
+    for (let index = 0; index < numTurns; index += 1) {
+        const turnStart = turnStartIndices.pop();
+        if (turnStart === undefined) {
+            retainedLength = 0;
+            turnStartIndices.length = 0;
+            break;
+        }
+        retainedLength = turnStart;
+    }
+    records.length = retainedLength;
 }
 
 function toolCallIdsFromThread(thread: Thread): Set<string> {
