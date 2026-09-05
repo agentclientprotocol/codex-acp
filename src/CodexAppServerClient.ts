@@ -56,6 +56,8 @@ import type {
     ThreadListResponse,
     ThreadReadParams,
     ThreadReadResponse,
+    ThreadTurnsListParams,
+    ThreadTurnsListResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
     ThreadSettings,
@@ -574,6 +576,28 @@ export class CodexAppServerClient {
 
     async threadRead(params: ThreadReadParams): Promise<ThreadReadResponse> {
         return await this.sendRequest({ method: "thread/read", params: params });
+    }
+
+    async threadTurnsList(params: ThreadTurnsListParams): Promise<ThreadTurnsListResponse> {
+        return await this.sendRequest({method: "thread/turns/list", params});
+    }
+
+    async threadReadWithHistory(threadId: string): Promise<ThreadReadResponse> {
+        const response = await this.threadRead({threadId});
+        const turns: ThreadReadResponse["thread"]["turns"] = [];
+        let cursor: string | null = null;
+        do {
+            const page = await this.threadTurnsList({
+                threadId,
+                cursor,
+                limit: 50,
+                sortDirection: "asc",
+                itemsView: "full",
+            });
+            turns.push(...page.data);
+            cursor = page.nextCursor;
+        } while (cursor !== null);
+        return {...response, thread: {...response.thread, turns}};
     }
 
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {

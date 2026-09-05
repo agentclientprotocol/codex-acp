@@ -1,0 +1,75 @@
+{
+  "reads": [
+    [
+      {
+        "threadId": "history"
+      }
+    ]
+  ],
+  "pages": [
+    [
+      {
+        "threadId": "history",
+        "cursor": null,
+        "limit": 50,
+        "sortDirection": "asc",
+        "itemsView": "full"
+      }
+    ],
+    [
+      {
+        "threadId": "history",
+        "cursor": "next-page",
+        "limit": 50,
+        "sortDirection": "asc",
+        "itemsView": "full"
+      }
+    ]
+  ],
+  "thread": {
+    "id": "history",
+    "turns": [
+      {
+        "id": "first",
+        "items": [
+          {
+            "type": "agentMessage",
+            "id": "first-message",
+            "text": "Answer first",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          }
+        ],
+        "itemsView": "full",
+        "status": "completed",
+        "error": null,
+        "startedAt": null,
+        "completedAt": null,
+        "durationMs": null
+      },
+      {
+        "id": "second",
+        "items": [
+          {
+            "type": "agentMessage",
+            "id": "second-message",
+            "text": "Answer second",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          }
+        ],
+        "itemsView": "full",
+        "status": "completed",
+        "error": null,
+        "startedAt": null,
+        "completedAt": null,
+        "durationMs": null
+      }
+    ],
+    "name": "Saved conversation"
+  }
+}

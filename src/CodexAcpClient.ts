@@ -532,6 +532,7 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadResume({
+            excludeTurns: true,
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
@@ -571,16 +572,14 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadResume({
+            excludeTurns: true,
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
         });
         onSubscribed?.();
-        const historyResponse = await this.codexClient.threadRead({
-            threadId: response.thread.id,
-            includeTurns: true,
-        });
+        const historyResponse = await this.codexClient.threadReadWithHistory(response.thread.id);
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
@@ -596,10 +595,7 @@ export class CodexAcpClient {
     }
 
     async readSessionThread(sessionId: string): Promise<Thread> {
-        return (await this.codexClient.threadRead({
-            threadId: sessionId,
-            includeTurns: true,
-        })).thread;
+        return (await this.codexClient.threadReadWithHistory(sessionId)).thread;
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
@@ -976,6 +972,7 @@ export class CodexAcpClient {
         let lateStopReason: "cancelled" | "timeout" | null = null;
         try {
             const forkPromise = this.codexClient.threadFork({
+                excludeTurns: true,
                 threadId: params.sessionId,
                 lastTurnId: params.turnId,
                 cwd: params.workspace.cwd,
