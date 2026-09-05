@@ -146,7 +146,7 @@ describe("CodexACPAgent - loadSession", () => {
             sandbox: {type: "dangerFullAccess"},
             reasoningEffort: model.defaultReasoningEffort,
         });
-        appServer.threadRead = vi.fn().mockImplementation(({threadId}) => {
+        appServer.threadReadWithHistory = vi.fn().mockImplementation((threadId) => {
             if (threadId === "orphan-history") return Promise.reject(new Error("missing child history"));
             return Promise.resolve({thread: threadId === root.id ? root : child});
         });
@@ -391,7 +391,7 @@ describe("CodexACPAgent - loadSession", () => {
             sandbox: { type: "dangerFullAccess" },
             reasoningEffort: model.defaultReasoningEffort,
         });
-        codexAppServerClient.threadRead = vi.fn().mockResolvedValue({
+        codexAppServerClient.threadReadWithHistory = vi.fn().mockResolvedValue({
             thread: thread,
         });
         const goal: ThreadGoal = {
@@ -415,10 +415,7 @@ describe("CodexACPAgent - loadSession", () => {
         };
         await codexAcpAgent.loadSession(loadParams);
 
-        expect(codexAppServerClient.threadRead).toHaveBeenCalledWith({
-            threadId: thread.id,
-            includeTurns: true,
-        });
+        expect(codexAppServerClient.threadReadWithHistory).toHaveBeenCalledWith(thread.id);
         expect(codexAppServerClient.threadGoalGet).toHaveBeenCalledWith({ threadId: thread.id });
         await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             "data/load-session-history.json"
@@ -501,7 +498,7 @@ describe("CodexACPAgent - loadSession", () => {
             sandbox: { type: "dangerFullAccess" },
             reasoningEffort: model.defaultReasoningEffort,
         });
-        codexAppServerClient.threadRead = vi.fn().mockResolvedValue({
+        codexAppServerClient.threadReadWithHistory = vi.fn().mockResolvedValue({
             thread: thread,
         });
 
@@ -757,7 +754,7 @@ describe("CodexACPAgent - loadSession", () => {
                 sandbox: { type: "dangerFullAccess" },
                 reasoningEffort: model.defaultReasoningEffort,
             });
-            codexAppServerClient.threadRead = vi.fn().mockResolvedValue({
+            codexAppServerClient.threadReadWithHistory = vi.fn().mockResolvedValue({
                 thread,
             });
 
@@ -859,7 +856,7 @@ describe("CodexACPAgent - loadSession", () => {
             sandbox: { type: "dangerFullAccess" },
             reasoningEffort: model.defaultReasoningEffort,
         });
-        codexAppServerClient.threadRead = vi.fn().mockResolvedValue({
+        codexAppServerClient.threadReadWithHistory = vi.fn().mockResolvedValue({
             thread: thread,
         });
 

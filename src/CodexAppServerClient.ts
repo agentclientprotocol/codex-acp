@@ -56,6 +56,8 @@ import type {
     ThreadListResponse,
     ThreadReadParams,
     ThreadReadResponse,
+    ThreadTurnsListParams,
+    ThreadTurnsListResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
     ThreadSettings,
@@ -574,6 +576,47 @@ export class CodexAppServerClient {
 
     async threadRead(params: ThreadReadParams): Promise<ThreadReadResponse> {
         return await this.sendRequest({ method: "thread/read", params: params });
+    }
+
+    async threadTurnsList(params: ThreadTurnsListParams): Promise<ThreadTurnsListResponse> {
+        return await this.sendRequest({method: "thread/turns/list", params});
+    }
+
+    async threadReadWithHistory(threadId: string): Promise<ThreadReadResponse> {
+        const response = await this.threadRead({threadId});
+        // Legacy stores reconstruct the rollout on each read; paging would repeat
+        // that work. Full-history reads are only deprecated for paginated threads.
+        if (response.thread.historyMode === "legacy") {
+            return await this.threadRead({threadId, includeTurns: true});
+        }
+        const turns = await this.threadReadHistory(threadId);
+        return {...response, thread: {...response.thread, turns}};
+    }
+
+    async threadReadHistory(threadId: string, initialCursor: string | null = null): Promise<ThreadReadResponse["thread"]["turns"]> {
+        const turns: ThreadReadResponse["thread"]["turns"] = [];
+        const seenCursors = new Set<string>();
+        if (initialCursor !== null) seenCursors.add(initialCursor);
+        let cursor: string | null = initialCursor;
+        do {
+            const page = await this.threadTurnsList({
+                threadId,
+                cursor,
+                limit: 50,
+                sortDirection: "desc",
+                itemsView: "full",
+            });
+            turns.push(...page.data);
+            cursor = page.nextCursor;
+            if (cursor !== null) {
+                if (seenCursors.has(cursor)) {
+                    throw new Error("Codex returned a repeated thread history cursor");
+                }
+                seenCursors.add(cursor);
+            }
+        } while (cursor !== null);
+        // Only reverse turns: items within each full turn are already chronological.
+        return turns.reverse();
     }
 
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {

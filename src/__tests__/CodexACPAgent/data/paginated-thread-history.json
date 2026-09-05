@@ -1,0 +1,131 @@
+{
+  "reads": [
+    [
+      {
+        "threadId": "history"
+      }
+    ]
+  ],
+  "pages": [
+    [
+      {
+        "threadId": "history",
+        "cursor": null,
+        "limit": 50,
+        "sortDirection": "desc",
+        "itemsView": "full"
+      }
+    ],
+    [
+      {
+        "threadId": "history",
+        "cursor": "next-page",
+        "limit": 50,
+        "sortDirection": "desc",
+        "itemsView": "full"
+      }
+    ]
+  ],
+  "thread": {
+    "id": "history",
+    "turns": [
+      {
+        "id": "first",
+        "items": [
+          {
+            "type": "userMessage",
+            "id": "first-input",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Question first",
+                "text_elements": []
+              }
+            ]
+          },
+          {
+            "type": "agentMessage",
+            "id": "first-message",
+            "text": "Answer first",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          }
+        ],
+        "itemsView": "full",
+        "status": "completed",
+        "error": null,
+        "startedAt": null,
+        "completedAt": null,
+        "durationMs": null
+      },
+      {
+        "id": "second",
+        "items": [
+          {
+            "type": "userMessage",
+            "id": "second-input",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Question second",
+                "text_elements": []
+              }
+            ]
+          },
+          {
+            "type": "agentMessage",
+            "id": "second-message",
+            "text": "Answer second",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          }
+        ],
+        "itemsView": "full",
+        "status": "completed",
+        "error": null,
+        "startedAt": null,
+        "completedAt": null,
+        "durationMs": null
+      },
+      {
+        "id": "third",
+        "items": [
+          {
+            "type": "userMessage",
+            "id": "third-input",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Question third",
+                "text_elements": []
+              }
+            ]
+          },
+          {
+            "type": "agentMessage",
+            "id": "third-message",
+            "text": "Answer third",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          }
+        ],
+        "itemsView": "full",
+        "status": "completed",
+        "error": null,
+        "startedAt": null,
+        "completedAt": null,
+        "durationMs": null
+      }
+    ],
+    "name": "Saved conversation"
+  }
+}

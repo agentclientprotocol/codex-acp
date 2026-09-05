@@ -29,6 +29,7 @@ export async function forkSession(
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
     const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
     const response = await dependencies.codexClient.threadFork({
+        excludeTurns: true,
         config: await dependencies.createSessionConfig(
             request.cwd,
             additionalDirectories,
@@ -60,10 +61,7 @@ async function resolveForkTurnId(
     const forkPoint = readAirForkPoint(request._meta);
     if (!forkPoint) return undefined;
 
-    const history = await codexClient.threadRead({
-        threadId: request.sessionId,
-        includeTurns: true,
-    });
+    const history = await codexClient.threadReadWithHistory(request.sessionId);
     const candidateIds = airForkMessageIdCandidates(forkPoint.messageId);
     const itemTurnId = candidateIds
         .map(candidateId => history.thread.turns.find(turn => turn.items.some(item => item.id === candidateId))?.id)

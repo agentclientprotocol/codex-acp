@@ -178,6 +178,7 @@ describe("agent file-change report lifecycle", () => {
         })).resolves.toMatchObject({stopReason: "end_turn"});
 
         expect(appServer.threadFork).toHaveBeenCalledWith({
+            excludeTurns: true,
             threadId: sessionState.sessionId,
             lastTurnId: "main-turn",
             cwd: "/workspace",
