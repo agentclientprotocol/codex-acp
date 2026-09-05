@@ -280,6 +280,7 @@ export class CodexAcpServer {
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
     private readonly goalControlGenerations: Map<string, number>;
+    private readonly sessionConfigUpdates: Map<string, Promise<unknown>>;
     private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
     private readonly codexProcessState: CodexProcessState | null;
     private codexProcessGeneration = 0;
@@ -303,6 +304,7 @@ export class CodexAcpServer {
         this.sessionGenerations = new Map();
         this.sessionOpenGenerations = new Map();
         this.goalControlGenerations = new Map();
+        this.sessionConfigUpdates = new Map();
         this.permissionLifecycleContexts = new WeakMap();
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
@@ -795,6 +797,7 @@ export class CodexAcpServer {
             availableModelCount: modelState.availableModels.length
         });
         return {
+            sessionId,
             models: modelState,
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
@@ -1327,7 +1330,10 @@ export class CodexAcpServer {
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
-        await this.applySessionConfigOption(sessionState, params);
+        await this.runSessionConfigUpdate(
+            params.sessionId,
+            () => this.applySessionConfigOption(sessionState, params),
+        );
 
         return {
             configOptions: this.createSessionConfigOptions(sessionState),
@@ -1346,13 +1352,26 @@ export class CodexAcpServer {
                 await this.applyCollaborationModeChange(sessionState, this.stringConfigValue(params));
                 break;
             case MODEL_CONFIG_ID:
-                this.applyModelChange(sessionState, this.stringConfigValue(params));
+                await this.applyModelChange(sessionState, this.stringConfigValue(params));
                 break;
             case REASONING_EFFORT_CONFIG_ID:
-                this.applyReasoningEffortChange(sessionState, this.stringConfigValue(params));
+                await this.applyReasoningEffortChange(sessionState, this.stringConfigValue(params));
                 break;
             default:
                 throw RequestError.invalidParams();
+        }
+    }
+
+    private async runSessionConfigUpdate<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+        const previous = this.sessionConfigUpdates.get(sessionId);
+        const update = previous ? previous.then(operation, operation) : operation();
+        this.sessionConfigUpdates.set(sessionId, update);
+        try {
+            return await update;
+        } finally {
+            if (this.sessionConfigUpdates.get(sessionId) === update) {
+                this.sessionConfigUpdates.delete(sessionId);
+            }
         }
     }
 
@@ -1392,7 +1411,7 @@ export class CodexAcpServer {
         sessionState.collaborationMode = mode;
     }
 
-    private applyModelChange(sessionState: SessionState, value: string): void {
+    private async applyModelChange(sessionState: SessionState, value: string): Promise<void> {
         const model = sessionState.availableModels.find(m => m.id === value);
         if (!model) {
             const currentModel = ModelId.fromString(sessionState.currentModelId).model;
@@ -1404,16 +1423,27 @@ export class CodexAcpServer {
         const currentEffort = ModelId.fromString(sessionState.currentModelId).effort;
         const effort = findSupportedEffort(model.supportedReasoningEfforts, currentEffort)
             ?? model.defaultReasoningEffort;
+        await this.codexAcpClient.setModelAndEffort(
+            sessionState.sessionId,
+            ModelId.fromComponents(model, effort).toString(),
+            sessionState.collaborationMode,
+        );
         this.applyModelAndEffort(sessionState, model, effort);
     }
 
-    private applyReasoningEffortChange(sessionState: SessionState, value: string): void {
+    private async applyReasoningEffortChange(sessionState: SessionState, value: string): Promise<void> {
         const effort = findSupportedEffort(sessionState.supportedReasoningEfforts, value);
         if (!effort) {
             throw RequestError.invalidParams();
         }
         const {model} = ModelId.fromString(sessionState.currentModelId);
-        sessionState.currentModelId = ModelId.create(model, effort).toString();
+        const currentModelId = ModelId.create(model, effort).toString();
+        await this.codexAcpClient.setModelAndEffort(
+            sessionState.sessionId,
+            currentModelId,
+            sessionState.collaborationMode,
+        );
+        sessionState.currentModelId = currentModelId;
     }
 
     private applyModelAndEffort(sessionState: SessionState, model: Model, effort: ReasoningEffort): void {
@@ -1424,34 +1454,41 @@ export class CodexAcpServer {
     }
 
     async unstable_setSessionModel(params: LegacySetSessionModelRequest): Promise<LegacySetSessionModelResponse> {
-        logger.log("Set session model requested", {
-            sessionId: params.sessionId,
-            modelId: params.modelId
-        });
-        const sessionState = this.sessions.get(params.sessionId);
-        if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
+        return await this.runSessionConfigUpdate(params.sessionId, async () => {
+            logger.log("Set session model requested", {
+                sessionId: params.sessionId,
+                modelId: params.modelId
+            });
+            const sessionState = this.sessions.get(params.sessionId);
+            if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
 
-        const {model: requestedModelName, effort: requestedEffort} = ModelId.fromString(params.modelId);
+            const {model: requestedModelName, effort: requestedEffort} = ModelId.fromString(params.modelId);
 
-        const models = await this.codexAcpClient.fetchAvailableModels();
-        const model = models.find(m => m.id === requestedModelName);
-        if (!model) throw new Error(`Unknown model ${params.modelId}`);
+            const models = await this.codexAcpClient.fetchAvailableModels();
+            const model = models.find(m => m.id === requestedModelName);
+            if (!model) throw new Error(`Unknown model ${params.modelId}`);
 
-        let reasoningEffort: ReasoningEffort;
-        if (requestedEffort) {
-            const matchedEffort = findSupportedEffort(model.supportedReasoningEfforts, requestedEffort);
-            if (!matchedEffort) {
-                throw new Error(`Unsupported reasoning effort ${requestedEffort} for model ${requestedModelName}`);
+            let reasoningEffort: ReasoningEffort;
+            if (requestedEffort) {
+                const matchedEffort = findSupportedEffort(model.supportedReasoningEfforts, requestedEffort);
+                if (!matchedEffort) {
+                    throw new Error(`Unsupported reasoning effort ${requestedEffort} for model ${requestedModelName}`);
+                }
+                reasoningEffort = matchedEffort;
+            } else {
+                reasoningEffort = model.defaultReasoningEffort;
             }
-            reasoningEffort = matchedEffort;
-        } else {
-            reasoningEffort = model.defaultReasoningEffort;
-        }
 
-        sessionState.availableModels = models;
-        this.applyModelAndEffort(sessionState, model, reasoningEffort);
+            await this.codexAcpClient.setModelAndEffort(
+                sessionState.sessionId,
+                ModelId.fromComponents(model, reasoningEffort).toString(),
+                sessionState.collaborationMode,
+            );
+            sessionState.availableModels = models;
+            this.applyModelAndEffort(sessionState, model, reasoningEffort);
 
-        return {};
+            return {};
+        });
     }
 
     private parseLegacySetSessionModelParams(params: Record<string, unknown>): LegacySetSessionModelRequest {
@@ -2739,6 +2776,18 @@ export class CodexAcpServer {
         if (this.providerUpdate !== null) {
             await this.providerUpdate;
         }
+        const pendingConfigUpdate = this.sessionConfigUpdates.get(params.sessionId);
+        if (pendingConfigUpdate !== undefined) {
+            try {
+                await pendingConfigUpdate;
+            } catch (error) {
+                logger.error(`Pending session configuration update failed for ${params.sessionId}`, error);
+                throw RequestError.invalidRequest(
+                    undefined,
+                    "Prompt blocked because a pending session configuration update failed",
+                );
+            }
+        }
         logger.log("Prompt received", {
             sessionId: params.sessionId,
             prompt: params.prompt,
@@ -2853,11 +2902,14 @@ export class CodexAcpServer {
                     onTurnStarted?.();
                 },
                 setConfigOption: async (configId, value) => {
-                    await this.applySessionConfigOption(sessionState, {
-                        sessionId: sessionState.sessionId,
-                        configId,
-                        value,
-                    });
+                    await this.runSessionConfigUpdate(
+                        sessionState.sessionId,
+                        () => this.applySessionConfigOption(sessionState, {
+                            sessionId: sessionState.sessionId,
+                            configId,
+                            value,
+                        }),
+                    );
                     const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
                     await session.update({
                         sessionUpdate: "config_option_update",
@@ -3033,7 +3085,10 @@ export class CodexAcpServer {
                     return cancelledPromptResponse();
                 }
                 if (approved && !this.promptShouldStop(params.sessionId, activePrompt)) {
-                    await this.applyCollaborationModeChange(sessionState, DEFAULT_COLLABORATION_MODE);
+                    await this.runSessionConfigUpdate(
+                        sessionState.sessionId,
+                        () => this.applyCollaborationModeChange(sessionState, DEFAULT_COLLABORATION_MODE),
+                    );
                     const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
                     await session.update({
                         sessionUpdate: "config_option_update",

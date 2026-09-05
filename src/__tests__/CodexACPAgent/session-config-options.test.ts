@@ -1,5 +1,8 @@
 import {describe, expect, it, vi} from "vitest";
-import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
+import {
+    createCodexMockTestFixture,
+    createTestModel,
+} from "../acp-test-utils";
 import {AgentMode, MODE_CONFIG_ID} from "../../AgentMode";
 import {
     MODEL_CONFIG_ID,
@@ -49,9 +52,11 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
         collaborationMode: "default",
         additionalDirectories: [],
     });
+    const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate")
+        .mockResolvedValue(undefined);
 
     const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
-    return {fixture, codexAcpAgent, codexAcpClient, response};
+    return {fixture, codexAcpAgent, codexAcpClient, response, update};
 }
 
 describe("Session config options", () => {
@@ -173,8 +178,7 @@ describe("Session config options", () => {
 
     it("changes collaboration mode without starting a model turn", async () => {
         const {fast} = buildModels();
-        const {codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
-        const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
 
         const result = await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
@@ -192,8 +196,7 @@ describe("Session config options", () => {
 
     it("toggles collaboration mode with /plan without starting a model turn", async () => {
         const {fast} = buildModels();
-        const {fixture, codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
-        const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
+        const {fixture, codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
         const turnStart = vi.spyOn(fixture.getCodexAppServerClient(), "turnStart");
 
         const enabledResponse = await codexAcpAgent.prompt({
@@ -245,9 +248,54 @@ describe("Session config options", () => {
         }));
     });
 
+    it("serializes a model change behind an in-flight /plan mode change", async () => {
+        const {fast, slow} = buildModels();
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast, slow]);
+        let releasePlan!: () => void;
+        update
+            .mockImplementationOnce(() => new Promise<void>(resolve => {
+                releasePlan = resolve;
+            }))
+            .mockResolvedValueOnce(undefined);
+
+        const planPromise = codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "/plan"}],
+        });
+        await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+        const modelPromise = codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODEL_CONFIG_ID,
+            value: "slow-model",
+        });
+
+        await Promise.resolve();
+        expect(update).toHaveBeenCalledTimes(1);
+        releasePlan();
+        await planPromise;
+        await modelPromise;
+
+        expect(update).toHaveBeenCalledTimes(2);
+        expect(update.mock.calls[1]![0]).toMatchObject({
+            model: "slow-model",
+            effort: "medium",
+            collaborationMode: {
+                mode: "plan",
+                settings: {
+                    model: "slow-model",
+                    reasoning_effort: "medium",
+                },
+            },
+        });
+        expect(codexAcpAgent.getSessionState("session-id")).toMatchObject({
+            currentModelId: "slow-model[medium]",
+            collaborationMode: "plan",
+        });
+    });
+
     it("changes the model and keeps the current reasoning effort when supported", async () => {
         const {fast, slow} = buildModels();
-        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast, slow]);
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast, slow]);
 
         await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
@@ -256,6 +304,19 @@ describe("Session config options", () => {
         });
 
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("slow-model[medium]");
+        expect(update).toHaveBeenCalledWith({
+            threadId: "session-id",
+            model: "slow-model",
+            effort: "medium",
+            collaborationMode: {
+                mode: "default",
+                settings: {
+                    model: "slow-model",
+                    reasoning_effort: "medium",
+                    developer_instructions: null,
+                },
+            },
+        });
     });
 
     it("falls back to the new model's default effort when the current effort is unsupported", async () => {
@@ -271,9 +332,41 @@ describe("Session config options", () => {
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("slow-model[low]");
     });
 
+    it("refreshes the collaboration-mode model snapshot when the model changes", async () => {
+        const {fast, slow} = buildModels();
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast, slow]);
+
+        await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: COLLABORATION_MODE_CONFIG_ID,
+            value: PLAN_COLLABORATION_MODE,
+        });
+        update.mockClear();
+
+        await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODEL_CONFIG_ID,
+            value: "slow-model",
+        });
+
+        expect(update).toHaveBeenCalledWith(expect.objectContaining({
+            threadId: "session-id",
+            model: "slow-model",
+            effort: "medium",
+            collaborationMode: {
+                mode: "plan",
+                settings: {
+                    model: "slow-model",
+                    reasoning_effort: "medium",
+                    developer_instructions: null,
+                },
+            },
+        }));
+    });
+
     it("changes only the reasoning effort", async () => {
         const {fast} = buildModels();
-        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast]);
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast]);
 
         await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
@@ -282,6 +375,19 @@ describe("Session config options", () => {
         });
 
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("fast-model[high]");
+        expect(update).toHaveBeenCalledWith({
+            threadId: "session-id",
+            model: "fast-model",
+            effort: "high",
+            collaborationMode: {
+                mode: "default",
+                settings: {
+                    model: "fast-model",
+                    reasoning_effort: "high",
+                    developer_instructions: null,
+                },
+            },
+        });
     });
 
     it("refreshes the cached model list when unstable_setSessionModel picks a freshly fetched model", async () => {
@@ -309,6 +415,7 @@ describe("Session config options", () => {
             defaultReasoningEffort: "medium",
         });
         vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue([fast, extraModel]);
+        vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
 
         await codexAcpAgent.unstable_setSessionModel({
             sessionId: "session-id",
@@ -317,6 +424,147 @@ describe("Session config options", () => {
 
         const sessionState = codexAcpAgent.getSessionState("session-id");
         expect(sessionState.availableModels.map(m => m.id)).toEqual(["fast-model", "extra-model"]);
+    });
+
+    it("keeps the previous cached model list when legacy model persistence fails", async () => {
+        const {fast} = buildModels();
+        const {codexAcpAgent, codexAcpClient, update} = await createSession("fast-model[medium]", [fast]);
+        const extraModel = createTestModel({
+            id: "extra-model",
+            supportedReasoningEfforts: [mediumEffort],
+            defaultReasoningEffort: "medium",
+        });
+        vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue([fast, extraModel]);
+        update.mockRejectedValueOnce(new Error("settings update failed"));
+
+        await expect(codexAcpAgent.unstable_setSessionModel({
+            sessionId: "session-id",
+            modelId: "extra-model[medium]",
+        })).rejects.toThrow("settings update failed");
+
+        expect(codexAcpAgent.getSessionState("session-id").availableModels.map(m => m.id)).toEqual(["fast-model"]);
+    });
+
+    it("waits for an in-flight config update before starting a pipelined prompt", async () => {
+        const {fast, slow} = buildModels();
+        const {codexAcpAgent, codexAcpClient, update} = await createSession("fast-model[medium]", [fast, slow]);
+        let releaseUpdate!: () => void;
+        update.mockImplementationOnce(() => new Promise<void>(resolve => {
+            releaseUpdate = resolve;
+        }));
+        const sendPrompt = vi.spyOn(codexAcpClient, "sendPrompt").mockResolvedValue(null);
+
+        const configPromise = codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODEL_CONFIG_ID,
+            value: "slow-model",
+        });
+        await vi.waitFor(() => expect(update).toHaveBeenCalled());
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "use the configured model"}],
+        });
+
+        await Promise.resolve();
+        expect(sendPrompt).not.toHaveBeenCalled();
+        releaseUpdate();
+        await configPromise;
+        await promptPromise;
+
+        expect(sendPrompt.mock.calls[0]![2].toString()).toBe("slow-model[medium]");
+    });
+
+    it("waits for an in-flight legacy model update before starting a pipelined prompt", async () => {
+        const {fast, slow} = buildModels();
+        const {codexAcpAgent, codexAcpClient, update} = await createSession("fast-model[medium]", [fast]);
+        vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue([fast, slow]);
+        let releaseUpdate!: () => void;
+        update.mockImplementationOnce(() => new Promise<void>(resolve => {
+            releaseUpdate = resolve;
+        }));
+        const sendPrompt = vi.spyOn(codexAcpClient, "sendPrompt").mockResolvedValue(null);
+
+        const configPromise = codexAcpAgent.unstable_setSessionModel({
+            sessionId: "session-id",
+            modelId: "slow-model[medium]",
+        });
+        await vi.waitFor(() => expect(update).toHaveBeenCalled());
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "use the legacy-configured model"}],
+        });
+
+        await Promise.resolve();
+        expect(sendPrompt).not.toHaveBeenCalled();
+        releaseUpdate();
+        await configPromise;
+        await promptPromise;
+
+        expect(sendPrompt.mock.calls[0]![2].toString()).toBe("slow-model[medium]");
+    });
+
+    it("serializes config updates and continues after an earlier update fails", async () => {
+        const {fast, slow} = buildModels();
+        const {codexAcpAgent, update} = await createSession("fast-model[medium]", [fast, slow]);
+        let rejectFirst!: (error: Error) => void;
+        update
+            .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+                rejectFirst = reject;
+            }))
+            .mockResolvedValueOnce(undefined);
+
+        const first = codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: REASONING_EFFORT_CONFIG_ID,
+            value: "high",
+        });
+        await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+        const second = codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODEL_CONFIG_ID,
+            value: "slow-model",
+        });
+
+        await Promise.resolve();
+        expect(update).toHaveBeenCalledTimes(1);
+        rejectFirst(new Error("first update failed"));
+        await expect(first).rejects.toThrow("first update failed");
+        await expect(second).resolves.toBeDefined();
+
+        expect(update).toHaveBeenCalledTimes(2);
+        expect(update.mock.calls[1]![0]).toMatchObject({
+            model: "slow-model",
+            effort: "medium",
+        });
+        expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("slow-model[medium]");
+    });
+
+    it("fails a pipelined prompt closed with a configuration-specific error", async () => {
+        const {fast} = buildModels();
+        const {codexAcpAgent, codexAcpClient, update} = await createSession("fast-model[medium]", [fast]);
+        let rejectUpdate!: (error: Error) => void;
+        update.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+            rejectUpdate = reject;
+        }));
+        const sendPrompt = vi.spyOn(codexAcpClient, "sendPrompt").mockResolvedValue(null);
+
+        const configPromise = codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: REASONING_EFFORT_CONFIG_ID,
+            value: "high",
+        });
+        await vi.waitFor(() => expect(update).toHaveBeenCalled());
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "do not run on stale configuration"}],
+        });
+
+        rejectUpdate(new Error("settings update failed"));
+        await expect(configPromise).rejects.toThrow("settings update failed");
+        await expect(promptPromise).rejects.toThrow(
+            "Prompt blocked because a pending session configuration update failed",
+        );
+        expect(sendPrompt).not.toHaveBeenCalled();
     });
 
     it("changes the model through the legacy session/set_model extMethod", async () => {

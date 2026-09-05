@@ -15,7 +15,7 @@ export type SessionForkDependencies = {
         additionalDirectories: string[],
         mcpServers: acp.McpServer[],
     ): Promise<NonNullable<ThreadForkParams["config"]>>;
-    getResumeModelProvider(): Promise<string>;
+    getResumeModelProviderParams(): Promise<{modelProvider?: string}>;
     fetchAvailableModels(): Promise<Model[]>;
     createCurrentModelId(models: Model[], model: string, reasoningEffort: string | null): string;
     getCollaborationMode(sessionId: string): ModeKind;
@@ -36,7 +36,7 @@ export async function forkSession(
         ),
         cwd: request.cwd,
         ...(lastTurnId !== undefined && {lastTurnId}),
-        modelProvider: await dependencies.getResumeModelProvider(),
+        ...(await dependencies.getResumeModelProviderParams()),
         threadId: request.sessionId,
     });
     await dependencies.codexClient.threadUnsubscribe({threadId: response.thread.id});
