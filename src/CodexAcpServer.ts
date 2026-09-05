@@ -2719,16 +2719,9 @@ export class CodexAcpServer {
             return null;
         }
 
-        if (requestName === "Close") {
-            pendingTurnStart.resolve(null);
-            return null;
-        }
-
-        const turnId = await pendingTurnStart.promise;
-        if (!turnId) {
-            logger.log(`${requestName} request rejected: no current turn`, {sessionId: sessionState.sessionId});
-        }
-        return turnId;
+        logger.log(`${requestName} request released: turn has not started`, {sessionId: sessionState.sessionId});
+        pendingTurnStart.resolve(null);
+        return null;
     }
 
     async prompt(
@@ -3333,7 +3326,9 @@ export class CodexAcpServer {
             return;
         }
 
+        this.activePrompts.get(params.sessionId)?.requestCancel();
         // After turnInterrupt(), Codex will send turn/completed, which naturally completes awaitTurnCompleted().
+        // If turn/start never returned, do not wait for it — prompt() already aborted above.
         await this.interruptSessionTurn(sessionState, "Cancel", false);
     }
 }
