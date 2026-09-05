@@ -45,6 +45,24 @@ describe("paginated thread history", () => {
         expect(pages).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+        {name: "repeated cursor", cursors: ["page-a", "page-a"]},
+        {name: "cursor cycle", cursors: ["page-a", "page-b", "page-a"]},
+    ])("rejects a $name before requesting another page", async ({cursors}) => {
+        const fixture = createCodexMockTestFixture();
+        const appServer = fixture.getCodexAppServerClient();
+        vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: {id: "history", turns: []} as any});
+        const pages = vi.spyOn(appServer, "threadTurnsList")
+            .mockRejectedValue(new Error("Unexpected extra page request"));
+        for (const nextCursor of cursors) {
+            pages.mockResolvedValueOnce({data: [], nextCursor, backwardsCursor: null});
+        }
+
+        await expect(fixture.getCodexAcpClient().readSessionThread("history"))
+            .rejects.toThrow("Codex returned a repeated thread history cursor");
+        expect(pages).toHaveBeenCalledTimes(cursors.length);
+    });
+
     it("rejects an incomplete history if a later page fails", async () => {
         const fixture = createCodexMockTestFixture();
         const appServer = fixture.getCodexAppServerClient();

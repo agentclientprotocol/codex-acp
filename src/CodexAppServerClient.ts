@@ -585,6 +585,7 @@ export class CodexAppServerClient {
     async threadReadWithHistory(threadId: string): Promise<ThreadReadResponse> {
         const response = await this.threadRead({threadId});
         const turns: ThreadReadResponse["thread"]["turns"] = [];
+        const seenCursors = new Set<string>();
         let cursor: string | null = null;
         do {
             const page = await this.threadTurnsList({
@@ -596,6 +597,12 @@ export class CodexAppServerClient {
             });
             turns.push(...page.data);
             cursor = page.nextCursor;
+            if (cursor !== null) {
+                if (seenCursors.has(cursor)) {
+                    throw new Error("Codex returned a repeated thread history cursor");
+                }
+                seenCursors.add(cursor);
+            }
         } while (cursor !== null);
         return {...response, thread: {...response.thread, turns}};
     }
