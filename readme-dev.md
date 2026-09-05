@@ -12,6 +12,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
+- `MCP_STARTUP_PROMPT_TIMEOUT_MS` - how long a prompt waits for the session's MCP servers to finish starting before the turn is started without them (default `30000`).
 
 ### Quick start
 

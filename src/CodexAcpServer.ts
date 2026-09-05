@@ -207,6 +207,8 @@ export interface SessionFailure {
 
 const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;
 
+const DEFAULT_MCP_STARTUP_PROMPT_TIMEOUT_MS = 30_000;
+
 function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
     return clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY);
 }
@@ -223,6 +225,8 @@ interface ActiveAuthState {
 interface PendingMcpStartupSession {
     requestedServers: Set<string>;
     afterVersion: number;
+    settled: Promise<void>;
+    gateExpired: boolean;
 }
 
 interface PendingTurnStart {
@@ -236,6 +240,7 @@ interface ActivePrompt {
     cancelSignal: Promise<null>;
     signal: AbortSignal;
     currentTurn: { threadId: string, turnId: string } | null;
+    awaitingMcpStartup: boolean;
     requestCancel: () => void;
     requestClose: () => void;
     complete: () => void;
@@ -706,11 +711,7 @@ export class CodexAcpServer {
 
         const canPublishSessionUpdates = operation !== "fork";
         if (canPublishSessionUpdates && requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
-            this.pendingMcpStartupSessions.set(sessionId, {
-                requestedServers: new Set(getRequestedMcpServerNames(requestedMcpServers)),
-                afterVersion: mcpServerStartupVersion,
-            });
-            this.publishMcpStartupStatusAsync(sessionId);
+            this.trackMcpServerStartup(sessionId, requestedMcpServers, mcpServerStartupVersion);
         }
 
         if (canPublishSessionUpdates) {
@@ -1957,11 +1958,7 @@ export class CodexAcpServer {
         subscribed = false;
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
-            this.pendingMcpStartupSessions.set(sessionId, {
-                requestedServers: new Set(getRequestedMcpServerNames(requestedMcpServers)),
-                afterVersion: mcpServerStartupVersion,
-            });
-            this.publishMcpStartupStatusAsync(sessionId);
+            this.trackMcpServerStartup(sessionId, requestedMcpServers, mcpServerStartupVersion);
         }
 
         await this.publishAvailableCommands(sessionState, requestedSessionGeneration);
@@ -2411,16 +2408,73 @@ export class CodexAcpServer {
         return [];
     }
 
-    private publishMcpStartupStatusAsync(sessionId: string): void {
-        void this.doPublishMcpStartupStatus(sessionId);
+    private trackMcpServerStartup(
+        sessionId: string,
+        requestedMcpServers: Array<acp.McpServer>,
+        afterVersion: number,
+    ): void {
+        const pendingStartup: PendingMcpStartupSession = {
+            requestedServers: new Set(getRequestedMcpServerNames(requestedMcpServers)),
+            afterVersion: afterVersion,
+            settled: Promise.resolve(),
+            gateExpired: false,
+        };
+        this.pendingMcpStartupSessions.set(sessionId, pendingStartup);
+        pendingStartup.settled = this.doPublishMcpStartupStatus(sessionId, pendingStartup);
     }
 
-    private async doPublishMcpStartupStatus(sessionId: string): Promise<void> {
+    /**
+     * Waits until the session's MCP servers finished starting, so a turn never runs with tools
+     * Codex has not registered yet. Returns false when the prompt was cancelled while waiting.
+     */
+    private async awaitSessionMcpStartup(sessionId: string, activePrompt: ActivePrompt): Promise<boolean> {
         const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
-        if (!pendingStartup) {
-            return;
+        if (!pendingStartup || pendingStartup.gateExpired) {
+            return true;
         }
 
+        const requestedServers = Array.from(pendingStartup.requestedServers);
+        logger.log("Waiting for MCP server startup before starting a turn", {sessionId, servers: requestedServers});
+        const timeoutMs = getMcpStartupPromptTimeoutMs();
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        const expired = new Promise<"expired">((resolve) => {
+            timeoutHandle = setTimeout(() => resolve("expired"), timeoutMs);
+            timeoutHandle.unref?.();
+        });
+        activePrompt.awaitingMcpStartup = true;
+        try {
+            const outcome = await Promise.race([
+                pendingStartup.settled.then(() => "started" as const),
+                activePrompt.cancelSignal.then(() => "cancelled" as const),
+                expired,
+            ]);
+            if (outcome === "cancelled") {
+                logger.log("Prompt cancelled while waiting for MCP server startup", {sessionId});
+                return false;
+            }
+            if (outcome === "expired") {
+                // Codex may never report a post-startup status for a server. Do not block prompts
+                // forever on it: run the turn without those tools and stop waiting on later prompts.
+                pendingStartup.gateExpired = true;
+                logger.log("MCP server startup timed out, starting the turn without those tools", {
+                    sessionId,
+                    timeoutMs,
+                    servers: requestedServers,
+                });
+                return true;
+            }
+            logger.log("MCP server startup completed, starting the turn", {sessionId});
+            return true;
+        } finally {
+            activePrompt.awaitingMcpStartup = false;
+            clearTimeout(timeoutHandle);
+        }
+    }
+
+    private async doPublishMcpStartupStatus(
+        sessionId: string,
+        pendingStartup: PendingMcpStartupSession,
+    ): Promise<void> {
         try {
             const mcpStartup = await this.runWithProcessCheck(() =>
                 this.codexAcpClient.awaitMcpServerStartup(
@@ -2541,6 +2595,7 @@ export class CodexAcpServer {
             cancelSignal,
             signal: abortController.signal,
             currentTurn: null,
+            awaitingMcpStartup: false,
             requestCancel: () => {
                 if (abortController.signal.aborted) {
                     return;
@@ -2834,6 +2889,15 @@ export class CodexAcpServer {
 
             if (activePrompt.signal.aborted) {
                 return cancelledPromptResponse();
+            }
+
+            if (this.availableCommands.startsAgentTurn(params.prompt)) {
+                if (!await this.awaitSessionMcpStartup(params.sessionId, activePrompt)) {
+                    return cancelledPromptResponse();
+                }
+                if (this.sessionIsClosing(params.sessionId)) {
+                    return cancelledPromptResponse();
+                }
             }
 
             const commandPromise = this.availableCommands.tryHandleCommand(params.prompt, sessionState, {
@@ -3333,6 +3397,14 @@ export class CodexAcpServer {
             return;
         }
 
+        // No turn exists yet while the prompt waits for MCP startup, so there is nothing to interrupt.
+        const activePrompt = this.activePrompts.get(params.sessionId);
+        if (activePrompt?.awaitingMcpStartup) {
+            logger.log("Cancel requested while waiting for MCP server startup", {sessionId: params.sessionId});
+            activePrompt.requestCancel();
+            return;
+        }
+
         // After turnInterrupt(), Codex will send turn/completed, which naturally completes awaitTurnCompleted().
         await this.interruptSessionTurn(sessionState, "Cancel", false);
     }
@@ -3429,4 +3501,16 @@ function historyUpdateContentKey(update: UpdateSessionEvent): string | null {
 
 function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
     return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(server.name))));
+}
+
+function getMcpStartupPromptTimeoutMs(): number {
+    const value = process.env["MCP_STARTUP_PROMPT_TIMEOUT_MS"]?.trim();
+    if (!value) {
+        return DEFAULT_MCP_STARTUP_PROMPT_TIMEOUT_MS;
+    }
+    const configured = Number(value);
+    if (!Number.isFinite(configured) || configured < 0) {
+        return DEFAULT_MCP_STARTUP_PROMPT_TIMEOUT_MS;
+    }
+    return configured;
 }
