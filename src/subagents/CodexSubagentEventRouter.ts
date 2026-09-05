@@ -153,6 +153,22 @@ export class CodexSubagentEventRouter {
             }
         }
 
+        // Waiting for an activity item to name the child only works for
+        // subagents Codex names; an ad-hoc `spawn_agent` is never announced, so
+        // the child talks into a buffer that fills and drops its oldest updates
+        // while the client never learns it existed. A completed spawn is Codex
+        // confirming the child, and lands before any of its output. An activity
+        // item that does arrive first still wins: materializing twice is a no-op.
+        if (item.tool === "spawnAgent" && notification.method === "item/completed") {
+            for (const childSessionId of item.receiverThreadIds) {
+                if (!this.pendingSpawns.has(childSessionId)) continue;
+                const state = item.agentsStates[childSessionId];
+                if (state && terminalStateOf(state.status) !== undefined) continue;
+                logger.log(`Announcing spawned subagent ${childSessionId} from its spawn; Codex named no agent path`);
+                await this.materialize(childSessionId);
+            }
+        }
+
         for (const [childSessionId, state] of Object.entries(item.agentsStates)) {
             const terminalState = state && terminalStateOf(state.status);
             if (!terminalState) continue;
@@ -305,11 +321,22 @@ export class CodexSubagentEventRouter {
             : [];
     }
 
-    private async materialize(childSessionId: string, path: string): Promise<void> {
+    /**
+     * Announces a child as a native subagent session. `path` is Codex's agent
+     * path, which names the subagent and locates it in the tree; a spawn that
+     * was never announced by an activity item has none, and is announced under
+     * the fallback identity against the parent recorded when it was spawned.
+     */
+    private async materialize(childSessionId: string, path?: string): Promise<void> {
         if (this.children.has(childSessionId)) return;
         const pending = this.pendingSpawns.get(childSessionId);
-        const name = nameFromAgentPath(path, fallbackName(childSessionId));
-        const inferredParent = this.parentForPath(path);
+        if (path === undefined && !pending) return;
+        const name = path === undefined
+            ? fallbackName(childSessionId)
+            : nameFromAgentPath(path, fallbackName(childSessionId));
+        const inferredParent = path === undefined
+            ? {threadId: this.rootSessionId, sessionId: this.rootSessionId}
+            : this.parentForPath(path);
         const parentThreadId = pending?.parentThreadId ?? inferredParent.threadId;
         const parentSessionId = pending?.parentSessionId ?? inferredParent.sessionId;
         const task = pending?.task ?? `Delegated task for ${name}`;
@@ -326,7 +353,7 @@ export class CodexSubagentEventRouter {
             sessionId: childSessionId,
             name,
             task,
-            path: normalizeAgentPath(path),
+            ...(path === undefined ? {} : {path: normalizeAgentPath(path)}),
             generation: 1,
         });
         this.pendingSpawns.delete(childSessionId);

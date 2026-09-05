@@ -1023,6 +1023,87 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         expect(terminal?.args[0].update.state).toBe("cancelled");
     });
 
+    it("announces an unannounced spawn so its output is not lost", async () => {
+        // Codex names the subagents it defines, but an ad-hoc `spawn_agent`
+        // produces no activity item at all. The spawn's own completion is the
+        // last moment before the child starts talking, so it is what announces.
+        await initializeNativeSubagents();
+        const notifications: ServerNotification[] = [
+            {
+                method: "item/completed",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    completedAtMs: 0,
+                    item: {
+                        type: "collabAgentToolCall",
+                        id: "call-spawn-adhoc",
+                        tool: "spawnAgent",
+                        status: "completed",
+                        senderThreadId: sessionId,
+                        receiverThreadIds: ["thread-adhoc"],
+                        prompt: "Trace the data flow.",
+                        model: null,
+                        reasoningEffort: null,
+                        agentsStates: {
+                            "thread-adhoc": {status: "pendingInit", message: null},
+                        },
+                    },
+                },
+            },
+            {
+                method: "item/started",
+                params: {
+                    threadId: "thread-adhoc",
+                    turnId: "turn-child",
+                    startedAtMs: 0,
+                    item: {
+                        type: "commandExecution",
+                        id: "child-command",
+                        pluginId: null,
+                        scriptPath: null,
+                        command: "rg --files",
+                        cwd: "/test/project",
+                        processId: null,
+                        source: "agent",
+                        status: "inProgress",
+                        commandActions: [],
+                        aggregatedOutput: null,
+                        exitCode: null,
+                        durationMs: null,
+                    },
+                },
+            },
+        ];
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+
+        const updates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0]);
+        // Announced against the parent, under the fallback identity, carrying
+        // the spawn prompt as the task.
+        expect(updates).toContainEqual({
+            sessionId,
+            update: {
+                sessionUpdate: "subagent_spawned",
+                subagentSessionId: "thread-adhoc",
+                name: "Agent ad-adhoc",
+                task: "Trace the data flow.",
+                capabilities: {},
+            },
+        });
+        // The work it does belongs to the child's session, not the thread's.
+        expect(updates.filter(update => update.sessionId === "thread-adhoc"))
+            .toContainEqual(expect.objectContaining({
+                update: expect.objectContaining({sessionUpdate: "tool_call"}),
+            }));
+        // And the spawn itself never appears in the thread as a bare tool call.
+        expect(updates.filter(update => update.sessionId === sessionId)
+            .map(update => update.update.sessionUpdate))
+            .not.toContain("tool_call");
+    });
+
     it("waits for a pending spawn without publishing fallback identity and suppresses late activity", async () => {
         await initializeNativeSubagents();
         const appServer = mockFixture.getCodexAppServerClient();
