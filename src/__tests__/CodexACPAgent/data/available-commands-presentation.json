@@ -2,7 +2,7 @@
   "method": "sessionUpdate",
   "args": [
     {
-      "sessionId": "sessionId",
+      "sessionId": "session-id",
       "update": {
         "sessionUpdate": "available_commands_update",
         "availableCommands": [
@@ -89,12 +89,33 @@
           {
             "name": "$build",
             "description": "Build",
-            "input": null
+            "input": null,
+            "_meta": {
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "commandPresentation": {
+                    "source": "skill"
+                  }
+                }
+              }
+            }
           },
           {
             "name": "$deploy",
-            "description": "Deploy the service",
-            "input": null
+            "description": "Deploy",
+            "input": null,
+            "_meta": {
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "commandPresentation": {
+                    "source": "plugin",
+                    "pluginId": "quality"
+                  }
+                }
+              }
+            }
           }
         ]
       }

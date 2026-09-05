@@ -165,6 +165,7 @@ export class CodexAppServerClient {
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
+    private readonly globalNotificationHandlers = new Set<(event: ServerNotification) => void>();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -735,6 +736,12 @@ export class CodexAppServerClient {
         this.notificationHandlers.set(sessionId, callback);
     }
 
+    /** Observes process-wide notifications exactly once, before they are fanned out to sessions. */
+    onGlobalServerNotification(callback: (event: ServerNotification) => void): {dispose(): void} {
+        this.globalNotificationHandlers.add(callback);
+        return {dispose: () => this.globalNotificationHandlers.delete(callback)};
+    }
+
     private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
     onClientTransportEvent(callback: (event: CodexConnectionEvent) => void){
         this.codexEventHandlers.push(callback);
@@ -742,6 +749,9 @@ export class CodexAppServerClient {
 
     private notificationHandlers = new Map<string, (event: ServerNotification) => void>();
     private notify(notification: ServerNotification) {
+        for (const handler of this.globalNotificationHandlers) {
+            handler(notification);
+        }
         const threadId = extractThreadId(notification);
         if (threadId !== null) {
             const handler = this.notificationHandlers.get(threadId);

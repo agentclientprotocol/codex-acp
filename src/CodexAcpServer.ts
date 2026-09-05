@@ -131,12 +131,14 @@ import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
     AIR_ASYNC_TASKS_KEY,
+    AIR_COMMAND_PRESENTATION_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
     AIR_META_KEY,
     AIR_SESSION_FAILURE_KEY,
+    AIR_TOOL_PRESENTATION_KEY,
     clientSupportsAirCapability,
     JETBRAINS_META_KEY,
 } from "./AirExtension";
@@ -215,6 +217,14 @@ function clientSupportsAgentFileChangeReports(capabilities: acp.ClientCapabiliti
     return clientSupportsAirCapability(capabilities, AIR_AGENT_FILE_CHANGE_REPORT_KEY);
 }
 
+function clientSupportsCommandPresentation(capabilities: acp.ClientCapabilities | null): boolean {
+    return clientSupportsAirCapability(capabilities, AIR_COMMAND_PRESENTATION_KEY);
+}
+
+function clientSupportsToolPresentation(capabilities: acp.ClientCapabilities | null): boolean {
+    return clientSupportsAirCapability(capabilities, AIR_TOOL_PRESENTATION_KEY);
+}
+
 interface ActiveAuthState {
     account: Account | null;
     authConfigured: boolean;
@@ -285,6 +295,7 @@ export class CodexAcpServer {
     private codexProcessGeneration = 0;
     private initializeRequest: acp.InitializeRequest | null = null;
     private providerUpdate: Promise<void> | null = null;
+    private catalogNotificationSubscription: {dispose(): void};
 
     constructor(
         connection: AcpClientConnection,
@@ -318,6 +329,7 @@ export class CodexAcpServer {
         this.booleanConfigOptionsSupported = false;
         this.currentAuthStatus = null;
         this.availableCommands = this.createAvailableCommands(codexAcpClient);
+        this.catalogNotificationSubscription = this.observeCatalogChanges(codexAcpClient);
         this.observeCodexProcess();
     }
 
@@ -326,8 +338,25 @@ export class CodexAcpServer {
             this.connection,
             client,
             (operation) => this.runWithProcessCheck(operation),
-            () => this.refreshAuthState(null)
+            () => this.refreshAuthState(null),
+            () => clientSupportsCommandPresentation(this.clientCapabilities),
         );
+    }
+
+    private observeCatalogChanges(client: CodexAcpClient): {dispose(): void} {
+        return client.appServerClient.onGlobalServerNotification((notification) => {
+            if (notification.method !== "skills/changed"
+                && notification.method !== "app/list/updated"
+                && notification.method !== "externalAgentConfig/import/completed") {
+                return;
+            }
+            for (const sessionState of this.sessions.values()) {
+                this.publishAvailableCommandsAsync(
+                    sessionState,
+                    this.getSessionGeneration(sessionState.sessionId),
+                );
+            }
+        });
     }
 
     async initialize(
@@ -397,6 +426,8 @@ export class CodexAcpServer {
                             AIR_AGENT_FILE_CHANGE_REPORT_KEY,
                             AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                             AIR_ASYNC_TASKS_KEY,
+                            AIR_COMMAND_PRESENTATION_KEY,
+                            AIR_TOOL_PRESENTATION_KEY,
                         ],
                     },
                 },
@@ -889,6 +920,7 @@ export class CodexAcpServer {
                 this.activePrompts.delete(params.sessionId);
                 this.steeringQueues.delete(params.sessionId);
                 this.goalControlGenerations.delete(params.sessionId);
+                this.availableCommands.clear(params.sessionId);
             }
             this.endSessionCloseFence(params.sessionId);
         }
@@ -1047,6 +1079,8 @@ export class CodexAcpServer {
             await replacement.initialize(this.initializeRequest);
             this.codexAcpClient = replacement;
             this.availableCommands = this.createAvailableCommands(replacement);
+            this.catalogNotificationSubscription.dispose();
+            this.catalogNotificationSubscription = this.observeCatalogChanges(replacement);
 
             const resumeErrors: unknown[] = [];
             for (const session of this.sessions.values()) {
@@ -2258,7 +2292,10 @@ export class CodexAcpServer {
                 return updates;
             }
             case "mcpToolCall":
-                return [await createMcpToolCallUpdate(item)];
+                return [await createMcpToolCallUpdate(
+                    item,
+                    clientSupportsToolPresentation(this.clientCapabilities),
+                )];
             case "dynamicToolCall":
                 return [await createDynamicToolCallUpdate(item)];
             case "collabAgentToolCall":
@@ -2790,6 +2827,7 @@ export class CodexAcpServer {
                 this.sessionFailureEpoch,
                 sessionState.subagents,
                 (accountUpdated) => this.handleAccountUpdated(accountUpdated),
+                clientSupportsToolPresentation(this.clientCapabilities),
             );
             eventHandler = promptEventHandler;
             const permissionLifecycle = this.permissionLifecycleContext(sessionState);

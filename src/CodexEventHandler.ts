@@ -229,6 +229,7 @@ export class CodexEventHandler {
     private readonly subagents: CodexSubagentEventRouter;
     /** Connection-level `authStatus` sink; the app-server account push feeds it. */
     private readonly onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined;
+    private readonly supportsToolPresentation: boolean;
 
     constructor(
         connection: AcpClientConnection,
@@ -242,6 +243,7 @@ export class CodexEventHandler {
             new ACPSessionConnection(connection, sessionState.sessionId),
         ),
         onAccountUpdated?: (notification: AccountUpdatedNotification) => void,
+        supportsToolPresentation = false,
     ) {
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
@@ -250,6 +252,7 @@ export class CodexEventHandler {
         this.sessionFailureEpoch = sessionFailureEpoch;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
         this.subagents = subagents;
+        this.supportsToolPresentation = supportsToolPresentation;
         if (sessionState.sessionFailure !== undefined) {
             this.failuresById.set(sessionState.sessionFailure.id, sessionState.sessionFailure);
         }
@@ -730,7 +733,7 @@ export class CodexEventHandler {
                 return await createCommandExecutionUpdate(event.item);
             }
             case "mcpToolCall":
-                return await createMcpToolCallUpdate(event.item);
+                return await createMcpToolCallUpdate(event.item, this.supportsToolPresentation);
             case "dynamicToolCall":
                 return await createDynamicToolCallUpdate(event.item);
             case "webSearch":

@@ -1,0 +1,35 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "app-call-id",
+        "kind": "execute",
+        "title": "mcp.github-app.search",
+        "status": "in_progress",
+        "rawInput": {
+          "server": "github-app",
+          "tool": "search",
+          "arguments": {
+            "query": "codex"
+          }
+        },
+        "_meta": {
+          "is_mcp_tool_call": true,
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "toolPresentation": {
+                "source": "app",
+                "appId": "github",
+                "appName": "GitHub"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

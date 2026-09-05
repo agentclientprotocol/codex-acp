@@ -78,7 +78,14 @@ describe('CodexACPAgent - initialize', () => {
                 jetbrains: {
                     air: {
                         version: 1,
-                        capabilities: ["sessionFailure", "agentFileChangeReport", "nativeSubagentSessions", "asyncTasks"],
+                        capabilities: [
+                            "sessionFailure",
+                            "agentFileChangeReport",
+                            "nativeSubagentSessions",
+                            "asyncTasks",
+                            "commandPresentation",
+                            "toolPresentation",
+                        ],
                     },
                 },
             },

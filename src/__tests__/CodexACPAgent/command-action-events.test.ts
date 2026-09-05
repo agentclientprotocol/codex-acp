@@ -321,6 +321,49 @@ describe('CodexEventHandler - command action events', () => {
         );
     });
 
+    it('decorates app-backed mcp tools when tool presentation is negotiated', async () => {
+        await mockFixture.getCodexAcpAgent().initialize({
+            protocolVersion: 1,
+            clientCapabilities: {
+                _meta: {jetbrains: {air: {version: 1, capabilities: ["toolPresentation"]}}},
+            },
+        });
+        const notification: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                startedAtMs: 0,
+                item: {
+                    type: "mcpToolCall",
+                    id: "app-call-id",
+                    server: "github-app",
+                    tool: "search",
+                    status: "inProgress",
+                    arguments: {query: "codex"},
+                    appContext: {
+                        connectorId: "github",
+                        linkId: null,
+                        resourceUri: null,
+                        appName: "GitHub",
+                        actionName: "Search",
+                    },
+                    readOnlyHint: true,
+                    pluginId: null,
+                    result: null,
+                    error: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [notification]);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            'data/mcp-app-tool-presentation.json'
+        );
+    });
+
     it('should include mcp progress and final logs', async () => {
         const notifications: ServerNotification[] = [
             {

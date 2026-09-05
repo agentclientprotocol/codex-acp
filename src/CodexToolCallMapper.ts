@@ -33,6 +33,13 @@ import {
     type TerminalOutputMode,
 } from "./TerminalOutputMode";
 import {createContextCompactionMeta} from "./ContextCompactionMeta";
+import {
+    AIR_EXTENSION_VERSION,
+    AIR_EXTENSION_VERSION_KEY,
+    AIR_META_KEY,
+    AIR_TOOL_PRESENTATION_KEY,
+    JETBRAINS_META_KEY,
+} from "./AirExtension";
 
 type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus | CollabAgentToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -141,8 +148,18 @@ export function createCommandExecutionCompleteUpdate(
 }
 
 export async function createMcpToolCallUpdate(
-    item: ThreadItem & { type: "mcpToolCall" }
+    item: ThreadItem & { type: "mcpToolCall" },
+    supportsToolPresentation = false,
 ): Promise<UpdateSessionEvent> {
+    const presentation = item.appContext !== null
+        ? {
+            source: "app",
+            appId: item.appContext.connectorId,
+            ...(item.appContext.appName === null ? {} : {appName: item.appContext.appName}),
+        }
+        : item.pluginId === null
+            ? null
+            : {source: "plugin", pluginId: item.pluginId};
     return {
         ...await createExecuteToolCallUpdate(
             item,
@@ -150,7 +167,17 @@ export async function createMcpToolCallUpdate(
             createMcpRawInput(item.server, item.tool, item.arguments),
             createMcpRawOutput(item.result, item.error),
         ),
-        _meta: { is_mcp_tool_call: true },
+        _meta: {
+            is_mcp_tool_call: true,
+            ...(supportsToolPresentation && presentation !== null ? {
+                [JETBRAINS_META_KEY]: {
+                    [AIR_META_KEY]: {
+                        [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
+                        [AIR_TOOL_PRESENTATION_KEY]: presentation,
+                    },
+                },
+            } : {}),
+        },
     };
 }
 

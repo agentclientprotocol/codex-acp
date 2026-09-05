@@ -13,6 +13,13 @@ import {
     DEFAULT_COLLABORATION_MODE,
     PLAN_COLLABORATION_MODE,
 } from "./CollaborationModeConfig";
+import {
+    AIR_COMMAND_PRESENTATION_KEY,
+    AIR_EXTENSION_VERSION,
+    AIR_EXTENSION_VERSION_KEY,
+    AIR_META_KEY,
+    JETBRAINS_META_KEY,
+} from "./AirExtension";
 
 type ParsedSlashCommand = {
     name: string;
@@ -41,27 +48,42 @@ export class CodexCommands {
     private readonly codexAcpClient: CodexAcpClient;
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
     private readonly onLogout: LogoutHandler;
+    private readonly supportsCommandPresentation: () => boolean;
+    private readonly publishVersions = new Map<string, number>();
+    private readonly lastPublishedCommands = new Map<string, string>();
 
     constructor(
         connection: AcpClientConnection,
         codexAcpClient: CodexAcpClient,
         runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>,
-        onLogout: LogoutHandler = () => {}
+        onLogout: LogoutHandler = () => {},
+        supportsCommandPresentation: () => boolean = () => false,
     ) {
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
         this.runWithProcessCheck = runWithProcessCheck;
         this.onLogout = onLogout;
+        this.supportsCommandPresentation = supportsCommandPresentation;
     }
 
-    async publish(sessionState: SessionState, shouldPublish: () => boolean = () => true): Promise<void> {
+    async publish(
+        sessionState: SessionState,
+        shouldPublish: () => boolean = () => true,
+        force = false,
+    ): Promise<void> {
+        const publishVersion = (this.publishVersions.get(sessionState.sessionId) ?? 0) + 1;
+        this.publishVersions.set(sessionState.sessionId, publishVersion);
         try {
             if (!shouldPublish()) {
                 return;
             }
             const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
             const availableCommands = this.buildAvailableCommands(skillsResponse?.data ?? []);
-            if (availableCommands.length === 0 || !shouldPublish()) {
+            const serializedCommands = JSON.stringify(availableCommands);
+            if (availableCommands.length === 0
+                || !shouldPublish()
+                || this.publishVersions.get(sessionState.sessionId) !== publishVersion
+                || !force && this.lastPublishedCommands.get(sessionState.sessionId) === serializedCommands) {
                 return;
             }
 
@@ -70,11 +92,19 @@ export class CodexCommands {
                 sessionUpdate: "available_commands_update",
                 availableCommands
             });
+            if (this.publishVersions.get(sessionState.sessionId) === publishVersion) {
+                this.lastPublishedCommands.set(sessionState.sessionId, serializedCommands);
+            }
         } catch (err) {
             if (shouldPublish()) {
                 logger.error(`Failed to publish available commands for session ${sessionState.sessionId}`, err);
             }
         }
+    }
+
+    clear(sessionId: string): void {
+        this.publishVersions.delete(sessionId);
+        this.lastPublishedCommands.delete(sessionId);
     }
 
     private createSkillsListParams(sessionState: SessionState): SkillsListParams {
@@ -99,6 +129,18 @@ export class CodexCommands {
                     name,
                     description,
                     input: null,
+                    ...(this.supportsCommandPresentation() ? {
+                        _meta: {
+                            [JETBRAINS_META_KEY]: {
+                                [AIR_META_KEY]: {
+                                    [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
+                                    [AIR_COMMAND_PRESENTATION_KEY]: skill.pluginId === null
+                                        ? {source: "skill"}
+                                        : {source: "plugin", pluginId: skill.pluginId},
+                                },
+                            },
+                        },
+                    } : {}),
                 });
             }
         }
@@ -283,17 +325,7 @@ export class CodexCommands {
                 return { handled: true };
             }
             case "skills": {
-                const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
-                const skills = (response?.data ?? []).flatMap(entry => entry.skills);
-                const lines = skills.map(skill => {
-                    const description = skill.shortDescription ?? skill.description ?? "";
-                    return description ? `- ${skill.name}: ${description}` : `- ${skill.name}`;
-                });
-                const text = lines.length > 0
-                    ? ["Available skills:", ...lines].join("\n")
-                    : "No skills configured.";
-                const session = new ACPSessionConnection(this.connection, sessionId);
-                await session.update(createAgentTextMessageChunk(text));
+                await this.publish(sessionState, () => true, true);
                 return { handled: true };
             }
             case "mcp": {

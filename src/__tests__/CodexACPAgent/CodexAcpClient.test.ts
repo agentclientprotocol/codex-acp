@@ -1605,6 +1605,66 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-skills.json");
     });
 
+    it('decorates skill and plugin commands when command presentation is negotiated', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: {
+                _meta: {jetbrains: {air: {version: 1, capabilities: ["commandPresentation"]}}},
+            },
+        });
+
+        vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue({
+            data: [{
+                cwd: "/workspace",
+                skills: [
+                    {name: "build", description: "Build", path: "/skills/build", scope: "user", enabled: true, pluginId: null},
+                    {name: "deploy", description: "Deploy", path: "/plugins/quality/deploy", scope: "user", enabled: true, pluginId: "quality"},
+                ],
+                errors: [],
+            }],
+        });
+
+        // @ts-expect-error - exercising private helper
+        await codexAcpAgent.availableCommands.publish(createTestSessionState({sessionId: "session-id"}));
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-presentation.json");
+    });
+
+    it('refreshes the catalog once for a burst of process-wide skill changes', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        const listSkills = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills")
+            .mockResolvedValue({data: []});
+        const sessionState = createTestSessionState({sessionId: "session-id", cwd: "/workspace"});
+        // @ts-expect-error - install an active session without exercising unrelated session startup
+        codexAcpAgent.installSessionState(sessionState);
+        // @ts-expect-error - seed the last published snapshot
+        await codexAcpAgent.availableCommands.publish(sessionState);
+        mockFixture.clearAcpConnectionDump();
+
+        listSkills.mockResolvedValue({
+            data: [{
+                cwd: "/workspace",
+                skills: [{name: "new-skill", description: "New", path: "/skills/new", scope: "user", enabled: true, pluginId: null}],
+                errors: [],
+            }],
+        });
+        mockFixture.sendServerNotification({method: "skills/changed", params: {}});
+        mockFixture.sendServerNotification({method: "skills/changed", params: {}});
+
+        await vi.waitFor(() => {
+            const updates = mockFixture.getAcpConnectionEvents([])
+                .filter(event => event.method === "sessionUpdate"
+                    && event.args[0].sessionId === sessionState.sessionId
+                    && event.args[0].update.sessionUpdate === "available_commands_update");
+            expect(updates).toHaveLength(1);
+            expect(updates[0]!.args[0].update.availableCommands).toContainEqual(expect.objectContaining({name: "$new-skill"}));
+        });
+    });
+
     it('handles builtin slash command locally', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
