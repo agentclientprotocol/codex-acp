@@ -579,7 +579,16 @@ export class CodexAcpClient {
             threadId: request.sessionId,
         });
         onSubscribed?.();
-        const historyResponse = await this.codexClient.threadReadWithHistory(response.thread.id);
+        // Resume cursors bound durable history; later turns arrive through live events.
+        // A null paginated cursor means there was no durable history at resume time.
+        const thread = response.thread.historyMode === "paginated"
+            ? {
+                ...response.thread,
+                turns: response.turnsBackwardsCursor === null
+                    ? []
+                    : await this.codexClient.threadReadHistory(response.thread.id, response.turnsBackwardsCursor),
+            }
+            : (await this.codexClient.threadReadWithHistory(response.thread.id)).thread;
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
@@ -589,7 +598,7 @@ export class CodexAcpClient {
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
-            thread: historyResponse.thread,
+            thread,
             additionalDirectories,
         };
     }

@@ -670,11 +670,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         } as any);
         vi.spyOn(codexAppServerClient, "threadTurnsList")
             .mockResolvedValueOnce({
-                data: [{id: "turn-1", items: [{type: "agentMessage", id: "new-item-1", text: "Same answer"}]}],
+                data: [{id: "turn-2", items: [{type: "agentMessage", id: "new-item-2", text: "Same answer"}]}],
                 nextCursor: "second-page", backwardsCursor: null,
             } as any)
             .mockResolvedValueOnce({
-                data: [{id: "turn-2", items: [{type: "agentMessage", id: "new-item-2", text: "Same answer"}]}],
+                data: [{id: "turn-1", items: [{type: "agentMessage", id: "new-item-1", text: "Same answer"}]}],
                 nextCursor: null, backwardsCursor: null,
             } as any);
         const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({

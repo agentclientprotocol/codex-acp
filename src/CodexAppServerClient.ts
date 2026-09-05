@@ -584,15 +584,21 @@ export class CodexAppServerClient {
 
     async threadReadWithHistory(threadId: string): Promise<ThreadReadResponse> {
         const response = await this.threadRead({threadId});
+        const turns = await this.threadReadHistory(threadId);
+        return {...response, thread: {...response.thread, turns}};
+    }
+
+    async threadReadHistory(threadId: string, initialCursor: string | null = null): Promise<ThreadReadResponse["thread"]["turns"]> {
         const turns: ThreadReadResponse["thread"]["turns"] = [];
         const seenCursors = new Set<string>();
-        let cursor: string | null = null;
+        if (initialCursor !== null) seenCursors.add(initialCursor);
+        let cursor: string | null = initialCursor;
         do {
             const page = await this.threadTurnsList({
                 threadId,
                 cursor,
                 limit: 50,
-                sortDirection: "asc",
+                sortDirection: "desc",
                 itemsView: "full",
             });
             turns.push(...page.data);
@@ -604,7 +610,8 @@ export class CodexAppServerClient {
                 seenCursors.add(cursor);
             }
         } while (cursor !== null);
-        return {...response, thread: {...response.thread, turns}};
+        // Only reverse turns: items within each full turn are already chronological.
+        return turns.reverse();
     }
 
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
