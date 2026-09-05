@@ -4,16 +4,32 @@ on:
   push:
     branches:
       - main
+  # Previews are gated on CI, so they hang off the CI workflow finishing rather than
+  # off the push itself. `branches` filters on the *validated* branch, which keeps
+  # every PR CI run from spawning a Publish and Release run with all jobs skipped.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   # Recovery path for a release whose tag exists but whose npm publish or
-  # registry update did not land. See docs/RELEASES.md.
+  # registry update did not land, and the manual path for a preview from an
+  # arbitrary commit. See docs/RELEASES.md.
   workflow_dispatch:
     inputs:
+      channel:
+        description: Which channel to publish
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - preview
       ref:
         description: Tag or commit to publish
         required: true
         type: string
       publish_npm:
-        description: Publish the package before updating the registry
+        description: Publish the package before updating the registry (stable only)
         required: true
         default: true
         type: boolean
@@ -67,7 +83,7 @@ jobs:
   # environment's deployment branch policy.
   verify:
     needs: [release-please]
-    if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.publish_npm) || needs.release-please.outputs.release_created == 'true') }}
+    if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && inputs.publish_npm) || needs.release-please.outputs.release_created == 'true') }}
     runs-on: ubuntu-latest
     # Without this a stalled step burns the full 6h runner limit before anyone
     # notices the release did not publish. A hung apt mirror already cost one
@@ -149,9 +165,147 @@ jobs:
       # prepublishOnly builds the bundle.
       - run: npm publish --access public
 
+  # Same shape as publish-npm. Tagging is a separate job, so nothing here needs
+  # write access to the repository.
+  #
+  # The gate is the `CI` workflow rather than the `verify` job the stable path runs:
+  # typecheck, unit tests and the bundle, but not the e2e suite. A preview is meant to
+  # be on npm minutes after a merge, and e2e drives a live model.
+  publish-npm-preview:
+    name: Publish preview to npm
+    # Every CI-green push to main gets a preview, except release-please's own release
+    # merge: merging that PR already published this exact tree as a stable version, so
+    # a preview of it would be a double release. release-please's `releases_created`
+    # output would be the sharper signal, but it belongs to the push-triggered run and
+    # this job runs in the workflow_run one, so the commit is checked instead — by
+    # author and by the subject release-please generates, either of which is enough.
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.channel == 'preview') ||
+        (github.event_name == 'workflow_run'
+          && github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_repository.full_name == github.repository
+          && github.event.workflow_run.head_commit.author.name != 'acp-release-bot[bot]'
+          && !startsWith(github.event.workflow_run.head_commit.message, 'chore(main): release '))
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Same environment as the stable job, so the npm trusted-publisher binding holds.
+    # It carries no required reviewers, so previews never wait for an approval.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing, so there is no npm token
+    # Serialise previews so two pushes cannot read the same registry state and compute
+    # the same -preview.N. Job-level rather than workflow-level: a workflow-level group
+    # would also serialise release-please, and cancelling a queued release-please run
+    # means a release PR that silently stops updating. The trade-off is that GitHub
+    # keeps only one run pending per group, so a third push landing while one preview
+    # runs and another waits drops the waiting one — that commit gets no preview, but a
+    # version is never reused.
+    concurrency:
+      group: publish-npm-preview
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # workflow_run runs default to the tip of the default branch, so the commit
+          # CI actually validated has to be asked for explicitly.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.workflow_run.head_sha }}
+          # Brings the tags the version calculation reads as its floor. The repo is a
+          # few megabytes packed, so a full fetch is cheap and sidesteps every
+          # shallow-clone tag caveat.
+          fetch-depth: 0
+      # Setup .npmrc file to publish to npm
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      # Ahead of the version bump, so this still validates the committed lockfile.
+      - run: npm ci
+      - name: Compute the preview version
+        id: preview
+        run: |
+          version="$(node scripts/next-preview-version.mjs)"
+          sha="$(git rev-parse HEAD)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Preview \`$version\` from \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Apply the version to the working tree only
+        # Never committed: package.json and .release-please-manifest.json on main stay
+        # release-please's to own, and this only changes what goes into the tarball.
+        # `npm version` keeps package-lock.json's version fields in step, and
+        # --no-git-tag-version skips every git operation.
+        run: npm version "${{ steps.preview.outputs.version }}" --no-git-tag-version
+      # TODO(preview-releases): once one run has proved the trigger, the gate and the
+      # version calculation on main, drop --dry-run and add
+      # `echo "published=true" >> "$GITHUB_OUTPUT"` to this step. Nothing else needs
+      # touching — leaving `published` unset is what keeps the tag and the registry
+      # dispatch dormant while the publish is only a rehearsal. The workflow_run
+      # trigger and the `release` environment's deployment branch policy mean this job
+      # cannot be exercised from a feature branch at all.
+      - name: Publish
+        id: publish
+        # prepublishOnly builds the bundle, for a dry run too.
+        #
+        # --tag is mandatory: npm publish defaults to `latest` even for a semver
+        # prerelease, which would point every plain `npm install` at a preview.
+        run: npm publish --dry-run --access public --tag preview
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      version: ${{ steps.preview.outputs.version }}
+      sha: ${{ steps.preview.outputs.sha }}
+
+  publish-tag-preview:
+    name: Tag the published preview
+    needs: publish-npm-preview
+    if: ${{ needs.publish-npm-preview.outputs.published == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: release
+    permissions:
+      contents: write # create refs/tags/v<version>
+    steps:
+      # A re-run carries over the outputs of jobs it did not re-run. If that ever stops
+      # holding, fail with the manual recipe rather than tagging the wrong commit.
+      - name: Check the publish handed over a version and a commit
+        env:
+          VERSION: ${{ needs.publish-npm-preview.outputs.version }}
+          SHA: ${{ needs.publish-npm-preview.outputs.sha }}
+        run: |
+          if [ -z "$VERSION" ] || [ -z "$SHA" ]; then
+            echo "::error::publish-npm-preview reported version='$VERSION' sha='$SHA'." \
+              "Tag it by hand — see docs/RELEASES.md, 'A preview published but the" \
+              "commit was not tagged'."
+            exit 1
+          fi
+      - name: Create the tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.publish-npm-preview.outputs.version }}
+          SHA: ${{ needs.publish-npm-preview.outputs.sha }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/v$VERSION" \
+            -f sha="$SHA"
+          echo "Tagged \`v$VERSION\` at \`$SHA\`" >> "$GITHUB_STEP_SUMMARY"
+
   trigger-registry-update:
-    needs: publish-npm
-    if: ${{ always() && (needs.publish-npm.result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.publish_npm)) }}
+    needs: [publish-npm, publish-npm-preview]
+    # Both channels dispatch this: the registry has its own handling for preview
+    # versions. The two never fire together — a release merge publishes stable and
+    # skips the preview, and every other push does the reverse — so the registry sees
+    # exactly one dispatch per published version. The payload is deliberately
+    # unchanged: it names no version, and the registry resolves what it needs itself.
+    if: >-
+      ${{
+        always() && (
+          needs.publish-npm.result == 'success'
+          || needs.publish-npm-preview.outputs.published == 'true'
+          || (github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.publish_npm)
+        )
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: release
