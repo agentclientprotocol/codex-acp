@@ -610,6 +610,7 @@ export class CodexAcpClient {
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
+            ...(readEphemeralSession(request._meta) ? {ephemeral: true} : {}),
         });
 
         const codexModels = await this.fetchAvailableModels();
@@ -1412,6 +1413,22 @@ function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[
         .filter((value): value is string => typeof value === "string")
         .map(value => value.trim())
         .filter(value => value.length > 0));
+}
+
+function readEphemeralSession(meta?: Record<string, unknown> | null): boolean {
+    const codexMeta = meta?.["codex"];
+    if (codexMeta === null || typeof codexMeta !== "object" || Array.isArray(codexMeta)) {
+        return false;
+    }
+    if (!Object.prototype.hasOwnProperty.call(codexMeta, "ephemeral")) {
+        return false;
+    }
+
+    const ephemeral = (codexMeta as Record<string, unknown>)["ephemeral"];
+    if (typeof ephemeral !== "boolean") {
+        throw RequestError.invalidParams(undefined, "_meta.codex.ephemeral must be a boolean");
+    }
+    return ephemeral;
 }
 
 function readAdditionalDirectories(cwd: string, additionalDirectories?: string[],  meta?: Record<string, unknown> | null): string[] {
