@@ -35,10 +35,23 @@ export class AgentMode {
         this.sandboxMode = sandboxMode; // same as sandboxPolicy, need to look for
     }
 
-    static readonly ReadOnly = new AgentMode(
+    static readonly ReadAccess = new AgentMode(
         "read-only",
-        "Ask for approval",
-        "Always ask to edit external files and use the internet",
+        "Read Access",
+        "Ask before editing files or running commands that modify files.",
+        "standard",
+        "on-request",
+        "user",
+        {
+            type: "readOnly",
+            networkAccess: false,
+        },
+        "read-only",
+    );
+    static readonly WorkspaceAccess = new AgentMode(
+        "approval-required",
+        "Workspace Access",
+        "Ask before editing files outside the workspace or using the internet.",
         "standard",
         "on-request",
         "user",
@@ -53,7 +66,7 @@ export class AgentMode {
     );
     static readonly Agent = new AgentMode(
         "agent",
-        "Approve for me",
+        "Auto Review",
         "Only ask for actions detected as potentially unsafe",
         "auto_review",
         "on-request",
@@ -63,18 +76,18 @@ export class AgentMode {
             writableRoots: [],
             networkAccess: false,
             excludeTmpdirEnvVar: false,
-            excludeSlashTmp: false
+            excludeSlashTmp: false,
         },
         "workspace-write",
     );
     static readonly AgentFullAccess = new AgentMode(
         "agent-full-access",
-        "Full access",
+        "Full Access",
         "Unrestricted access to the internet and any file on your computer",
         "full_access",
         "never",
         "user",
-        {"type": "dangerFullAccess"},
+        { type: "dangerFullAccess" },
         "danger-full-access",
     );
 
@@ -114,7 +127,7 @@ export class AgentMode {
     }
 
     static all(): AgentMode[] {
-        return [AgentMode.ReadOnly, AgentMode.Agent, AgentMode.AgentFullAccess];
+        return [AgentMode.ReadAccess, AgentMode.WorkspaceAccess, AgentMode.Agent, AgentMode.AgentFullAccess, ];
     }
 
     static find(modeId: string): AgentMode | null {
