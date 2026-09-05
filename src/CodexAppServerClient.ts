@@ -584,6 +584,11 @@ export class CodexAppServerClient {
 
     async threadReadWithHistory(threadId: string): Promise<ThreadReadResponse> {
         const response = await this.threadRead({threadId});
+        // Legacy stores reconstruct the rollout on each read; paging would repeat
+        // that work. Full-history reads are only deprecated for paginated threads.
+        if (response.thread.historyMode === "legacy") {
+            return await this.threadRead({threadId, includeTurns: true});
+        }
         const turns = await this.threadReadHistory(threadId);
         return {...response, thread: {...response.thread, turns}};
     }

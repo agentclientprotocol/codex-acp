@@ -51,9 +51,12 @@ describe("paginated thread history", () => {
             turnsBackwardsCursor: boundary,
             model: "gpt-5", modelProvider: "openai", reasoningEffort: "medium", serviceTier: null,
         } as any);
-        const read = vi.spyOn(appServer, "threadRead").mockResolvedValue({
-            thread: {id: "history", historyMode: mode, name: "Later metadata", turns: []} as any,
-        });
+        const read = vi.spyOn(appServer, "threadRead").mockImplementation(async ({includeTurns}) => ({
+            thread: {
+                id: "history", historyMode: mode, name: "Later metadata",
+                turns: includeTurns ? expectedIds.map(messageTurn) : [],
+            } as any,
+        }));
         const pages = vi.spyOn(appServer, "threadTurnsList").mockImplementation(async ({cursor, sortDirection, itemsView}) => {
             expect(sortDirection).toBe("desc");
             expect(itemsView).toBe("full");
@@ -68,8 +71,28 @@ describe("paginated thread history", () => {
 
         expect(loaded.thread.turns.map(turn => turn.id)).toEqual(expectedIds);
         expect(loaded.thread.name).toBe(mode === "paginated" ? "Resume metadata" : "Later metadata");
-        expect(read).toHaveBeenCalledTimes(mode === "paginated" ? 0 : 1);
-        expect(pages).toHaveBeenCalledTimes(expectedIds.length);
+        expect(read.mock.calls).toEqual(mode === "paginated" ? [] : [
+            [{threadId: "history"}],
+            [{threadId: "history", includeTurns: true}],
+        ]);
+        expect(pages).toHaveBeenCalledTimes(mode === "legacy" ? 0 : expectedIds.length);
+    });
+
+    it("reads standalone legacy history without requiring a pagination API", async () => {
+        const fixture = createCodexMockTestFixture();
+        const appServer = fixture.getCodexAppServerClient();
+        const history = {id: "legacy", historyMode: "legacy", turns: [messageTurn("first"), messageTurn("second")]};
+        const read = vi.spyOn(appServer, "threadRead")
+            .mockResolvedValueOnce({thread: {...history, turns: []} as any})
+            .mockResolvedValueOnce({thread: history as any});
+        const pages = vi.spyOn(appServer, "threadTurnsList").mockRejectedValue(new Error("Method not found"));
+
+        expect(await fixture.getCodexAcpClient().readSessionThread("legacy")).toEqual(history);
+        expect(read.mock.calls).toEqual([
+            [{threadId: "legacy"}],
+            [{threadId: "legacy", includeTurns: true}],
+        ]);
+        expect(pages).not.toHaveBeenCalled();
     });
 
     it("does not include turns appended while standalone history is being paged", async () => {
