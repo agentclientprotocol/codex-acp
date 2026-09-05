@@ -1,5 +1,35 @@
 [
   {
+    "modelId": "gpt-6-astra[low]",
+    "name": "GPT-6-Astra (low)",
+    "description": "Astra from the app-server model catalog. low effort."
+  },
+  {
+    "modelId": "gpt-6-astra[medium]",
+    "name": "GPT-6-Astra (medium)",
+    "description": "Astra from the app-server model catalog. medium effort."
+  },
+  {
+    "modelId": "gpt-6-astra[high]",
+    "name": "GPT-6-Astra (high)",
+    "description": "Astra from the app-server model catalog. high effort."
+  },
+  {
+    "modelId": "gpt-6-astra[xhigh]",
+    "name": "GPT-6-Astra (xhigh)",
+    "description": "Astra from the app-server model catalog. xhigh effort."
+  },
+  {
+    "modelId": "gpt-6-astra[max]",
+    "name": "GPT-6-Astra (max)",
+    "description": "Astra from the app-server model catalog. max effort."
+  },
+  {
+    "modelId": "gpt-6-astra[ultra]",
+    "name": "GPT-6-Astra (ultra)",
+    "description": "Astra from the app-server model catalog. ultra effort."
+  },
+  {
     "modelId": "gpt-5.2[medium]",
     "name": "GPT-5.2 (medium)",
     "description": "Allowed by id. Default effort."

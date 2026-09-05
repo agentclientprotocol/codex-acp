@@ -231,6 +231,7 @@ export interface CodexProcessState {
 export class CodexAcpServer {
     private static readonly MODEL_NAME_TOKEN_OVERRIDES: Record<string, string> = {
         gpt: "GPT",
+        astra: "Astra",
         mini: "Mini",
         codex: "Codex",
     };
