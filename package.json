@@ -42,7 +42,8 @@
     "test:e2e": "npm run build && RUN_E2E_TESTS=true vitest run --no-file-parallelism --retry=2 src/__tests__/CodexACPAgent/e2e",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc --noEmit -p examples/tsconfig.json",
-    "codex-test": "tsx .claude/skills/run-codex/scripts/run-codex-test.ts"
+    "codex-test": "tsx .claude/skills/run-codex/scripts/run-codex-test.ts",
+    "codex-test:async-questions": "tsx .claude/skills/run-codex/scripts/run-async-question-test.ts"
   },
   "homepage": "https://github.com/agentclientprotocol/codex-acp#readme",
   "bugs": {

@@ -107,3 +107,9 @@ Request errors, invalid responses, and failed delivery produce a visible message
 Repeated live events with the same item ID create at most one request per loaded session. Sessions track their questions independently.
 
 Loading or forking history displays question text without reopening forms. Pending forms are not restored after adapter restart or session close/reopen. Durable recovery and delivery acknowledgements are outside this version of the extension.
+
+## Live validation
+
+Run `npm ci` to install the locked Codex version, then `npm run codex-test:async-questions` with an authenticated Codex account. The test uses the configured model and a temporary workspace. `CODEX_PATH` can select another CLI.
+
+The test asks real Codex to emit an asynchronous question, waits for the original prompt to finish, and answers the AIR request with a generated token. It verifies that exactly one new turn receives the reply envelope and that the model returns the token through ACP text updates. It fails on unavailable tools, turn errors, or a 90-second timeout.
