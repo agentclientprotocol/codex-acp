@@ -107,9 +107,11 @@ export class CodexAsyncQuestionHandler {
             question: question.title,
             answer: answers.get(question.id)!,
         }));
+        // Keep tag delimiters outside the JSON body; JSON parsing restores the original text.
+        const body = JSON.stringify(replies).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
         const result = await this.deliver({
             sessionId: request.sessionId,
-            prompt: [{type: "text", text: `<send_user_message_question_reply>\n${JSON.stringify(replies)}\n</send_user_message_question_reply>`}],
+            prompt: [{type: "text", text: `<send_user_message_question_reply>\n${body}\n</send_user_message_question_reply>`}],
         }, signal);
         if (!signal.aborted && result.outcome === "failed") throw new Error("Could not deliver async question answer");
     }

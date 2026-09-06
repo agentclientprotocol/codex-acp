@@ -88,6 +88,8 @@ After a valid response, it constructs a user message in the observed Codex deskt
 
 This wrapper is a Codex compatibility detail. The client does not construct it.
 
+The adapter escapes `<` and `>` inside the JSON body as `\u003c` and `\u003e`. Question or answer text cannot introduce wrapper delimiters, and JSON parsing restores the original text.
+
 The existing steering queue sends the message through `turn/steer` when a turn is active. Otherwise it waits for prompt cleanup and starts a new turn. If the active turn finishes during delivery, the existing steering fallback starts a new turn.
 
 Answers share the queue with other steering requests. A new turn streams ordinary ACP updates even when no client `session/prompt` request is outstanding. Clients advertising this extension must support that lifecycle.
