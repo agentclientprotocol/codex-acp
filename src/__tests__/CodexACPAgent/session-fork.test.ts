@@ -29,7 +29,14 @@ describe("ACP session fork", () => {
 
         expect(response.sessionId).toBe("fork-id");
         expect(agent.getSessionState("fork-id").cwd).toBe("/workspace");
-        expect(fixture.getAcpConnectionEvents([])).toEqual([]);
+        // Forking creates a session, so the connection reports the account it was
+        // created under (`authStatus` extension). Nothing else is sent.
+        expect(fixture.getAcpConnectionEvents([])).toEqual([
+            {
+                method: "notify",
+                args: ["_auth/status_update", {authStatus: {kind: "none", label: "Not logged in"}}],
+            },
+        ]);
         expect(forkSpy).toHaveBeenCalledWith({
             sessionId: "source-id",
             cwd: "/workspace",

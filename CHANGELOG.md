@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.10.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.9.0...v1.10.0) (2026-09-04)
+
+
+### Features
+
+* expose background terminals as async tasks ([#460](https://github.com/agentclientprotocol/codex-acp/issues/460)) ([e31c8c3](https://github.com/agentclientprotocol/codex-acp/commit/e31c8c369ec74f551d017d09abdb6d04d926dcab))
+
+
+### Bug Fixes
+
+* update codex to 0.153.3 ([#476](https://github.com/agentclientprotocol/codex-acp/issues/476)) ([b9f1386](https://github.com/agentclientprotocol/codex-acp/commit/b9f1386e0d14e1322dca5b6574146f8faa6ecea6))
+
+## [1.9.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.8.0...v1.9.0) (2026-09-04)
+
+
+### Features
+
+* report the agent's auth identity over ACP (authStatus extension) ([#467](https://github.com/agentclientprotocol/codex-acp/issues/467)) ([fe696b0](https://github.com/agentclientprotocol/codex-acp/commit/fe696b0a12b20a2d4dbfab68ff703a5adb7fe38c))
+
+
+### Bug Fixes
+
+* report complete status usage and limits ([#463](https://github.com/agentclientprotocol/codex-acp/issues/463)) ([5552cef](https://github.com/agentclientprotocol/codex-acp/commit/5552cef60fd60d3c7f8ad2ae8cefea401addeb37))
+* update codex to 0.153.2 ([#469](https://github.com/agentclientprotocol/codex-acp/issues/469)) ([6cd7048](https://github.com/agentclientprotocol/codex-acp/commit/6cd7048e55195aea5bc7ce618f4c13fb9e9378f9))
+
 ## [1.8.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.7.0...v1.8.0) (2026-09-01)
 
 

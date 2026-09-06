@@ -22,6 +22,7 @@ function completedReport(value: unknown): Turn {
             phase: "final_answer",
             memoryCitation: null,
             delivery: null,
+            questions: null,
         }],
         itemsView: "full",
         status: "completed",

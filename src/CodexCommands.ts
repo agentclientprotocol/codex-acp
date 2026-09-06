@@ -4,7 +4,7 @@ import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnec
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, SkillsListParams, TurnCompletedNotification} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
-import type {RateLimitsMap} from "./RateLimitsMap";
+import {createRateLimitsMap, type RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
 import {logger} from "./Logger";
 import {createAgentTextMessageChunk} from "./ContentChunks";
@@ -261,6 +261,7 @@ export class CodexCommands {
                 return { handled: true, turnCompleted };
             }
             case "status": {
+                await this.refreshRateLimits(sessionState);
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 const message = this.buildStatusMessage(sessionState);
                 await session.update(createAgentTextMessageChunk(message));
@@ -442,6 +443,17 @@ export class CodexCommands {
         return lines.join("  \n");
     }
 
+    private async refreshRateLimits(sessionState: SessionState): Promise<void> {
+        try {
+            const response = await this.runWithProcessCheck(() => this.codexAcpClient.getRateLimits());
+            if (response) {
+                sessionState.rateLimits = createRateLimitsMap(response);
+            }
+        } catch (err) {
+            logger.error(`Failed to refresh rate limits for session ${sessionState.sessionId}`, err);
+        }
+    }
+
     private formatAccountInfo(account: SessionState["account"]): string {
         if (!account) {
             return "not logged in";
@@ -474,10 +486,10 @@ export class CodexCommands {
             return "data not available yet";
         }
         const used = usage.totalTokens;
-        const percentLeft = Math.round(((contextWindow - used) / contextWindow) * 100);
+        const percentUsed = Math.round((used / contextWindow) * 100);
         const usedFormatted = this.formatTokenCount(used);
         const totalFormatted = this.formatTokenCount(contextWindow);
-        return `${percentLeft}% left (${usedFormatted} used / ${totalFormatted})`;
+        return `${percentUsed}% used (${usedFormatted} used / ${totalFormatted})`;
     }
 
     private formatRateLimitLines(rateLimits: RateLimitsMap | null): string[] {
@@ -520,7 +532,33 @@ export class CodexCommands {
             }
         }
 
+        if (rateLimits.individualLimit) {
+            const limit = rateLimits.individualLimit;
+            const used = this.formatCreditAmount(limit.used);
+            const total = this.formatCreditAmount(limit.limit);
+            if (used !== null && total !== null) {
+                const percentLeft = Math.round(Math.min(100, Math.max(0, limit.remainingPercent)));
+                const resetDate = new Date(limit.resetsAt * 1000)
+                    .toLocaleDateString("en-US", {month: "short", day: "numeric"});
+                lines.push(
+                    `**${prefix}individual spend limit:** ${percentLeft}% left (${used} of ${total} credits used; resets ${resetDate})`,
+                );
+            }
+        }
+
         return lines;
+    }
+
+    private formatCreditAmount(raw: string): string | null {
+        const trimmed = raw.trim();
+        if (trimmed.length === 0) {
+            return null;
+        }
+        const value = Number(trimmed);
+        if (!Number.isFinite(value) || value < 0) {
+            return null;
+        }
+        return Math.round(value).toLocaleString("en-US");
     }
 
     private formatWindowLabel(windowDurationMins: number | null): string {
