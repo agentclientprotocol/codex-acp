@@ -11,6 +11,7 @@ import {AIR_ASYNC_QUESTIONS_KEY, clientSupportsAirCapability} from "./AirExtensi
 import {logger} from "./Logger";
 
 type QuestionSession = {
+    acceptingRequests: boolean;
     seen: Set<string>;
     pending: Set<AbortController>;
 };
@@ -24,17 +25,22 @@ export class CodexAsyncQuestionHandler {
         private readonly deliver: (request: SessionSteerRequest, signal: AbortSignal) => Promise<SessionSteeringResponse>,
     ) {}
 
+    beginPrompt(sessionId: string): void {
+        const session = this.sessions.get(sessionId);
+        if (session) {
+            session.acceptingRequests = true;
+        } else {
+            this.sessions.set(sessionId, {acceptingRequests: true, seen: new Set(), pending: new Set()});
+        }
+    }
+
     handleNotification(notification: ServerNotification, capabilities: ClientCapabilities | null): void {
         if (notification.method !== "item/completed" || !clientSupportsAirCapability(capabilities, AIR_ASYNC_QUESTIONS_KEY)) return;
         const {threadId, turnId, item} = notification.params;
         if (item.type !== "agentMessage" || item.delivery !== "async" || !item.questions?.length) return;
 
-        let session = this.sessions.get(threadId);
-        if (!session) {
-            session = {seen: new Set(), pending: new Set()};
-            this.sessions.set(threadId, session);
-        }
-        if (session.seen.has(item.id)) return;
+        const session = this.sessions.get(threadId);
+        if (!session?.acceptingRequests || session.seen.has(item.id)) return;
         session.seen.add(item.id);
         const controller = new AbortController();
         session.pending.add(controller);
@@ -62,6 +68,7 @@ export class CodexAsyncQuestionHandler {
     cancelSession(sessionId: string): void {
         const session = this.sessions.get(sessionId);
         if (!session) return;
+        session.acceptingRequests = false;
         for (const controller of session.pending) controller.abort();
         session.pending.clear();
     }

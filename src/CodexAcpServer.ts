@@ -1545,7 +1545,7 @@ export class CodexAcpServer {
         const turnId = await this.getSteerableTurnId(sessionState);
         signal?.throwIfAborted();
         if (turnId) {
-            const injected = await this.injectSteerIntoActiveTurn(params, turnId, sessionState);
+            const injected = await this.injectSteerIntoActiveTurn(params, turnId);
             if (injected) {
                 logger.log("Steering session injected", {sessionId: params.sessionId, turnId});
                 return {outcome: "injected"};
@@ -1569,10 +1569,9 @@ export class CodexAcpServer {
     /**
      * Attempts to inject the prompt into the given running turn.
      *
-     * A failed injection is fatal only when the turn is still the session's
-     * current turn and Codex reported something other than "no active turn to
-     * steer". Otherwise the turn has already ended underneath us and the caller
-     * should start a new turn instead.
+     * Only an explicit "no active turn to steer" rejection permits a new turn.
+     * A transport failure may occur after Codex accepted the input, even if the
+     * tracked turn has since completed; retrying it could duplicate user input.
      *
      * @returns true when the prompt was injected; false when the caller should
      *     fall back to starting a new turn.
@@ -1580,7 +1579,6 @@ export class CodexAcpServer {
     private async injectSteerIntoActiveTurn(
         params: SessionSteerRequest,
         turnId: string,
-        sessionState: SessionState,
     ): Promise<boolean> {
         try {
             await this.runWithProcessCheck(() => this.codexAcpClient.steerTurn({
@@ -1591,8 +1589,7 @@ export class CodexAcpServer {
             return true;
         } catch (err) {
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-            const turnStillActive = sessionState.currentTurnId === turnId;
-            if (turnStillActive && !this.isNoActiveTurnToSteerError(err)) {
+            if (!this.isNoActiveTurnToSteerError(err)) {
                 throw err;
             }
             return false;
@@ -2611,6 +2608,7 @@ export class CodexAcpServer {
                 return;
             }
             logger.log("Prompt request cancelled", {sessionId: sessionState.sessionId});
+            this.asyncQuestions.cancelSession(sessionState.sessionId);
             activePrompt.requestCancel();
             const turn = activePrompt.currentTurn;
             if (!turn) {
@@ -2769,6 +2767,7 @@ export class CodexAcpServer {
         let recoverableSessionFailure = sessionState.sessionFailure;
         sessionState.currentTurnId = null;
         const activePrompt = this.trackActivePrompt(params.sessionId);
+        this.asyncQuestions.beginPrompt(params.sessionId);
         let pendingTurnStart: PendingTurnStart | null = null;
         const ensurePendingTurnStart = (): PendingTurnStart => {
             if (pendingTurnStart === null) {

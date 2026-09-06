@@ -96,7 +96,7 @@ Synchronous Codex `item/tool/requestUserInput` still uses standard ACP elicitati
 
 ## Cancellation and failure
 
-There is no answer timeout. Session cancellation, close/delete, provider replacement, and Codex process exit cancel pending question RPCs through ACP `$/cancel_request`. The client closes the form and settles its request. Late responses are ignored, and cancelled answers waiting in the steering queue cannot start work. Input already accepted by Codex cannot be retracted by dismissing the form.
+There is no answer timeout. Prompt RPC cancellation, session cancellation, close/delete, provider replacement, and Codex process exit cancel pending question RPCs through ACP `$/cancel_request`. The client closes the form and settles its request. Late responses are ignored, and cancelled answers waiting in the steering queue cannot start work. After cancellation, new question events are ignored until another prompt begins. Input already accepted by Codex cannot be retracted by dismissing the form.
 
 Request errors, invalid responses, and failed delivery produce a visible message asking the user to answer in chat. The adapter does not automatically retry an uncertain delivery.
 

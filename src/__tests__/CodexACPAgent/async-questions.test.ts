@@ -19,7 +19,7 @@ function airCapabilities(version: unknown = 1, capabilities: unknown = ["asyncQu
     return {_meta: {jetbrains: {air: {version, capabilities}}}};
 }
 
-async function setup(clientCapabilities: acp.ClientCapabilities = airCapabilities()) {
+async function setup(clientCapabilities: acp.ClientCapabilities = airCapabilities(), signal?: AbortSignal) {
     const fixture = createCodexMockTestFixture();
     const agent = fixture.getCodexAcpAgent();
     const appServer = fixture.getCodexAppServerClient();
@@ -43,7 +43,7 @@ async function setup(clientCapabilities: acp.ClientCapabilities = airCapabilitie
     });
     const response = deferred<AsyncQuestionResponse>();
     fixture.setExtensionResponse(ASYNC_QUESTION_REQUEST_METHOD, response.promise);
-    const prompt = agent.prompt({sessionId: session.sessionId, prompt: [{type: "text", text: "Do some work"}]});
+    const prompt = agent.prompt({sessionId: session.sessionId, prompt: [{type: "text", text: "Do some work"}]}, signal);
     await vi.waitFor(() => expect(session.currentTurnId).toBe("turn-1"));
     const questions = [
         {title: "Есть номер YouTrack-задачи?", options: null},
@@ -51,8 +51,8 @@ async function setup(clientCapabilities: acp.ClientCapabilities = airCapabilitie
     ];
     const item = {type: "agentMessage", id: "question-call", text: questions.map(q => q.title).join("\n"),
         phase: "final_answer", memoryCitation: null, delivery: "async", questions};
-    async function sendQuestion() {
-        fixture.sendServerNotification({method: "item/completed", params: {threadId: session.sessionId, turnId: "turn-1", item}});
+    async function sendQuestion(turnId = "turn-1") {
+        fixture.sendServerNotification({method: "item/completed", params: {threadId: session.sessionId, turnId, item}});
         await fixture.getCodexAcpClient().waitForSessionNotifications(session.sessionId);
     }
     function requests() {
@@ -186,6 +186,48 @@ describe("asynchronous user questions", () => {
         expect(f.steer).toHaveBeenCalledTimes(1);
         expect(f.start).toHaveBeenCalledTimes(1);
         await f.finish();
+    });
+
+    it("cancels pending questions when the prompt RPC is cancelled", async () => {
+        const controller = new AbortController();
+        const f = await setup(airCapabilities(), controller.signal);
+        await f.sendQuestion();
+        controller.abort();
+        expect(f.requestSignals[0]!.aborted).toBe(true);
+        await f.finish();
+        f.answer();
+        await new Promise(resolve => setImmediate(resolve));
+        expect(f.steer).not.toHaveBeenCalled();
+        expect(f.start).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not open a late question after session cancellation", async () => {
+        const f = await setup();
+        await f.finish();
+        await f.agent.cancel({sessionId: "session-id"});
+        await f.sendQuestion();
+        expect(f.requests()).toHaveLength(0);
+        const nextPrompt = f.agent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "Continue"}]});
+        await vi.waitFor(() => expect(f.session.currentTurnId).toBe("turn-2"));
+        await f.sendQuestion("turn-2");
+        expect(f.requests()).toHaveLength(1);
+        f.response.resolve({status: "dismissed"});
+        f.nextCompletion.resolve({threadId: "session-id", turn: turn("turn-2", "completed")});
+        await nextPrompt;
+    });
+
+    it("does not resend an uncertain answer when its turn completed during a transport failure", async () => {
+        const f = await setup();
+        f.steer.mockImplementationOnce(async () => {
+            await f.finish();
+            throw new Error("Transport disconnected after sending input");
+        });
+        await f.sendQuestion();
+        f.answer();
+        await vi.waitFor(() => expect(f.fixture.getAcpConnectionEvents([]).some(e => e.method === "sessionUpdate"
+            && e.args[0].update.content?.text?.includes("Please send your answer in chat"))).toBe(true));
+        expect(f.steer).toHaveBeenCalledTimes(1);
+        expect(f.start).toHaveBeenCalledTimes(1);
     });
 
     it.each(["dismiss", "cancel", "close"])("does not submit input after %s", async action => {
