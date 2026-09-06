@@ -1,0 +1,80 @@
+{
+  "capability": {
+    "version": 1,
+    "requestMethod": "_codex/requestUserInput"
+  },
+  "request": [
+    "_codex/requestUserInput",
+    {
+      "sessionId": "session-id",
+      "turnId": "turn-1",
+      "itemId": "question-call",
+      "questions": [
+        {
+          "id": "[\"request_user_input_async\",\"question-call\",0]",
+          "title": "Есть номер YouTrack-задачи?"
+        },
+        {
+          "id": "[\"request_user_input_async\",\"question-call\",1]",
+          "title": "Which scope?",
+          "options": [
+            "Platform",
+            "Plugin"
+          ]
+        }
+      ]
+    }
+  ],
+  "updates": [
+    {
+      "method": "sessionUpdate",
+      "args": [
+        {
+          "sessionId": "session-id",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "messageId": "question-call",
+            "content": {
+              "type": "text",
+              "text": "Есть номер YouTrack-задачи?\nWhich scope?"
+            },
+            "_meta": {
+              "codex": {
+                "phase": "final_answer"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "method": "sessionUpdate",
+      "args": [
+        {
+          "sessionId": "session-id",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "messageId": "progress",
+            "content": {
+              "type": "text",
+              "text": "Working while the question is open"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "steer": [
+    {
+      "threadId": "session-id",
+      "expectedTurnId": "turn-1",
+      "input": [
+        {
+          "type": "text",
+          "text": "<send_user_message_question_reply>\n[{\"questionItemId\":\"[\\\"request_user_input_async\\\",\\\"question-call\\\",0]\",\"question\":\"Есть номер YouTrack-задачи?\",\"answer\":\"давай создай задачу\"},{\"questionItemId\":\"[\\\"request_user_input_async\\\",\\\"question-call\\\",1]\",\"question\":\"Which scope?\",\"answer\":\"A custom scope\"}]\n</send_user_message_question_reply>",
+          "text_elements": []
+        }
+      ]
+    }
+  ]
+}

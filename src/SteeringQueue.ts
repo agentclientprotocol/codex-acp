@@ -2,6 +2,7 @@ import type {SessionSteerRequest, SessionSteeringResponse} from "./AcpExtensions
 
 interface QueuedSteering {
     params: SessionSteerRequest;
+    signal: AbortSignal | undefined;
     resolve: (response: SessionSteeringResponse) => void;
     reject: (error: unknown) => void;
 }
@@ -16,12 +17,12 @@ export class SteeringQueue {
     private processing = false;
 
     constructor(
-        private readonly handle: (params: SessionSteerRequest) => Promise<SessionSteeringResponse>,
+        private readonly handle: (params: SessionSteerRequest, signal?: AbortSignal) => Promise<SessionSteeringResponse>,
     ) {}
 
-    enqueue(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+    enqueue(params: SessionSteerRequest, signal?: AbortSignal): Promise<SessionSteeringResponse> {
         return new Promise<SessionSteeringResponse>((resolve, reject) => {
-            this.pending.push({params, resolve, reject});
+            this.pending.push({params, signal, resolve, reject});
             this.startConsumer();
         });
     }
@@ -44,7 +45,7 @@ export class SteeringQueue {
             while (this.pending.length > 0) {
                 const next = this.pending.shift()!;
                 try {
-                    next.resolve(await this.handle(next.params));
+                    next.resolve(await this.handle(next.params, next.signal));
                 } catch (error) {
                     next.reject(error); // one failed steer must not stall the rest
                 }

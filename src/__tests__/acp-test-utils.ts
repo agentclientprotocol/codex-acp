@@ -259,6 +259,7 @@ export function removeDirectoryWithRetry(directory: string): void {
 export interface CodexMockTestFixture extends TestFixture {
     sendServerNotification(notification: ServerNotification | Record<string, unknown>): void,
     sendServerRequest<T>(method: string, params: unknown): Promise<T>,
+    setExtensionResponse(method: string, response: unknown): void,
     setPermissionResponse(response: RequestPermissionResponse | Promise<RequestPermissionResponse>): void,
     setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void,
 }
@@ -276,6 +277,7 @@ export function createCodexMockTestFixture(
 ): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
+    const extensionResponses = new Map<string, unknown>();
 
     // State for controlling permission responses
     const permissionState: { response: RequestPermissionResponse | Promise<RequestPermissionResponse> } = {
@@ -302,6 +304,7 @@ export function createCodexMockTestFixture(
     const acpEventHandlers: ((event: MethodCallEvent) => void)[] = [];
     const returnValues = new Map<string, (args: any[]) => any>();
     returnValues.set('request', (args) => {
+        if (extensionResponses.has(args[0])) return extensionResponses.get(args[0]);
         if (args[0] === acp.methods.client.session.requestPermission) {
             return permissionState.response;
         }
@@ -341,6 +344,9 @@ export function createCodexMockTestFixture(
 
     return {
         ...baseFixture,
+        setExtensionResponse(method: string, response: unknown): void {
+            extensionResponses.set(method, response);
+        },
         sendServerNotification(notification: ServerNotification | Record<string, unknown>): void {
             if (unhandledNotificationHandler) {
                 unhandledNotificationHandler(notification);

@@ -63,6 +63,7 @@ describe('CodexACPAgent - initialize', () => {
                 },
                 _meta: {
                     authStatus: {},
+                    "codex.asyncQuestions": {version: 1, requestMethod: "_codex/requestUserInput"},
                 },
             },
             authMethods: getCodexAuthMethods(),

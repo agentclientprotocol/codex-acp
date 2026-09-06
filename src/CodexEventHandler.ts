@@ -225,6 +225,7 @@ export class CodexEventHandler {
     private readonly seenReasoningDeltaItemIds = new Set<string>();
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
+    private readonly emittedAgentMessageIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly subagents: CodexSubagentEventRouter;
     /** Connection-level `authStatus` sink; the app-server account push feeds it. */
@@ -460,6 +461,7 @@ export class CodexEventHandler {
          */
         switch (notification.method) {
             case "item/agentMessage/delta":
+                this.emittedAgentMessageIds.add(notification.params.itemId);
                 this.completeRetryIncidentOnTurnProgress();
                 return await this.createTextEvent(notification.params);
             case "item/plan/delta":
@@ -802,6 +804,12 @@ export class CodexEventHandler {
                 return this.subagents.legacyCollaborationCompleted(event.item);
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
+                // Async questions can arrive as a completed item without any text deltas.
+                if (event.item.delivery === "async" && !this.emittedAgentMessageIds.has(event.item.id)) {
+                    this.emittedAgentMessageIds.add(event.item.id);
+                    return createAgentTextMessageChunk(event.item.text, event.item.id,
+                        createCodexMessagePhaseMeta(event.item.phase));
+                }
                 return null;
             case "plan": {
                 const deltaText = this.planDeltaTextByItemId.get(event.item.id) ?? "";
