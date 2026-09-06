@@ -1,7 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk";
 import {createCodexMockTestFixture, createTestSessionState} from "../acp-test-utils";
-import {ASYNC_QUESTION_REQUEST_METHOD, ASYNC_QUESTIONS_CAPABILITY} from "../../AsyncQuestionExtension";
+import {ASYNC_QUESTION_REQUEST_METHOD} from "../../AsyncQuestionExtension";
 import type {AsyncQuestionRequest, AsyncQuestionResponse} from "../../AsyncQuestionExtension";
 import type {Turn, TurnCompletedNotification} from "../../app-server/v2";
 
@@ -15,14 +15,18 @@ function turn(id: string, status: Turn["status"]): Turn {
     return {id, status, items: [], itemsView: "notLoaded", error: null, startedAt: null, completedAt: null, durationMs: null};
 }
 
-async function setup(version: unknown = 1) {
+function airCapabilities(version: unknown = 1, capabilities: unknown = ["asyncQuestions"]): acp.ClientCapabilities {
+    return {_meta: {jetbrains: {air: {version, capabilities}}}};
+}
+
+async function setup(clientCapabilities: acp.ClientCapabilities = airCapabilities()) {
     const fixture = createCodexMockTestFixture();
     const agent = fixture.getCodexAcpAgent();
     const appServer = fixture.getCodexAppServerClient();
     const session = createTestSessionState({sessionId: "session-id"});
     vi.spyOn(agent, "getSessionState").mockReturnValue(session);
     const initialized = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: {_meta: {[ASYNC_QUESTIONS_CAPABILITY]: {version}}},
+        clientCapabilities,
     });
     const completion = deferred<TurnCompletedNotification>();
     const nextCompletion = deferred<TurnCompletedNotification>();
@@ -80,7 +84,7 @@ describe("asynchronous user questions", () => {
         f.answer();
         await vi.waitFor(() => expect(f.steer).toHaveBeenCalledTimes(1));
         await expect(JSON.stringify({
-            capability: f.initialized.agentCapabilities?._meta?.[ASYNC_QUESTIONS_CAPABILITY],
+            capability: f.initialized._meta?.["jetbrains"],
             request: f.requests()[0]!.args.slice(0, 2),
             updates: f.fixture.getAcpConnectionEvents([]).filter(e => e.method === "sessionUpdate"
                 && e.args[0].update.sessionUpdate === "agent_message_chunk"),
@@ -103,12 +107,22 @@ describe("asynchronous user questions", () => {
         await vi.waitFor(() => expect(f.session.currentTurnId).toBeNull());
     });
 
-    it.each([undefined, 0, 2, "1"])("falls back to text when version %s is not negotiated", async version => {
-        const f = await setup(version === undefined ? null : version);
+    it.each([{}, airCapabilities(0), airCapabilities("1"), airCapabilities(1, []),
+        {_meta: {"codex.asyncQuestions": {version: 1}}},
+    ])("falls back to text without AIR negotiation: %j", async capabilities => {
+        const f = await setup(capabilities);
         await f.sendQuestion();
         expect(f.requests()).toHaveLength(0);
         expect(f.fixture.getAcpConnectionEvents([]).some(e => e.method === "sessionUpdate"
             && e.args[0].update.content?.text === "Есть номер YouTrack-задачи?\nWhich scope?")).toBe(true);
+        await f.finish();
+    });
+
+    it("uses the shared AIR version compatibility rule", async () => {
+        const f = await setup(airCapabilities(2));
+        await f.sendQuestion();
+        expect(f.requests()).toHaveLength(1);
+        f.response.resolve({status: "dismissed"});
         await f.finish();
     });
 

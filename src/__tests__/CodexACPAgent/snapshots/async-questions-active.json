@@ -1,10 +1,18 @@
 {
   "capability": {
-    "version": 1,
-    "requestMethod": "_codex/requestUserInput"
+    "air": {
+      "version": 1,
+      "capabilities": [
+        "sessionFailure",
+        "agentFileChangeReport",
+        "nativeSubagentSessions",
+        "asyncTasks",
+        "asyncQuestions"
+      ]
+    }
   },
   "request": [
-    "_codex/requestUserInput",
+    "_session/async_question/request",
     {
       "sessionId": "session-id",
       "turnId": "turn-1",

@@ -141,8 +141,6 @@ export async function steerSessionWithFallback(
 }
 
 export {
-    ASYNC_QUESTIONS_CAPABILITY,
-    ASYNC_QUESTIONS_VERSION,
     ASYNC_QUESTION_REQUEST_METHOD,
     type AsyncQuestionRequest,
     type AsyncQuestionResponse,

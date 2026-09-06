@@ -1,5 +1,4 @@
 import {CodexAsyncQuestionHandler} from "./CodexAsyncQuestionHandler";
-import {ASYNC_QUESTIONS_CAPABILITY, asyncQuestionsCapability} from "./AsyncQuestionExtension";
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
@@ -133,6 +132,7 @@ import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
     AIR_ASYNC_TASKS_KEY,
+    AIR_ASYNC_QUESTIONS_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
@@ -382,7 +382,6 @@ export class CodexAcpServer {
                     // Presence means "this agent pushes `_auth/status_update`". It
                     // never carries a payload, and the client never asks for one.
                     [AUTH_STATUS_META_KEY]: authStatusCapability(),
-                    [ASYNC_QUESTIONS_CAPABILITY]: asyncQuestionsCapability(),
                 },
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
@@ -403,6 +402,7 @@ export class CodexAcpServer {
                             AIR_AGENT_FILE_CHANGE_REPORT_KEY,
                             AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                             AIR_ASYNC_TASKS_KEY,
+                            AIR_ASYNC_QUESTIONS_KEY,
                         ],
                     },
                 },

@@ -4,10 +4,10 @@ import type {ServerNotification} from "./app-server";
 import type {SessionSteerRequest, SessionSteeringResponse} from "./AcpExtensions";
 import {
     ASYNC_QUESTION_REQUEST_METHOD,
-    clientSupportsAsyncQuestions,
     type AsyncQuestionRequest,
     type AsyncQuestionResponse,
 } from "./AsyncQuestionExtension";
+import {AIR_ASYNC_QUESTIONS_KEY, clientSupportsAirCapability} from "./AirExtension";
 import {logger} from "./Logger";
 
 type QuestionSession = {
@@ -25,7 +25,7 @@ export class CodexAsyncQuestionHandler {
     ) {}
 
     handleNotification(notification: ServerNotification, capabilities: ClientCapabilities | null): void {
-        if (notification.method !== "item/completed" || !clientSupportsAsyncQuestions(capabilities)) return;
+        if (notification.method !== "item/completed" || !clientSupportsAirCapability(capabilities, AIR_ASYNC_QUESTIONS_KEY)) return;
         const {threadId, turnId, item} = notification.params;
         if (item.type !== "agentMessage" || item.delivery !== "async" || !item.questions?.length) return;
 
