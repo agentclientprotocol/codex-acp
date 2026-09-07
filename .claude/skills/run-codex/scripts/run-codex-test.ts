@@ -102,7 +102,7 @@ async function main() {
     console.log(`Prompt: ${prompt}`);
     console.log(`CWD: ${cwd}`);
     console.log(`Output: ${output}`);
-    console.log(`System prompt append: ${systemPromptAppend ? "configured" : "none"}`);
+    console.log(`System prompt append: ${systemPromptAppend?.trim() ? "configured" : "none"}`);
     console.log("=".repeat(60));
     console.log("");
 
