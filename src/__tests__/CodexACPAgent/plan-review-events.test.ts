@@ -60,6 +60,7 @@ describe("CodexACPAgent - plan review", () => {
         permissionOptionId: string | null,
         options: {
             typedFailures?: boolean;
+            reportUsage?: boolean;
             emitCompletionNotification?: boolean;
             implementationStart?: Promise<TurnStartResponse>;
             permissionResponse?: acp.RequestPermissionResponse | Promise<acp.RequestPermissionResponse>;
@@ -144,6 +145,15 @@ describe("CodexACPAgent - plan review", () => {
                 },
             },
         });
+        if (options.reportUsage) {
+            fixture.sendServerNotification({method: "thread/tokenUsage/updated", params: {
+                threadId: sessionId, turnId: "plan-turn", tokenUsage: {
+                    total: {totalTokens: 120, inputTokens: 100, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 20, reasoningOutputTokens: 0},
+                    last: {totalTokens: 120, inputTokens: 100, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 20, reasoningOutputTokens: 0},
+                    modelContextWindow: 128000,
+                },
+            }});
+        }
         const completion: TurnCompletion = {
             threadId: sessionId,
             turn: {
@@ -164,6 +174,24 @@ describe("CodexACPAgent - plan review", () => {
 
         return {promptPromise, sessionState, turnStart, implementationTurn};
     }
+
+    it("includes both planning and implementation usage in one prompt", async () => {
+        const {promptPromise, sessionState, implementationTurn} = await startPlanPrompt("implement_plan", {reportUsage: true});
+        await vi.waitFor(() => expect(sessionState.currentTurnId).toBe("implementation-turn"));
+        fixture.sendServerNotification({method: "thread/tokenUsage/updated", params: {
+            threadId: sessionId, turnId: "implementation-turn", tokenUsage: {
+                total: {totalTokens: 350, inputTokens: 300, cachedInputTokens: 100, cacheWriteInputTokens: 0, outputTokens: 50, reasoningOutputTokens: 0},
+                last: {totalTokens: 230, inputTokens: 200, cachedInputTokens: 100, cacheWriteInputTokens: 0, outputTokens: 30, reasoningOutputTokens: 0},
+                modelContextWindow: 128000,
+            },
+        }});
+        implementationTurn.resolve({threadId: sessionId, turn: {
+            id: "implementation-turn", items: [], itemsView: "notLoaded", status: "completed",
+            error: null, startedAt: null, completedAt: null, durationMs: null,
+        }});
+        const result = await promptPromise;
+        expect(result.usage).toMatchObject({totalTokens: 350, inputTokens: 200, cachedReadTokens: 100, outputTokens: 50});
+    });
 
     it("requests plan permission and starts one implementation turn when approved", async () => {
         const {promptPromise, sessionState, turnStart, implementationTurn} = await startPlanPrompt("implement_plan");

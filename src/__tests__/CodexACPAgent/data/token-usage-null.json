@@ -5,6 +5,12 @@
     "quota": {
       "token_count": null,
       "model_usage": []
+    },
+    "usageAccounting": {
+      "version": 1,
+      "source": "codex/thread-token-usage-delta",
+      "scope": "root_thread_prompt",
+      "completeness": "partial"
     }
   }
 }

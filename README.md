@@ -11,7 +11,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - ChatGPT, API key, and client-provided custom gateway authentication.
 - Model, reasoning effort, fast mode, approval, and sandbox mode configuration.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
-- Shell command, file change, [permission request](docs/permission-extension.md), MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, token usage, and review events.
+- Shell command, file change, [permission request](docs/permission-extension.md), MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, [token usage](docs/usage-accounting.md), and review events.
 - [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
 - [Background terminal tasks](docs/async-tasks.md) in AIR, with task status and targeted stop support after capability negotiation.
 - Session-scoped long-running goals through the provider-neutral [goal extension](docs/goal-extension.md).

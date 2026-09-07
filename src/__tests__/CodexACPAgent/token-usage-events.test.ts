@@ -61,7 +61,7 @@ describe('Token Usage Events', () => {
                     inputTokens: 4000,
                     cachedInputTokens: 1000,
                     cacheWriteInputTokens: 0,
-                    outputTokens: 900,
+                    outputTokens: 1000,
                     reasoningOutputTokens: 100,
                 },
                 last: {
@@ -69,7 +69,7 @@ describe('Token Usage Events', () => {
                     inputTokens: 2000,
                     cachedInputTokens: 500,
                     cacheWriteInputTokens: 0,
-                    outputTokens: 450,
+                    outputTokens: 500,
                     reasoningOutputTokens: 50,
                 },
                 modelContextWindow: 128000,
@@ -133,7 +133,7 @@ describe('Token Usage Events', () => {
             );
         });
 
-        it('should use last token usage from multiple updates', async () => {
+        it('should accumulate all requests from multiple updates', async () => {
             const notifications: ServerNotification[] = [
                 createTokenUsageNotification(sessionId, {
                     total: { totalTokens: 1000, inputTokens: 800, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
@@ -146,8 +146,8 @@ describe('Token Usage Events', () => {
                     modelContextWindow: 128000,
                 }),
                 createTokenUsageNotification(sessionId, {
-                    total: { totalTokens: 3500, inputTokens: 2800, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 600, reasoningOutputTokens: 100 },
-                    last: { totalTokens: 1500, inputTokens: 1200, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 100 },
+                    total: { totalTokens: 3500, inputTokens: 2800, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 700, reasoningOutputTokens: 100 },
+                    last: { totalTokens: 1500, inputTokens: 1200, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 100 },
                     modelContextWindow: 128000,
                 }),
             ];
@@ -202,7 +202,7 @@ describe('Token Usage Events', () => {
                         inputTokens: 4000,
                         cachedInputTokens: 1000,
                         cacheWriteInputTokens: 0,
-                        outputTokens: 900,
+                        outputTokens: 1000,
                         reasoningOutputTokens: 100,
                     },
                     last: {
@@ -210,7 +210,7 @@ describe('Token Usage Events', () => {
                         inputTokens: 2000,
                         cachedInputTokens: 500,
                         cacheWriteInputTokens: 0,
-                        outputTokens: 450,
+                        outputTokens: 500,
                         reasoningOutputTokens: 50,
                     },
                     modelContextWindow: 128000,
@@ -233,8 +233,8 @@ describe('Token Usage Events', () => {
                     modelContextWindow: 128000,
                 }),
                 createTokenUsageNotification(sessionId, {
-                    total: { totalTokens: 3500, inputTokens: 2800, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 600, reasoningOutputTokens: 100 },
-                    last: { totalTokens: 1500, inputTokens: 1200, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 100 },
+                    total: { totalTokens: 3500, inputTokens: 2800, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 700, reasoningOutputTokens: 100 },
+                    last: { totalTokens: 1500, inputTokens: 1200, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 100 },
                     modelContextWindow: 128000,
                 }),
             ])();
@@ -245,8 +245,8 @@ describe('Token Usage Events', () => {
         it('should skip usage_update when model context window is unavailable', async () => {
             const events = await setupPromptAndReturnEvents([
                 createTokenUsageNotification(sessionId, {
-                    total: { totalTokens: 5000, inputTokens: 4000, cachedInputTokens: 1000, cacheWriteInputTokens: 0, outputTokens: 900, reasoningOutputTokens: 100 },
-                    last: { totalTokens: 2500, inputTokens: 2000, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 450, reasoningOutputTokens: 50 },
+                    total: { totalTokens: 5000, inputTokens: 4000, cachedInputTokens: 1000, cacheWriteInputTokens: 0, outputTokens: 1000, reasoningOutputTokens: 100 },
+                    last: { totalTokens: 2500, inputTokens: 2000, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 500, reasoningOutputTokens: 50 },
                     modelContextWindow: null,
                 }),
             ])();

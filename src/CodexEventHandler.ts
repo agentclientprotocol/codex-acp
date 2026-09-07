@@ -1280,6 +1280,12 @@ export class CodexEventHandler {
     }
 
     private handleTokenUsageUpdated(params: ThreadTokenUsageUpdatedNotification): void {
+        if (params.threadId === this.sessionState.sessionId
+            && params.turnId === this.sessionState.currentTurnId) {
+            this.sessionState.promptTokenUsage?.observe(params.tokenUsage);
+        } else if (params.threadId === this.sessionState.sessionId && this.sessionState.currentTurnId === null) {
+            this.sessionState.promptTokenUsage?.restoreBaseline(toTokenCount(params.tokenUsage.total));
+        }
         this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
         this.sessionState.totalTokenUsage = toTokenCount(params.tokenUsage.total);
         this.sessionState.modelContextWindow = params.tokenUsage.modelContextWindow;
