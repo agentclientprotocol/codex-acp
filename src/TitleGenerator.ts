@@ -46,6 +46,7 @@ export class TitleGenerator {
      *                        not turn.items — turn.items contains only agent output).
      */
     onTurnCompleted(userPromptText: string): void {
+        if (process.env["ACP_DISABLE_TITLE_GENERATION"] === "1") return;
         if (this.generated) return;
         const src = this.getSessionTitleSource();
         // "explicit": user renamed or session loaded with a name — skip

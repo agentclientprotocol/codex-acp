@@ -12,6 +12,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
+- `ACP_DISABLE_TITLE_GENERATION` - set to `1` to skip the adapter's extra model call for session titles. Applies to every session in this adapter process; unset or other values retain automatic generation. Existing titles, prompt-derived fallback titles, and `/rename` remain available. This is an adapter-specific option, not an ACP protocol setting.
 
 ### Quick start
 

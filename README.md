@@ -59,6 +59,7 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
+- `ACP_DISABLE_TITLE_GENERATION` - set to `1` to skip the adapter's extra model call for session titles. Applies to every session in this adapter process; unset or other values retain automatic generation. Existing titles, prompt-derived fallback titles, and `/rename` remain available.
 
 ## Development
 
