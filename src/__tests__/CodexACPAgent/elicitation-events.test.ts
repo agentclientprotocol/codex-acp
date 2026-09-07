@@ -702,6 +702,42 @@ describe('Elicitation Events', () => {
     });
 
     describe('URL mode elicitation', () => {
+        it('maps MCP OAuth login to ACP URL elicitation and completes it', async () => {
+            const agent = fixture.getCodexAcpAgent();
+            const codexClient = fixture.getCodexAcpClient();
+            await agent.initialize({
+                protocolVersion: acp.PROTOCOL_VERSION,
+                clientCapabilities: { elicitation: { url: {} } },
+            });
+            fixture.setElicitationResponse({action: 'accept'});
+            const oauthLogin = vi.spyOn(codexClient, 'mcpServerOauthLogin').mockResolvedValue({
+                authorizationUrl: 'https://example.com/oauth/authorize',
+            });
+            vi.spyOn(codexClient, 'awaitMcpServerOauthLoginCompleted').mockResolvedValue({
+                name: 'linear',
+                threadId: sessionId,
+                success: true,
+            });
+
+            await expect((agent as any).authenticateMcpServer(sessionId, 'linear')).resolves.toBe(true);
+
+            expect(oauthLogin).toHaveBeenCalledWith({name: 'linear', threadId: sessionId});
+            const events = fixture.getAcpConnectionEvents([]);
+            expect(events[0]).toMatchObject({
+                method: 'createElicitation',
+                args: [{
+                    mode: 'url',
+                    sessionId,
+                    message: 'Authenticate with MCP server linear',
+                    url: 'https://example.com/oauth/authorize',
+                }],
+            });
+            expect(events[1]).toMatchObject({
+                method: 'completeElicitation',
+                args: [{elicitationId: expect.stringMatching(/^mcp-oauth-/)}],
+            });
+        });
+
         it('should use ACP URL elicitation when the client supports it', async () => {
             const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
                 elicitation: { url: {} },

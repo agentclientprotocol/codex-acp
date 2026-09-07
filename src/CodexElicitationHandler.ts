@@ -325,6 +325,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
             case "url":
                 return clientSupportsUrlElicitation(this.clientCapabilities);
             case "openai/form":
+            case "openaiForm":
                 return false;
         }
     }
@@ -334,7 +335,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
     }
 
     private isMessageOnlyForm(params: McpServerElicitationRequestParams): boolean {
-        if (params.mode !== "form" && params.mode !== "openai/form") return false;
+        if (params.mode !== "form" && params.mode !== "openai/form" && params.mode !== "openaiForm") return false;
         if (params.requestedSchema === null) return true;
         if (!isRecord(params.requestedSchema)) return false;
         return params.requestedSchema["type"] === "object"

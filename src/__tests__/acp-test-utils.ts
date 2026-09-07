@@ -2,8 +2,8 @@ import * as acp from "@agentclientprotocol/sdk";
 import type {CreateElicitationResponse, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
 import {CodexAcpClient} from '../CodexAcpClient';
 import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';
-import {startCodexConnection} from "../CodexJsonRpcConnection";
-import {CodexAcpServer, type SessionState} from "../CodexAcpServer";
+import {type CodexConnection, startCodexConnection} from "../CodexJsonRpcConnection";
+import {CodexAcpServer, type CodexProcessState, type SessionState} from "../CodexAcpServer";
 import {SessionCostTracker} from "../SessionCostTracker";
 import {ACPSessionConnection, type AcpClientConnection} from "../ACPSessionConnection";
 import type {ServerNotification} from "../app-server";
@@ -16,6 +16,8 @@ import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
+import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTerminalTasks";
+import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -88,6 +90,7 @@ export interface ConnectionConfig {
     connection: MessageConnection;
     getExitCode: () => number | null;
     acpConnection?: AcpConnectionConfig;
+    codexProcessState?: CodexProcessState;
 }
 
 export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
@@ -107,6 +110,7 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         undefined,
         config.getExitCode,
         undefined,
+        config.codexProcessState,
     );
 
     const transportEvents: CodexConnectionEvent[] = [];
@@ -269,6 +273,7 @@ export interface CodexMockTestFixture extends TestFixture {
  */
 export function createCodexMockTestFixture(
     restartCodexClient?: () => Promise<CodexAcpClient>,
+    process?: CodexConnection["process"],
 ): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
@@ -317,6 +322,13 @@ export function createCodexMockTestFixture(
     const baseFixture = createBaseTestFixture({
         connection: mockCodexConnection,
         getExitCode: () => null,
+        ...(process ? {codexProcessState: {
+            connection: {connection: mockCodexConnection, process},
+            codexPath: undefined,
+            config: undefined,
+            modelProvider: undefined,
+            stderr: "",
+        }} : {}),
         acpConnection: {
             connection: acpConnection,
             events: acpConnectionEvents,
@@ -416,6 +428,12 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
             false,
             new ACPSessionConnection({notify: vi.fn(), request: vi.fn()} as AcpClientConnection, sessionId),
         ),
+        asyncTasks: new CodexBackgroundTerminalTasks(
+            false,
+            sessionId,
+            {} as CodexAppServerClient,
+            new ACPSessionConnection({notify: vi.fn(), request: vi.fn()} as AcpClientConnection, sessionId),
+        ),
         ...overrides,
     };
 }
@@ -444,6 +462,19 @@ export function createTestModel(overrides?: Partial<Model>): Model {
         isDefault: true,
         ...overrides,
     };
+}
+
+/**
+ * Waits for the connection's first `_auth/status_update`. `initialize` starts
+ * the identity read that produces it and never waits for the read, so a test
+ * that must not race it waits here instead.
+ */
+export async function awaitFirstAuthStatusPush(fixture: TestFixture): Promise<void> {
+    await vi.waitFor(() => {
+        const pushed = fixture.getAcpConnectionEvents([]).some(event =>
+            event.method === "notify" && event.args[0] === AUTH_STATUS_UPDATE_METHOD);
+        expect(pushed).toBe(true);
+    });
 }
 
 export function setupPromptTestSession(sessionOverrides?: Partial<SessionState>) {

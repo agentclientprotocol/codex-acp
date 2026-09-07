@@ -29,6 +29,11 @@ type PendingSubagent = {
     droppedBufferedNotifications: number;
 };
 
+export type ClosingChildSession = {
+    threadId: string;
+    sessionId: string;
+};
+
 /** Owns native lifecycle, child routing, waiting, and legacy activity deduplication. */
 export class CodexSubagentEventRouter {
     private static readonly DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -180,6 +185,27 @@ export class CodexSubagentEventRouter {
             : this.rootSessionId;
     }
 
+    closingChildSessions(notification: ServerNotification): ClosingChildSession[] {
+        if (!this.supported) return [];
+        if (notification.method === "turn/completed") {
+            if (terminalStateFromTurn(notification.params.turn.status) === undefined) return [];
+            return this.closingChildSession(notification.params.threadId);
+        }
+        if (notification.method !== "item/started" && notification.method !== "item/completed") return [];
+        const item = notification.params.item;
+        if (item.type === "subAgentActivity") {
+            return item.kind === "interrupted" ? this.closingChildSession(item.agentThreadId) : [];
+        }
+        if (item.type !== "collabAgentToolCall") return [];
+
+        const closing = new Map<string, ClosingChildSession>();
+        for (const [threadId, state] of Object.entries(item.agentsStates)) {
+            if (!state || terminalStateOf(state.status) === undefined) continue;
+            for (const child of this.closingChildSession(threadId)) closing.set(threadId, child);
+        }
+        return [...closing.values()];
+    }
+
     takeBufferedNotifications(): ServerNotification[] {
         return this.replayQueue.splice(0);
     }
@@ -270,6 +296,13 @@ export class CodexSubagentEventRouter {
             && (this.children.has(threadId)
                 || this.pendingSpawns.has(threadId)
                 || this.terminalPendingSpawns.has(threadId));
+    }
+
+    private closingChildSession(threadId: string): ClosingChildSession[] {
+        const child = this.children.get(threadId);
+        return child && child.terminalState === undefined
+            ? [{threadId, sessionId: child.sessionId}]
+            : [];
     }
 
     private async materialize(childSessionId: string, path: string): Promise<void> {

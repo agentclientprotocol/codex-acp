@@ -156,6 +156,8 @@ describe("agent file-change report lifecycle", () => {
                     }),
                     phase: "final_answer",
                     memoryCitation: null,
+                    delivery: null,
+                    questions: null,
                 }], "full"),
             };
         });
@@ -176,6 +178,7 @@ describe("agent file-change report lifecycle", () => {
         })).resolves.toMatchObject({stopReason: "end_turn"});
 
         expect(appServer.threadFork).toHaveBeenCalledWith({
+            excludeTurns: true,
             threadId: sessionState.sessionId,
             lastTurnId: "main-turn",
             cwd: "/workspace",
@@ -468,6 +471,7 @@ describe("agent file-change report lifecycle", () => {
             message: "invalid_json_schema: missing uncertainty",
             codexErrorInfo: null,
             additionalDetails: null,
+            misalignment: null,
         };
         awaitTurnCompleted.mockResolvedValueOnce({
             threadId: "audit-thread",
@@ -511,6 +515,8 @@ describe("agent file-change report lifecycle", () => {
                 text: "not JSON",
                 phase: "final_answer",
                 memoryCitation: null,
+                delivery: null,
+                questions: null,
             }], "full"),
         });
         const threadRead = vi.spyOn(appServer, "threadRead");
