@@ -650,6 +650,9 @@ export class CodexAcpClient {
             await this.codexClient.threadUnsubscribe({threadId: sessionId});
         } finally {
             this.codexClient.clearThreadHandlers(sessionId);
+            for (const childSessionId of this.subagents.childSessionIds(sessionId)) {
+                this.threadTokenUsage.delete(childSessionId);
+            }
             this.subagents.clear(sessionId);
             this.threadTokenUsage.delete(sessionId);
         }
