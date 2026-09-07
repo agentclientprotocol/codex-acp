@@ -223,9 +223,12 @@ export class CodexCommands {
             case "review":
             case "review-branch":
             case "review-commit":
-            // "/goal pause" and "/goal clear" do not start a turn, but the other forms do.
-            case "goal":
                 return true;
+            // "/goal pause", "/goal clear", and "/goal" (usage) do not start a turn, but the other forms do.
+            case "goal": {
+                const arg = command.rest.trim().toLowerCase();
+                return !(arg.length === 0 || arg === "pause" || arg === "clear" || arg.length > 4000);
+            }
             default:
                 // Unrecognized commands are forwarded to Codex as raw prompts.
                 return true;
