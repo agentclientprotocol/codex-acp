@@ -48,6 +48,7 @@ import {
     createModelConfigOption,
     createReasoningEffortConfigOption,
     findSupportedEffort,
+    formatModelDisplayName,
     MODEL_CONFIG_ID,
     REASONING_EFFORT_CONFIG_ID,
 } from "./ModelConfigOption";
@@ -252,12 +253,6 @@ export interface CodexProcessState {
 }
 
 export class CodexAcpServer {
-    private static readonly MODEL_NAME_TOKEN_OVERRIDES: Record<string, string> = {
-        gpt: "GPT",
-        mini: "Mini",
-        codex: "Codex",
-    };
-
     private codexAcpClient: CodexAcpClient;
     private readonly connection: AcpClientConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
@@ -1857,19 +1852,12 @@ export class CodexAcpServer {
         return models.find(m => m.id === modelId.model);
     }
 
-    private normalizeModelDisplayName(displayName: string): string {
-        return displayName
-            .split("-")
-            .map((token) => CodexAcpServer.MODEL_NAME_TOKEN_OVERRIDES[token.toLowerCase()] ?? token)
-            .join("-");
-    }
-
     private createModelState(availableModels: Model[], selectedModelId: string): LegacySessionModelState {
         const allowedModels = availableModels
             .flatMap((model) =>
                 model.supportedReasoningEfforts.map((effort) => ({
                     modelId: ModelId.fromComponents(model, effort.reasoningEffort).toString(),
-                    name: `${this.normalizeModelDisplayName(model.displayName)} (${effort.reasoningEffort})`,
+                    name: `${formatModelDisplayName(model.displayName)} (${effort.reasoningEffort})`,
                     description: `${model.description} ${effort.description}`,
                 }))
             );
