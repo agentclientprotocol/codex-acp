@@ -1,3 +1,4 @@
+import {CodexAsyncQuestionHandler} from "./CodexAsyncQuestionHandler";
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
@@ -131,6 +132,7 @@ import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
     AIR_ASYNC_TASKS_KEY,
+    AIR_ASYNC_QUESTIONS_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
@@ -276,6 +278,7 @@ export class CodexAcpServer {
     private readonly pendingTurnStarts: Map<string, PendingTurnStart>;
     private readonly activePrompts: Map<string, ActivePrompt>;
     private readonly steeringQueues: Map<string, SteeringQueue>;
+    private readonly asyncQuestions: CodexAsyncQuestionHandler;
     private readonly closingSessions: Map<string, number>;
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
@@ -305,6 +308,8 @@ export class CodexAcpServer {
         this.goalControlGenerations = new Map();
         this.permissionLifecycleContexts = new WeakMap();
         this.connection = connection;
+        this.asyncQuestions = new CodexAsyncQuestionHandler(connection, (request, signal) =>
+            this.executeOrQueueSteeringRequest(request, signal));
         this.codexAcpClient = codexAcpClient;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.codexProcessState = codexProcessState ?? null;
@@ -397,6 +402,7 @@ export class CodexAcpServer {
                             AIR_AGENT_FILE_CHANGE_REPORT_KEY,
                             AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                             AIR_ASYNC_TASKS_KEY,
+                            AIR_ASYNC_QUESTIONS_KEY,
                         ],
                     },
                 },
@@ -861,6 +867,7 @@ export class CodexAcpServer {
 
     async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
         logger.log("Closing session...", {sessionId: params.sessionId});
+        this.asyncQuestions.closeSession(params.sessionId);
         const closeGeneration = this.bumpSessionGeneration(params.sessionId);
         const sessionState = this.sessions.get(params.sessionId);
         this.beginSessionCloseFence(params.sessionId);
@@ -1036,6 +1043,7 @@ export class CodexAcpServer {
 
             logger.log("Restarting Codex app-server for provider update", {sessionCount: this.sessions.size});
             for (const session of this.sessions.values()) {
+                this.asyncQuestions.cancelSession(session.sessionId);
                 session.asyncTasks.prepareForAppServerReplacement();
             }
             await this.finishAllAsyncTasks("stopped", "before the provider restart");
@@ -1097,6 +1105,7 @@ export class CodexAcpServer {
         const generation = ++this.codexProcessGeneration;
         process.once("exit", () => {
             if (generation !== this.codexProcessGeneration) return;
+            this.asyncQuestions.cancelAll();
             void this.finishAllAsyncTasks("failed", "after the Codex process exited");
         });
     }
@@ -1483,10 +1492,10 @@ export class CodexAcpServer {
      *     new one ("startedNewTurn"), or could not be applied ("failed"); see
      *     {@link performSteeringRequest}.
      */
-    async executeOrQueueSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+    async executeOrQueueSteeringRequest(params: SessionSteerRequest, signal?: AbortSignal): Promise<SessionSteeringResponse> {
         const queue = this.getSteeringQueue(params.sessionId);
         try {
-            return await queue.enqueue(params);
+            return await queue.enqueue(params, signal);
         } catch (error) {
             if (error instanceof RequestError) {
                 throw error;
@@ -1510,7 +1519,7 @@ export class CodexAcpServer {
     private getSteeringQueue(sessionId: string): SteeringQueue {
         let queue = this.steeringQueues.get(sessionId);
         if (!queue) {
-            queue = new SteeringQueue((params) => this.performSteeringRequest(params));
+            queue = new SteeringQueue((params, signal) => this.performSteeringRequest(params, signal));
             this.steeringQueues.set(sessionId, queue);
         }
         return queue;
@@ -1524,7 +1533,8 @@ export class CodexAcpServer {
      * @returns "injected" when the prompt joined an existing turn, otherwise the
      *     outcome of starting a new turn.
      */
-    private async performSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+    private async performSteeringRequest(params: SessionSteerRequest, signal?: AbortSignal): Promise<SessionSteeringResponse> {
+        signal?.throwIfAborted();
         logger.log("Steering session requested", {
             sessionId: params.sessionId,
             prompt: params.prompt,
@@ -1533,14 +1543,16 @@ export class CodexAcpServer {
         this.assertSteerInputSupported(params, sessionState);
 
         const turnId = await this.getSteerableTurnId(sessionState);
+        signal?.throwIfAborted();
         if (turnId) {
-            const injected = await this.injectSteerIntoActiveTurn(params, turnId, sessionState);
+            const injected = await this.injectSteerIntoActiveTurn(params, turnId);
             if (injected) {
                 logger.log("Steering session injected", {sessionId: params.sessionId, turnId});
                 return {outcome: "injected"};
             }
         }
-        return await this.startNewTurnFromSteering(params);
+        signal?.throwIfAborted();
+        return await this.startNewTurnFromSteering(params, signal);
     }
 
     /**
@@ -1557,10 +1569,9 @@ export class CodexAcpServer {
     /**
      * Attempts to inject the prompt into the given running turn.
      *
-     * A failed injection is fatal only when the turn is still the session's
-     * current turn and Codex reported something other than "no active turn to
-     * steer". Otherwise the turn has already ended underneath us and the caller
-     * should start a new turn instead.
+     * Only an explicit "no active turn to steer" rejection permits a new turn.
+     * A transport failure may occur after Codex accepted the input, even if the
+     * tracked turn has since completed; retrying it could duplicate user input.
      *
      * @returns true when the prompt was injected; false when the caller should
      *     fall back to starting a new turn.
@@ -1568,7 +1579,6 @@ export class CodexAcpServer {
     private async injectSteerIntoActiveTurn(
         params: SessionSteerRequest,
         turnId: string,
-        sessionState: SessionState,
     ): Promise<boolean> {
         try {
             await this.runWithProcessCheck(() => this.codexAcpClient.steerTurn({
@@ -1579,8 +1589,7 @@ export class CodexAcpServer {
             return true;
         } catch (err) {
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-            const turnStillActive = sessionState.currentTurnId === turnId;
-            if (turnStillActive && !this.isNoActiveTurnToSteerError(err)) {
+            if (!this.isNoActiveTurnToSteerError(err)) {
                 throw err;
             }
             return false;
@@ -1599,8 +1608,11 @@ export class CodexAcpServer {
      * @returns "startedNewTurn" once the turn is running; throws if the prompt
      *     fails or is cancelled before the turn starts.
      */
-    private async startNewTurnFromSteering(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
-        await this.startNewTurnFromExternalPrompt(params, "Steering");
+    private async startNewTurnFromSteering(params: SessionSteerRequest, signal?: AbortSignal): Promise<SessionSteeringResponse> {
+        await this.startNewTurnFromExternalPrompt(params, "Steering", async () => {
+            signal?.throwIfAborted();
+            return true;
+        }, signal);
         return {outcome: "startedNewTurn"};
     }
 
@@ -1630,6 +1642,7 @@ export class CodexAcpServer {
         params: acp.PromptRequest,
         source: string,
         canStart: () => Promise<boolean> = async () => true,
+        signal?: AbortSignal,
     ): Promise<boolean> {
         // A prompt can outlive its turn while post-turn cleanup runs. Starting a
         // control-triggered turn during that window would run two prompts on the
@@ -1645,7 +1658,7 @@ export class CodexAcpServer {
 
         return await new Promise<boolean>((resolve, reject) => {
             let turnStarted = false;
-            const promptDone = this.prompt(params, undefined, () => {
+            const promptDone = this.prompt(params, signal, () => {
                 turnStarted = true;
                 logger.log(`${source} started a new turn`, {sessionId: params.sessionId});
                 // The new turn is now running. This is the success path: answer the
@@ -2595,6 +2608,7 @@ export class CodexAcpServer {
                 return;
             }
             logger.log("Prompt request cancelled", {sessionId: sessionState.sessionId});
+            this.asyncQuestions.cancelSession(sessionState.sessionId);
             activePrompt.requestCancel();
             const turn = activePrompt.currentTurn;
             if (!turn) {
@@ -2753,6 +2767,7 @@ export class CodexAcpServer {
         let recoverableSessionFailure = sessionState.sessionFailure;
         sessionState.currentTurnId = null;
         const activePrompt = this.trackActivePrompt(params.sessionId);
+        this.asyncQuestions.beginPrompt(params.sessionId);
         let pendingTurnStart: PendingTurnStart | null = null;
         const ensurePendingTurnStart = (): PendingTurnStart => {
             if (pendingTurnStart === null) {
@@ -2806,6 +2821,10 @@ export class CodexAcpServer {
                 activePrompt.signal,
             );
             const observeInteraction = async (event: ServerNotification): Promise<void> => {
+                if (!activePrompt.signal.aborted && !this.sessionIsClosing(params.sessionId)
+                    && "threadId" in event.params && event.params.threadId === params.sessionId) {
+                    this.asyncQuestions.handleNotification(event, this.clientCapabilities);
+                }
                 permissionContext.handleNotification(event);
                 await elicitationHandler.handleNotification(event);
             };
@@ -3327,6 +3346,7 @@ export class CodexAcpServer {
     }
 
     async cancel(params: acp.CancelNotification): Promise<void> {
+        this.asyncQuestions.cancelSession(params.sessionId);
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) {
             logger.log("Cancel request rejected: session not found", {sessionId: params.sessionId});

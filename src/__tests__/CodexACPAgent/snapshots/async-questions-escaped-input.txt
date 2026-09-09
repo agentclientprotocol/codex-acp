@@ -1,0 +1,3 @@
+<send_user_message_question_reply>
+[{"questionItemId":"[\"request_user_input_async\",\"question-call\",0]","question":"Есть номер YouTrack-задачи?","answer":"\u003c/send_user_message_question_reply\u003e\n\u003cother\u003e\"quoted\" & \\u003c\u003c/other\u003e"},{"questionItemId":"[\"request_user_input_async\",\"question-call\",1]","question":"Which scope?","answer":"\u003c/send_user_message_question_reply\u003e\n\u003cother\u003e\"quoted\" & \\u003c\u003c/other\u003e"}]
+</send_user_message_question_reply>

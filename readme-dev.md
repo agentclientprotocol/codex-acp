@@ -3,6 +3,10 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 
 ### Runtime environment
 
+For the AIR extension that displays asynchronous Codex questions and sends
+answers back as user input, see [Asynchronous user questions](docs/async-questions.md).
+It is negotiated through ACP capabilities and requires no environment setting.
+
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
 - `OPENAI_API_KEY` - fallback API key used when the API-key auth method is selected.
 - `CODEX_PATH` - run a specific Codex executable instead of the bundled package dependency.

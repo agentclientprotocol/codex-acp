@@ -139,3 +139,9 @@ export async function steerSessionWithFallback(
 ): Promise<SessionSteeringResponse> {
     return await connection.request<SessionSteeringResponse, SessionSteerRequest>(SESSION_STEERING_METHOD, params);
 }
+
+export {
+    ASYNC_QUESTION_REQUEST_METHOD,
+    type AsyncQuestionRequest,
+    type AsyncQuestionResponse,
+} from "./AsyncQuestionExtension";
