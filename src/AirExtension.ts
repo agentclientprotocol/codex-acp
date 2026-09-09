@@ -21,15 +21,17 @@ export const AIR_ASYNC_TASKS_BACKGROUNDED_KEY = "backgrounded";
 export const AIR_AGENT_FILE_CHANGE_REPORT_REQUEST_KEY = "agentFileChangeReportRequest";
 export const AIR_EXTENSION_VERSION = 1;
 
+/** Merge one AIR payload into metadata while preserving other object namespaces. */
 export function withAirMeta(
     meta: Record<string, unknown> | null | undefined,
     key: string,
     value: unknown,
 ): Record<string, unknown> {
-    const jetbrains = (meta?.[JETBRAINS_META_KEY] ?? {}) as Record<string, unknown>;
-    const air = (jetbrains[AIR_META_KEY] ?? {}) as Record<string, unknown>;
+    const root = asRecord(meta);
+    const jetbrains = asRecord(root[JETBRAINS_META_KEY]);
+    const air = asRecord(jetbrains[AIR_META_KEY]);
     return {
-        ...meta,
+        ...root,
         [JETBRAINS_META_KEY]: {
             ...jetbrains,
             [AIR_META_KEY]: {
@@ -45,13 +47,20 @@ export function clientSupportsAirCapability(
     capabilities: ClientCapabilities | null | undefined,
     capability: string,
 ): boolean {
-    const jetbrains = capabilities?._meta?.[JETBRAINS_META_KEY] as Record<string, unknown> | undefined;
-    const air = jetbrains?.[AIR_META_KEY] as Record<string, unknown> | undefined;
-    const version = air?.[AIR_EXTENSION_VERSION_KEY];
-    const supported = air?.[AIR_EXTENSION_CAPABILITIES_KEY];
+    const meta = asRecord(capabilities?._meta);
+    const jetbrains = asRecord(meta[JETBRAINS_META_KEY]);
+    const air = asRecord(jetbrains[AIR_META_KEY]);
+    const version = air[AIR_EXTENSION_VERSION_KEY];
+    const supported = air[AIR_EXTENSION_CAPABILITIES_KEY];
     return typeof version === "number"
         && Number.isInteger(version)
         && version >= AIR_EXTENSION_VERSION
         && Array.isArray(supported)
         && supported.includes(capability);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : {};
 }

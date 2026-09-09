@@ -82,6 +82,7 @@ describe("Session config options", () => {
                 {value: "slow-model", name: "Slow model", description: "Strong"},
             ],
         });
+        expect(modelOption?._meta).toBeUndefined();
 
         const effortOption = response.configOptions?.find(o => o.id === REASONING_EFFORT_CONFIG_ID);
         expect(effortOption).toMatchObject({
@@ -94,6 +95,7 @@ describe("Session config options", () => {
                 {value: "high", name: "High"},
             ],
         });
+        expect(effortOption?._meta).toBeUndefined();
 
         const modeOption = response.configOptions?.find(o => o.id === MODE_CONFIG_ID);
         expect(modeOption).toMatchObject({
@@ -166,6 +168,42 @@ describe("Session config options", () => {
             currentValue: "medium",
             _meta: {jetbrains: {air: {version: 1, recommendedValue: "low"}}},
         });
+    });
+
+    it("updates the recommended effort when the selected model changes", async () => {
+        const {fast, slow} = buildModels();
+        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast, slow], {
+            _meta: {jetbrains: {air: {version: 1, capabilities: ["recommendedValue"]}}},
+        });
+
+        const response = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODEL_CONFIG_ID,
+            value: "slow-model",
+        });
+
+        expect(response.configOptions?.find(option => option.id === MODEL_CONFIG_ID)).toMatchObject({
+            currentValue: "slow-model",
+            _meta: {jetbrains: {air: {recommendedValue: "fast-model"}}},
+        });
+        expect(response.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID)).toMatchObject({
+            currentValue: "medium",
+            _meta: {jetbrains: {air: {recommendedValue: "low"}}},
+        });
+    });
+
+    it("omits a model recommendation when the catalog has no default", async () => {
+        const {fast, slow} = buildModels();
+        fast.isDefault = false;
+        const {response} = await createSession("slow-model[medium]", [fast, slow], {
+            _meta: {jetbrains: {air: {version: 1, capabilities: ["recommendedValue"]}}},
+        });
+
+        expect(response.configOptions?.find(option => option.id === MODEL_CONFIG_ID)?._meta).toBeUndefined();
+        expect(response.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID)).toHaveProperty(
+            "_meta.jetbrains.air.recommendedValue",
+            "low",
+        );
     });
 
     it("keeps the legacy models list as combined model/effort entries", async () => {
