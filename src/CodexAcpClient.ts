@@ -773,9 +773,13 @@ export class CodexAcpClient {
             return configWithWorkspaceRoots;
         }
 
+        const configuredMcpServers = configWithWorkspaceRoots["mcp_servers"];
         return {
             ...configWithWorkspaceRoots,
-            "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+            "mcp_servers": {
+                ...(isJsonObject(configuredMcpServers) ? configuredMcpServers : {}),
+                ...Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+            },
         };
     }
 
