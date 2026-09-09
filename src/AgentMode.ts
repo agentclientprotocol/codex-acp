@@ -35,6 +35,19 @@ export class AgentMode {
         this.sandboxMode = sandboxMode; // same as sandboxPolicy, need to look for
     }
 
+    static readonly ReadOnly = new AgentMode(
+        "read-only",
+        "Read-only",
+        "Inspect only, ask for approval to modify any files",
+        "standard",
+        "on-request",
+        "user",
+        {
+            type: "readOnly",
+            networkAccess: false,
+        },
+        "read-only",
+    );
     static readonly EditInternal = new AgentMode(
         "edit-internal",
         "Ask for approval",
@@ -114,7 +127,7 @@ export class AgentMode {
     }
 
     static all(): AgentMode[] {
-        return [AgentMode.EditInternal, AgentMode.Agent, AgentMode.AgentFullAccess];
+        return [AgentMode.ReadOnly, AgentMode.EditInternal, AgentMode.Agent, AgentMode.AgentFullAccess];
     }
 
     static find(modeId: string): AgentMode | null {
