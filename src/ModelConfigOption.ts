@@ -1,6 +1,7 @@
 import type {SessionConfigOption} from "@agentclientprotocol/sdk";
 import type {ReasoningEffort} from "./app-server";
 import type {Model, ReasoningEffortOption} from "./app-server/v2";
+import {AIR_RECOMMENDED_CONFIG_VALUE_KEY, withAirMeta} from "./AirExtension";
 
 export const MODEL_CONFIG_ID = "model";
 export const REASONING_EFFORT_CONFIG_ID = "reasoning_effort";
@@ -17,7 +18,11 @@ export function findSupportedEffort(
     return options.find(o => o.reasoningEffort === effort)?.reasoningEffort;
 }
 
-export function createModelConfigOption(availableModels: Array<Model>, currentBaseModelId: string): SessionConfigOption {
+export function createModelConfigOption(
+    availableModels: Array<Model>,
+    currentBaseModelId: string,
+    recommendedModelId?: string,
+): SessionConfigOption {
     const options: Array<{ value: string; name: string; description: string | null }> = availableModels.map(model => ({
         value: model.id,
         name: model.displayName,
@@ -31,6 +36,9 @@ export function createModelConfigOption(availableModels: Array<Model>, currentBa
         });
     }
 
+    const recommendation = recommendedModelId && options.some(option => option.value === recommendedModelId)
+        ? recommendedModelId
+        : undefined;
     return {
         id: MODEL_CONFIG_ID,
         name: "Model",
@@ -39,13 +47,18 @@ export function createModelConfigOption(availableModels: Array<Model>, currentBa
         type: "select",
         currentValue: currentBaseModelId,
         options,
+        ...(recommendation
+            ? {_meta: withAirMeta(undefined, AIR_RECOMMENDED_CONFIG_VALUE_KEY, recommendation)}
+            : {}),
     };
 }
 
 export function createReasoningEffortConfigOption(
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     currentEffort: string,
+    recommendedEffort?: string,
 ): SessionConfigOption {
+    const recommendation = findSupportedEffort(supportedReasoningEfforts, recommendedEffort);
     return {
         id: REASONING_EFFORT_CONFIG_ID,
         name: "Reasoning effort",
@@ -58,5 +71,8 @@ export function createReasoningEffortConfigOption(
             name: capitalize(option.reasoningEffort),
             description: option.description,
         })),
+        ...(recommendation
+            ? {_meta: withAirMeta(undefined, AIR_RECOMMENDED_CONFIG_VALUE_KEY, recommendation)}
+            : {}),
     };
 }

@@ -132,6 +132,7 @@ import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
     AIR_ASYNC_TASKS_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
+    AIR_RECOMMENDED_CONFIG_VALUE_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
@@ -397,6 +398,7 @@ export class CodexAcpServer {
                             AIR_AGENT_FILE_CHANGE_REPORT_KEY,
                             AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                             AIR_ASYNC_TASKS_KEY,
+                            AIR_RECOMMENDED_CONFIG_VALUE_KEY,
                         ],
                     },
                 },
@@ -1728,14 +1730,26 @@ export class CodexAcpServer {
 
     private createSessionConfigOptions(sessionState: SessionState): Array<acp.SessionConfigOption> {
         const currentModelId = ModelId.fromString(sessionState.currentModelId);
+        const useRecommendedValue = clientSupportsAirCapability(
+            this.clientCapabilities,
+            AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+        );
+        const currentModel = this.findCurrentModel(sessionState.availableModels, sessionState.currentModelId);
+        const recommendedModelId = useRecommendedValue
+            ? sessionState.availableModels.find(model => model.isDefault)?.id
+            : undefined;
         const configOptions = [
             sessionState.agentMode.toConfigOption(),
             createCollaborationModeConfigOption(sessionState.collaborationMode),
-            createModelConfigOption(sessionState.availableModels, currentModelId.model),
+            createModelConfigOption(sessionState.availableModels, currentModelId.model, recommendedModelId),
         ];
         if (sessionState.supportedReasoningEfforts.length > 0) {
             configOptions.push(
-                createReasoningEffortConfigOption(sessionState.supportedReasoningEfforts, currentModelId.effort),
+                createReasoningEffortConfigOption(
+                    sessionState.supportedReasoningEfforts,
+                    currentModelId.effort,
+                    useRecommendedValue ? currentModel?.defaultReasoningEffort : undefined,
+                ),
             );
         }
       if (sessionState.currentModelSupportsFast) {
