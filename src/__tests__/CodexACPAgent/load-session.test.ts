@@ -413,8 +413,9 @@ describe("CodexACPAgent - loadSession", () => {
             cwd: "/test/project",
             mcpServers: [],
         };
-        await codexAcpAgent.loadSession(loadParams);
+        const response = await codexAcpAgent.loadSession(loadParams);
 
+        expect(response.sessionId).toBe(thread.id);
         expect(codexAppServerClient.threadReadWithHistory).toHaveBeenCalledWith(thread.id);
         expect(codexAppServerClient.threadGoalGet).toHaveBeenCalledWith({ threadId: thread.id });
         await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(

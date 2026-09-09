@@ -535,7 +535,7 @@ export class CodexAcpClient {
             excludeTurns: true,
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: await this.getResumeModelProvider(),
+            ...(await this.resumeModelProviderParams()),
             threadId: request.sessionId,
         });
         onSubscribed?.();
@@ -559,7 +559,7 @@ export class CodexAcpClient {
             refreshSkills: (cwd, directories) => this.refreshSkills(cwd, directories),
             createSessionConfig: (cwd, directories, mcpServers) =>
                 this.createSessionConfig(cwd, directories, mcpServers),
-            getResumeModelProvider: () => this.getResumeModelProvider(),
+            getResumeModelProviderParams: () => this.resumeModelProviderParams(),
             fetchAvailableModels: () => this.fetchAvailableModels(),
             createCurrentModelId: (models, model, reasoningEffort) =>
                 this.createModelId(models, model, reasoningEffort).toString(),
@@ -575,7 +575,7 @@ export class CodexAcpClient {
             excludeTurns: true,
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
-            modelProvider: await this.getResumeModelProvider(),
+            ...(await this.resumeModelProviderParams()),
             threadId: request.sessionId,
         });
         onSubscribed?.();
@@ -797,10 +797,17 @@ export class CodexAcpClient {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
     }
 
-    private async getResumeModelProvider(): Promise<string> {
-        // Prefer an explicit/gateway provider, then the provider persisted in Codex config.
-        // Keep OpenAI as the final fallback for ChatGPT-authenticated sessions without a configured provider.
-        return (await this.getCurrentModelProvider()) ?? "openai";
+    /**
+     * Resume-time provider override, as `thread/resume` params.
+     *
+     * Prefer an explicit/gateway provider, then the provider persisted in Codex config.
+     * When neither is configured the field is omitted entirely: supplying one makes the
+     * app-server re-resolve the thread's model and reasoning effort from config, which
+     * discards the picks stored on the thread itself.
+     */
+    private async resumeModelProviderParams(): Promise<{modelProvider?: string}> {
+        const modelProvider = await this.getCurrentModelProvider();
+        return modelProvider ? {modelProvider} : {};
     }
 
     private async refreshSkills(
@@ -1080,6 +1087,20 @@ export class CodexAcpClient {
         await this.codexClient.threadSettingsUpdate({
             threadId: sessionId,
             collaborationMode: createCodexCollaborationMode(mode, currentModelId),
+        });
+    }
+
+    async setModelAndEffort(
+        sessionId: string,
+        currentModelId: string,
+        collaborationMode: ModeKind,
+    ): Promise<void> {
+        const modelId = ModelId.fromString(currentModelId);
+        await this.codexClient.threadSettingsUpdate({
+            threadId: sessionId,
+            model: modelId.model,
+            effort: modelId.effort as ReasoningEffort,
+            collaborationMode: createCodexCollaborationMode(collaborationMode, currentModelId),
         });
     }
 
