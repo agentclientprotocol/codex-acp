@@ -13,9 +13,9 @@ the agent registry.
 There is no manual release button, and versions are never typed in by hand: the
 version is an output of the commit history, not an input.
 
-Every _other_ push to `main` publishes a preview instead — see
-[Preview releases](#preview-releases). Anything merged to `main` is on npm within
-minutes; there is no staging branch.
+Other pushes to `main` trigger preview publishing directly, without waiting for
+CI or release-please — see [Preview releases](#preview-releases) for exclusions
+and queue behavior. There is no staging branch.
 
 ## Releasing
 
@@ -50,28 +50,30 @@ npm view "@agentclientprotocol/codex-acp@<version>"
 
 ## Preview releases
 
-Every push to `main` that is not a release merge publishes a preview from the
-same workflow. There is no GitHub release — only an npm publish under the
-`preview` dist-tag, a `v<version>` tag on the commit it came from, and the same
+Each eligible push to `main` triggers a preview from the exact pushed commit in
+the same workflow. Release commits are excluded as described below. There is no
+GitHub release — only an npm publish under the `preview` dist-tag, a `v<version>`
+tag on the commit it came from, and the same
 agent registry update a stable release dispatches, since the registry has its own
 handling for preview versions.
 
-Those are three jobs, in that order: `publish-npm-preview` mirrors `publish-npm`
-and does nothing but publish; `publish-tag-preview` creates the tag; and
-`trigger-registry-update` is shared with the stable path. The tag is a separate
-job so that a tag failure can be retried on its own with **Re-run failed jobs**
-— re-running the publish is not an option, because npm versions are immutable and
-publishing the same one twice fails outright.
+`publish-npm-preview` installs dependencies, computes and applies the preview
+version in the working tree, then publishes to npm. The `prepublishOnly` hook
+builds the bundle before publication. After publishing, `publish-tag-preview`
+creates the tag and `trigger-registry-update` dispatches the registry update
+independently; neither waits for the other. The registry job is shared with the
+stable path. A tag failure can be retried on its own with **Re-run failed jobs**,
+leaving the successful npm publish untouched.
 
-The gate is the [`CI`](../.github/workflows/ci.yml) workflow finishing green —
-typecheck, unit tests and the binary bundle — not the `verify` job the stable
-path runs, so the e2e suite is the one thing a preview is not held to. A preview
-is meant to be on npm minutes after a merge, and e2e drives a live model.
+Previews start directly on push, without waiting for the
+[`CI`](../.github/workflows/ci.yml) workflow or the `release-please` job. The
+preview job does not run typecheck, unit tests or e2e tests. Stable publishing
+still requires the `verify` job to pass.
 
-Both downstream jobs are gated on a `published` output that the publish step
-sets, not on whether the publish job went green. That keeps the two concerns
-apart — `published` means "npm has this version" and nothing else — and it means
-a rehearsal run that only passes `--dry-run` neither tags nor dispatches.
+The publish step runs `npm publish --access public --tag preview` and sets
+`published=true` only after it succeeds. Both downstream jobs use that output
+to proceed with preview tagging and registry dispatch. This is a real publish,
+with no dry-run stage.
 
 A stable and a preview dispatch can never collide — a release merge publishes
 stable and skips the preview, every other push does the reverse — so the registry
@@ -106,30 +108,34 @@ job publishes before it tags, so a version can exist on npm without a tag but
 never the reverse; that is why a registry read failure aborts the run rather than
 falling back to the tags alone.
 
-Two pushes landing together cannot collide, because the job takes a concurrency
-group. GitHub keeps only one run pending per group, so a third push arriving
-while one preview runs and another waits drops the waiting one — that commit
-simply gets no preview.
+Preview publish jobs are serialized by a concurrency group with
+`cancel-in-progress: false`. GitHub keeps only one run pending per group, so a
+third push arriving while one preview runs and another waits drops the waiting
+one — that commit simply gets no preview.
 
 `latest` stays put because the job passes `npm publish --tag preview`. Without
 it npm would move `latest` onto the preview: `--tag` defaults to `latest` even
 for a semver prerelease. Right after a release the `preview` dist-tag can name a
 version _below_ `latest` until the next push lands; that is cosmetic.
 
-Release merges are excluded by checking the head commit's author and the subject
-release-please generates. Both are checked, either is enough, and the cost of a
+Automatic previews are skipped when the head commit's author name is
+`acp-release-bot[bot]` or its message starts with `chore(main): release `.
+Either match is enough to identify a release commit, and the cost of a
 miss is one wasted version number plus a `preview` tag briefly pointing at
-already-released code — `latest` is untouched. release-please's own
-`releases_created` output would be a sharper signal, but previews hang off the
-`CI` workflow finishing rather than off the push, so they run in a different
-workflow run from the `release-please` job and cannot read its outputs.
+already-released code — `latest` is untouched. The preview job has no dependency
+on `release-please`, so it uses the commit metadata without waiting for that
+job's outputs.
 
-To publish a preview by hand — from any commit, bypassing the CI gate:
+To publish a preview by hand from a specific commit or branch:
 
 ```sh
 gh workflow run publish.yml --ref main \
   -f channel=preview -f ref=<commit-or-branch> -f publish_npm=false
 ```
+
+Manual previews use the requested ref and bypass the automatic release-commit
+exclusions. The `publish_npm` input applies only to stable publishing; setting it
+to `false` does not disable preview publication.
 
 `--ref main` is required: the `release` environment only accepts protected
 branches and `v*` tags, so a dispatch from anywhere else is rejected before the

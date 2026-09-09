@@ -41,7 +41,9 @@ CODEX_PATH=/path/to/codex npx -y @agentclientprotocol/codex-acp
 ```
 
 To try changes that have landed on `main` but are not released yet, install from the
-`preview` channel — every push to `main` publishes one. See
+`preview` channel. Pushes to `main` trigger preview publishing without waiting
+for CI or release-please; release commits are excluded, and newer pushes can
+replace queued previews. See
 [docs/RELEASES.md](docs/RELEASES.md#preview-releases).
 
 ```bash

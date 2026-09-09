@@ -35,7 +35,9 @@
 - Stable releases are fully automated by release-please. There is no manual release workflow, and the version is never chosen by hand — it follows from the commit history.
 - `npm run release:preflight` verifies it is safe to release and prints the PR number and version; then `gh pr merge <pr-number> --squash`.
 - The preflight is the guard-list as code; if it exits non-zero, follow what it prints rather than merging.
-- Every _other_ push to `main` publishes a preview to npm — `1.7.1-preview.4` and so on — under the `preview` dist-tag, tags the commit it came from, and updates the agent registry the same way a release does. Only `latest` is reserved for real releases. So anything merged to `main` is published within minutes; there is no staging branch.
+- Pushes to `main` trigger preview publishing directly, without waiting for CI or release-please. Automatic previews skip commits authored by `acp-release-bot[bot]` or whose message starts with `chore(main): release `.
+- Previews build and publish the exact pushed commit to npm under the `preview` dist-tag, then independently tag it as `v<version>` and dispatch the agent registry update. Only `latest` is reserved for stable releases. Manual previews publish the requested ref; `publish_npm` applies only to the stable channel.
+- Preview publish jobs are serialized without cancelling the running job, but newer pushes can replace a queued preview, so not every commit gets a preview. There is no staging branch.
 - Full runbook, including how to recover a stalled release: [`docs/RELEASES.md`](docs/RELEASES.md).
 
 ## Docs
