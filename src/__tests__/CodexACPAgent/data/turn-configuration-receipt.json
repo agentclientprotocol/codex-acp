@@ -1,0 +1,27 @@
+{
+  "turnConfiguration": {
+    "version": 1,
+    "turns": [
+      {
+        "threadId": "test-session-id",
+        "turnId": "turn-id",
+        "requested": {
+          "model": "gpt-5.6-sol",
+          "effort": "xhigh"
+        },
+        "threadSettings": {
+          "model": "gpt-5.6-sol",
+          "effort": "xhigh",
+          "modelProvider": "openai"
+        },
+        "modelReroutes": [
+          {
+            "fromModel": "gpt-5.6-sol",
+            "toModel": "gpt-5.6-terra",
+            "reason": "highRiskCyberActivity"
+          }
+        ]
+      }
+    ]
+  }
+}
