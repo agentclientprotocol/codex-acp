@@ -1,33 +1,39 @@
 {
   "stopReason": "end_turn",
   "usage": {
-    "totalTokens": 1500,
-    "inputTokens": 700,
+    "totalTokens": 3500,
+    "inputTokens": 2300,
     "cachedReadTokens": 500,
-    "outputTokens": 200,
+    "outputTokens": 700,
     "thoughtTokens": 100
   },
   "_meta": {
     "quota": {
       "token_count": {
-        "totalTokens": 1500,
-        "inputTokens": 700,
+        "totalTokens": 3500,
+        "inputTokens": 2300,
         "cachedInputTokens": 500,
-        "outputTokens": 200,
+        "outputTokens": 700,
         "reasoningOutputTokens": 100
       },
       "model_usage": [
         {
           "model": "model-id",
           "token_count": {
-            "totalTokens": 1500,
-            "inputTokens": 700,
+            "totalTokens": 3500,
+            "inputTokens": 2300,
             "cachedInputTokens": 500,
-            "outputTokens": 200,
+            "outputTokens": 700,
             "reasoningOutputTokens": 100
           }
         }
       ]
+    },
+    "usageAccounting": {
+      "version": 1,
+      "source": "codex/thread-token-usage-delta",
+      "scope": "root_thread_prompt",
+      "completeness": "reported"
     }
   }
 }
