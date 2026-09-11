@@ -426,12 +426,15 @@ export class CodexCommands {
             sessionState.lastTokenUsage,
             sessionState.modelContextWindow
         );
+        const permissionLine = agentMode.permissionProfileId
+            ? `**Permission profile:** ${agentMode.permissionProfileId}`
+            : `**Sandbox:** ${agentMode.sandboxMode}`;
 
         const lines = [
             `**Model:** ${sessionState.currentModelId}`,
             `**Directory:** ${sessionState.cwd}`,
             `**Approval:** ${agentMode.approvalPolicy}`,
-            `**Sandbox:** ${agentMode.sandboxMode}`,
+            permissionLine,
             `**Account:** ${accountText}`,
             `**Session:** \`${sessionState.sessionId}\``,
             ``,
