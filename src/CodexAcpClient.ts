@@ -70,6 +70,7 @@ import {
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
+import {readSystemPromptAppend} from "./SystemPrompt";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 
 /**
@@ -528,6 +529,7 @@ export class CodexAcpClient {
     }
 
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
+        const developerInstructions = readSystemPromptAppend(request._meta);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -537,6 +539,7 @@ export class CodexAcpClient {
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
+            ...(developerInstructions !== undefined && {developerInstructions}),
         });
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
@@ -568,6 +571,7 @@ export class CodexAcpClient {
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+        const developerInstructions = readSystemPromptAppend(request._meta);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -577,6 +581,7 @@ export class CodexAcpClient {
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
+            ...(developerInstructions !== undefined && {developerInstructions}),
         });
         onSubscribed?.();
         // Resume cursors bound durable history; later turns arrive through live events.
@@ -608,6 +613,7 @@ export class CodexAcpClient {
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
+        const developerInstructions = readSystemPromptAppend(request._meta);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -615,6 +621,7 @@ export class CodexAcpClient {
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
+            ...(developerInstructions !== undefined && {developerInstructions}),
         });
 
         const codexModels = await this.fetchAvailableModels();
