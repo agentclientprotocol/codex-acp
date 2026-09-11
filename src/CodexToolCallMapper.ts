@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
 import { stripShellPrefix } from "./CommandUtils";
+import { commandExecutionAcpStatus } from "./CommandExecutionStatus";
 import type {
     FuzzyFileSearchSessionCompletedNotification,
     FuzzyFileSearchSessionUpdatedNotification
@@ -119,7 +120,7 @@ export function createCommandExecutionCompleteUpdate(
     const update: UpdateSessionEvent = {
         sessionUpdate: "tool_call_update",
         toolCallId: item.id,
-        status: item.status === "completed" ? "completed" : "failed",
+        status: commandExecutionAcpStatus(item),
         rawOutput: {
             formatted_output: item.aggregatedOutput ?? "",
             exit_code: item.exitCode,
