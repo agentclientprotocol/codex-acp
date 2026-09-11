@@ -75,7 +75,77 @@ const typedFailureCapabilities: acp.ClientCapabilities = {
     _meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}},
 };
 
+const expiredChatGptError: ErrorNotification["error"] = {
+    message: "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
+    codexErrorInfo: "unauthorized",
+    additionalDetails: null,
+    misalignment: null,
+};
+
 describe("CodexEventHandler - auth error events", () => {
+    it.each([null, "openai"])("returns standard AuthRequired for expired ChatGPT credentials with provider %s", async (authProvider) => {
+        const {result} = await runPromptWithError(createTestSessionState({
+            sessionId: "expired-chatgpt-session",
+            account: {type: "chatgpt", email: "test@example.com", planType: "pro"},
+            authConfigured: true,
+            authProvider,
+        }), expiredChatGptError);
+
+        // Check the JSON-RPC payload a standard ACP client receives, without extensions.
+        expect(JSON.parse(JSON.stringify(result))).toMatchObject({
+            code: -32000,
+            data: {
+                message: expiredChatGptError.message,
+                codexErrorInfo: "unauthorized",
+            },
+        });
+    });
+
+    it("returns AuthRequired for a terminal ChatGPT HTTP 401", async () => {
+        const {result} = await runPromptWithError(createTestSessionState({
+            account: {type: "chatgpt", email: "test@example.com", planType: "pro"},
+            authConfigured: true,
+        }), {
+            ...expiredChatGptError,
+            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: 401}},
+        });
+
+        expect(result).toMatchObject({code: -32000});
+    });
+
+    it("does not request ChatGPT login for a custom provider using a cached ChatGPT account", async () => {
+        const {result} = await runPromptWithError(createTestSessionState({
+            account: {type: "chatgpt", email: "test@example.com", planType: "pro"},
+            authConfigured: true,
+            authProvider: "custom-provider",
+        }), expiredChatGptError);
+
+        expect(result).toMatchObject({code: -32603});
+    });
+
+    it("keeps retryable ChatGPT auth errors non-terminal", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            account: {type: "chatgpt", email: "test@example.com", planType: "pro"},
+            authConfigured: true,
+        }), expiredChatGptError, true);
+
+        expect(result).toMatchObject({stopReason: "end_turn"});
+        expect(updates).toEqual([expect.objectContaining({
+            sessionUpdate: "session_info_update",
+        })]);
+    });
+
+    it("preserves negotiated typed failures for expired ChatGPT credentials", async () => {
+        const {result} = await runPromptWithError(createTestSessionState({
+            account: {type: "chatgpt", email: "test@example.com", planType: "pro"},
+            authConfigured: true,
+        }), expiredChatGptError, false, typedFailureCapabilities);
+
+        expect(result).toMatchObject({
+            _meta: {jetbrains: {air: {sessionFailure: {category: "access", actions: ["login"]}}}},
+        });
+    });
+
     it("publishes a typed terminal failure instead of assistant text when AIR negotiated it", async () => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: "typed-failure-session",
