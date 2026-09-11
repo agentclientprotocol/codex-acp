@@ -37,8 +37,21 @@ export class AgentMode {
 
     static readonly ReadOnly = new AgentMode(
         "read-only",
+        "Read-only",
+        "Inspect only, ask for approval to modify any files",
+        "standard",
+        "on-request",
+        "user",
+        {
+            type: "readOnly",
+            networkAccess: false,
+        },
+        "read-only",
+    );
+    static readonly EditInternal = new AgentMode(
+        "edit-internal",
         "Ask for approval",
-        "Always ask to edit external files and use the internet",
+        "Edit workspace files, ask for approval to edit external files or use the internet",
         "standard",
         "on-request",
         "user",
@@ -114,7 +127,7 @@ export class AgentMode {
     }
 
     static all(): AgentMode[] {
-        return [AgentMode.ReadOnly, AgentMode.Agent, AgentMode.AgentFullAccess];
+        return [AgentMode.ReadOnly, AgentMode.EditInternal, AgentMode.Agent, AgentMode.AgentFullAccess];
     }
 
     static find(modeId: string): AgentMode | null {
