@@ -12,6 +12,7 @@ export const JETBRAINS_META_KEY = "jetbrains";
 export const AIR_META_KEY = "air";
 export const AIR_EXTENSION_VERSION_KEY = "version";
 export const AIR_EXTENSION_CAPABILITIES_KEY = "capabilities";
+export const AIR_DIFF_STATS_KEY = "diffStats";
 export const AIR_SESSION_FAILURE_KEY = "sessionFailure";
 export const AIR_AGENT_FILE_CHANGE_REPORT_KEY = "agentFileChangeReport";
 export const AIR_NATIVE_SUBAGENT_SESSIONS_KEY = "nativeSubagentSessions";

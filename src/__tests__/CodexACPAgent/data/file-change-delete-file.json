@@ -16,7 +16,17 @@
             "newText": "",
             "path": "/test/project/OldFile.kt",
             "_meta": {
-              "kind": "delete"
+              "kind": "delete",
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "diffStats": {
+                    "version": 1,
+                    "added": 0,
+                    "removed": 3
+                  }
+                }
+              }
             }
           }
         ]

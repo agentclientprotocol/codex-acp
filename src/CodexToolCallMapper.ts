@@ -1,5 +1,7 @@
 import type { ContentBlock, ToolCallContent } from "@agentclientprotocol/sdk";
-import { applyPatch, parsePatch, reversePatch } from "diff";
+import { applyPatch, parsePatch, reversePatch, type StructuredPatch } from "diff";
+import { DiffStatsCalculator } from "./DiffStats";
+import { AIR_DIFF_STATS_KEY, withAirMeta } from "./AirExtension";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
@@ -47,6 +49,7 @@ type ContextCompactionItem = ThreadItem & { type: "contextCompaction" };
 type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
 
 const CONTEXT_COMPACTION_META = createContextCompactionMeta();
+const DIFF_STATS = new DiffStatsCalculator();
 
 function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
     switch (status) {
@@ -838,9 +841,7 @@ async function createAddFileContent(change: FileUpdateChange): Promise<ToolCallC
         oldText: null,
         newText: change.diff, // app-server always returns file content instead of diff
         path: change.path,
-        _meta: {
-            kind: "add",
-        },
+        _meta: withAirMeta({ kind: "add" }, AIR_DIFF_STATS_KEY, DIFF_STATS.addedFile(change.diff)),
     };
 }
 
@@ -848,55 +849,44 @@ async function createUpdateFileContent(change: FileUpdateChange): Promise<ToolCa
     if (change.kind.type !== "update") return null;
 
     const unifiedDiff = recoverCorruptedDiff(change.diff);
+    const patches = parsePatch(unifiedDiff);
+    if (patches.length !== 1) return null;
+    const patch = patches[0]!;
     const movePath = change.kind.move_path;
 
     const oldContent = await readFileContent(change.path);
     if (oldContent !== null) {
-        const patchedContent = applyPatch(oldContent, unifiedDiff);
+        const patchedContent = applyPatch(oldContent, patch);
         if (patchedContent === false) {
             // If Codex runs in full access mode, the file might already be patched.
             // we can verify this by checking if the reverted patch applies.
-            const revertedPatch = revertPatch(unifiedDiff);
-            if (revertedPatch) {
-                const revertedContent = applyPatch(oldContent, revertedPatch);
-                if (revertedContent !== false) {
-                    return createUpdateDiffContent(change.path, revertedContent, oldContent);
-                }
+            const revertedContent = applyPatch(oldContent, reversePatch(patch));
+            if (revertedContent !== false) {
+                return createUpdateDiffContent(change.path, revertedContent, oldContent, patch);
             }
             return null;
         }
-        return createUpdateDiffContent(movePath ?? change.path, oldContent, patchedContent);
+        return createUpdateDiffContent(movePath ?? change.path, oldContent, patchedContent, patch);
     }
 
     if (!movePath) return null;
     const newContent = await readFileContent(movePath);
     if (newContent === null) return null;
 
-    const revertedPatch = revertPatch(unifiedDiff);
-    if (!revertedPatch) return null;
-
-    const revertedContent = applyPatch(newContent, revertedPatch);
+    const revertedContent = applyPatch(newContent, reversePatch(patch));
     if (revertedContent === false) return null;
 
-    return createUpdateDiffContent(movePath, revertedContent, newContent);
+    return createUpdateDiffContent(movePath, revertedContent, newContent, patch);
 }
 
-function revertPatch(unifiedDiff: string) {
-    const [patch] = parsePatch(unifiedDiff);
-    if (!patch) return null;
-
-    return reversePatch(patch);
-}
-
-function createUpdateDiffContent(path: string, oldText: string, newText: string): ToolCallContent {
+function createUpdateDiffContent(path: string, oldText: string, newText: string, patch: StructuredPatch): ToolCallContent {
+    const stats = DIFF_STATS.update(patch);
     return {
         type: "diff",
         oldText,
         newText,
         path,
-        _meta: {
-            kind: "update",
-        },
+        _meta: stats ? withAirMeta({ kind: "update" }, AIR_DIFF_STATS_KEY, stats) : { kind: "update" },
     };
 }
 
@@ -906,9 +896,7 @@ async function createDeleteFileContent(change: FileUpdateChange): Promise<ToolCa
         oldText: change.diff, // app-server always returns file content instead of diff
         newText: "",
         path: change.path,
-        _meta: {
-            kind: "delete",
-        }
+        _meta: withAirMeta({ kind: "delete" }, AIR_DIFF_STATS_KEY, DIFF_STATS.deletedFile(change.diff))
     }
 }
 

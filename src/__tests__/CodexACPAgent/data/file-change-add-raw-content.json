@@ -16,7 +16,17 @@
             "newText": "fun main() {\n    println(\"Hello, World!\")\n}\n",
             "path": "/test/project/RawFile.kt",
             "_meta": {
-              "kind": "add"
+              "kind": "add",
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "diffStats": {
+                    "version": 1,
+                    "added": 3,
+                    "removed": 0
+                  }
+                }
+              }
             }
           }
         ]
