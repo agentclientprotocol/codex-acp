@@ -1102,9 +1102,13 @@ export class CodexEventHandler {
                 this.createTurnErrorData(params.error),
             );
         } else if (this.isAuthenticationRequiredError(error)) {
-            this.failure = this.sessionState.authConfigured
-                ? RequestError.internalError(this.createTurnErrorData(params.error))
-                : RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message);
+            // A saved ChatGPT account can outlive its credentials. Standard ACP
+            // clients need AuthRequired to offer login again after a terminal 401.
+            const canLoginAgain = this.sessionState.account?.type === "chatgpt"
+                && (this.sessionState.authProvider === null || this.sessionState.authProvider === "openai");
+            this.failure = !this.sessionState.authConfigured || canLoginAgain
+                ? RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message)
+                : RequestError.internalError(this.createTurnErrorData(params.error));
         }
         return createAgentTextMessageChunk(`${params.error.message}\n\n`);
     }
