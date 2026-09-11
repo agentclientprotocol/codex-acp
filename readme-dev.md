@@ -84,3 +84,8 @@ npm run package:all
 1. Update the `@openai/codex` version in `package.json` (under `dependencies`).
 2. Regenerate Codex types in `src/app-server/`: `npm run generate-types`
 3. Ensure there are no type errors or failed tests: `npm run typecheck` and `npm run test`
+
+### AIR diff statistics
+
+See the [diff statistics specification](docs/diff-statistics-extension.md) for the
+`_meta.jetbrains.air.diffStats` payload and its compatibility rules.

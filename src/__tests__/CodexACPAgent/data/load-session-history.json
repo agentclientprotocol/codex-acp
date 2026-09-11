@@ -280,11 +280,16 @@
             "path": "/test/project/Added.txt",
             "_meta": {
               "kind": "add",
-              "com.intellij/diffStats": {
-                "version": 1,
-                "added": 2,
-                "removed": 0,
-                "firstChangedLine": 1
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "diffStats": {
+                    "version": 1,
+                    "added": 2,
+                    "removed": 0,
+                    "firstChangedLine": 1
+                  }
+                }
               }
             }
           }

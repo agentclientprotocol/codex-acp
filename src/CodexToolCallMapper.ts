@@ -1,6 +1,7 @@
 import type { ContentBlock, ToolCallContent } from "@agentclientprotocol/sdk";
 import { applyPatch, parsePatch, reversePatch, type StructuredPatch } from "diff";
 import { DiffStatsCalculator } from "./DiffStats";
+import { AIR_DIFF_STATS_KEY, withAirMeta } from "./AirExtension";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
@@ -840,10 +841,7 @@ async function createAddFileContent(change: FileUpdateChange): Promise<ToolCallC
         oldText: null,
         newText: change.diff, // app-server always returns file content instead of diff
         path: change.path,
-        _meta: {
-            kind: "add",
-            "com.intellij/diffStats": DIFF_STATS.addedFile(change.diff),
-        },
+        _meta: withAirMeta({ kind: "add" }, AIR_DIFF_STATS_KEY, DIFF_STATS.addedFile(change.diff)),
     };
 }
 
@@ -888,10 +886,7 @@ function createUpdateDiffContent(path: string, oldText: string, newText: string,
         oldText,
         newText,
         path,
-        _meta: {
-            kind: "update",
-            ...(stats ? { "com.intellij/diffStats": stats } : {}),
-        },
+        _meta: stats ? withAirMeta({ kind: "update" }, AIR_DIFF_STATS_KEY, stats) : { kind: "update" },
     };
 }
 
@@ -901,10 +896,7 @@ async function createDeleteFileContent(change: FileUpdateChange): Promise<ToolCa
         oldText: change.diff, // app-server always returns file content instead of diff
         newText: "",
         path: change.path,
-        _meta: {
-            kind: "delete",
-            "com.intellij/diffStats": DIFF_STATS.deletedFile(change.diff),
-        }
+        _meta: withAirMeta({ kind: "delete" }, AIR_DIFF_STATS_KEY, DIFF_STATS.deletedFile(change.diff))
     }
 }
 

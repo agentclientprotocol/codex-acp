@@ -289,7 +289,7 @@ describe('CodexEventHandler - file change events', () => {
         expect(event.content).toHaveLength(1);
         expect(event.content![0]!._meta).toEqual({
             kind: 'update',
-            ...(expected ? { 'com.intellij/diffStats': expected } : {}),
+            ...(expected ? { jetbrains: { air: { version: 1, diffStats: expected } } } : {}),
         });
     });
 

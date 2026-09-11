@@ -17,11 +17,16 @@
             "path": "/test/project/NewFile.kt",
             "_meta": {
               "kind": "add",
-              "com.intellij/diffStats": {
-                "version": 1,
-                "added": 5,
-                "removed": 0,
-                "firstChangedLine": 1
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "diffStats": {
+                    "version": 1,
+                    "added": 5,
+                    "removed": 0,
+                    "firstChangedLine": 1
+                  }
+                }
               }
             }
           }
