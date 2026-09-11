@@ -880,7 +880,7 @@ async function createUpdateFileContent(change: FileUpdateChange): Promise<ToolCa
 }
 
 function createUpdateDiffContent(path: string, oldText: string, newText: string, patch: StructuredPatch): ToolCallContent {
-    const stats = DIFF_STATS.update(patch, oldText, newText);
+    const stats = DIFF_STATS.update(patch);
     return {
         type: "diff",
         oldText,

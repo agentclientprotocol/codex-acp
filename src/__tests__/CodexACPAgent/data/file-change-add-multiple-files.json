@@ -23,8 +23,7 @@
                   "diffStats": {
                     "version": 1,
                     "added": 1,
-                    "removed": 0,
-                    "firstChangedLine": 1
+                    "removed": 0
                   }
                 }
               }
@@ -43,8 +42,7 @@
                   "diffStats": {
                     "version": 1,
                     "added": 1,
-                    "removed": 0,
-                    "firstChangedLine": 1
+                    "removed": 0
                   }
                 }
               }

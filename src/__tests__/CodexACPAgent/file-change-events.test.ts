@@ -269,9 +269,9 @@ describe('CodexEventHandler - file change events', () => {
     });
 
     it.each([
-        { name: 'before application', disk: 'old\n', expected: { version: 1, added: 2, removed: 1, firstChangedLine: 1 } },
-        { name: 'after application', disk: 'new\nextra\n', expected: { version: 1, added: 2, removed: 1, firstChangedLine: 1 } },
-        { name: 'a relocated hunk', disk: 'prefix\nold\n', expected: undefined },
+        { name: 'before application', disk: 'old\n', expected: { version: 1, added: 2, removed: 1 } },
+        { name: 'after application', disk: 'new\nextra\n', expected: { version: 1, added: 2, removed: 1 } },
+        { name: 'a relocated hunk', disk: 'prefix\nold\n', expected: { version: 1, added: 2, removed: 1 } },
     ])('publishes reliable update statistics $name', async ({ disk, expected }) => {
         mockFileContent('/test/project/OldFile.kt', disk);
         const event = await createFileChangeUpdate({
