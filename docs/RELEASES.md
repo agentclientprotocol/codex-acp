@@ -61,9 +61,12 @@ handling for preview versions.
 version in the working tree, then publishes to npm. The `prepublishOnly` hook
 builds the bundle before publication. After publishing, `publish-tag-preview`
 creates the tag and `trigger-registry-update` dispatches the registry update
-independently; neither waits for the other. The registry job is shared with the
-stable path. A tag failure can be retried on its own with **Re-run failed jobs**,
-leaving the successful npm publish untouched.
+independently; neither waits for the other. Before dispatching, the registry job
+polls npm for the exact published version for up to 12.5 minutes, including
+downloading its tarball, so the registry never checks while npm is still
+propagating the package. The registry job is shared with the stable path. A tag
+failure can be retried on its own with **Re-run failed jobs**, leaving the
+successful npm publish untouched.
 
 Previews start directly on push, without waiting for the
 [`CI`](../.github/workflows/ci.yml) workflow or the `release-please` job. The
@@ -72,8 +75,9 @@ still requires the `verify` job to pass.
 
 The publish step runs `npm publish --access public --tag preview` and sets
 `published=true` only after it succeeds. Both downstream jobs use that output
-to proceed with preview tagging and registry dispatch. This is a real publish,
-with no dry-run stage.
+to proceed with preview tagging and the registry availability check. This is a
+real publish, with no dry-run stage; the later dry run downloads the published
+tarball to verify it has propagated.
 
 A stable and a preview dispatch can never collide — a release merge publishes
 stable and skips the preview, every other push does the reverse — so the registry
