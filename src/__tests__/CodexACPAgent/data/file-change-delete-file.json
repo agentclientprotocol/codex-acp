@@ -16,7 +16,13 @@
             "newText": "",
             "path": "/test/project/OldFile.kt",
             "_meta": {
-              "kind": "delete"
+              "kind": "delete",
+              "com.intellij/diffStats": {
+                "version": 1,
+                "added": 0,
+                "removed": 3,
+                "firstChangedLine": 1
+              }
             }
           }
         ]

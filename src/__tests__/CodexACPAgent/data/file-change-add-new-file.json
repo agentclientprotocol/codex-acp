@@ -16,7 +16,13 @@
             "newText": "package test.project\n\nclass NewFile {\n    fun hello() = \"Hello\"\n}\n",
             "path": "/test/project/NewFile.kt",
             "_meta": {
-              "kind": "add"
+              "kind": "add",
+              "com.intellij/diffStats": {
+                "version": 1,
+                "added": 5,
+                "removed": 0,
+                "firstChangedLine": 1
+              }
             }
           }
         ]

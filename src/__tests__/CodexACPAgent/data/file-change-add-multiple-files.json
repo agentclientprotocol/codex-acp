@@ -16,7 +16,13 @@
             "newText": "class FileA\n",
             "path": "/test/project/FileA.kt",
             "_meta": {
-              "kind": "add"
+              "kind": "add",
+              "com.intellij/diffStats": {
+                "version": 1,
+                "added": 1,
+                "removed": 0,
+                "firstChangedLine": 1
+              }
             }
           },
           {
@@ -25,7 +31,13 @@
             "newText": "class FileB\n",
             "path": "/test/project/FileB.kt",
             "_meta": {
-              "kind": "add"
+              "kind": "add",
+              "com.intellij/diffStats": {
+                "version": 1,
+                "added": 1,
+                "removed": 0,
+                "firstChangedLine": 1
+              }
             }
           }
         ]

@@ -16,7 +16,13 @@
             "newText": "fun main() {\n    println(\"Hello, World!\")\n}\n",
             "path": "/test/project/RawFile.kt",
             "_meta": {
-              "kind": "add"
+              "kind": "add",
+              "com.intellij/diffStats": {
+                "version": 1,
+                "added": 3,
+                "removed": 0,
+                "firstChangedLine": 1
+              }
             }
           }
         ]

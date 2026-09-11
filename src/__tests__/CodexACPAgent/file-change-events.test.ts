@@ -268,6 +268,31 @@ describe('CodexEventHandler - file change events', () => {
         );
     });
 
+    it.each([
+        { name: 'before application', disk: 'old\n', expected: { version: 1, added: 2, removed: 1, firstChangedLine: 1 } },
+        { name: 'after application', disk: 'new\nextra\n', expected: { version: 1, added: 2, removed: 1, firstChangedLine: 1 } },
+        { name: 'a relocated hunk', disk: 'prefix\nold\n', expected: undefined },
+    ])('publishes reliable update statistics $name', async ({ disk, expected }) => {
+        mockFileContent('/test/project/OldFile.kt', disk);
+        const event = await createFileChangeUpdate({
+            type: 'fileChange',
+            id: 'stats-update',
+            changes: [{
+                path: '/test/project/OldFile.kt',
+                kind: { type: 'update', move_path: null },
+                diff: '@@ -1 +1,2 @@\n-old\n+new\n+extra\n',
+            }],
+            status: 'completed',
+        });
+        expect(event.sessionUpdate).toBe('tool_call');
+        if (event.sessionUpdate !== 'tool_call') throw new Error('Expected a file-change tool call');
+        expect(event.content).toHaveLength(1);
+        expect(event.content![0]!._meta).toEqual({
+            kind: 'update',
+            ...(expected ? { 'com.intellij/diffStats': expected } : {}),
+        });
+    });
+
     it('should ignore broken unified diffs in update file changes', async () => {
         const fileChange: ThreadItem & { type: 'fileChange' } = {
             type: 'fileChange',
