@@ -41,6 +41,10 @@ export {
 
 export const LEGACY_SET_SESSION_MODEL_METHOD = "session/set_model";
 export const SESSION_STEERING_METHOD = "_session/steering";
+export const KANDEV_GUARDED_TTY_CAPABILITY = "kandev.guarded-tty-exec";
+export const KANDEV_GUARDED_TTY_VERSION = 1;
+export const KANDEV_GUARDED_TTY_CAPABILITY_METHOD = "_kandev/guarded_tty/capability";
+export const KANDEV_GUARDED_TTY_EXEC_METHOD = "_kandev/guarded_tty/exec";
 
 export type LegacySessionModel = {
     modelId: string;
@@ -78,6 +82,8 @@ export type ExtMethodRequest =
     | LegacySetSessionModelExtRequest
     | SessionSteeringExtRequest
     | GoalControlExtRequest
+    | KandevGuardedTtyCapabilityExtRequest
+    | KandevGuardedTtyExecExtRequest
     | AsyncTaskStopExtRequest
 
 export function isExtMethodRequest(request: { method: string, params: Record<string, unknown> }): request is ExtMethodRequest {
@@ -87,6 +93,8 @@ export function isExtMethodRequest(request: { method: string, params: Record<str
         || request.method === GOAL_CONTROL_METHOD
         || request.method === LEGACY_GOAL_CONTROL_METHOD
         || request.method === SESSION_STEERING_METHOD
+        || request.method === KANDEV_GUARDED_TTY_CAPABILITY_METHOD
+        || request.method === KANDEV_GUARDED_TTY_EXEC_METHOD
         || request.method === ASYNC_TASK_STOP_METHOD;
 }
 
@@ -131,6 +139,63 @@ export type SessionSteeringResponse = {
 export type SessionSteeringExtRequest = {
     method: typeof SESSION_STEERING_METHOD;
     params: SessionSteerRequest;
+}
+
+export type KandevGuardedTtyCapabilityRequest = {
+    sessionId: SessionId;
+}
+
+export type KandevGuardedTtyCapabilityResponse = {
+    capability: typeof KANDEV_GUARDED_TTY_CAPABILITY;
+    version: typeof KANDEV_GUARDED_TTY_VERSION;
+    supported: true;
+    capability_method: typeof KANDEV_GUARDED_TTY_CAPABILITY_METHOD;
+    exec_method: typeof KANDEV_GUARDED_TTY_EXEC_METHOD;
+    session_id: SessionId;
+}
+
+export type KandevGuardedTtyCapabilityExtRequest = {
+    method: typeof KANDEV_GUARDED_TTY_CAPABILITY_METHOD;
+    params: KandevGuardedTtyCapabilityRequest;
+}
+
+export type KandevGuardedTtyExecRequest = {
+    sessionId: SessionId;
+    argv: string[];
+}
+
+export type KandevGuardedTtyDenialCode =
+    | "app_server_error"
+    | "cancelled"
+    | "invalid_output"
+    | "output_overflow"
+    | "stale_session"
+    | "timeout";
+
+export type KandevGuardedTtyExecReceipt = {
+    capability: typeof KANDEV_GUARDED_TTY_CAPABILITY;
+    version: typeof KANDEV_GUARDED_TTY_VERSION;
+    session_id: SessionId;
+    method: "command/exec";
+    requested_tty: true;
+    dispatched_tty: boolean;
+    process_id: string | null;
+    cwd: string | null;
+    outcome: "completed" | "failed" | "denied";
+    denial_code: KandevGuardedTtyDenialCode | null;
+    stdout: string;
+    stderr: string;
+    stdout_bytes: number;
+    stderr_bytes: number;
+    output_bytes: number;
+    exit_code: number | null;
+    started_at: string;
+    completed_at: string;
+}
+
+export type KandevGuardedTtyExecExtRequest = {
+    method: typeof KANDEV_GUARDED_TTY_EXEC_METHOD;
+    params: KandevGuardedTtyExecRequest;
 }
 
 export async function steerSessionWithFallback(

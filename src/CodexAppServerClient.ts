@@ -83,6 +83,11 @@ import type {
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
     ItemCompletedNotification,
+    CommandExecOutputDeltaNotification,
+    CommandExecParams,
+    CommandExecResponse,
+    CommandExecTerminateParams,
+    CommandExecTerminateResponse,
 } from "./app-server/v2";
 import type {
     ThreadBackgroundTerminalsRequest,
@@ -167,6 +172,10 @@ export class CodexAppServerClient {
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
+    private readonly commandExecOutputCaptures = new Map<
+        string,
+        Set<(event: CommandExecOutputDeltaNotification) => void>
+    >();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -199,6 +208,9 @@ export class CodexAppServerClient {
             }
             if (serverNotification.method === "thread/settings/updated") {
                 this.threadSettings.set(serverNotification.params.threadId, serverNotification.params.threadSettings);
+            }
+            if (serverNotification.method === "command/exec/outputDelta") {
+                this.recordCommandExecOutput(serverNotification.params);
             }
             const routing = extractTurnRouting(serverNotification);
             if (this.handleStaleTurnNotification(serverNotification, routing)) {
@@ -770,6 +782,32 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "skills/list", params });
     }
 
+    async commandExec(params: CommandExecParams): Promise<CommandExecResponse> {
+        return await this.sendRequest({method: "command/exec", params});
+    }
+
+    async commandExecTerminate(params: CommandExecTerminateParams): Promise<CommandExecTerminateResponse> {
+        return await this.sendRequest({method: "command/exec/terminate", params});
+    }
+
+    captureCommandExecOutput(
+        processId: string,
+        capture: (event: CommandExecOutputDeltaNotification) => void,
+    ): () => void {
+        const captures = this.commandExecOutputCaptures.get(processId) ?? new Set();
+        captures.add(capture);
+        this.commandExecOutputCaptures.set(processId, captures);
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            captures.delete(capture);
+            if (captures.size === 0) {
+                this.commandExecOutputCaptures.delete(processId);
+            }
+        };
+    }
+
     /**
      * Registers a notification handler for a specific session.
      * Replaces any existing handler for the same session, preventing handler accumulation.
@@ -861,6 +899,14 @@ export class CodexAppServerClient {
         }
         for (const capture of captures) {
             capture();
+        }
+    }
+
+    private recordCommandExecOutput(event: CommandExecOutputDeltaNotification): void {
+        const captures = this.commandExecOutputCaptures.get(event.processId);
+        if (!captures) return;
+        for (const capture of captures) {
+            capture(event);
         }
     }
 

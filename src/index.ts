@@ -14,8 +14,14 @@ import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
 import {
     GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
+    KANDEV_GUARDED_TTY_CAPABILITY_METHOD,
+    KANDEV_GUARDED_TTY_EXEC_METHOD,
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
+import {
+    GUARDED_TTY_MAX_ARG_COUNT,
+    GUARDED_TTY_MAX_SINGLE_ARG_BYTES,
+} from "./GuardedTtyExec";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 
 const emptyExtensionParamsParser = z.preprocess(
@@ -45,6 +51,16 @@ const goalControlParamsParser = z.discriminatedUnion("action", [
     }).passthrough(),
 ]);
 
+const guardedTtyCapabilityParamsParser = z.object({
+    sessionId: z.string(),
+}).strict();
+
+const guardedTtyExecParamsParser = z.object({
+    sessionId: z.string(),
+    argv: z.array(z.string().min(1).max(GUARDED_TTY_MAX_SINGLE_ARG_BYTES))
+        .min(1)
+        .max(GUARDED_TTY_MAX_ARG_COUNT),
+}).strict();
 const asyncTaskStopParamsParser = z.object({
     sessionId: z.string().trim().min(1),
     asyncTaskId: z.string().trim().min(1),
@@ -169,5 +185,7 @@ function startAcpServer() {
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
+        .onRequest(KANDEV_GUARDED_TTY_CAPABILITY_METHOD, guardedTtyCapabilityParamsParser, (ctx) => getAgent().extMethod(KANDEV_GUARDED_TTY_CAPABILITY_METHOD, ctx.params, ctx.signal))
+        .onRequest(KANDEV_GUARDED_TTY_EXEC_METHOD, guardedTtyExecParamsParser, (ctx) => getAgent().extMethod(KANDEV_GUARDED_TTY_EXEC_METHOD, ctx.params, ctx.signal))
         .connect(acpJsonStream);
 }
