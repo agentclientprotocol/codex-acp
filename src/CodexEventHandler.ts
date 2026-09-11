@@ -223,6 +223,7 @@ export class CodexEventHandler {
     private planUpdateChain: Promise<void> = Promise.resolve();
     private disposed = false;
     private readonly seenReasoningDeltaItemIds = new Set<string>();
+    private readonly seenAgentMessageDeltaItemIds = new Set<string>();
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
@@ -623,6 +624,7 @@ export class CodexEventHandler {
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
+        this.seenAgentMessageDeltaItemIds.add(event.itemId);
         const phase = this.agentMessagePhases.get(event.itemId) ?? null;
         return createAgentTextMessageChunk(event.delta, event.itemId, createCodexMessagePhaseMeta(phase));
     }
@@ -745,7 +747,17 @@ export class CodexEventHandler {
                 return this.subagents.legacyCollaborationStarted(event.item);
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
-                return null;
+                if (this.seenAgentMessageDeltaItemIds.delete(event.item.id)) {
+                    return null;
+                }
+                if (event.item.text.length === 0) {
+                    return null;
+                }
+                return createAgentTextMessageChunk(
+                    event.item.text,
+                    event.item.id,
+                    createCodexMessagePhaseMeta(event.item.phase),
+                );
             case "contextCompaction":
                 return createContextCompactionStartUpdate(event.item);
             case "subAgentActivity":

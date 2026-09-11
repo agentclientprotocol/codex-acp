@@ -86,4 +86,102 @@ describe("CodexEventHandler - agent message events", () => {
             "data/agent-message-phases.json"
         );
     });
+
+    it("emits completed agent text when a provider omits message deltas", async () => {
+        const notifications: ServerNotification[] = [
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "agentMessage",
+                        id: "completed-only-message",
+                        text: "Ark-compatible final answer.",
+                        phase: "final_answer",
+                        memoryCitation: null,
+                        delivery: null,
+                        questions: null,
+                    },
+                },
+            },
+            {
+                method: "item/completed",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    completedAtMs: 1,
+                    item: {
+                        type: "agentMessage",
+                        id: "completed-only-message",
+                        text: "Ark-compatible final answer.",
+                        phase: "final_answer",
+                        memoryCitation: null,
+                        delivery: null,
+                        questions: null,
+                    },
+                },
+            },
+        ];
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+
+        const dump = mockFixture.getAcpConnectionDump([]);
+        expect(dump).toContain("Ark-compatible final answer.");
+        expect(dump.match(/Ark-compatible final answer\./g)).toHaveLength(1);
+    });
+
+    it("does not duplicate completed text after streamed deltas", async () => {
+        const notifications: ServerNotification[] = [
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "agentMessage",
+                        id: "streamed-message",
+                        text: "",
+                        phase: null,
+                        memoryCitation: null,
+                        delivery: null,
+                        questions: null,
+                    },
+                },
+            },
+            {
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    itemId: "streamed-message",
+                    delta: "Streamed once.",
+                },
+            },
+            {
+                method: "item/completed",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    completedAtMs: 1,
+                    item: {
+                        type: "agentMessage",
+                        id: "streamed-message",
+                        text: "Streamed once.",
+                        phase: null,
+                        memoryCitation: null,
+                        delivery: null,
+                        questions: null,
+                    },
+                },
+            },
+        ];
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+
+        const dump = mockFixture.getAcpConnectionDump([]);
+        expect(dump.match(/Streamed once\./g)).toHaveLength(1);
+    });
 });
