@@ -6,11 +6,12 @@ import type {
     ThreadItem,
 } from "../../app-server/v2";
 import {stripShellPrefix} from "../../CommandUtils";
+import {commandExecutionAcpStatus} from "../../CommandExecutionStatus";
 import {commandToolName} from "../../ToolCallName";
 import {textContent} from "../AcpToolCallRenderer";
 import type {PermissionToolFacts, ToolFacts} from "../ToolFacts";
 import {permissionProfileContent, permissionProfilePaths} from "./SandboxPermissionReporter";
-import {toTerminalToolStatus, toToolStatus} from "./ToolStatus";
+import {toToolStatus} from "./ToolStatus";
 
 type CommandPermissionParams = CommandExecutionRequestApprovalParams & {
     additionalPermissions?: AdditionalPermissionProfile | null;
@@ -213,7 +214,7 @@ function completionFacts(
         toolCallId: item.id,
         report: "update",
         ...(name === undefined ? {} : {name}),
-        status: toTerminalToolStatus(item.status),
+        status: commandExecutionAcpStatus(item),
     };
     if (!usesTerminal(item)) {
         const viewedFile = singleAction(item.commandActions)?.type === "read";
