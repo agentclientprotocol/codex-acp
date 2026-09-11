@@ -39,6 +39,7 @@ import type {
     WarningNotification
 } from "./app-server/v2";
 import type { McpStartupCompleteEvent } from "./app-server/McpStartupCompleteEvent";
+import { commandExecutionAcpStatus } from "./CommandExecutionStatus";
 import {toTokenCount} from "./TokenCount";
 import {
     commandExecutionUsesTerminalOutput,
@@ -1009,7 +1010,7 @@ export class CodexEventHandler {
         const update: UpdateSessionEvent = {
             sessionUpdate: "tool_call_update",
             toolCallId: item.id,
-            status: item.status === "completed" ? "completed" : "failed",
+            status: commandExecutionAcpStatus(item),
             rawOutput: {
                 formatted_output: item.aggregatedOutput ?? "",
                 exit_code: item.exitCode
