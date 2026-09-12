@@ -254,6 +254,45 @@ describe("Session config options", () => {
         expect(result.configOptions?.find(o => o.id === COLLABORATION_MODE_CONFIG_ID)).toMatchObject({currentValue: "plan"});
     });
 
+    it("uses plan_mode_reasoning_effort while Plan mode is active", async () => {
+        const {fast} = buildModels();
+        const {codexAcpAgent, codexAcpClient} = await createSession("fast-model[low]", [fast]);
+        vi.spyOn(codexAcpClient, "getPlanModeReasoningEffort").mockResolvedValue("high");
+        const update = vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
+
+        const enabled = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: COLLABORATION_MODE_CONFIG_ID,
+            value: PLAN_COLLABORATION_MODE,
+        });
+
+        expect(update).toHaveBeenCalledWith(expect.objectContaining({
+            threadId: "session-id",
+            collaborationMode: expect.objectContaining({
+                mode: "plan",
+                settings: expect.objectContaining({reasoning_effort: "high"}),
+            }),
+        }));
+        expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("fast-model[high]");
+        expect(enabled.configOptions?.find(o => o.id === REASONING_EFFORT_CONFIG_ID)).toMatchObject({currentValue: "high"});
+
+        const disabled = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: COLLABORATION_MODE_CONFIG_ID,
+            value: "default",
+        });
+
+        expect(update).toHaveBeenLastCalledWith(expect.objectContaining({
+            threadId: "session-id",
+            collaborationMode: expect.objectContaining({
+                mode: "default",
+                settings: expect.objectContaining({reasoning_effort: "low"}),
+            }),
+        }));
+        expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("fast-model[low]");
+        expect(disabled.configOptions?.find(o => o.id === REASONING_EFFORT_CONFIG_ID)).toMatchObject({currentValue: "low"});
+    });
+
     it("toggles collaboration mode with /plan without starting a model turn", async () => {
         const {fast} = buildModels();
         const {fixture, codexAcpAgent, codexAcpClient} = await createSession("fast-model[medium]", [fast]);
