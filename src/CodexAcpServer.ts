@@ -26,8 +26,11 @@ import type {InputModality, ReasoningEffort, ServerNotification} from "./app-ser
 import type {
     Account,
     AccountUpdatedNotification,
+    ApprovalsReviewer,
+    AskForApproval,
     Model,
     ReasoningEffortOption,
+    SandboxPolicy,
     Thread,
     ThreadGoal,
     ThreadItem,
@@ -160,6 +163,9 @@ export interface SessionState {
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     supportedInputModalities: Array<InputModality>,
     agentMode: AgentMode,
+    resolvedApprovalPolicy: AskForApproval,
+    resolvedApprovalsReviewer: ApprovalsReviewer,
+    resolvedSandboxPolicy: SandboxPolicy,
     collaborationMode: ModeKind,
     currentTurnId: string | null;
     lastTokenUsage: TokenCount | null;
@@ -666,6 +672,9 @@ export class CodexAcpServer {
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
+            resolvedApprovalPolicy: sessionMetadata.approvalPolicy ?? AgentMode.Agent.approvalPolicy,
+            resolvedApprovalsReviewer: sessionMetadata.approvalsReviewer ?? AgentMode.Agent.approvalsReviewer,
+            resolvedSandboxPolicy: sessionMetadata.sandboxPolicy ?? AgentMode.Agent.sandboxPolicy,
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             lastTokenUsage: null,
@@ -1923,6 +1932,9 @@ export class CodexAcpServer {
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(),
+            resolvedApprovalPolicy: sessionMetadata.approvalPolicy ?? AgentMode.Agent.approvalPolicy,
+            resolvedApprovalsReviewer: sessionMetadata.approvalsReviewer ?? AgentMode.Agent.approvalsReviewer,
+            resolvedSandboxPolicy: sessionMetadata.sandboxPolicy ?? AgentMode.Agent.sandboxPolicy,
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             lastTokenUsage: null,
@@ -2942,6 +2954,7 @@ export class CodexAcpServer {
                 throw RequestError.invalidRequest("The current model does not support image input");
             }
             const agentMode = sessionState.agentMode;
+            const turnPermissionSettings = this.createTurnPermissionSettings(sessionState, agentMode);
             const serviceTier = resolveFastServiceTier(
                 sessionState.fastModeEnabled,
                 sessionState.currentModelSupportsFast,
@@ -2951,7 +2964,7 @@ export class CodexAcpServer {
             const sendPromptPromise = this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(
                     effectiveParams,
-                    agentMode,
+                    turnPermissionSettings,
                     modelId,
                     serviceTier,
                     disableSummary,
@@ -3243,6 +3256,24 @@ export class CodexAcpServer {
             logger.error("Error requesting plan implementation permission", error);
             return false;
         }
+    }
+
+    private createTurnPermissionSettings(
+        sessionState: SessionState,
+        agentMode: AgentMode,
+    ): {approvalPolicy: AskForApproval, approvalsReviewer: ApprovalsReviewer, sandboxPolicy: SandboxPolicy} {
+        if (agentMode.id !== AgentMode.DEFAULT_AGENT_MODE.id) {
+            return {
+                approvalPolicy: agentMode.approvalPolicy,
+                approvalsReviewer: agentMode.approvalsReviewer,
+                sandboxPolicy: agentMode.sandboxPolicy,
+            };
+        }
+        return {
+            approvalPolicy: sessionState.resolvedApprovalPolicy,
+            approvalsReviewer: sessionState.resolvedApprovalsReviewer,
+            sandboxPolicy: sessionState.resolvedSandboxPolicy,
+        };
     }
 
     private cancelledPromptResponse(sessionState: SessionState): acp.PromptResponse {
