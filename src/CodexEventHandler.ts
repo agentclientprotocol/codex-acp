@@ -223,6 +223,7 @@ export class CodexEventHandler {
     private planUpdateChain: Promise<void> = Promise.resolve();
     private disposed = false;
     private readonly seenReasoningDeltaItemIds = new Set<string>();
+    private readonly seenAgentMessageDeltaItemIds = new Set<string>();
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
@@ -448,6 +449,7 @@ export class CodexEventHandler {
         this.pendingPlanItemIds.clear();
         this.planDeltaTextByItemId.clear();
         this.lastEmittedPlanTextByItemId.clear();
+        this.seenAgentMessageDeltaItemIds.clear();
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
@@ -623,6 +625,7 @@ export class CodexEventHandler {
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
+        this.seenAgentMessageDeltaItemIds.add(event.itemId);
         const phase = this.agentMessagePhases.get(event.itemId) ?? null;
         return createAgentTextMessageChunk(event.delta, event.itemId, createCodexMessagePhaseMeta(phase));
     }
@@ -802,6 +805,26 @@ export class CodexEventHandler {
                 return this.subagents.legacyCollaborationCompleted(event.item);
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
+                if (event.item.delivery === "async" && event.item.questions !== null) {
+                    const streamed = this.seenAgentMessageDeltaItemIds.delete(event.item.id);
+                    return createAgentTextMessageChunk(
+                        streamed ? "" : event.item.text,
+                        event.item.id,
+                        {
+                            codex: {
+                                ...(event.item.phase ? {phase: event.item.phase} : {}),
+                                asyncUserInput: {
+                                    delivery: event.item.delivery,
+                                    threadId: event.threadId,
+                                    turnId: event.turnId,
+                                    itemId: event.item.id,
+                                    questions: event.item.questions,
+                                },
+                            },
+                        },
+                    );
+                }
+                this.seenAgentMessageDeltaItemIds.delete(event.item.id);
                 return null;
             case "plan": {
                 const deltaText = this.planDeltaTextByItemId.get(event.item.id) ?? "";
