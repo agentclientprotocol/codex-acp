@@ -410,6 +410,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         additionalDirectories: [],
         sessionId,
         currentModelId: "model-id[effort]",
+        defaultModeModelId: null,
         availableModels: [],
         supportedReasoningEfforts: [],
         supportedInputModalities: ["text", "image"],
