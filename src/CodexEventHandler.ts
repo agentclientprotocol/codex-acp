@@ -1102,9 +1102,7 @@ export class CodexEventHandler {
                 this.createTurnErrorData(params.error),
             );
         } else if (this.isAuthenticationRequiredError(error)) {
-            this.failure = this.sessionState.authConfigured
-                ? RequestError.internalError(this.createTurnErrorData(params.error))
-                : RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message);
+            this.failure = RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message);
         }
         return createAgentTextMessageChunk(`${params.error.message}\n\n`);
     }
