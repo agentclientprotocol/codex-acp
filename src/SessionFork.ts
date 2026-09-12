@@ -51,6 +51,9 @@ export async function forkSession(
         modelProvider: response.modelProvider,
         currentServiceTier: response.serviceTier as ServiceTier ?? null,
         additionalDirectories,
+        approvalPolicy: response.approvalPolicy,
+        approvalsReviewer: response.approvalsReviewer,
+        sandboxPolicy: response.sandbox,
     };
 }
 

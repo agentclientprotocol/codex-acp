@@ -9,6 +9,7 @@ import {
     createTestFixture,
     createTestModel,
     createTestSessionState,
+    setupPromptTestSession,
     type TestFixture
 } from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
@@ -1062,6 +1063,67 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             forceReload: true,
         });
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(turnStartSpy.mock.invocationCallOrder[0]!);
+    });
+
+    it('preserves resolved default prompt permissions while adding ACP directories', async () => {
+        const {mockFixture, turnStartSpy} = setupPromptTestSession({
+            sessionId: "session-id",
+            cwd: "/workspace",
+            additionalDirectories: ["/workspace/extra"],
+            agentMode: AgentMode.DEFAULT_AGENT_MODE,
+            resolvedApprovalPolicy: "on-request",
+            resolvedApprovalsReviewer: "user",
+            resolvedSandboxPolicy: {
+                type: "workspaceWrite",
+                writableRoots: ["/shared-cache"],
+                networkAccess: true,
+                excludeTmpdirEnvVar: false,
+                excludeSlashTmp: false,
+            },
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Hello"}],
+        });
+
+        expect(turnStartSpy.mock.calls[0]![0]).toMatchObject({
+            approvalPolicy: "on-request",
+            approvalsReviewer: "user",
+            sandboxPolicy: {
+                type: "workspaceWrite",
+                writableRoots: ["/shared-cache", "/workspace/extra"],
+                networkAccess: true,
+            },
+        });
+    });
+
+    it('uses explicit non-default mode prompt permissions instead of resolved defaults', async () => {
+        const {mockFixture, turnStartSpy} = setupPromptTestSession({
+            sessionId: "session-id",
+            cwd: "/workspace",
+            agentMode: AgentMode.AgentFullAccess,
+            resolvedApprovalPolicy: "on-request",
+            resolvedApprovalsReviewer: "user",
+            resolvedSandboxPolicy: {
+                type: "workspaceWrite",
+                writableRoots: ["/shared-cache"],
+                networkAccess: true,
+                excludeTmpdirEnvVar: false,
+                excludeSlashTmp: false,
+            },
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Hello"}],
+        });
+
+        expect(turnStartSpy.mock.calls[0]![0]).toMatchObject({
+            approvalPolicy: "never",
+            approvalsReviewer: "user",
+            sandboxPolicy: {type: "dangerFullAccess"},
+        });
     });
 
     it('applies ACP additional directories to turn skill discovery and sandbox policy', async () => {

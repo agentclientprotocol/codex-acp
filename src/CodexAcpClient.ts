@@ -32,6 +32,8 @@ import {sanitizeMcpServerName} from "./McpServerName";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
+    ApprovalsReviewer,
+    AskForApproval,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
     ListMcpServerStatusResponse,
@@ -549,6 +551,9 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            approvalPolicy: response.approvalPolicy,
+            approvalsReviewer: response.approvalsReviewer,
+            sandboxPolicy: response.sandbox,
         }
     }
 
@@ -600,6 +605,9 @@ export class CodexAcpClient {
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             thread,
             additionalDirectories,
+            approvalPolicy: response.approvalPolicy,
+            approvalsReviewer: response.approvalsReviewer,
+            sandboxPolicy: response.sandbox,
         };
     }
 
@@ -630,6 +638,9 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            approvalPolicy: response.approvalPolicy,
+            approvalsReviewer: response.approvalsReviewer,
+            sandboxPolicy: response.sandbox,
         };
     }
 
@@ -935,7 +946,7 @@ export class CodexAcpClient {
 
     async sendPrompt(
         request: acp.PromptRequest,
-        agentMode: AgentMode,
+        turnPermissionSettings: {approvalPolicy: AskForApproval, approvalsReviewer: ApprovalsReviewer, sandboxPolicy: SandboxPolicy},
         modelId: ModelId,
         serviceTier: ServiceTier | null,
         disableSummary: boolean,
@@ -953,9 +964,9 @@ export class CodexAcpClient {
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
-            approvalPolicy: agentMode.approvalPolicy,
-            approvalsReviewer: agentMode.approvalsReviewer,
-            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            approvalPolicy: turnPermissionSettings.approvalPolicy,
+            approvalsReviewer: turnPermissionSettings.approvalsReviewer,
+            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(turnPermissionSettings.sandboxPolicy, additionalDirectories),
             summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
