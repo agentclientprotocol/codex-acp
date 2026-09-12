@@ -64,6 +64,9 @@ export async function forkSession(
         currentServiceTier: response.serviceTier as ServiceTier ?? null,
         additionalDirectories,
         skippedMcpServers: sessionConfig.skippedMcpServers,
+        approvalPolicy: response.approvalPolicy,
+        approvalsReviewer: response.approvalsReviewer,
+        sandboxPolicy: response.sandbox,
     };
 }
 
