@@ -2379,8 +2379,14 @@ export class CodexAcpServer {
                 return [{ type: "text", text: this.formatUriAsLink("image", input.url) }];
             }
             case "localImage": {
-                const localPath = input.path.startsWith("file://") ? fileURLToPath(input.path) : input.path;
-                const uri = pathToFileURL(localPath).href;
+                let localPath: string;
+                let uri: string;
+                try {
+                    localPath = input.path.startsWith("file://") ? fileURLToPath(input.path) : input.path;
+                    uri = pathToFileURL(localPath).href;
+                } catch {
+                    return [{ type: "text", text: this.formatUriAsLink(null, input.path) }];
+                }
                 const mimeType = localImageMimeType(localPath);
                 const data = mimeType ? await readFile(localPath).catch(() => null) : null;
                 if (mimeType && data) {
@@ -2392,8 +2398,11 @@ export class CodexAcpServer {
                 return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
             case "audio":
             case "localAudio":
-            case "mention":
                 return [];
+            case "mention": {
+                const uri = input.path.startsWith("file://") ? input.path : pathToFileURL(input.path).href;
+                return [{ type: "resource_link", name: input.name, uri }];
+            }
         }
     }
 

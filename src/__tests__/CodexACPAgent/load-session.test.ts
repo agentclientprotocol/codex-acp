@@ -288,6 +288,8 @@ describe("CodexACPAgent - loadSession", () => {
                                 { type: "image", url: "https://example.com/image.png" },
                                 { type: "image", url: "data:image/png;base64,dGVzdCBpbWFnZQ==" },
                                 { type: "localImage", path: localImagePath },
+                                { type: "localImage", path: "file:///tmp/invalid%2Fimage.png" },
+                                { type: "mention", name: "notes.txt", path: "/test/project/notes.txt" },
                             ],
                         },
                         {
