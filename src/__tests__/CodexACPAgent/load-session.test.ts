@@ -1,9 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, onTestFinished, vi } from "vitest";
 import type * as acp from "@agentclientprotocol/sdk";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
+import type { UpdateSessionEvent } from "../../ACPSessionConnection";
 import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
@@ -191,6 +193,11 @@ describe("CodexACPAgent - loadSession", () => {
     });
 
     it("should replay history during loadSession", async () => {
+        const localImageDirectory = await mkdtemp(join(tmpdir(), "codex-acp-load-session-"));
+        const localImagePath = join(localImageDirectory, "image.png");
+        await writeFile(localImagePath, "test image");
+        onTestFinished(() => rm(localImageDirectory, { recursive: true }));
+
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
@@ -273,8 +280,14 @@ describe("CodexACPAgent - loadSession", () => {
                             id: "item-user-1",
                             clientId: null,
                             content: [
-                                { type: "text", text: "Hi", text_elements: [] },
+                                {
+                                    type: "text",
+                                    text: `\n# Files mentioned by the user:\n\n## image.png: ${localImagePath}\n\n## My request for Codex:\nHi`,
+                                    text_elements: [],
+                                },
                                 { type: "image", url: "https://example.com/image.png" },
+                                { type: "image", url: "data:image/png;base64,dGVzdCBpbWFnZQ==" },
+                                { type: "localImage", path: localImagePath },
                             ],
                         },
                         {
@@ -417,7 +430,11 @@ describe("CodexACPAgent - loadSession", () => {
 
         expect(codexAppServerClient.threadReadWithHistory).toHaveBeenCalledWith(thread.id);
         expect(codexAppServerClient.threadGoalGet).toHaveBeenCalledWith({ threadId: thread.id });
-        await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+        const replay = fixture.getAcpConnectionDump([]).replaceAll(
+            pathToFileURL(localImagePath).href,
+            "file:///tmp/codex-acp-load-session-image.png",
+        );
+        await expect(replay).toMatchFileSnapshot(
             "data/load-session-history.json"
         );
     });
@@ -534,8 +551,8 @@ describe("CodexACPAgent - loadSession", () => {
                     type: "event_msg",
                     payload: {
                         type: "user_message",
-                        message: "List the files",
-                        images: [],
+                        message: "\n# Files mentioned by the user:\n\n## screenshot.png: embedded\n\n## My request for Codex:\nList the files",
+                        images: ["data:image/png;base64,dW5pcXVlLWZhbGxiYWNrLWltYWdl"],
                         local_images: [],
                         text_elements: [],
                     },
@@ -718,7 +735,14 @@ describe("CodexACPAgent - loadSession", () => {
                                 type: "userMessage",
                                 id: "item-user-1",
                                 clientId: null,
-                                content: [{ type: "text", text: "List the files", text_elements: [] }],
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: "List the files",
+                                        text_elements: [],
+                                    },
+                                    { type: "image", url: "data:image/png;base64,dW5pcXVlLWZhbGxiYWNrLWltYWdl" },
+                                ],
                             },
                             {
                                 type: "reasoning",
@@ -771,6 +795,18 @@ describe("CodexACPAgent - loadSession", () => {
                 cwd: "/test/project",
                 mcpServers: [],
             });
+
+            const replayedUserContent = fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === "sessionUpdate")
+                .map(event => event.args[0].update)
+                .filter((update): update is Extract<UpdateSessionEvent, {sessionUpdate: "user_message_chunk"}> => (
+                    update.sessionUpdate === "user_message_chunk"
+                ))
+                .map(update => update.content);
+            expect(replayedUserContent).toEqual([
+                {type: "text", text: "List the files"},
+                {type: "image", mimeType: "image/png", data: "dW5pcXVlLWZhbGxiYWNrLWltYWdl"},
+            ]);
 
             await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
                 "data/load-session-response-item-history-fallback.json",

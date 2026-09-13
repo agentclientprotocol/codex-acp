@@ -1,5 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
+import {readFile} from "node:fs/promises";
+import {extname} from "node:path";
+import {fileURLToPath, pathToFileURL} from "node:url";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
@@ -112,7 +115,9 @@ import {
     createAgentTextThoughtChunk,
     createCodexMessagePhaseMeta,
     createUserMessageChunk,
+    visibleUserMessageText,
 } from "./ContentChunks";
+
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot,} from "./ThreadGoalSnapshot";
 import {
     clientSupportsSubagents,
@@ -152,6 +157,19 @@ import {
     parseAgentFileChangeReportRequest,
 } from "./AgentFileChangeReport";
 
+const LOCAL_IMAGE_MIME_TYPES: Readonly<Record<string, string>> = {
+    ".avif": "image/avif",
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+};
+
+function localImageMimeType(localPath: string): string | null {
+    return LOCAL_IMAGE_MIME_TYPES[extname(localPath).toLowerCase()] ?? null;
+}
 
 export interface SessionState {
     sessionId: string,
@@ -2282,13 +2300,11 @@ export class CodexAcpServer {
         }
     }
 
-    private createUserMessageUpdates(item: ThreadItem & { type: "userMessage" }): UpdateSessionEvent[] {
+    private async createUserMessageUpdates(item: ThreadItem & { type: "userMessage" }): Promise<UpdateSessionEvent[]> {
         const updates: UpdateSessionEvent[] = [];
-        const messageId = item.id;
         for (const input of item.content) {
-            const blocks = this.userInputToContentBlocks(input);
-            for (const block of blocks) {
-                updates.push(createUserMessageChunk(block, messageId));
+            for (const block of await this.userInputToContentBlocks(input)) {
+                updates.push(createUserMessageChunk(block, item.id));
             }
         }
         return updates;
@@ -2349,20 +2365,36 @@ export class CodexAcpServer {
         );
     }
 
-    private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
+    private async userInputToContentBlocks(input: UserInput): Promise<acp.ContentBlock[]> {
         switch (input.type) {
-            case "text":
-                return input.text.length > 0 ? [{ type: "text", text: input.text }] : [];
-            case "image":
+            case "text": {
+                const visibleText = visibleUserMessageText(input.text);
+                return visibleText.length > 0 ? [{ type: "text", text: visibleText }] : [];
+            }
+            case "image": {
+                const match = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\r\n]+)$/i.exec(input.url);
+                if (match?.[1] && match[2]) {
+                    return [{ type: "image", mimeType: match[1], data: match[2].replace(/\s/g, "") }];
+                }
                 return [{ type: "text", text: this.formatUriAsLink("image", input.url) }];
+            }
             case "localImage": {
-                const uri = input.path.startsWith("file://") ? input.path : `file://${input.path}`;
+                const localPath = input.path.startsWith("file://") ? fileURLToPath(input.path) : input.path;
+                const uri = pathToFileURL(localPath).href;
+                const mimeType = localImageMimeType(localPath);
+                const data = mimeType ? await readFile(localPath).catch(() => null) : null;
+                if (mimeType && data) {
+                    return [{ type: "image", mimeType, data: data.toString("base64"), uri }];
+                }
                 return [{ type: "text", text: this.formatUriAsLink(null, uri) }];
             }
             case "skill":
                 return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
+            case "audio":
+            case "localAudio":
+            case "mention":
+                return [];
         }
-        return [];
     }
 
     private formatUriAsLink(name: string | null, uri: string): string {
