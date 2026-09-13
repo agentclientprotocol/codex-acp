@@ -78,6 +78,8 @@ import {
     type LegacySetSessionModelRequest,
     type LegacySetSessionModelResponse,
     SESSION_STEERING_METHOD,
+    SESSION_REWIND_METHOD,
+    type SessionRewindRequest,
     type SessionSteeringResponse,
     type SessionSteerRequest,
 } from "./AcpExtensions";
@@ -134,6 +136,7 @@ import {
     AIR_ASYNC_TASKS_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+    AIR_SESSION_REWIND_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
@@ -394,6 +397,7 @@ export class CodexAcpServer {
                             AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                             AIR_ASYNC_TASKS_KEY,
                             AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+                            AIR_SESSION_REWIND_KEY,
                         ],
                     },
                 },
@@ -429,6 +433,10 @@ export class CodexAcpServer {
                     ),
                 };
             }
+            case SESSION_REWIND_METHOD:
+                return await this.runWithProcessCheck(
+                    () => this.codexAcpClient.rewindSession(methodRequest.params as SessionRewindRequest),
+                );
             case GOAL_CONTROL_METHOD:
             case LEGACY_GOAL_CONTROL_METHOD: {
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
