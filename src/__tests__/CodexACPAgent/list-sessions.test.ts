@@ -224,6 +224,105 @@ describe("CodexACPAgent - list sessions", () => {
         );
     });
 
+    it("lists only durable top-level conversations and derives a human fallback title", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+
+        const root: Thread = {
+            id: "root",
+            sessionId: "root",
+            parentThreadId: null,
+            threadSource: null,
+            forkedFromId: null,
+            preview: "<shared-context>transport context only",
+            ephemeral: false,
+            modelProvider: "openai",
+            model: null,
+            reasoningEffort: null,
+            createdAt: 100,
+            updatedAt: 200,
+            recencyAt: null,
+            status: {type: "idle"},
+            path: null,
+            cwd: "/repo/project",
+            cliVersion: "0.0.0",
+            section: null,
+            sectionEnteredAt: null,
+            projectId: null,
+            historyMode: "legacy",
+            source: "vscode",
+            agentNickname: null,
+            agentRole: null,
+            gitInfo: null,
+            name: null,
+            turns: [],
+        };
+        const child = {...root, id: "child", sessionId: "child", parentThreadId: "root"};
+        const ephemeral = {...root, id: "ephemeral", sessionId: "ephemeral", ephemeral: true};
+        const guardian: Thread = {
+            ...root,
+            id: "guardian",
+            sessionId: "guardian",
+            source: {subAgent: {other: "guardian"}},
+        };
+        const named = {...root, id: "named", sessionId: "named", name: "Saved title"};
+        const contextOnly = {...root, id: "context-only", sessionId: "context-only"};
+
+        codexAppServerClient.threadList = vi.fn().mockResolvedValue({
+            data: [root, child, ephemeral, guardian, named, contextOnly],
+            nextCursor: null,
+        });
+        codexAppServerClient.threadReadWithHistory = vi.fn().mockImplementation((threadId) => ({
+            thread: {
+                ...root,
+                id: threadId,
+                turns: threadId === "context-only" ? [{
+                    id: "turn-context",
+                    status: "completed",
+                    error: null,
+                    items: [{
+                        type: "userMessage",
+                        id: "message-context",
+                        clientId: null,
+                        content: [{
+                            type: "text",
+                            text: "<environment_context>machine data</environment_context>",
+                            text_elements: [],
+                        }],
+                    }],
+                }] : [{
+                    id: "turn-1",
+                    status: "completed",
+                    error: null,
+                    items: [{
+                        type: "userMessage",
+                        id: "message-1",
+                        clientId: null,
+                        content: [{
+                            type: "text",
+                            text: "<shared-context>machine data</shared-context>\n<task-resources>files</task-resources>\n<!-- /shared-context -->\nHow do I resume this session?",
+                            text_elements: [],
+                        }],
+                    }],
+                }],
+            },
+        }));
+
+        const response = await codexAcpAgent.listSessions({cwd: null, cursor: null});
+
+        expect(response.sessions).toEqual([
+            expect.objectContaining({sessionId: "root", title: "How do I resume this session?"}),
+            expect.objectContaining({sessionId: "named", title: "Saved title"}),
+            expect.objectContaining({sessionId: "context-only", title: "Untitled conversation"}),
+        ]);
+        expect(codexAppServerClient.threadReadWithHistory).toHaveBeenCalledTimes(2);
+        expect(codexAppServerClient.threadReadWithHistory).toHaveBeenCalledWith("root");
+        expect(codexAppServerClient.threadReadWithHistory).toHaveBeenCalledWith("context-only");
+    });
+
     it("includes tracked additional directories for active sessions", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();

@@ -80,6 +80,60 @@ export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata
 export const CUSTOM_GATEWAY_PROVIDER_ID = "custom-gateway";
 export const OPENAI_PROVIDER_ID = "openai";
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const UNTITLED_SESSION = "Untitled conversation";
+const INJECTED_CONTEXT_TAGS = new Set([
+    "shared-context",
+    "task-resources",
+    "environment_context",
+    "environment-context",
+]);
+
+function stripLeadingInjectedContext(value: string): string {
+    let remaining = value.trimStart();
+    while (remaining.length > 0) {
+        const comment = /^<!--\s*\/?shared-context\s*-->/i.exec(remaining);
+        if (comment) {
+            remaining = remaining.slice(comment[0].length).trimStart();
+            continue;
+        }
+
+        const opening = /^<([a-z_-]+)\b[^>]*>/i.exec(remaining);
+        const tag = opening?.[1]?.toLowerCase();
+        if (!opening || !tag || !INJECTED_CONTEXT_TAGS.has(tag)) break;
+        const closing = new RegExp(`</${tag}\\s*>`, "i").exec(remaining.slice(opening[0].length));
+        if (!closing) return "";
+        remaining = remaining
+            .slice(opening[0].length + closing.index + closing[0].length)
+            .trimStart();
+    }
+    return remaining.replace(/\s+/g, " ").trim();
+}
+
+function needsHistoryTitle(thread: Thread): boolean {
+    return thread.name === null &&
+        stripLeadingInjectedContext(thread.preview).length === 0;
+}
+
+function firstHumanTitle(thread: Thread): string | null {
+    for (const turn of thread.turns) {
+        for (const item of turn.items) {
+            if (item.type !== "userMessage") continue;
+            const title = item.content
+                .filter((input): input is Extract<UserInput, {type: "text"}> => input.type === "text")
+                .map(input => stripLeadingInjectedContext(input.text))
+                .filter(Boolean)
+                .join(" ");
+            if (title) return title;
+        }
+    }
+    return null;
+}
+
+function isUserFacingThread(thread: Thread): boolean {
+    return thread.parentThreadId === null &&
+        !thread.ephemeral &&
+        !(typeof thread.source === "object" && "subAgent" in thread.source);
+}
 
 /**
  * The url-mode variant of the ACP `elicitation/create` request params.
@@ -1184,32 +1238,45 @@ export class CodexAcpClient {
             sourceKinds: sourceKinds,
         });
 
-        const mapThreadToSession = (thread: Thread) => ({
-            sessionId: thread.id,
-            cwd: thread.cwd,
-            title: (thread.name ?? thread.preview) || null,
-            updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
-        });
+        const mapThreadToSession = async (thread: Thread) => {
+            let title = thread.name ?? stripLeadingInjectedContext(thread.preview);
+            if (needsHistoryTitle(thread)) {
+                try {
+                    const history = await this.codexClient.threadReadWithHistory(thread.id);
+                    title = firstHumanTitle(history.thread) ?? UNTITLED_SESSION;
+                } catch (error) {
+                    logger.error("Failed to derive a session title from thread history", {
+                        threadId: thread.id,
+                        error,
+                    });
+                    title = UNTITLED_SESSION;
+                }
+            }
+            return {
+                sessionId: thread.id,
+                cwd: thread.cwd,
+                title: title || UNTITLED_SESSION,
+                updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
+            };
+        };
 
         if (listResponse.data.length === 0) {
             const diagnostics = await this.runSessionListDiagnostics();
             logger.log("Session list diagnostics", diagnostics);
         }
 
-        let sessions = listResponse.data.map(mapThreadToSession);
+        let threads = listResponse.data.filter(isUserFacingThread);
         if (requestedCwd) {
-            const filtered = listResponse.data
-                .filter(filterByCwd)
-                .map(mapThreadToSession);
+            const filtered = threads.filter(filterByCwd);
             if (filtered.length > 0 || isAbsolutePathLike(requestedCwd)) {
-                sessions = filtered;
+                threads = filtered;
             } else {
                 logger.log("Ignoring non-absolute cwd filter for session/list", {cwd: requestedCwd});
             }
         }
 
         return {
-            sessions,
+            sessions: await Promise.all(threads.map(mapThreadToSession)),
             nextCursor: listResponse.nextCursor ?? null,
         };
     }
