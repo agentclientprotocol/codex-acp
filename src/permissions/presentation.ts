@@ -15,7 +15,11 @@ type CommandPresentationParams = CommandExecutionRequestApprovalParams & {
     additionalPermissions?: AdditionalPermissionProfile | null;
 };
 
-export function commandToolCall(params: CommandPresentationParams): acp.ToolCallUpdate {
+export function commandToolCall(
+    params: CommandPresentationParams,
+    permissionContext: PermissionPromptContext,
+): acp.ToolCallUpdate {
+    const name = permissionContext.commandName(params.threadId, params.itemId);
     const network = params.networkApprovalContext;
     const rawInput = {
         ...(params.command ? {command: stripShellPrefix(params.command)} : {}),
@@ -30,6 +34,7 @@ export function commandToolCall(params: CommandPresentationParams): acp.ToolCall
         : [];
     return {
         toolCallId: params.itemId,
+        ...(name !== undefined ? {name} : {}),
         kind: "execute",
         status: "pending",
         title: network
@@ -71,6 +76,7 @@ export function additionalPermissionsToolCall(
     const content = permissionProfileContent(permissions);
     return {
         toolCallId: itemId,
+        name: "request_permissions",
         kind: "other",
         status: "pending",
         title: "Additional sandbox permissions",

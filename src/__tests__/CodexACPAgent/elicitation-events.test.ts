@@ -227,7 +227,12 @@ describe('Elicitation Events', () => {
             };
             expect(await fixture.sendServerRequest('mcpServer/elicitation/request', params))
                 .toEqual({ action: 'cancel', content: null, _meta: null });
-            expect(fixture.getAcpConnectionEvents([]).filter(event => event.method === 'sessionUpdate')).toEqual([]);
+            const sessionUpdates = fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === 'sessionUpdate')
+                .map(event => event.args[0].update);
+            expect(sessionUpdates).toEqual([
+                expect.objectContaining({ sessionUpdate: 'tool_call_update', status: 'completed', rawOutput: { action: 'cancel' } }),
+            ]);
             completeTurn();
             await promptPromise;
         });
@@ -453,7 +458,10 @@ describe('Elicitation Events', () => {
             };
             expect(await fixture.sendServerRequest('mcpServer/elicitation/request', params))
                 .toEqual({ action: 'cancel', content: null, _meta: null });
-            expect(fixture.getAcpConnectionEvents([]).filter(event => event.method === 'sessionUpdate')).toEqual([]);
+            const toolStatuses = fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === 'sessionUpdate')
+                .map(event => event.args[0].update.status);
+            expect(toolStatuses).not.toContain('in_progress');
             completeTurn();
             await promptPromise;
         });
@@ -526,7 +534,10 @@ describe('Elicitation Events', () => {
             };
             expect(await fixture.sendServerRequest('mcpServer/elicitation/request', params))
                 .toEqual({ action: 'cancel', content: null, _meta: null });
-            expect(fixture.getAcpConnectionEvents([]).filter(event => event.method === 'sessionUpdate')).toEqual([]);
+            const toolStatuses = fixture.getAcpConnectionEvents([])
+                .filter(event => event.method === 'sessionUpdate')
+                .map(event => event.args[0].update.status);
+            expect(toolStatuses).not.toContain('in_progress');
             completeTurn();
             await promptPromise;
         });
@@ -889,47 +900,70 @@ describe('Elicitation Events', () => {
                 },
             });
 
-            const [elicitationEvent] = fixture.getAcpConnectionEvents(['_meta']);
-            expect(elicitationEvent).toMatchObject({
+            expect(fixture.getAcpConnectionEvents([])).toEqual([{
                 method: 'createElicitation',
                 args: [{
                     sessionId,
                     toolCallId: 'request-user-input-1',
                     mode: 'form',
-                    message: 'Input requested',
+                    message: 'Codex needs your input to continue.',
                     requestedSchema: {
                         type: 'object',
-                        required: ['notes'],
+                        properties: {
+                            next_step: {
+                                type: 'string',
+                                title: 'What should I do next?',
+                                description: 'Next step',
+                                oneOf: [
+                                    { const: 'Run tests', title: 'Run tests', description: 'Run the focused test suite.' },
+                                    { const: 'Stop', title: 'Stop', description: 'Stop and report current status.' },
+                                    {
+                                        const: 'None of the above',
+                                        title: 'None of the above',
+                                        description: 'Provide a different answer in the note field.',
+                                    },
+                                ],
+                                _meta: {
+                                    codex: { isOther: true, isSecret: false },
+                                },
+                            },
+                            next_step_note: {
+                                type: 'string',
+                                title: 'Additional answer or note',
+                                _meta: {
+                                    codex: { questionId: 'next_step', role: 'user_note', isSecret: false },
+                                },
+                            },
+                            notes: {
+                                type: 'string',
+                                title: 'Any extra instructions?',
+                                description: 'Notes',
+                                _meta: {
+                                    codex: { isOther: false, isSecret: false },
+                                },
+                            },
+                        },
+                        required: ['next_step', 'notes'],
+                    },
+                    _meta: {
+                        codex: { autoResolutionMs: 60000 },
                     },
                 }],
-            });
-            expect(elicitationEvent!.args[0].requestedSchema.properties.next_step.oneOf).toEqual([
-                { const: 'Run tests', title: 'Run tests', description: 'Run the focused test suite.' },
-                { const: 'Stop', title: 'Stop', description: 'Stop and report current status.' },
-            ]);
-            expect(elicitationEvent!.args[0].requestedSchema.properties.next_step__other).toMatchObject({
-                type: 'string',
-                title: 'Other',
-            });
-            expect(elicitationEvent!.args[0].requestedSchema.properties.notes).toMatchObject({
-                type: 'string',
-                title: 'Notes',
-                description: 'Any extra instructions?',
-            });
+            }]);
 
             completeTurn();
             await promptPromise;
         });
 
-        it('should prefer free-form Other answers over fixed choices', async () => {
+        it('should return the Other choice and its note using Codex answer conventions', async () => {
             const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
                 elicitation: { form: {} },
             });
             fixture.setElicitationResponse({
                 action: 'accept',
                 content: {
-                    next_step: 'Run tests',
-                    next_step__other: 'Inspect flaky logs',
+                    next_step: 'None of the above',
+                    next_step_note: 'Inspect flaky logs',
                 },
             });
 
@@ -955,9 +989,123 @@ describe('Elicitation Events', () => {
             const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
             expect(response).toEqual({
                 answers: {
-                    next_step: { answers: ['Inspect flaky logs'] },
+                    next_step: { answers: ['None of the above', 'user_note: Inspect flaky logs'] },
                 },
             });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it.each(['before', 'after'] as const)(
+            'should preserve questions with note field IDs when they appear %s the choice',
+            async (order) => {
+                const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                    elicitation: { form: {} },
+                });
+                fixture.setElicitationResponse({
+                    action: 'accept',
+                    content: {
+                        choice: 'Run tests',
+                        choice_note: 'Follow project conventions',
+                        choice_note1: 'Private context',
+                        choice_note2: '  Run the focused suite first  ',
+                    },
+                });
+
+                const choice: ToolRequestUserInputParams['questions'][number] = {
+                    id: 'choice',
+                    header: 'Next step',
+                    question: 'What should I do next?',
+                    isOther: true,
+                    isSecret: true,
+                    options: [
+                        { label: 'Run tests', description: 'Run the focused test suite.' },
+                        { label: 'Stop', description: 'Stop and report current status.' },
+                    ],
+                };
+                const otherQuestions: ToolRequestUserInputParams['questions'] = [
+                    {
+                        id: 'choice_note',
+                        header: 'Constraints',
+                        question: 'Which constraints should I follow?',
+                        isOther: false,
+                        isSecret: false,
+                        options: null,
+                    },
+                    {
+                        id: 'choice_note1',
+                        header: 'Private',
+                        question: 'What private context should I consider?',
+                        isOther: false,
+                        isSecret: true,
+                        options: null,
+                    },
+                ];
+                const params: ToolRequestUserInputParams = {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    itemId: 'request-user-input-1',
+                    autoResolutionMs: null,
+                    isBlocking: true,
+                    questions: order === 'before' ? [...otherQuestions, choice] : [choice, ...otherQuestions],
+                };
+
+                const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+                expect(response).toEqual({
+                    answers: {
+                        choice: { answers: ['Run tests', 'user_note: Run the focused suite first'] },
+                        choice_note: { answers: ['Follow project conventions'] },
+                        choice_note1: { answers: ['Private context'] },
+                    },
+                });
+                await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+                    `data/elicitation-user-input-note-collision-${order}.json`,
+                );
+
+                completeTurn();
+                await promptPromise;
+            },
+        );
+
+        it('should keep an existing None of the above choice selectable without duplicating it', async () => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+            });
+            fixture.setElicitationResponse({
+                action: 'accept',
+                content: { next_step: 'None of the above' },
+            });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'request-user-input-1',
+                autoResolutionMs: null,
+                isBlocking: true,
+                questions: [{
+                    id: 'next_step',
+                    header: 'Next step',
+                    question: 'What should I do next?',
+                    isOther: true,
+                    isSecret: false,
+                    options: [
+                        { label: 'Run tests', description: 'Run the focused test suite.' },
+                        { label: 'None of the above', description: 'Use a different approach.' },
+                    ],
+                }],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+            expect(response).toEqual({
+                answers: { next_step: { answers: ['None of the above'] } },
+            });
+            const [elicitationEvent] = fixture.getAcpConnectionEvents([]);
+            const options = elicitationEvent!.args[0].requestedSchema.properties.next_step.oneOf;
+            expect(options.filter((option: { const: string }) => option.const === 'None of the above')).toHaveLength(1);
+            await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+                'data/elicitation-user-input-existing-other.json',
+            );
 
             completeTurn();
             await promptPromise;

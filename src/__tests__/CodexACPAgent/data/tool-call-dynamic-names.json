@@ -1,0 +1,105 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "plain-tool",
+        "kind": "execute",
+        "title": "read_file",
+        "status": "in_progress",
+        "rawInput": {
+          "arguments": {
+            "path": "/repo/config.json"
+          }
+        },
+        "name": "read_file"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "plain-tool",
+        "name": "read_file",
+        "status": "completed"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "functions.tool",
+        "kind": "execute",
+        "title": "read_file",
+        "status": "in_progress",
+        "rawInput": {
+          "arguments": {
+            "path": "/repo/config.json"
+          }
+        },
+        "name": "functions.read_file"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "functions.tool",
+        "name": "functions.read_file",
+        "status": "completed"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "toolstool",
+        "kind": "execute",
+        "title": "read_file",
+        "status": "in_progress",
+        "rawInput": {
+          "arguments": {
+            "path": "/repo/config.json"
+          }
+        },
+        "name": "toolsread_file"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "toolstool",
+        "name": "toolsread_file",
+        "status": "completed"
+      }
+    }
+  ]
+}

@@ -7,6 +7,7 @@
         "toolCallId": "elicitation:test-session-id:tool-server:1",
         "kind": "execute",
         "status": "pending",
+        "title": "MCP tool call approval",
         "content": [
           {
             "type": "content",
@@ -18,6 +19,7 @@
         ],
         "rawInput": {
           "serverName": "tool-server",
+          "description": "Allow tool call?",
           "schema": {
             "type": "object",
             "properties": {}
@@ -39,6 +41,32 @@
           "_meta": "_meta"
         }
       ]
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "elicitation:test-session-id:tool-server:1",
+        "status": "completed",
+        "title": "MCP tool call approval",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Allow tool call?"
+            }
+          }
+        ],
+        "rawOutput": {
+          "action": "accept"
+        }
+      }
     }
   ]
 }

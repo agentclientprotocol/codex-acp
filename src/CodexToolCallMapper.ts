@@ -33,6 +33,7 @@ import {
     type TerminalOutputMode,
 } from "./TerminalOutputMode";
 import {createContextCompactionMeta} from "./ContextCompactionMeta";
+import {commandToolName, functionToolName} from "./ToolCallName";
 
 type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus | CollabAgentToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -81,14 +82,19 @@ export async function createFileChangeUpdate(
 }
 
 export async function createCommandExecutionUpdate(item: CommandExecutionItem): Promise<UpdateSessionEvent> {
+    const name = commandToolName(item.source);
     const commandAction = item.commandActions.length === 1 ? item.commandActions[0] : undefined;
     if (commandAction) {
-        return createCommandActionEvent(item.id, item.status, item.cwd, commandAction);
+        return {
+            ...createCommandActionEvent(item.id, item.status, item.cwd, commandAction),
+            ...(name === undefined ? {} : {name}),
+        };
     }
     const command = stripShellPrefix(item.command);
     return createTerminalCommandEvent({
         sessionUpdate: "tool_call",
         toolCallId: item.id,
+        ...(name === undefined ? {} : {name}),
         kind: "execute",
         title: command,
         status: toAcpStatus(item.status),
@@ -157,7 +163,10 @@ export async function createMcpToolCallUpdate(
 export async function createDynamicToolCallUpdate(
     item: ThreadItem & { type: "dynamicToolCall" }
 ): Promise<UpdateSessionEvent> {
-    return createExecuteToolCallUpdate(item, item.tool, { arguments: item.arguments })
+    return {
+        ...await createExecuteToolCallUpdate(item, item.tool, { arguments: item.arguments }),
+        name: functionToolName(item.tool, item.namespace),
+    };
 }
 
 export function createImageViewUpdate(
@@ -168,6 +177,7 @@ export function createImageViewUpdate(
         sessionUpdate: "tool_call",
         toolCallId: item.id,
         kind: "read",
+        name: "view_image",
         title: `View Image ${displayPath}`,
         status: "completed",
         content: [createContent({
@@ -269,7 +279,7 @@ export async function createExecuteToolCallUpdate(
     title: string,
     rawInput?: Record<string, JsonValue | string>,
     rawOutput?: Record<string, JsonValue | string | null>,
-): Promise<UpdateSessionEvent> {
+): Promise<AcpToolCallEvent> {
     return {
         sessionUpdate: "tool_call",
         toolCallId: item.id,

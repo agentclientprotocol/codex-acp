@@ -63,6 +63,7 @@ import {
     fuzzyFileSearchToolCallId,
 } from "./CodexToolCallMapper";
 import { stripShellPrefix } from "./CommandUtils";
+import {commandToolName, functionToolName} from "./ToolCallName";
 import {createTerminalOutputMeta, type TerminalOutputMode} from "./TerminalOutputMode";
 import {
     createCodexMessagePhaseMeta,
@@ -765,10 +766,16 @@ export class CodexEventHandler {
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
+                return {
+                    sessionUpdate: "tool_call_update",
+                    toolCallId: event.item.id,
+                    status: event.item.status === "completed" ? "completed" : "failed",
+                }
             case "dynamicToolCall":
                 return {
                     sessionUpdate: "tool_call_update",
                     toolCallId: event.item.id,
+                    name: functionToolName(event.item.tool, event.item.namespace),
                     status: event.item.status === "completed" ? "completed" : "failed",
                 }
             case "mcpToolCall":
@@ -1006,9 +1013,11 @@ export class CodexEventHandler {
     }
 
     private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {
+        const name = commandToolName(item.source);
         const update: UpdateSessionEvent = {
             sessionUpdate: "tool_call_update",
             toolCallId: item.id,
+            ...(name === undefined ? {} : {name}),
             status: item.status === "completed" ? "completed" : "failed",
             rawOutput: {
                 formatted_output: item.aggregatedOutput ?? "",

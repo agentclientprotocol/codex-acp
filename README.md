@@ -10,6 +10,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 
 - ChatGPT, API key, and client-provided custom gateway authentication.
 - Model, reasoning effort, fast mode, approval, and sandbox mode configuration.
+- Concrete recommended model and reasoning-effort values through the opt-in [AIR recommended config values](docs/recommended-config-values-extension.md) capability.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
 - Shell command, file change, [permission request](docs/permission-extension.md), MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, token usage, and review events.
 - [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
@@ -38,6 +39,16 @@ The npm package includes a compatible `@openai/codex` dependency. Set `CODEX_PAT
 
 ```bash
 CODEX_PATH=/path/to/codex npx -y @agentclientprotocol/codex-acp
+```
+
+To try changes that have landed on `main` but are not released yet, install from the
+`preview` channel. Pushes to `main` trigger preview publishing without waiting
+for CI or release-please; release commits are excluded, and newer pushes can
+replace queued previews. See
+[docs/RELEASES.md](docs/RELEASES.md#preview-releases).
+
+```bash
+npx -y @agentclientprotocol/codex-acp@preview
 ```
 
 ## Authentication

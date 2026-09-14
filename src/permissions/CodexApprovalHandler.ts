@@ -50,7 +50,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const response = await this.requestPermission({
                 sessionId: params.threadId,
-                toolCall: commandToolCall(authoritativeParams),
+                toolCall: commandToolCall(authoritativeParams, this.permissionContext),
                 options: decisions.map(({option}) => option),
                 _meta: requestPermissionMeta(
                     params.networkApprovalContext ? CODEX_NETWORK_PERMISSION_TITLE : CODEX_COMMAND_PERMISSION_TITLE,
