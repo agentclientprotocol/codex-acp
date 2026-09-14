@@ -1,0 +1,208 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "unifiedExecStartup-execute",
+        "name": "exec_command",
+        "kind": "execute",
+        "title": "npm test",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "unifiedExecStartup-execute"
+          }
+        ],
+        "rawInput": {
+          "command": "npm test",
+          "cwd": "/repo"
+        },
+        "_meta": {
+          "terminal_info": {
+            "cwd": "/repo",
+            "terminal_id": "unifiedExecStartup-execute"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "unifiedExecStartup-read",
+        "status": "in_progress",
+        "kind": "read",
+        "title": "Read file '/repo/config.json'",
+        "locations": [
+          {
+            "path": "/repo/config.json"
+          }
+        ],
+        "name": "exec_command"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "unifiedExecInteraction-execute",
+        "name": "write_stdin",
+        "kind": "execute",
+        "title": "npm test",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "unifiedExecInteraction-execute"
+          }
+        ],
+        "rawInput": {
+          "command": "npm test",
+          "cwd": "/repo"
+        },
+        "_meta": {
+          "terminal_info": {
+            "cwd": "/repo",
+            "terminal_id": "unifiedExecInteraction-execute"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "unifiedExecInteraction-read",
+        "status": "in_progress",
+        "kind": "read",
+        "title": "Read file '/repo/config.json'",
+        "locations": [
+          {
+            "path": "/repo/config.json"
+          }
+        ],
+        "name": "write_stdin"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "agent-execute",
+        "kind": "execute",
+        "title": "npm test",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "agent-execute"
+          }
+        ],
+        "rawInput": {
+          "command": "npm test",
+          "cwd": "/repo"
+        },
+        "_meta": {
+          "terminal_info": {
+            "cwd": "/repo",
+            "terminal_id": "agent-execute"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "agent-read",
+        "status": "in_progress",
+        "kind": "read",
+        "title": "Read file '/repo/config.json'",
+        "locations": [
+          {
+            "path": "/repo/config.json"
+          }
+        ]
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "userShell-execute",
+        "kind": "execute",
+        "title": "npm test",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "userShell-execute"
+          }
+        ],
+        "rawInput": {
+          "command": "npm test",
+          "cwd": "/repo"
+        },
+        "_meta": {
+          "terminal_info": {
+            "cwd": "/repo",
+            "terminal_id": "userShell-execute"
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "userShell-read",
+        "status": "in_progress",
+        "kind": "read",
+        "title": "Read file '/repo/config.json'",
+        "locations": [
+          {
+            "path": "/repo/config.json"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -13,7 +13,8 @@
           "arguments": {
             "includeDisabled": false
           }
-        }
+        },
+        "name": "list_apps"
       }
     }
   ]

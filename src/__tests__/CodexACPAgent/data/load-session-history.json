@@ -325,7 +325,8 @@
           "arguments": {
             "includeDisabled": false
           }
-        }
+        },
+        "name": "list_apps"
       }
     }
   ]
@@ -339,6 +340,7 @@
         "sessionUpdate": "tool_call",
         "toolCallId": "item-image-view-1",
         "kind": "read",
+        "name": "view_image",
         "title": "View Image /test/project/input.png",
         "status": "completed",
         "content": [

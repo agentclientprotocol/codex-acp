@@ -90,6 +90,46 @@ describe("Approval Events", () => {
     }
 
     describe("command approvals", () => {
+        it.each([
+            ["unifiedExecStartup", "exec_command"],
+            ["unifiedExecInteraction", "write_stdin"],
+            ["agent", undefined],
+            ["userShell", undefined],
+        ] as const)("uses only a known tool name for %s command approvals", async (source, name) => {
+            const prompt = setupSessionWithPendingPrompt();
+            fixture.sendServerNotification({
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "commandExecution",
+                        id: "command-item",
+                        pluginId: null,
+                        scriptPath: null,
+                        command: "npm test",
+                        cwd: "/workspace",
+                        processId: null,
+                        source,
+                        status: "inProgress",
+                        commandActions: [],
+                        aggregatedOutput: null,
+                        exitCode: null,
+                        durationMs: null,
+                    },
+                },
+            });
+            await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+            fixture.clearAcpConnectionDump();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowOnce}});
+
+            await fixture.sendServerRequest("item/commandExecution/requestApproval", commandParams(["accept", "cancel"]));
+
+            expect(permissionRequest().toolCall.name).toBe(name);
+            await finish(prompt);
+        });
+
         it("emits an autonomous ACP v1 snapshot and maps explicit reject to decline", async () => {
             const prompt = setupSessionWithPendingPrompt();
             fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.Decline}});
@@ -653,6 +693,7 @@ describe("Approval Events", () => {
                 expect(permissionRequest()).toMatchObject({
                     toolCall: {
                         toolCallId: "permissions-item",
+                        name: "request_permissions",
                         kind: "other",
                         status: "pending",
                         title: "Additional sandbox permissions",
