@@ -29,6 +29,8 @@ describe('CodexEventHandler - command action events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-list-path',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'ls /test/project',
                     cwd: '/test/project',
                     processId: null,
@@ -65,6 +67,8 @@ describe('CodexEventHandler - command action events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-list-no-path',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'ls',
                     cwd: '/test/project',
                     processId: null,
@@ -101,6 +105,8 @@ describe('CodexEventHandler - command action events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-read-file',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'sed -n "1,80p" /test/project/src/index.ts',
                     cwd: '/test/project',
                     processId: null,
@@ -138,6 +144,8 @@ describe('CodexEventHandler - command action events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-search-query-path',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'rg "Service" src',
                     cwd: '/test/project',
                     processId: null,
@@ -175,6 +183,8 @@ describe('CodexEventHandler - command action events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-search-query-only',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'rg "Service"',
                     cwd: '/test/project',
                     processId: null,
@@ -212,6 +222,8 @@ describe('CodexEventHandler - command action events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-search-path-only',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'rg --files -g "*service*"',
                     cwd: '/test/project',
                     processId: null,
@@ -249,6 +261,8 @@ describe('CodexEventHandler - command action events', () => {
                 item: {
                     type: 'commandExecution',
                     id: 'command-search-no-query-no-path',
+                    pluginId: null,
+                    scriptPath: null,
                     command: 'rg',
                     cwd: '/test/project',
                     processId: null,
@@ -291,6 +305,7 @@ describe('CodexEventHandler - command action events', () => {
                     status: "inProgress",
                     arguments: { argument: "example"},
                     appContext: null,
+                    readOnlyHint: null,
                     pluginId: null,
                     result: null,
                     error: null,
@@ -322,6 +337,7 @@ describe('CodexEventHandler - command action events', () => {
                         status: "inProgress",
                         arguments: { file_path: ".ai/local.md", mode: "slice", start_line: 1, max_lines: 200 },
                         appContext: null,
+                        readOnlyHint: true,
                         pluginId: null,
                         result: null,
                         error: null,
@@ -352,6 +368,7 @@ describe('CodexEventHandler - command action events', () => {
                         status: "failed",
                         arguments: { file_path: ".ai/local.md", mode: "slice", start_line: 1, max_lines: 200 },
                         appContext: null,
+                        readOnlyHint: true,
                         pluginId: null,
                         result: null,
                         error: {
@@ -387,6 +404,7 @@ describe('CodexEventHandler - command action events', () => {
                         status: "inProgress",
                         arguments: { argument: "example" },
                         appContext: null,
+                        readOnlyHint: null,
                         pluginId: null,
                         result: null,
                         error: null,
@@ -426,6 +444,7 @@ describe('CodexEventHandler - command action events', () => {
                         status: "failed",
                         arguments: { argument: "example" },
                         appContext: null,
+                        readOnlyHint: null,
                         pluginId: null,
                         result: null,
                         error: {

@@ -7,6 +7,7 @@
         "toolCallId": "elicitation-elicit-789",
         "kind": "fetch",
         "status": "pending",
+        "title": "MCP server requests to open a URL",
         "content": [
           {
             "type": "content",
@@ -18,21 +19,56 @@
         ],
         "rawInput": {
           "serverName": "auth-server",
+          "description": "Please authorize access to your GitHub account",
           "url": "https://example.com/authorize?id=elicit-789"
         }
       },
       "options": [
         {
           "optionId": "accept",
-          "name": "Accept",
-          "kind": "allow_once"
+          "name": "Allow",
+          "kind": "allow_once",
+          "_meta": "_meta"
         },
         {
           "optionId": "decline",
-          "name": "Decline",
-          "kind": "reject_once"
+          "name": "Deny",
+          "kind": "reject_once",
+          "_meta": "_meta"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Cancel",
+          "kind": "reject_once",
+          "_meta": "_meta"
         }
       ]
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "elicitation-elicit-789",
+        "status": "completed",
+        "title": "MCP server requests to open a URL",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Please authorize access to your GitHub account"
+            }
+          }
+        ],
+        "rawOutput": {
+          "action": "accept"
+        }
+      }
     }
   ]
 }

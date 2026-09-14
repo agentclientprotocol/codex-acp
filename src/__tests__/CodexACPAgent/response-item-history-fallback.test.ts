@@ -5,6 +5,46 @@ import { parseResponseItemHistoryFallback } from "../../ResponseItemHistoryFallb
 type ToolCallUpdate = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call_update" }>;
 
 describe("ResponseItemHistoryFallback", () => {
+    it("preserves programmatic function names alongside invocation titles", async () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            functionCall("call-search", "rg \"Needle\" src"),
+            functionCall("call-terminal", "npm test"),
+            {
+                type: "response_item",
+                payload: {
+                    type: "function_call",
+                    call_id: "call-patch",
+                    name: "apply_patch",
+                    arguments: JSON.stringify({ patch: "*** Begin Patch\n*** End Patch" }),
+                },
+            },
+            {
+                type: "response_item",
+                payload: {
+                    type: "function_call",
+                    call_id: "call-mcp",
+                    name: "mcp__docs__find_page",
+                    arguments: JSON.stringify({ query: "Tool names" }),
+                },
+            },
+            {
+                type: "response_item",
+                payload: {
+                    type: "function_call",
+                    call_id: "call-namespaced",
+                    namespace: "functions.",
+                    name: "read_file",
+                    arguments: JSON.stringify({ path: "README.md" }),
+                },
+            },
+            functionCallOutput("call-search", "Chunk ID: search\nProcess exited with code 0\nOutput:\nsrc/index.ts\n"),
+        ]), "terminal_output");
+
+        await expect(`${JSON.stringify(updates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/response-item-history-tool-names.json",
+        );
+    });
+
     it("recovers only missing function calls for mixed parsed histories", () => {
         const updates = parseResponseItemHistoryFallback(jsonl([
             functionCall("call-existing", "rg \"Existing\" src"),

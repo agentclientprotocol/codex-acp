@@ -4,9 +4,193 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
-import type { Model, Thread } from "../../app-server/v2";
+import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
+    it("replays native child history and disconnects an orphan", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        const makeThread = (id: string, items: Thread["turns"][number]["items"]): Thread => ({
+            id,
+            sessionId: id,
+            parentThreadId: id === "root-history" ? null : "root-history",
+            threadSource: null,
+            originator: null,
+            forkedFromId: null,
+            preview: id,
+            ephemeral: false,
+            modelProvider: "openai",
+            model: null,
+            reasoningEffort: null,
+            createdAt: 1,
+            updatedAt: 2,
+            recencyAt: null,
+            status: {type: "idle"},
+            path: null,
+            cwd: "/workspace",
+            cliVersion: "0",
+            section: null,
+            sectionEnteredAt: null,
+            projectId: null,
+            historyMode: "legacy",
+            source: "cli",
+            agentNickname: null,
+            agentRole: null,
+            gitInfo: null,
+            name: null,
+            turns: [{
+                id: `turn-${id}`,
+                itemsView: "full",
+                status: "completed",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+                items,
+            }],
+        });
+        const root = makeThread("root-history", [
+            {
+                type: "subAgentActivity",
+                id: "activity-child-1",
+                kind: "started",
+                agentThreadId: "child-history",
+                agentPath: "/root/history_child",
+            },
+            {
+                type: "subAgentActivity",
+                id: "activity-child-1-terminal",
+                kind: "interrupted",
+                agentThreadId: "child-history",
+                agentPath: "/root/history_child",
+            },
+            {
+                type: "subAgentActivity",
+                id: "activity-child-2",
+                kind: "started",
+                agentThreadId: "child-history",
+                agentPath: "/root/history_child",
+            },
+            {
+                type: "subAgentActivity",
+                id: "activity-child-2-terminal",
+                kind: "interrupted",
+                agentThreadId: "child-history",
+                agentPath: "/root/history_child",
+            },
+            {
+                type: "subAgentActivity",
+                id: "activity-orphan",
+                kind: "started",
+                agentThreadId: "orphan-history",
+                agentPath: "/root/orphan_child",
+            },
+        ]);
+        const child = makeThread("child-history", [
+            {
+                type: "commandExecution",
+                id: "child-command-1",
+                pluginId: null,
+                scriptPath: null,
+                command: "python -m http.server",
+                cwd: "/workspace",
+                processId: "42",
+                source: "unifiedExecStartup",
+                status: "inProgress",
+                commandActions: [],
+                aggregatedOutput: null,
+                exitCode: null,
+                durationMs: null,
+            },
+            {
+                type: "agentMessage",
+                id: "child-history-message-1",
+                text: "Persisted first-generation output",
+                phase: null,
+                memoryCitation: null,
+                delivery: null,
+                questions: null,
+            },
+        ]);
+        const firstChildTurn = child.turns[0]!;
+        child.turns.push({
+            id: "turn-child-history-2",
+            itemsView: firstChildTurn.itemsView,
+            status: firstChildTurn.status,
+            error: firstChildTurn.error,
+            startedAt: firstChildTurn.startedAt,
+            completedAt: firstChildTurn.completedAt,
+            durationMs: firstChildTurn.durationMs,
+            items: [{
+                type: "agentMessage",
+                id: "child-history-message-2",
+                text: "Persisted second-generation output",
+                phase: null,
+                memoryCitation: null,
+                delivery: null,
+                questions: null,
+            }],
+        });
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread: root,
+            model: model.id,
+            modelProvider: "openai",
+            cwd: "/workspace",
+            approvalPolicy: "never",
+            sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockImplementation((threadId) => {
+            if (threadId === "orphan-history") return Promise.reject(new Error("missing child history"));
+            return Promise.resolve({thread: threadId === root.id ? root : child});
+        });
+        appServer.threadBackgroundTerminalsList = vi.fn().mockImplementation(({threadId}) => Promise.resolve({
+            data: threadId === "child-history"
+                ? [{itemId: "child-command-1", processId: "42", command: "python -m http.server"}]
+                : [],
+            nextCursor: null,
+        }));
+
+        await agent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: {
+                _meta: {jetbrains: {air: {version: 1, capabilities: ["nativeSubagentSessions", "asyncTasks"]}}},
+            },
+        });
+        await agent.loadSession({sessionId: root.id, cwd: "/workspace", mcpServers: []});
+
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0]);
+        const firstSpawnIndex = updates.findIndex(({update}) => update.subagentSessionId === "child-history"
+            && update.sessionUpdate === "subagent_spawned");
+        const firstOutputIndex = updates.findIndex(({update}) => update.messageId === "child-history-message-1");
+        const childTaskIndex = updates.findIndex(({update}) => update.sessionUpdate === "async_task_spawned"
+            && update.asyncTaskId === "child-history:child-command-1");
+        const firstTerminalIndex = updates.findIndex(({update}) => update.sessionUpdate === "subagent_state_update"
+            && update.subagentSessionId === "child-history");
+        const secondSpawnIndex = updates.findIndex(({update}) => update.subagentSessionId === "child-history:generation:2"
+            && update.sessionUpdate === "subagent_spawned");
+        const secondOutputIndex = updates.findIndex(({update}) => update.messageId === "child-history-message-2");
+        const orphanTerminalIndex = updates.findIndex(({update}) => update.subagentSessionId === "orphan-history"
+            && update.state === "disconnected");
+        expect(firstOutputIndex).toBeGreaterThan(firstSpawnIndex);
+        expect(childTaskIndex).toBeGreaterThan(firstSpawnIndex);
+        expect(firstTerminalIndex).toBeGreaterThan(childTaskIndex);
+        expect(secondSpawnIndex).toBeGreaterThan(firstOutputIndex);
+        expect(secondOutputIndex).toBeGreaterThan(secondSpawnIndex);
+        expect(orphanTerminalIndex).toBeGreaterThan(secondOutputIndex);
+        expect(updates[firstOutputIndex]?.sessionId).toBe("child-history");
+        expect(updates[secondOutputIndex]?.sessionId).toBe("child-history:generation:2");
+    });
+
     it("should replay history during loadSession", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -26,6 +210,8 @@ describe("CodexACPAgent - loadSession", () => {
             upgrade: null,
             upgradeInfo: null,
             availabilityNux: null,
+            modelSpecialty: null,
+            multiAgentVersion: null,
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -51,10 +237,13 @@ describe("CodexACPAgent - loadSession", () => {
             sessionId: "session-1",
             parentThreadId: null,
             threadSource: null,
+            originator: null,
             forkedFromId: null,
             preview: "Hi",
             ephemeral: false,
             modelProvider: "openai",
+            model: null,
+            reasoningEffort: null,
             createdAt: 123,
             updatedAt: 124,
             recencyAt: null,
@@ -62,6 +251,10 @@ describe("CodexACPAgent - loadSession", () => {
             path: null,
             cwd: "/test/project",
             cliVersion: "0.0.0",
+            section: null,
+            sectionEnteredAt: null,
+            projectId: null,
+            historyMode: "legacy",
             source: "cli",
             agentNickname: null,
             agentRole: null,
@@ -92,6 +285,8 @@ describe("CodexACPAgent - loadSession", () => {
                             text: "Hello!",
                             phase: null,
                             memoryCitation: null,
+                            delivery: null,
+                            questions: null,
                         },
                         {
                             type: "reasoning",
@@ -102,6 +297,8 @@ describe("CodexACPAgent - loadSession", () => {
                         {
                             type: "commandExecution",
                             id: "item-cmd-1",
+                            pluginId: null,
+                            scriptPath: null,
                             command: "ls",
                             cwd: "/test/project",
                             processId: null,
@@ -132,6 +329,7 @@ describe("CodexACPAgent - loadSession", () => {
                             status: "completed",
                             arguments: {},
                             appContext: null,
+                            readOnlyHint: null,
                             pluginId: null,
                             result: null,
                             error: null,
@@ -159,11 +357,19 @@ describe("CodexACPAgent - loadSession", () => {
                             status: "completed",
                             revisedPrompt: "A tiny blue square",
                             result: "iVBORw0KGgo=",
+                            failure: null,
                             savedPath: "/test/project/generated-blue-square.png",
                         },
                         {
                             type: "contextCompaction",
                             id: "item-context-compaction-1",
+                        },
+                        {
+                            type: "subAgentActivity",
+                            id: "item-subagent-1",
+                            kind: "started",
+                            agentThreadId: "thread-child-1",
+                            agentPath: "/root/test_audit",
                         },
                     ],
                 },
@@ -187,9 +393,20 @@ describe("CodexACPAgent - loadSession", () => {
             sandbox: { type: "dangerFullAccess" },
             reasoningEffort: model.defaultReasoningEffort,
         });
-        codexAppServerClient.threadRead = vi.fn().mockResolvedValue({
+        codexAppServerClient.threadReadWithHistory = vi.fn().mockResolvedValue({
             thread: thread,
         });
+        const goal: ThreadGoal = {
+            threadId: thread.id,
+            objective: "Keep the restored migration green",
+            status: "paused",
+            tokenBudget: null,
+            tokensUsed: 42,
+            timeUsedSeconds: 46,
+            createdAt: 1710000000,
+            updatedAt: 1710000046,
+        };
+        codexAppServerClient.threadGoalGet = vi.fn().mockResolvedValue({ goal });
 
         await codexAcpAgent.initialize({ protocolVersion: 1 });
 
@@ -200,10 +417,8 @@ describe("CodexACPAgent - loadSession", () => {
         };
         await codexAcpAgent.loadSession(loadParams);
 
-        expect(codexAppServerClient.threadRead).toHaveBeenCalledWith({
-            threadId: thread.id,
-            includeTurns: true,
-        });
+        expect(codexAppServerClient.threadReadWithHistory).toHaveBeenCalledWith(thread.id);
+        expect(codexAppServerClient.threadGoalGet).toHaveBeenCalledWith({ threadId: thread.id });
         await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             "data/load-session-history.json"
         );
@@ -228,6 +443,8 @@ describe("CodexACPAgent - loadSession", () => {
             upgrade: null,
             upgradeInfo: null,
             availabilityNux: null,
+            modelSpecialty: null,
+            multiAgentVersion: null,
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -250,10 +467,13 @@ describe("CodexACPAgent - loadSession", () => {
             sessionId: "session-1",
             parentThreadId: null,
             threadSource: null,
+            originator: null,
             forkedFromId: null,
             preview: "",
             ephemeral: false,
             modelProvider: "openai",
+            model: null,
+            reasoningEffort: null,
             createdAt: 0,
             updatedAt: 0,
             recencyAt: null,
@@ -261,6 +481,10 @@ describe("CodexACPAgent - loadSession", () => {
             path: null,
             cwd: "/test/project",
             cliVersion: "0.0.0",
+            section: null,
+            sectionEnteredAt: null,
+            projectId: null,
+            historyMode: "legacy",
             source: "cli",
             agentNickname: null,
             agentRole: null,
@@ -277,7 +501,7 @@ describe("CodexACPAgent - loadSession", () => {
             sandbox: { type: "dangerFullAccess" },
             reasoningEffort: model.defaultReasoningEffort,
         });
-        codexAppServerClient.threadRead = vi.fn().mockResolvedValue({
+        codexAppServerClient.threadReadWithHistory = vi.fn().mockResolvedValue({
             thread: thread,
         });
 
@@ -461,10 +685,13 @@ describe("CodexACPAgent - loadSession", () => {
                 sessionId: "session-legacy",
                 parentThreadId: null,
                 threadSource: null,
+                originator: null,
                 forkedFromId: null,
                 preview: "List the files",
                 ephemeral: false,
                 modelProvider: "openai",
+                model: null,
+                reasoningEffort: null,
                 createdAt: 123,
                 updatedAt: 124,
                 recencyAt: null,
@@ -472,6 +699,10 @@ describe("CodexACPAgent - loadSession", () => {
                 path: rolloutPath,
                 cwd: "/test/project",
                 cliVersion: "0.139.0",
+                section: null,
+                sectionEnteredAt: null,
+                projectId: null,
+                historyMode: "legacy",
                 source: "vscode",
                 agentNickname: null,
                 agentRole: null,
@@ -510,6 +741,8 @@ describe("CodexACPAgent - loadSession", () => {
                                 text: "The directory contains README.md and src.",
                                 phase: null,
                                 memoryCitation: null,
+                                delivery: null,
+                                questions: null,
                             },
                         ],
                     },
@@ -525,7 +758,7 @@ describe("CodexACPAgent - loadSession", () => {
                 sandbox: { type: "dangerFullAccess" },
                 reasoningEffort: model.defaultReasoningEffort,
             });
-            codexAppServerClient.threadRead = vi.fn().mockResolvedValue({
+            codexAppServerClient.threadReadWithHistory = vi.fn().mockResolvedValue({
                 thread,
             });
 
@@ -570,6 +803,8 @@ describe("CodexACPAgent - loadSession", () => {
             upgrade: null,
             upgradeInfo: null,
             availabilityNux: null,
+            modelSpecialty: null,
+            multiAgentVersion: null,
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -592,10 +827,13 @@ describe("CodexACPAgent - loadSession", () => {
             sessionId: "session-1",
             parentThreadId: null,
             threadSource: null,
+            originator: null,
             forkedFromId: null,
             preview: "",
             ephemeral: false,
             modelProvider: "openai",
+            model: null,
+            reasoningEffort: null,
             createdAt: 0,
             updatedAt: 0,
             recencyAt: null,
@@ -603,6 +841,10 @@ describe("CodexACPAgent - loadSession", () => {
             path: null,
             cwd: "/test/project",
             cliVersion: "0.0.0",
+            section: null,
+            sectionEnteredAt: null,
+            projectId: null,
+            historyMode: "legacy",
             source: "cli",
             agentNickname: null,
             agentRole: null,
@@ -619,7 +861,7 @@ describe("CodexACPAgent - loadSession", () => {
             sandbox: { type: "dangerFullAccess" },
             reasoningEffort: model.defaultReasoningEffort,
         });
-        codexAppServerClient.threadRead = vi.fn().mockResolvedValue({
+        codexAppServerClient.threadReadWithHistory = vi.fn().mockResolvedValue({
             thread: thread,
         });
 

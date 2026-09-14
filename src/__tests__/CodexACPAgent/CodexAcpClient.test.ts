@@ -4,6 +4,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR, type CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
+    awaitFirstAuthStatusPush,
     createCodexMockTestFixture,
     createTestFixture,
     createTestModel,
@@ -16,6 +17,7 @@ import {AgentMode} from "../../AgentMode";
 import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
+import {GOAL_CONTROL_METHOD} from "../../AcpExtensions";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -37,6 +39,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.initialize({protocolVersion: 1});
         await authFixture.getCodexAcpClient().logout();
+        // `initialize` reads the auth identity without waiting for it, and pushes
+        // it. Let that read land before the dump is cleared, so it cannot appear
+        // in the snapshot of the failing `newSession`.
+        await awaitFirstAuthStatusPush(authFixture);
         authFixture.clearCodexConnectionDump();
 
         await expect(
@@ -58,6 +64,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const unauthenticatedResponse = await keyFixture.getCodexAcpAgent().extMethod("authentication/status", {});
         expect(unauthenticatedResponse).toEqual({type: "unauthenticated"});
 
+        await awaitFirstAuthStatusPush(keyFixture);
         keyFixture.clearCodexConnectionDump();
 
         const authRequest: CodexAuthRequest = { methodId: "api-key", _meta: { "api-key": { apiKey: "TOKEN" }}};
@@ -86,6 +93,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             "account/login/start",
             "account/read",
             "account/updated",
+            // Reads the connection auth identity for the `auth/status_update` push
+            // when no session is open yet.
+            "account/read",
             "thread/start",
             "model/list",
             "thread/started",
@@ -200,6 +210,113 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         expect(accountReadSpy).toHaveBeenCalledWith({refreshToken: true});
         expect(accountLoginSpy).not.toHaveBeenCalled();
+    });
+
+    function createDeviceCodeFixture() {
+        const deviceFixture = createCodexMockTestFixture();
+        const codexAppServerClient = deviceFixture.getCodexAppServerClient();
+        vi.spyOn(codexAppServerClient, "accountRead").mockResolvedValue({
+            account: null,
+            requiresOpenaiAuth: true,
+        });
+        vi.spyOn(codexAppServerClient, "accountLogin").mockResolvedValue({
+            type: "chatgptDeviceCode",
+            loginId: "login-1",
+            verificationUrl: "https://example.com/device",
+            userCode: "ABCD-1234",
+        });
+        let loginCompleted: ((event: unknown) => void) | undefined;
+        vi.spyOn(codexAppServerClient.connection, "onNotification").mockImplementation(((method: unknown, handler: (event: unknown) => void) => {
+            if (method === "account/login/completed") {
+                loginCompleted = handler;
+            }
+            return { dispose: () => {} };
+        }) as never);
+        return {
+            deviceFixture,
+            codexAppServerClient,
+            completeLogin: (success: boolean) => loginCompleted?.({ loginId: "login-1", success, error: null }),
+            loginCompletedSubscribed: () => loginCompleted !== undefined,
+        };
+    }
+
+    it('should authenticate with ChatGPT device code via URL elicitation', async () => {
+        const { deviceFixture, completeLogin, loginCompletedSubscribed } = createDeviceCodeFixture();
+        const codexAcpAgent = deviceFixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: { elicitation: { url: {} } },
+        });
+        deviceFixture.setElicitationResponse({ action: "accept" });
+
+        const authPromise = codexAcpAgent.authenticate({ methodId: "chat-gpt-device-code" }, 42);
+        await vi.waitFor(() => expect(loginCompletedSubscribed()).toBe(true));
+        completeLogin(true);
+        await expect(authPromise).resolves.toEqual({});
+
+        const elicitationRequest = deviceFixture.getAcpConnectionEvents([])
+            .find(event => event.method === "createElicitation");
+        expect(elicitationRequest?.args[0]).toEqual({
+            mode: "url",
+            requestId: 42,
+            elicitationId: "login-1",
+            url: "https://example.com/device",
+            message: expect.stringContaining("ABCD-1234"),
+        });
+        const elicitationComplete = deviceFixture.getAcpConnectionEvents([])
+            .find(event => event.method === "completeElicitation");
+        expect(elicitationComplete?.args[0]).toEqual({
+            elicitationId: "login-1",
+        });
+    });
+
+    it('should cancel ChatGPT device code login when URL elicitation is declined', async () => {
+        const { deviceFixture, codexAppServerClient } = createDeviceCodeFixture();
+        const codexAcpAgent = deviceFixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: { elicitation: { url: {} } },
+        });
+        const cancelSpy = vi.spyOn(codexAppServerClient, "accountLoginCancel")
+            .mockResolvedValue({ status: "canceled" });
+        deviceFixture.setElicitationResponse({ action: "decline" });
+
+        await expect(codexAcpAgent.authenticate({ methodId: "chat-gpt-device-code" }, 42))
+            .rejects.toThrow();
+        expect(cancelSpy).toHaveBeenCalledWith({ loginId: "login-1" });
+        expect(deviceFixture.getAcpConnectionEvents([])
+            .some(event => event.method === "completeElicitation"))
+            .toBe(false);
+    });
+
+    it('should complete URL elicitation when login finishes before the elicitation response', async () => {
+        const { deviceFixture, completeLogin, loginCompletedSubscribed } = createDeviceCodeFixture();
+        const codexAcpAgent = deviceFixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: { elicitation: { url: {} } },
+        });
+        deviceFixture.setElicitationResponse(new Promise(() => {}));
+
+        const authPromise = codexAcpAgent.authenticate({ methodId: "chat-gpt-device-code" }, 42);
+        await vi.waitFor(() => expect(loginCompletedSubscribed()).toBe(true));
+        completeLogin(true);
+        await expect(authPromise).resolves.toEqual({});
+
+        const elicitationComplete = deviceFixture.getAcpConnectionEvents([])
+            .find(event => event.method === "completeElicitation");
+        expect(elicitationComplete?.args[0]).toEqual({
+            elicitationId: "login-1",
+        });
+    });
+
+    it('should reject ChatGPT device code auth when the client lacks URL elicitation', async () => {
+        const { deviceFixture } = createDeviceCodeFixture();
+        const codexAcpAgent = deviceFixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({ protocolVersion: 1 });
+
+        await expect(codexAcpAgent.authenticate({ methodId: "chat-gpt-device-code" }, 42))
+            .rejects.toThrow("Device code authentication requires URL elicitation support");
     });
 
     it('should authenticate with a gateway', async () => {
@@ -326,6 +443,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 upgrade: null,
                 upgradeInfo: null,
                 availabilityNux: null,
+                modelSpecialty: null,
+                multiAgentVersion: null,
                 displayName: "gpt-5",
                 description: "test model",
                 hidden: false,
@@ -417,7 +536,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             reasoningEffort: "medium",
             serviceTier: null,
         } as any);
-        const threadReadSpy = vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+        const threadReadSpy = vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
             thread: {id: "thread-id"} as any,
         });
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
@@ -437,6 +556,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             mcpServers: [],
         });
 
+        expect(threadResumeSpy.mock.calls.every(([params]) => params.excludeTurns === true)).toBe(true);
         expect(resumed.additionalDirectories).toEqual(["/workspace/resume-extra"]);
         expect(loaded.additionalDirectories).toEqual(["/workspace/load-extra"]);
         expect(threadResumeSpy.mock.calls[0]![0].config?.["projects"]).toEqual({
@@ -447,10 +567,201 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             "/workspace": {trust_level: "trusted"},
             "/workspace/load-extra": {trust_level: "trusted"},
         });
-        expect(threadReadSpy).toHaveBeenCalledWith({
-            threadId: "thread-id",
-            includeTurns: true,
+        expect(threadReadSpy).toHaveBeenCalledWith("thread-id");
+    });
+
+    it('forks an ACP session through thread/fork with the requested workspace', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
+            thread: {id: "fork-id"} as any,
+            model: "gpt-5",
+            modelProvider: "openai",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        const threadUnsubscribeSpy = vi.spyOn(codexAppServerClient, "threadUnsubscribe").mockResolvedValue({
+            status: "unsubscribed",
         });
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        const forked = await codexAcpClient.forkSession({
+            sessionId: "source-id",
+            cwd: "/workspace",
+            additionalDirectories: ["/workspace/extra"],
+            mcpServers: [],
+        });
+
+        expect(forked.sessionId).toBe("fork-id");
+        expect(forked.additionalDirectories).toEqual(["/workspace/extra"]);
+        expect(threadForkSpy).toHaveBeenCalledWith(expect.objectContaining({
+            excludeTurns: true,
+            threadId: "source-id",
+            cwd: "/workspace",
+            config: expect.objectContaining({
+                projects: {
+                    "/workspace": {trust_level: "trusted"},
+                    "/workspace/extra": {trust_level: "trusted"},
+                },
+            }),
+        }));
+        expect(threadUnsubscribeSpy).toHaveBeenCalledWith({threadId: "fork-id"});
+    });
+
+    it('maps an AIR fork message id to the containing Codex turn', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
+            thread: {
+                id: "source-id",
+                turns: [
+                    {id: "turn-1", items: [{id: "item-1"}]},
+                    {id: "turn-2", items: [{id: "agent-message-2"}]},
+                ],
+            },
+        } as any);
+        const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
+            thread: {id: "fork-id"},
+            model: "gpt-5",
+            modelProvider: "openai",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        await codexAcpClient.forkSession({
+            sessionId: "source-id",
+            cwd: "/workspace",
+            _meta: {
+                jetbrains: {air: {fork: {version: 1, messageId: "agent-message-2:segment:0"}}},
+            },
+        });
+
+        expect(threadForkSpy).toHaveBeenCalledWith(expect.objectContaining({
+            excludeTurns: true,
+            threadId: "source-id",
+            lastTurnId: "turn-2",
+        }));
+    });
+
+    it('maps a persisted AIR message fingerprint when Codex item ids changed', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+            thread: {id: "source-id", turns: []},
+        } as any);
+        vi.spyOn(codexAppServerClient, "threadTurnsList")
+            .mockResolvedValueOnce({
+                data: [{id: "turn-2", items: [{type: "agentMessage", id: "new-item-2", text: "Same answer"}]}],
+                nextCursor: "second-page", backwardsCursor: null,
+            } as any)
+            .mockResolvedValueOnce({
+                data: [{id: "turn-1", items: [{type: "agentMessage", id: "new-item-1", text: "Same answer"}]}],
+                nextCursor: null, backwardsCursor: null,
+            } as any);
+        const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
+            thread: {id: "fork-id"},
+            model: "gpt-5",
+            modelProvider: "openai",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        await codexAcpClient.forkSession({
+            sessionId: "source-id",
+            cwd: "/workspace",
+            _meta: {
+                jetbrains: {air: {fork: {
+                    version: 1,
+                    messageId: "old-item-2",
+                    messageFingerprint: "sha256:41153d2b46c2869f4021958d44dac18888247fd999507c28970be299a8de4a0f",
+                    messageOccurrence: 2,
+                }}},
+            },
+        });
+
+        expect(threadForkSpy).toHaveBeenCalledWith(expect.objectContaining({
+            excludeTurns: true,
+            threadId: "source-id",
+            lastTurnId: "turn-2",
+        }));
+    });
+
+    it('restores collaboration mode for resumed and loaded sessions', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "threadResume").mockImplementation(async ({threadId}) => {
+            mockFixture.sendServerNotification({
+                method: "thread/settings/updated",
+                params: {
+                    threadId,
+                    threadSettings: {
+                        collaborationMode: {
+                            mode: "plan",
+                            settings: {},
+                        },
+                    },
+                },
+            });
+            return {
+                thread: {id: threadId},
+                model: "gpt-5",
+                modelProvider: "openai",
+                reasoningEffort: "medium",
+                serviceTier: null,
+            } as any;
+        });
+        vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockImplementation(async (threadId) => ({
+            thread: {id: threadId, turns: []},
+        } as any));
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        const resumed = await codexAcpAgent.resumeSession({
+            sessionId: "resume-id",
+            cwd: "/workspace",
+        });
+        const loaded = await codexAcpAgent.loadSession({
+            sessionId: "load-id",
+            cwd: "/workspace",
+            mcpServers: [],
+        });
+
+        expect(codexAcpAgent.getSessionState("resume-id").collaborationMode).toBe("plan");
+        expect(codexAcpAgent.getSessionState("load-id").collaborationMode).toBe("plan");
+        expect(resumed.configOptions?.find(option => option.id === "collaboration_mode")).toMatchObject({currentValue: "plan"});
+        expect(loaded.configOptions?.find(option => option.id === "collaboration_mode")).toMatchObject({currentValue: "plan"});
     });
 
     it('uses configured model provider when resuming sessions without an explicit provider', async () => {
@@ -471,7 +782,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             reasoningEffort: "medium",
             serviceTier: null,
         } as any);
-        vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+        vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
             thread: {id: "thread-id"} as any,
         });
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
@@ -518,7 +829,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             reasoningEffort: "medium",
             serviceTier: null,
         } as any);
-        vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+        vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
             thread: {id: "thread-id", turns: []} as any,
         });
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
@@ -772,6 +1083,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             sessionId: "session-id",
             cwd: "/workspace",
             additionalDirectories: ["/workspace/extra"],
+            agentMode: AgentMode.Agent,
         }));
 
         await codexAcpAgent.prompt({
@@ -790,6 +1102,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             type: "workspaceWrite",
             writableRoots: ["/workspace/extra"],
         });
+        expect(turnStartSpy.mock.calls[0]![0].approvalsReviewer).toBe("auto_review");
     });
 
     function loadNotifications(){
@@ -1080,7 +1393,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
     });
 
-    it('returns success when a cancelled ACP prompt request completes before interruption wins', async () => {
+    it('returns cancelled when completion races with an already cancelled ACP prompt request', async () => {
         const { mockFixture, sessionState } = setupPromptFixture();
         const turnCompleted = deferred<TurnCompletedNotification>();
         vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
@@ -1120,7 +1433,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             threadId: "session-id",
             turn: createTurn("turn-id", "completed"),
         });
-        await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
         expect(mockFixture.getAcpConnectionDump([])).toContain("tail output");
         turnInterrupt.resolve(undefined);
     });
@@ -1275,7 +1588,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     shortDescription: "Build",
                     path: "/workspace",
                     scope: "user",
-                    enabled: true
+                    enabled: true,
+                    pluginId: null
                 }],
                 errors: []
             }]
@@ -1304,6 +1618,48 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.prompt({ sessionId: "session-id", prompt: [{ type: "text", text: "/status" }] });
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-status.json");
+    });
+
+    it('preserves the latest context usage while handling /status locally', async () => {
+        const {mockFixture, sessionState} = setupPromptFixture({
+            lastTokenUsage: {
+                totalTokens: 41_500,
+                inputTokens: 40_000,
+                cachedInputTokens: 1_000,
+                outputTokens: 500,
+                reasoningOutputTokens: 100,
+            },
+            modelContextWindow: 258_400,
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: sessionState.sessionId,
+            prompt: [{type: "text", text: "/status"}],
+        });
+
+        expect(sessionState.lastTokenUsage?.totalTokens).toBe(41_500);
+        expect(mockFixture.getAcpConnectionDump([])).toContain(
+            "**Context window:** 16% used (41.5K used / 258.4K)",
+        );
+    });
+
+    it('resets the previous context usage before a model turn', async () => {
+        const {mockFixture, sessionState} = setupPromptFixture({
+            lastTokenUsage: {
+                totalTokens: 41_500,
+                inputTokens: 40_000,
+                cachedInputTokens: 1_000,
+                outputTokens: 500,
+                reasoningOutputTokens: 100,
+            },
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: sessionState.sessionId,
+            prompt: [{type: "text", text: "start a model turn"}],
+        });
+
+        expect(sessionState.lastTokenUsage).toBeNull();
     });
 
     it('passes skill slash commands through to Codex', async () => {
@@ -1496,9 +1852,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     it('handles goal slash commands through Codex app server', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture();
         const goalRunSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "runGoalSet")
-            .mockResolvedValue({
-                threadId: "session-id",
-                turn: createTurn("goal-turn-id", "completed"),
+            .mockImplementation(async (_params, _onTurnStarted, _runtimeEffectsGraceMs, onGoalSet) => {
+                onGoalSet?.(createThreadGoal());
+                return {
+                    threadId: "session-id",
+                    turn: createTurn("goal-turn-id", "completed"),
+                };
             });
         const goalClearSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "runGoalClear")
             .mockResolvedValue(undefined);
@@ -1528,7 +1887,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(goalRunSpy).toHaveBeenNthCalledWith(2, {
             threadId: "session-id",
             status: "paused",
-        });
+        }, undefined, undefined, expect.any(Function));
         expect(goalRunSpy).toHaveBeenNthCalledWith(3, {
             threadId: "session-id",
             status: "active",
@@ -1665,12 +2024,15 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 update: {
                     sessionUpdate: "session_info_update",
                     _meta: {
-                        codex: {
-                            goal: {
-                                objective: "Ship the migration and keep tests green",
-                                status: "active",
-                                tokenBudget: null,
-                            },
+                        goal: {
+                            objective: "Ship the migration and keep tests green",
+                            status: "active",
+                            tokenBudget: null,
+                            tokensUsed: 0,
+                            timeUsedSeconds: 0,
+                            createdAt: 1710000000000,
+                            updatedAt: 1710000100000,
+                            controlMethod: "_session/goal",
                         },
                     },
                 },
@@ -2388,6 +2750,304 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
     });
 
+    it('controls an active goal through the out-of-band session extension', async () => {
+        const { mockFixture, sessionState, turnStartSpy } = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const pausedGoal = createThreadGoal({status: "paused", timeUsedSeconds: 12});
+        const activeGoal = createThreadGoal({status: "active", timeUsedSeconds: 12});
+        const setGoalSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "setGoal")
+            .mockImplementation(async (_sessionId, _objective, _onTurnStarted, onGoalSet) => {
+                onGoalSet?.(activeGoal);
+                return null;
+            });
+        const setStatusSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "setGoalStatus")
+            .mockResolvedValue(pausedGoal);
+        const resumeGoalSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "resumeGoal")
+            .mockImplementation(async (_sessionId, _onTurnStarted, onGoalSet) => {
+                onGoalSet?.(activeGoal);
+                return null;
+            });
+        const clearGoalSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "clearGoal").mockResolvedValue(undefined);
+        const getGoalSpy = vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal").mockResolvedValue(activeGoal);
+        mockFixture.clearAcpConnectionDump();
+
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: "Replace the objective",
+        })).resolves.toEqual({});
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "pause",
+        })).resolves.toEqual({});
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "resume",
+        })).resolves.toEqual({});
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "clear",
+        })).resolves.toEqual({});
+
+        expect(setGoalSpy).toHaveBeenCalledWith("session-id", "Replace the objective", undefined, expect.any(Function));
+        expect(setStatusSpy).toHaveBeenNthCalledWith(1, "session-id", "paused");
+        expect(resumeGoalSpy).toHaveBeenCalledWith("session-id", undefined, expect.any(Function));
+        expect(clearGoalSpy).toHaveBeenCalledWith("session-id");
+        expect(getGoalSpy).toHaveBeenCalledTimes(2);
+        expect(turnStartSpy).toHaveBeenCalledTimes(2);
+        const goalUpdates = mockFixture.getAcpConnectionEvents([]).filter(event =>
+            event.method === "sessionUpdate"
+            && "args" in event
+            && event.args[0]?.update?.sessionUpdate === "session_info_update"
+        );
+        expect(goalUpdates).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                args: [expect.objectContaining({
+                    update: expect.objectContaining({
+                        _meta: {goal: expect.objectContaining({status: "paused"})},
+                    }),
+                })],
+            }),
+            expect.objectContaining({
+                args: [expect.objectContaining({
+                    update: expect.objectContaining({
+                        _meta: {goal: expect.objectContaining({status: "active"})},
+                    }),
+                })],
+            }),
+            expect.objectContaining({
+                args: [expect.objectContaining({
+                    update: expect.objectContaining({
+                        _meta: {goal: null},
+                    }),
+                })],
+            }),
+        ]));
+    });
+
+    it('waits for an active turn before starting goal work', async () => {
+        const {mockFixture, sessionState, turnStartSpy} = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const activeTurnCompleted = deferred<TurnCompletedNotification>();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReset()
+            .mockReturnValueOnce(activeTurnCompleted.promise)
+            .mockResolvedValue({
+                threadId: "session-id",
+                turn: createTurn("goal-work-turn", "completed"),
+            });
+        const goal = createThreadGoal({objective: "Finish the migration", status: "active"});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "setGoal")
+            .mockImplementation(async (_sessionId, _objective, _onTurnStarted, onGoalSet) => {
+                onGoalSet?.(goal);
+                return null;
+            });
+        vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal").mockResolvedValue(goal);
+
+        const activePrompt = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Work already in progress"}],
+        });
+        await vi.waitFor(() => expect(turnStartSpy).toHaveBeenCalledTimes(1));
+
+        const setGoal = mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: goal.objective,
+        });
+        await flushAsyncWork();
+        expect(turnStartSpy).toHaveBeenCalledTimes(1);
+
+        activeTurnCompleted.resolve({
+            threadId: "session-id",
+            turn: createTurn("turn-id", "completed"),
+        });
+        await expect(activePrompt).resolves.toMatchObject({stopReason: "end_turn"});
+        await expect(setGoal).resolves.toEqual({});
+        expect(turnStartSpy).toHaveBeenCalledTimes(2);
+        expect(turnStartSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+            input: [expect.objectContaining({text: "Continue working toward the active goal."})],
+        }));
+    });
+
+    it('starts goal work when resume routes no app-server turn', async () => {
+        const {mockFixture, sessionState, turnStartSpy} = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const goal = createThreadGoal({objective: "Finish the migration", status: "active"});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "resumeGoal")
+            .mockImplementation(async (_sessionId, _onTurnStarted, onGoalSet) => {
+                onGoalSet?.(goal);
+                return null;
+            });
+        vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal").mockResolvedValue(goal);
+
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "resume",
+        })).resolves.toEqual({});
+
+        expect(turnStartSpy).toHaveBeenCalledTimes(1);
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            input: [expect.objectContaining({text: "Continue working toward the active goal."})],
+        }));
+    });
+
+    it('starts only the latest goal replacement after an active turn', async () => {
+        const {mockFixture, sessionState, turnStartSpy} = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const activeTurnCompleted = deferred<TurnCompletedNotification>();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReset()
+            .mockReturnValueOnce(activeTurnCompleted.promise)
+            .mockResolvedValue({
+                threadId: "session-id",
+                turn: createTurn("goal-work-turn", "completed"),
+            });
+        const firstGoal = createThreadGoal({objective: "First replacement", createdAt: 1});
+        const latestGoal = createThreadGoal({objective: "Latest replacement", createdAt: 2});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "setGoal")
+            .mockImplementation(async (_sessionId, objective, _onTurnStarted, onGoalSet) => {
+                onGoalSet?.(objective === firstGoal.objective ? firstGoal : latestGoal);
+                return null;
+            });
+        const getGoal = vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal").mockResolvedValue(latestGoal);
+
+        const activePrompt = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Work already in progress"}],
+        });
+        await vi.waitFor(() => expect(turnStartSpy).toHaveBeenCalledTimes(1));
+        const firstSet = mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: firstGoal.objective,
+        });
+        const latestSet = mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: latestGoal.objective,
+        });
+        await flushAsyncWork();
+        expect(turnStartSpy).toHaveBeenCalledTimes(1);
+
+        activeTurnCompleted.resolve({
+            threadId: "session-id",
+            turn: createTurn("turn-id", "completed"),
+        });
+        await expect(activePrompt).resolves.toMatchObject({stopReason: "end_turn"});
+        await expect(firstSet).resolves.toEqual({});
+        await expect(latestSet).resolves.toEqual({});
+
+        expect(turnStartSpy).toHaveBeenCalledTimes(2);
+        expect(getGoal).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not start queued goal work after the goal is paused', async () => {
+        const {mockFixture, sessionState, turnStartSpy} = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const activeTurnCompleted = deferred<TurnCompletedNotification>();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReset()
+            .mockReturnValue(activeTurnCompleted.promise);
+        const goal = createThreadGoal({objective: "Finish the migration", status: "active"});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "setGoal")
+            .mockImplementation(async (_sessionId, _objective, _onTurnStarted, onGoalSet) => {
+                onGoalSet?.(goal);
+                return null;
+            });
+        vi.spyOn(mockFixture.getCodexAcpClient(), "setGoalStatus")
+            .mockResolvedValue(createThreadGoal({objective: goal.objective, status: "paused"}));
+
+        const activePrompt = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Work already in progress"}],
+        });
+        await vi.waitFor(() => expect(turnStartSpy).toHaveBeenCalledTimes(1));
+        const setGoal = mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: goal.objective,
+        });
+        await flushAsyncWork();
+        await mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "pause",
+        });
+
+        activeTurnCompleted.resolve({
+            threadId: "session-id",
+            turn: createTurn("turn-id", "completed"),
+        });
+        await expect(activePrompt).resolves.toMatchObject({stopReason: "end_turn"});
+        await expect(setGoal).resolves.toEqual({});
+        expect(turnStartSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not duplicate an app-server-routed goal turn', async () => {
+        const {mockFixture, sessionState, turnStartSpy} = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const goal = createThreadGoal({objective: "Finish the migration", status: "active"});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "setGoal")
+            .mockImplementation(async (_sessionId, _objective, _onTurnStarted, onGoalSet) => {
+                onGoalSet?.(goal);
+                return {
+                    threadId: "session-id",
+                    turn: createTurn("routed-goal-turn", "completed"),
+                };
+            });
+        const getGoal = vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal");
+
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: goal.objective,
+        })).resolves.toEqual({});
+
+        expect(getGoal).not.toHaveBeenCalled();
+        expect(turnStartSpy).not.toHaveBeenCalled();
+    });
+
+    it('ignores an older goal refresh that completes after a newer refresh', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const sessionState = createTestSessionState({sessionId: "session-id"});
+        // @ts-expect-error - registering local session state for the refresh race
+        codexAcpAgent.sessions.set("session-id", sessionState);
+        const staleGoal = createThreadGoal({objective: "stale", createdAt: 100});
+        const currentGoal = createThreadGoal({objective: "current", createdAt: 200});
+        const staleResponse = deferred<ThreadGoal | null>();
+        const currentResponse = deferred<ThreadGoal | null>();
+        const getGoal = vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal")
+            .mockReturnValueOnce(staleResponse.promise)
+            .mockReturnValueOnce(currentResponse.promise);
+
+        // @ts-expect-error - exercising the private refresh interleaving directly
+        const stalePublish = codexAcpAgent.publishCurrentGoal(sessionState, 0, true);
+        await vi.waitFor(() => expect(getGoal).toHaveBeenCalledTimes(1));
+        // @ts-expect-error - exercising the private refresh interleaving directly
+        const currentPublish = codexAcpAgent.publishCurrentGoal(sessionState, 0, true);
+        currentResponse.resolve(currentGoal);
+        await currentPublish;
+        staleResponse.resolve(staleGoal);
+        await stalePublish;
+
+        expect(sessionState.currentGoal).toMatchObject({objective: "current", createdAt: 200000});
+        const goalUpdates = mockFixture.getAcpConnectionEvents([]).filter(event =>
+            event.method === "sessionUpdate"
+            && event.args[0]?.update?.sessionUpdate === "session_info_update"
+        );
+        expect(goalUpdates).toHaveLength(1);
+        expect(goalUpdates[0]?.args[0]?.update?._meta).toEqual({
+            goal: expect.objectContaining({objective: "current", createdAt: 200000}),
+        });
+    });
+
     it('suppresses the first routed goal notification after cancellation marks the turn stale', async () => {
         const { mockFixture } = setupPromptFixture();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
@@ -2553,7 +3213,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         }
     });
 
-    it('completes goal slash command when app server starts no continuation turn', async () => {
+    it('starts a goal work turn when app server starts no continuation turn', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture();
         const goalRunSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "runGoalSet")
             .mockResolvedValue(null);
@@ -2569,7 +3229,13 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             objective: "Ship the migration and keep tests green",
             status: "active",
         }, expect.any(Function));
-        expect(turnStartSpy).not.toHaveBeenCalled();
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            input: [{
+                type: "text",
+                text: "Continue working toward the active goal.",
+                text_elements: [],
+            }],
+        }));
     });
 
     it('reports missing goal slash command input', async () => {
@@ -2644,7 +3310,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         fixture.clearAcpConnectionDump();
         const prompt: acp.ContentBlock[] = [{ type: "text", text: "/logout " }];
         await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: prompt });
-        await expect(fixture.getAcpConnectionDump(["sessionId"])).toMatchFileSnapshot("data/command-logout.json");
+        const logoutEvent = fixture.getAcpConnectionEvents(["sessionId"]).find(event =>
+            event.args[0]?.update?.sessionUpdate === "agent_message_chunk"
+        );
+        await expect(JSON.stringify(logoutEvent, null, 2)).toMatchFileSnapshot("data/command-logout.json");
     });
 
     it('clears active session auth state when logout command signs out', async () => {
@@ -2678,12 +3347,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 sessionId: "session-1",
                 currentModelId,
                 models: [model],
+                collaborationMode: "default",
                 additionalDirectories: [],
             })
             .mockResolvedValueOnce({
                 sessionId: "session-2",
                 currentModelId,
                 models: [model],
+                collaborationMode: "default",
                 additionalDirectories: [],
             });
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
@@ -2712,7 +3383,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.authenticate({methodId: "api-key"});
 
-        expect(authenticateSpy).toHaveBeenCalledWith({methodId: "api-key"});
+        expect(authenticateSpy).toHaveBeenCalledWith({methodId: "api-key"}, undefined);
         expect(getAccountSpy).toHaveBeenCalledTimes(4);
         expect(codexAcpAgent.getSessionState(session1.sessionId)).toMatchObject({
             account: { type: "apiKey" },
@@ -2742,6 +3413,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             sessionId: "openai-session",
             currentModelId,
             models: [model],
+            collaborationMode: "default",
             modelProvider: "openai",
             additionalDirectories: [],
         });
@@ -2767,7 +3439,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         };
         await codexAcpAgent.authenticate(gatewayAuthRequest);
 
-        expect(authenticateSpy).toHaveBeenCalledWith(gatewayAuthRequest);
+        expect(authenticateSpy).toHaveBeenCalledWith(gatewayAuthRequest, undefined);
         expect(getAccountSpy).toHaveBeenCalledTimes(1);
         expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
             account: { type: "apiKey" },
@@ -2794,6 +3466,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             sessionId: "custom-provider-session",
             currentModelId,
             models: [model],
+            collaborationMode: "default",
             additionalDirectories: [],
         });
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
@@ -2826,8 +3499,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             data: [{
                 cwd: "/workspace",
                 skills: [
-                    { name: "build", description: "Build the project", shortDescription: "Build", path: "/workspace/build", scope: "user", enabled: true },
-                    { name: "deploy", description: "Deploy the service", path: "/workspace/deploy", scope: "repo", enabled: true }
+                    { name: "build", description: "Build the project", shortDescription: "Build", path: "/workspace/build", scope: "user", enabled: true, pluginId: null },
+                    { name: "deploy", description: "Deploy the service", path: "/workspace/deploy", scope: "repo", enabled: true, pluginId: null }
                 ],
                 errors: []
             }]
@@ -2851,7 +3524,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             data: [
                 {
                     name: "fs",
+                    runtimeStatus: null,
+                    pluginId: null,
                     serverInfo: null,
+                    toolsError: null,
                     tools: {listFiles: {name: "listFiles", inputSchema: {type: "object"}}},
                     resources: [{name: "workspace", uri: "file:///workspace"}],
                     resourceTemplates: [],
@@ -2859,7 +3535,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 },
                 {
                     name: "browser",
+                    runtimeStatus: null,
+                    pluginId: null,
                     serverInfo: null,
+                    toolsError: null,
                     tools: {},
                     resources: [],
                     resourceTemplates: [],
@@ -2907,6 +3586,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             upgrade: null,
             upgradeInfo: null,
             availabilityNux: null,
+            modelSpecialty: null,
+            multiAgentVersion: null,
             displayName: 'Codex 5.2',
             description: 'Coding model',
             hidden: false,
@@ -2928,6 +3609,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             upgrade: null,
             upgradeInfo: null,
             availabilityNux: null,
+            modelSpecialty: null,
+            multiAgentVersion: null,
             displayName: 'Standard 5.1',
             description: 'Standard model',
             hidden: false,
@@ -3194,8 +3877,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: null,
                 credits: null,
                 individualLimit: null,
+                spendControlReached: null,
                 planType: null,
                 rateLimitReachedType: null,
+                normalModelSlug: null,
             }
         });
         rateLimits.set("limit-2", {
@@ -3208,8 +3893,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 secondary: null,
                 credits: null,
                 individualLimit: null,
+                spendControlReached: null,
                 planType: null,
                 rateLimitReachedType: null,
+                normalModelSlug: null,
             }
         });
 
@@ -3217,6 +3904,47 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await mockFixture.getCodexAcpAgent().prompt({ sessionId: "session-id", prompt: [{ type: "text", text: "/status" }] });
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/command-status-with-rate-limits.json");
+    });
+
+    it ('should refresh the complete rate-limit snapshot for status', async () => {
+        const {mockFixture, sessionState} = setupPromptFixture();
+        vi.spyOn(mockFixture.getCodexAcpClient(), "getRateLimits").mockResolvedValue({
+            ordinaryUsageAllowed: null,
+            rateLimits: {
+                limitId: "codex",
+                limitName: "Codex",
+                primary: {usedPercent: 15, resetsAt: null, windowDurationMins: 300},
+                secondary: {usedPercent: 25, resetsAt: null, windowDurationMins: 10080},
+                credits: {hasCredits: false, unlimited: false, balance: "0"},
+                individualLimit: {
+                    limit: "25000",
+                    used: "8000",
+                    remainingPercent: 72,
+                    resetsAt: Date.UTC(2026, 8, 30, 12) / 1000,
+                },
+                spendControlReached: null,
+                planType: null,
+                rateLimitReachedType: null,
+                normalModelSlug: null,
+            },
+            rateLimitsByLimitId: null,
+            rateLimitResetCredits: null,
+            accountId: null,
+            rateLimitUpsell: null,
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: sessionState.sessionId,
+            prompt: [{type: "text", text: "/status"}],
+        });
+
+        const dump = mockFixture.getAcpConnectionDump([]);
+        expect(dump).toContain("**Codex 5h limit:** 85% left");
+        expect(dump).toContain("**Codex Weekly limit:** 75% left");
+        expect(dump).toContain("**Codex Credits:** 0");
+        expect(dump).toContain(
+            "**Codex individual spend limit:** 72% left (8,000 of 25,000 credits used; resets Sep 30)",
+        );
     });
 
     it ('should surface thread/compacted as user-visible message', async () => {
@@ -3336,6 +4064,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     individualLimit: null,
                     planType: null,
                     rateLimitReachedType: null,
+                    normalModelSlug: null,
                 }
             }
         });
@@ -3352,6 +4081,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     individualLimit: null,
                     planType: null,
                     rateLimitReachedType: null,
+                    normalModelSlug: null,
                 }
             }
         });
@@ -3371,6 +4101,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 individualLimit: null,
                 planType: null,
                 rateLimitReachedType: null,
+                normalModelSlug: null,
             }
         });
         expect(sessionState.rateLimits!.get("fast-limit")).toEqual({
@@ -3385,7 +4116,78 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 individualLimit: null,
                 planType: null,
                 rateLimitReachedType: null,
+                normalModelSlug: null,
             }
+        });
+    });
+
+    it ('should apply a missing-id rate-limit update to the codex bucket', async () => {
+        const sessionId = "test-session-id";
+        const rateLimits: RateLimitsMap = new Map([
+            ["codex", {
+                limitId: "codex",
+                limitName: "Codex",
+                snapshot: {
+                    limitId: "codex",
+                    limitName: "Codex",
+                    primary: {usedPercent: 10, resetsAt: null, windowDurationMins: 300},
+                    secondary: {usedPercent: 20, resetsAt: null, windowDurationMins: 10080},
+                    credits: {hasCredits: true, unlimited: false, balance: "25"},
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                    normalModelSlug: null,
+                },
+            }],
+            ["codex_other", {
+                limitId: "codex_other",
+                limitName: "Other",
+                snapshot: {
+                    limitId: "codex_other",
+                    limitName: "Other",
+                    primary: {usedPercent: 30, resetsAt: null, windowDurationMins: 60},
+                    secondary: null,
+                    credits: null,
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                    normalModelSlug: null,
+                },
+            }],
+        ]);
+        const {mockFixture, sessionState} = setupPromptFixture({sessionId, rateLimits});
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{type: "text", text: "test"}],
+        });
+        mockFixture.sendServerNotification({
+            method: "account/rateLimits/updated",
+            params: {
+                rateLimits: {
+                    limitId: null,
+                    limitName: null,
+                    primary: null,
+                    secondary: {usedPercent: 40, resetsAt: null, windowDurationMins: 10080},
+                    credits: null,
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                    normalModelSlug: null,
+                },
+            },
+        });
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+
+        expect([...sessionState.rateLimits!.keys()]).toEqual(["codex", "codex_other"]);
+        expect(sessionState.rateLimits!.get("codex")!.snapshot).toMatchObject({
+            limitId: "codex",
+            primary: null,
+            secondary: {usedPercent: 40, resetsAt: null, windowDurationMins: 10080},
+            credits: {hasCredits: true, unlimited: false, balance: "25"},
         });
     });
 });

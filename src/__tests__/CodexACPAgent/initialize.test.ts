@@ -52,15 +52,36 @@ describe('CodexACPAgent - initialize', () => {
                     list: {},
                     close: {},
                     delete: {},
+                    fork: {},
                     additionalDirectories: {},
+                    subagents: {},
                 },
                 mcpCapabilities: {
                     acp: false,
                     http: true,
                     sse: false,
                 },
+                _meta: {
+                    authStatus: {},
+                },
             },
             authMethods: getCodexAuthMethods(),
+            _meta: {
+                steering: {
+                    supported: true,
+                },
+                goal: {
+                    version: 1,
+                    controlMethod: "_session/goal",
+                    actions: ["set", "pause", "resume", "clear"],
+                },
+                jetbrains: {
+                    air: {
+                        version: 1,
+                        capabilities: ["sessionFailure", "agentFileChangeReport", "nativeSubagentSessions", "asyncTasks", "recommendedValue"],
+                    },
+                },
+            },
         });
     });
 
@@ -85,6 +106,22 @@ describe('CodexACPAgent - initialize', () => {
         ]));
     });
 
+    it('enables experimental thread settings without requesting attestation', async () => {
+        await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {
+                elicitation: { form: {}, url: {} },
+            },
+        });
+
+        expect(mockCodexConnection.sendRequest).toHaveBeenCalledWith("initialize", expect.objectContaining({
+            capabilities: {
+                experimentalApi: true,
+                requestAttestation: false,
+            },
+        }));
+    });
+
     it('should advertise API key auth with the legacy metadata method', () => {
         expect(getCodexAuthMethods()).toEqual(expect.arrayContaining([
             expect.objectContaining({
@@ -101,6 +138,16 @@ describe('CodexACPAgent - initialize', () => {
             expect.objectContaining({id: "codex-api-key"}),
             expect.objectContaining({id: "openai-api-key"}),
         ]));
+    });
+
+    it('should advertise ChatGPT device code auth only when the client supports URL elicitation', () => {
+        const withUrlElicitation = getCodexAuthMethods({elicitation: {url: {}}})
+            .map((method) => method.id);
+        expect(withUrlElicitation).toContain("chat-gpt-device-code");
+
+        const withoutUrlElicitation = getCodexAuthMethods({elicitation: {form: {}}})
+            .map((method) => method.id);
+        expect(withoutUrlElicitation).not.toContain("chat-gpt-device-code");
     });
 
     it('should not advertise ChatGPT auth when browser auth is disabled', () => {

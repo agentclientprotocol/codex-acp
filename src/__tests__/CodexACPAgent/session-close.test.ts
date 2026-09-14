@@ -61,6 +61,21 @@ describe("ACP session close", () => {
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
     });
 
+    it("does not publish available commands after close completes", async () => {
+        const skills = deferred<{data: []}>();
+        const {fixture, codexAcpAgent} = await createSession({
+            configure: ({codexAcpClient}) => {
+                vi.spyOn(codexAcpClient, "listSkills").mockReturnValue(skills.promise);
+            },
+        });
+
+        await codexAcpAgent.closeSession({sessionId});
+        skills.resolve({data: []});
+        await waitForMicrotasks();
+
+        expect(fixture.getAcpConnectionEvents([])).toEqual([]);
+    });
+
     it("does not wait for delayed turn start before closing", async () => {
         const {fixture, codexAcpAgent} = await createSession();
         const turnStart = deferred<TurnStartResponse>();
@@ -86,7 +101,6 @@ describe("ACP session close", () => {
         const requestMethods = fixture.getCodexConnectionEvents([])
             .flatMap(event => event.eventType === "request" ? [event.method] : []);
         expect(requestMethods).toEqual(["thread/unsubscribe"]);
-        expect(fixture.getAcpConnectionDump([])).not.toContain("Conversation interrupted");
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
 
         fixture.clearCodexConnectionDump();
@@ -457,6 +471,7 @@ async function createSession(options: {
         sessionId,
         currentModelId: "model-id[medium]",
         models: [model],
+        collaborationMode: "default",
         currentServiceTier: null,
         additionalDirectories: [],
     });
@@ -503,6 +518,7 @@ function createSessionMetadata(): SessionMetadata {
         sessionId,
         currentModelId: "model-id[medium]",
         models: [createTestModel()],
+        collaborationMode: "default",
         currentServiceTier: null,
         additionalDirectories: [],
     };

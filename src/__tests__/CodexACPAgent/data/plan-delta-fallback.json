@@ -1,0 +1,21 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "plan-2",
+        "content": {
+          "type": "text",
+          "text": "### Buffered plan\n\n1. Use the buffered fallback."
+        },
+        "_meta": {
+          "codex": {
+            "phase": "final_answer"
+          }
+        }
+      }
+    }
+  ]
+}

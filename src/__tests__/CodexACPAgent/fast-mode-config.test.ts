@@ -43,6 +43,7 @@ describe("Fast mode session config", () => {
             sessionId: "session-id",
             currentModelId: "fast-model[medium]",
             models: [fastModel, slowModel],
+            collaborationMode: "default",
             currentServiceTier,
             additionalDirectories: [],
         });

@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk";
-import {ApprovalOptionId} from "../../../ApprovalOptionId";
+import {ApprovalOptionId} from "../../../permissions/option-ids";
 
 export type PermissionResponder = (
     params: acp.RequestPermissionRequest,

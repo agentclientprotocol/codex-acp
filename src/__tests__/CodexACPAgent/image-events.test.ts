@@ -33,6 +33,7 @@ describe("CodexEventHandler - image events", () => {
                         status: "generating",
                         revisedPrompt: null,
                         result: "",
+                        failure: null,
                     },
                 },
             },
@@ -48,6 +49,7 @@ describe("CodexEventHandler - image events", () => {
                         status: "generating",
                         revisedPrompt: "A tiny blue square",
                         result: "iVBORw0KGgo=",
+                        failure: null,
                         savedPath: "/tmp/codex/generated-blue-square.png",
                     },
                 },
@@ -74,6 +76,7 @@ describe("CodexEventHandler - image events", () => {
                     status: "generating",
                     revisedPrompt: null,
                     result: "iVBORw0KGgo=",
+                    failure: null,
                 },
             },
         };

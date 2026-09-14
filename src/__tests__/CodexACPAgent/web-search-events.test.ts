@@ -36,6 +36,7 @@ describe("CodexEventHandler - web search events", () => {
                         type: "webSearch",
                         id: "web-search-1",
                         query: "agent client protocol",
+                        results: null,
                         action: {
                             type: "search",
                             query: "agent client protocol",
@@ -54,6 +55,7 @@ describe("CodexEventHandler - web search events", () => {
                         type: "webSearch",
                         id: "web-search-1",
                         query: "agent client protocol",
+                        results: null,
                         action: {
                             type: "search",
                             query: "agent client protocol",
@@ -83,6 +85,7 @@ describe("CodexEventHandler - web search events", () => {
                         type: "webSearch",
                         id: "web-open-1",
                         query: "https://agentclientprotocol.com",
+                        results: null,
                         action: {
                             type: "openPage",
                             url: "https://agentclientprotocol.com",
@@ -100,6 +103,7 @@ describe("CodexEventHandler - web search events", () => {
                         type: "webSearch",
                         id: "web-find-1",
                         query: "protocol",
+                        results: null,
                         action: {
                             type: "findInPage",
                             url: "https://agentclientprotocol.com/protocol",
