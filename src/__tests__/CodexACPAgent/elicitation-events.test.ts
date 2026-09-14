@@ -997,6 +997,120 @@ describe('Elicitation Events', () => {
             await promptPromise;
         });
 
+        it.each(['before', 'after'] as const)(
+            'should preserve questions with note field IDs when they appear %s the choice',
+            async (order) => {
+                const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                    elicitation: { form: {} },
+                });
+                fixture.setElicitationResponse({
+                    action: 'accept',
+                    content: {
+                        choice: 'Run tests',
+                        choice_note: 'Follow project conventions',
+                        choice_note1: 'Private context',
+                        choice_note2: '  Run the focused suite first  ',
+                    },
+                });
+
+                const choice: ToolRequestUserInputParams['questions'][number] = {
+                    id: 'choice',
+                    header: 'Next step',
+                    question: 'What should I do next?',
+                    isOther: true,
+                    isSecret: true,
+                    options: [
+                        { label: 'Run tests', description: 'Run the focused test suite.' },
+                        { label: 'Stop', description: 'Stop and report current status.' },
+                    ],
+                };
+                const otherQuestions: ToolRequestUserInputParams['questions'] = [
+                    {
+                        id: 'choice_note',
+                        header: 'Constraints',
+                        question: 'Which constraints should I follow?',
+                        isOther: false,
+                        isSecret: false,
+                        options: null,
+                    },
+                    {
+                        id: 'choice_note1',
+                        header: 'Private',
+                        question: 'What private context should I consider?',
+                        isOther: false,
+                        isSecret: true,
+                        options: null,
+                    },
+                ];
+                const params: ToolRequestUserInputParams = {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    itemId: 'request-user-input-1',
+                    autoResolutionMs: null,
+                    isBlocking: true,
+                    questions: order === 'before' ? [...otherQuestions, choice] : [choice, ...otherQuestions],
+                };
+
+                const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+                expect(response).toEqual({
+                    answers: {
+                        choice: { answers: ['Run tests', 'user_note: Run the focused suite first'] },
+                        choice_note: { answers: ['Follow project conventions'] },
+                        choice_note1: { answers: ['Private context'] },
+                    },
+                });
+                await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+                    `data/elicitation-user-input-note-collision-${order}.json`,
+                );
+
+                completeTurn();
+                await promptPromise;
+            },
+        );
+
+        it('should keep an existing None of the above choice selectable without duplicating it', async () => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+            });
+            fixture.setElicitationResponse({
+                action: 'accept',
+                content: { next_step: 'None of the above' },
+            });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'request-user-input-1',
+                autoResolutionMs: null,
+                isBlocking: true,
+                questions: [{
+                    id: 'next_step',
+                    header: 'Next step',
+                    question: 'What should I do next?',
+                    isOther: true,
+                    isSecret: false,
+                    options: [
+                        { label: 'Run tests', description: 'Run the focused test suite.' },
+                        { label: 'None of the above', description: 'Use a different approach.' },
+                    ],
+                }],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+            expect(response).toEqual({
+                answers: { next_step: { answers: ['None of the above'] } },
+            });
+            const [elicitationEvent] = fixture.getAcpConnectionEvents([]);
+            const options = elicitationEvent!.args[0].requestedSchema.properties.next_step.oneOf;
+            expect(options.filter((option: { const: string }) => option.const === 'None of the above')).toHaveLength(1);
+            await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+                'data/elicitation-user-input-existing-other.json',
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+
         it('should auto-resolve request_user_input when the client does not answer in time', async () => {
             const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
                 elicitation: { form: {} },

@@ -111,6 +111,16 @@ function elicitationResponseMeta(
     return Object.keys(meta).length === 0 ? null : meta;
 }
 
+function userInputNoteFieldId(questionId: string, questionIds: ReadonlySet<string>): string {
+    const base = `${questionId}${USER_INPUT_NOTE_FIELD_SUFFIX}`;
+    let fieldId = base;
+    let index = 1;
+    while (questionIds.has(fieldId)) {
+        fieldId = `${base}${index++}`;
+    }
+    return fieldId;
+}
+
 function userInputResponseValue(
     content: Record<string, acp.ElicitationContentValue>,
     fieldId: string
@@ -382,6 +392,8 @@ export class CodexElicitationHandler implements ElicitationHandler {
     private buildUserInputRequest(params: ToolRequestUserInputParams): acp.CreateElicitationRequest {
         const properties: Record<string, acp.ElicitationPropertySchema> = {};
         const required: string[] = [];
+        const questionIds = new Set(params.questions.map(question => question.id));
+
         for (const question of params.questions) {
             const options = question.options ?? [];
             const hasOptions = options.length > 0;
@@ -407,7 +419,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                             title: option.label,
                             ...(option.description ? { description: option.description } : {}),
                         })),
-                        ...(hasOtherAnswer ? [{
+                        ...(hasOtherAnswer && !options.some(option => option.label === USER_INPUT_OTHER_OPTION) ? [{
                             const: USER_INPUT_OTHER_OPTION,
                             title: USER_INPUT_OTHER_OPTION,
                             description: "Provide a different answer in the note field.",
@@ -419,7 +431,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     type: "string",
                 };
             if (hasOtherAnswer) {
-                properties[`${question.id}${USER_INPUT_NOTE_FIELD_SUFFIX}`] = {
+                properties[userInputNoteFieldId(question.id, questionIds)] = {
                     type: "string",
                     title: "Additional answer or note",
                     _meta: {
@@ -509,6 +521,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
 
         const answers: ToolRequestUserInputResponse["answers"] = {};
         const content = contentRecord(response.content);
+        const questionIds = new Set(params.questions.map(question => question.id));
         for (const question of params.questions) {
             const answerValues: string[] = [];
             const value = userInputResponseValue(content, question.id);
@@ -516,7 +529,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 answerValues.push(...(Array.isArray(value) ? value.map(String) : [String(value)]));
             }
             if (question.isOther && question.options != null && question.options.length > 0) {
-                const note = userInputResponseValue(content, `${question.id}${USER_INPUT_NOTE_FIELD_SUFFIX}`);
+                const note = userInputResponseValue(content, userInputNoteFieldId(question.id, questionIds));
                 if (note !== undefined) {
                     const notes = Array.isArray(note) ? note : [note];
                     answerValues.push(...notes.map(item => `${USER_INPUT_NOTE_PREFIX}${String(item).trim()}`));
