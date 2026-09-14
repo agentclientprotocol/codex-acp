@@ -161,7 +161,7 @@ export class CodexAppServerClient {
     private readonly pendingTurnCompletionResolvers = new Map<string, Map<string, (event: TurnCompletedNotification) => void>>();
     private readonly pendingCompactionCompletionResolvers = new Map<string, Set<(event: CompactionCompletedNotification) => void>>();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
-    private readonly turnRoutingCaptures = new Map<string, Set<(turnId: string) => void>>();
+    private readonly turnRoutingCaptures = new Map<string, Set<(turnId: string, notification: ServerNotification) => void>>();
     private readonly threadStatusCaptures = new Map<string, Set<(status: ThreadStatus) => void>>();
     private readonly threadGoalUpdateCaptures = new Map<string, Set<(event: ThreadGoalUpdatedNotification) => void>>();
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
@@ -204,7 +204,7 @@ export class CodexAppServerClient {
             if (this.handleStaleTurnNotification(serverNotification, routing)) {
                 return;
             }
-            this.recordTurnRouting(routing);
+            this.recordTurnRouting(routing, serverNotification);
             if (this.handleStaleTurnNotification(serverNotification, routing)) {
                 return;
             }
@@ -518,10 +518,48 @@ export class CodexAppServerClient {
         };
     }
 
-    async runCompact(params: ThreadCompactStartParams): Promise<CompactionCompletedNotification> {
-        const compactionCompleted = this.awaitCompactionCompleted(params.threadId);
-        await this.threadCompactStart(params);
-        return await compactionCompleted;
+    async runCompact(
+        params: ThreadCompactStartParams,
+        onTurnStarted?: (turnId: string) => void,
+    ): Promise<CompactionCompletedNotification | Extract<ServerNotification, {method: "turn/completed"}>> {
+        type Result = CompactionCompletedNotification | Extract<ServerNotification, {method: "turn/completed"}>;
+        let compactTurnId: string | null = null;
+        let resolveCompleted: (event: Result) => void = () => {};
+        let rejectCompleted: (error: Error) => void = () => {};
+        const completed = new Promise<Result>((resolve, reject) => {
+            resolveCompleted = resolve;
+            rejectCompleted = reject;
+        });
+        // The request acknowledgement can still be pending when the connection closes.
+        void completed.catch(() => {});
+        const closed = this.connection.onClose?.(() => rejectCompleted(new Error("Codex connection closed during compaction.")));
+        const completeCompaction = (event: CompactionCompletedNotification) => {
+            if (compactTurnId !== null && event.params.turnId !== compactTurnId) return;
+            resolveCompleted(event);
+        };
+        const releaseCompactionCapture = this.captureCompactionCompletions(params.threadId, completeCompaction);
+        const releaseTurnCapture = this.captureTurnCompletions(params.threadId, (event) => {
+            if (compactTurnId === null || event.turn.id !== compactTurnId) return;
+            if (event.turn.status !== "inProgress") {
+                resolveCompleted({method: "turn/completed", params: event});
+            }
+        });
+        const releaseRoutingCapture = this.captureTurnRoutings(params.threadId, (turnId, notification) => {
+            if (compactTurnId !== null) return;
+            if (notification.method !== "turn/started"
+                && !(notification.method === "item/started" && notification.params.item.type === "contextCompaction")) return;
+            compactTurnId = turnId;
+            onTurnStarted?.(turnId);
+        });
+        try {
+            await this.threadCompactStart(params);
+            return await completed;
+        } finally {
+            releaseTurnCapture();
+            releaseRoutingCapture();
+            releaseCompactionCapture();
+            closed?.dispose();
+        }
     }
 
     async turnInterrupt(params: TurnInterruptParams): Promise<TurnInterruptResponse> {
@@ -736,9 +774,10 @@ export class CodexAppServerClient {
 
     async awaitCompactionCompleted(threadId: string): Promise<CompactionCompletedNotification> {
         return await new Promise((resolve) => {
-            const resolvers = this.pendingCompactionCompletionResolvers.get(threadId) ?? new Set();
-            resolvers.add(resolve);
-            this.pendingCompactionCompletionResolvers.set(threadId, resolvers);
+            const releaseCapture = this.captureCompactionCompletions(threadId, (event) => {
+                releaseCapture();
+                resolve(event);
+            });
         });
     }
 
@@ -828,10 +867,27 @@ export class CodexAppServerClient {
         if (!resolvers) {
             return;
         }
-        this.pendingCompactionCompletionResolvers.delete(threadId);
         for (const resolve of resolvers) {
             resolve(event);
         }
+    }
+
+    private captureCompactionCompletions(
+        threadId: string,
+        capture: (event: CompactionCompletedNotification) => void,
+    ): () => void {
+        const captures = this.pendingCompactionCompletionResolvers.get(threadId) ?? new Set();
+        captures.add(capture);
+        this.pendingCompactionCompletionResolvers.set(threadId, captures);
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            captures.delete(capture);
+            if (captures.size === 0) {
+                this.pendingCompactionCompletionResolvers.delete(threadId);
+            }
+        };
     }
 
     private recordThreadStatusChanged(event: ThreadStatusChangedNotification): void {
@@ -864,7 +920,10 @@ export class CodexAppServerClient {
         }
     }
 
-    private recordTurnRouting(routing: { threadId: string | null, turnId: string | null }): void {
+    private recordTurnRouting(
+        routing: { threadId: string | null, turnId: string | null },
+        notification: ServerNotification,
+    ): void {
         if (routing.threadId === null || routing.turnId === null) {
             return;
         }
@@ -873,7 +932,7 @@ export class CodexAppServerClient {
             return;
         }
         for (const capture of captures) {
-            capture(routing.turnId);
+            capture(routing.turnId, notification);
         }
     }
 
@@ -938,8 +997,8 @@ export class CodexAppServerClient {
         };
     }
 
-    private captureTurnRoutings(threadId: string, capture: (turnId: string) => void): () => void {
-        const captures = this.turnRoutingCaptures.get(threadId) ?? new Set<(turnId: string) => void>();
+    private captureTurnRoutings(threadId: string, capture: (turnId: string, notification: ServerNotification) => void): () => void {
+        const captures = this.turnRoutingCaptures.get(threadId) ?? new Set<(turnId: string, notification: ServerNotification) => void>();
         captures.add(capture);
         this.turnRoutingCaptures.set(threadId, captures);
         let released = false;
