@@ -33,6 +33,7 @@ export interface SpawnedAgentFixture {
         timeoutMs?: number,
     ): Promise<void>;
     expectStatus(sessionId: string, fields: Record<string, unknown>): Promise<void>;
+    readText(sessionId: string): string;
     readPermissionRequests(
         sessionId: string,
         toolCallKind: acp.ToolKind,
@@ -247,6 +248,10 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
                 expect(text).toContain(`**${field}:** ${String(value)}`);
             }
         });
+    }
+
+    readText(sessionId: string): string {
+        return this.client.readText(sessionId);
     }
 
     readPermissionRequests(

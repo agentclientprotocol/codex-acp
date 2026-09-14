@@ -1,4 +1,16 @@
 {
+  "method": "notify",
+  "args": [
+    "_auth/status_update",
+    {
+      "authStatus": {
+        "kind": "none",
+        "label": "Not logged in"
+      }
+    }
+  ]
+}
+{
   "method": "sessionUpdate",
   "args": [
     {
@@ -72,6 +84,13 @@
                 "kind": "prefixPrompt",
                 "presentation": "state"
               }
+            }
+          },
+          {
+            "name": "rename",
+            "description": "Rename the current session.",
+            "input": {
+              "hint": "new name"
             }
           },
           {
@@ -391,11 +410,13 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-context-compaction-1",
-        "kind": "other",
-        "title": "Context compacted",
+        "kind": "think",
+        "title": "Compact conversation",
         "status": "completed",
         "_meta": {
-          "contextCompaction": true
+          "contextCompaction": {
+            "version": 1
+          }
         }
       }
     }

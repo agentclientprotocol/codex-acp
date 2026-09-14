@@ -47,6 +47,7 @@
       }
     ],
     "approvalPolicy": "on-request",
+    "approvalsReviewer": "approvalsReviewer",
     "sandboxPolicy": {
       "type": "workspaceWrite",
       "writableRoots": [],

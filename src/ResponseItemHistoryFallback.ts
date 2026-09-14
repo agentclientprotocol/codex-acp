@@ -179,6 +179,7 @@ function toolCallIdFromThreadItem(item: ThreadItem): string | null {
             return item.id;
         case "userMessage":
         case "hookPrompt":
+        case "functionCallOutput":
         case "agentMessage":
         case "plan":
         case "reasoning":

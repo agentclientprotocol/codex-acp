@@ -52,12 +52,17 @@ describe('CodexACPAgent - initialize', () => {
                     list: {},
                     close: {},
                     delete: {},
+                    fork: {},
                     additionalDirectories: {},
+                    subagents: {},
                 },
                 mcpCapabilities: {
                     acp: false,
                     http: true,
                     sse: false,
+                },
+                _meta: {
+                    authStatus: {},
                 },
             },
             authMethods: getCodexAuthMethods(),
@@ -73,7 +78,7 @@ describe('CodexACPAgent - initialize', () => {
                 jetbrains: {
                     air: {
                         version: 1,
-                        capabilities: ["sessionFailure"],
+                        capabilities: ["sessionFailure", "agentFileChangeReport", "nativeSubagentSessions", "asyncTasks", "recommendedValue"],
                     },
                 },
             },

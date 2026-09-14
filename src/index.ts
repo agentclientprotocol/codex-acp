@@ -3,7 +3,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {z} from "zod";
 import {startCodexConnection} from "./CodexJsonRpcConnection";
-import {CodexAcpServer} from "./CodexAcpServer";
+import {CodexAcpServer, type CodexProcessState} from "./CodexAcpServer";
 import {createJsonStream} from "./StdUtils";
 import {isCodexAuthRequest} from "./CodexAuthMethod";
 import {CodexAcpClient} from "./CodexAcpClient";
@@ -16,6 +16,7 @@ import {
     GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
+import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -43,6 +44,11 @@ const goalControlParamsParser = z.discriminatedUnion("action", [
         action: z.enum(["pause", "resume", "clear"]),
     }).passthrough(),
 ]);
+
+const asyncTaskStopParamsParser = z.object({
+    sessionId: z.string().trim().min(1),
+    asyncTaskId: z.string().trim().min(1),
+}).passthrough();
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
@@ -88,21 +94,21 @@ function startAcpServer() {
         defaultAuthRequest: defaultAuthRequest ?? null,
     });
 
-    const codexConnection = startCodexConnection(codexPath);
-
-    const maxStderrTailChars = 2 * 1024;
-    let stderr = "";
-    codexConnection.process.stderr.addListener("data", (data: Buffer) => {
-        stderr = (stderr + data.toString()).slice(-maxStderrTailChars);
-    });
+    const codexProcessState: CodexProcessState = {
+        connection: startCodexConnection(codexPath),
+        codexPath,
+        config,
+        modelProvider,
+        stderr: "",
+    };
 
     process.stdin.on("close", () => {
-        codexConnection.process.stdin.end();
+        codexProcessState.connection.process.stdin.end();
         // Kill the codex process if it doesn't exit naturally
         setTimeout(() => {
-            if (!codexConnection.process.killed) {
+            if (!codexProcessState.connection.process.killed) {
                 logger.log("Codex still running 2s after stdin closed; terminating process");
-                codexConnection.process.kill();
+                codexProcessState.connection.process.kill();
             }
         }, 2000);
     });
@@ -110,9 +116,16 @@ function startAcpServer() {
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
     function createAgent(connection: acp.AgentContext): CodexAcpServer {
-        const appServerClient = new CodexAppServerClient(codexConnection.connection);
+        const appServerClient = new CodexAppServerClient(codexProcessState.connection.connection);
         const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
-        return new CodexAcpServer(connection, codexClient, defaultAuthRequest, () => codexConnection.process.exitCode, () => stderr);
+        return new CodexAcpServer(
+            connection,
+            codexClient,
+            defaultAuthRequest,
+            undefined,
+            undefined,
+            codexProcessState,
+        );
     }
 
     let codexAcpServer: CodexAcpServer | null = null;
@@ -136,6 +149,7 @@ function startAcpServer() {
         .onRequest(acp.methods.agent.initialize, (ctx) => getAgent().initialize(ctx.params))
         .onRequest(acp.methods.agent.session.new, (ctx) => getAgent().newSession(ctx.params))
         .onRequest(acp.methods.agent.session.load, (ctx) => getAgent().loadSession(ctx.params))
+        .onRequest(acp.methods.agent.session.fork, (ctx) => getAgent().forkSession(ctx.params))
         .onRequest(acp.methods.agent.session.list, (ctx) => getAgent().listSessions(ctx.params))
         .onRequest(acp.methods.agent.session.delete, (ctx) => getAgent().deleteSession(ctx.params))
         .onRequest(acp.methods.agent.session.resume, (ctx) => getAgent().resumeSession(ctx.params))
@@ -153,6 +167,7 @@ function startAcpServer() {
         .onRequest("authentication/logout", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/logout", ctx.params))
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
+        .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .connect(acpJsonStream);
 }

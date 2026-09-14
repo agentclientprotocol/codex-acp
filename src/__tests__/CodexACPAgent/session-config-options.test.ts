@@ -1,4 +1,5 @@
 import {describe, expect, it, vi} from "vitest";
+import * as acp from "@agentclientprotocol/sdk";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import {AgentMode, MODE_CONFIG_ID} from "../../AgentMode";
 import {
@@ -31,11 +32,16 @@ function buildModels(): {fast: Model; slow: Model} {
         description: "Strong",
         supportedReasoningEfforts: [lowEffort, mediumEffort],
         defaultReasoningEffort: "low",
+        isDefault: false,
     });
     return {fast, slow};
 }
 
-async function createSession(currentModelId: string, availableModels: Array<Model>) {
+async function createSession(
+    currentModelId: string,
+    availableModels: Array<Model>,
+    clientCapabilities?: acp.ClientCapabilities,
+) {
     const fixture = createCodexMockTestFixture();
     const codexAcpAgent = fixture.getCodexAcpAgent();
     const codexAcpClient = fixture.getCodexAcpClient();
@@ -49,6 +55,10 @@ async function createSession(currentModelId: string, availableModels: Array<Mode
         collaborationMode: "default",
         additionalDirectories: [],
     });
+
+    if (clientCapabilities) {
+        await codexAcpAgent.initialize({protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities});
+    }
 
     const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
     return {fixture, codexAcpAgent, codexAcpClient, response};
@@ -72,6 +82,7 @@ describe("Session config options", () => {
                 {value: "slow-model", name: "Slow model", description: "Strong"},
             ],
         });
+        expect(modelOption?._meta).toBeUndefined();
 
         const effortOption = response.configOptions?.find(o => o.id === REASONING_EFFORT_CONFIG_ID);
         expect(effortOption).toMatchObject({
@@ -84,12 +95,30 @@ describe("Session config options", () => {
                 {value: "high", name: "High"},
             ],
         });
+        expect(effortOption?._meta).toBeUndefined();
 
         const modeOption = response.configOptions?.find(o => o.id === MODE_CONFIG_ID);
         expect(modeOption).toMatchObject({
             category: "mode",
             currentValue: AgentMode.DEFAULT_AGENT_MODE.id,
             type: "select",
+            options: [
+                {
+                    value: "read-only",
+                    name: "Ask for approval",
+                    description: "Always ask to edit external files and use the internet",
+                },
+                {
+                    value: "agent",
+                    name: "Approve for me",
+                    description: "Only ask for actions detected as potentially unsafe",
+                },
+                {
+                    value: "agent-full-access",
+                    name: "Full access",
+                    description: "Unrestricted access to the internet and any file on your computer",
+                },
+            ],
         });
         expect((modeOption as any).options.map((o: any) => o.value)).toEqual(
             AgentMode.all().map(m => m.id)
@@ -125,6 +154,58 @@ describe("Session config options", () => {
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("custom-model[high]");
     });
 
+    it("advertises the default model and its effort as recommended values after negotiation", async () => {
+        const {fast, slow} = buildModels();
+        const {response} = await createSession("slow-model[medium]", [fast, slow], {
+            _meta: {jetbrains: {air: {version: 1, capabilities: ["recommendedValue"]}}},
+        });
+
+        expect(response.configOptions?.find(option => option.id === MODEL_CONFIG_ID)).toMatchObject({
+            currentValue: "slow-model",
+            _meta: {jetbrains: {air: {version: 1, recommendedValue: "fast-model"}}},
+        });
+        expect(response.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID)).toMatchObject({
+            currentValue: "medium",
+            _meta: {jetbrains: {air: {version: 1, recommendedValue: "low"}}},
+        });
+    });
+
+    it("updates the recommended effort when the selected model changes", async () => {
+        const {fast, slow} = buildModels();
+        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast, slow], {
+            _meta: {jetbrains: {air: {version: 1, capabilities: ["recommendedValue"]}}},
+        });
+
+        const response = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODEL_CONFIG_ID,
+            value: "slow-model",
+        });
+
+        expect(response.configOptions?.find(option => option.id === MODEL_CONFIG_ID)).toMatchObject({
+            currentValue: "slow-model",
+            _meta: {jetbrains: {air: {recommendedValue: "fast-model"}}},
+        });
+        expect(response.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID)).toMatchObject({
+            currentValue: "medium",
+            _meta: {jetbrains: {air: {recommendedValue: "low"}}},
+        });
+    });
+
+    it("omits a model recommendation when the catalog has no default", async () => {
+        const {fast, slow} = buildModels();
+        fast.isDefault = false;
+        const {response} = await createSession("slow-model[medium]", [fast, slow], {
+            _meta: {jetbrains: {air: {version: 1, capabilities: ["recommendedValue"]}}},
+        });
+
+        expect(response.configOptions?.find(option => option.id === MODEL_CONFIG_ID)?._meta).toBeUndefined();
+        expect(response.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID)).toHaveProperty(
+            "_meta.jetbrains.air.recommendedValue",
+            "low",
+        );
+    });
+
     it("keeps the legacy models list as combined model/effort entries", async () => {
         const {fast, slow} = buildModels();
         const {response} = await createSession("fast-model[medium]", [fast, slow]);
@@ -146,12 +227,12 @@ describe("Session config options", () => {
         const result = await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
             configId: MODE_CONFIG_ID,
-            value: AgentMode.ReadOnly.id,
+            value: AgentMode.Agent.id,
         });
 
-        expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.ReadOnly);
+        expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.Agent);
         const modeOption = result.configOptions?.find(o => o.id === MODE_CONFIG_ID);
-        expect((modeOption as any).currentValue).toBe(AgentMode.ReadOnly.id);
+        expect((modeOption as any).currentValue).toBe(AgentMode.Agent.id);
     });
 
     it("changes collaboration mode without starting a model turn", async () => {

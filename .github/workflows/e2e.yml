@@ -10,6 +10,7 @@ permissions: {}
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -18,9 +19,33 @@ jobs:
         with:
           node-version: '24'
       - name: Configure sandboxing
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes bubblewrap
+          # Acquire::*::Timeout only guards a single socket operation, so a mirror
+          # that stalls once the headers are in never trips it -- that ate a 6h
+          # runner limit, then a 5min step cap. Kill each attempt from the outside
+          # and retry the fetch instead. No Acquire::Retries: apt retrying inside a
+          # killed window would just burn the budget without ever finishing.
+          #
+          # The per-attempt budgets are generous on purpose. When the image's
+          # package lists are stale, a healthy `update` pulls ~5MB of indexes and
+          # takes about two minutes; a tighter cap killed it mid-download three
+          # times in a row and turned "slow but fine" into a failed release.
+          # Languages=none drops the Translation-* files, which nothing here reads.
+          apt_opts=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Languages=none)
+          for attempt in 1 2; do
+            if timeout 300 sudo apt-get "${apt_opts[@]}" update \
+              && timeout 120 sudo apt-get "${apt_opts[@]}" install --yes bubblewrap; then
+              installed=yes
+              break
+            fi
+            echo "apt attempt ${attempt} stalled or failed, retrying"
+            sleep 10
+          done
+          if [ -z "${installed:-}" ]; then
+            echo "::error::bubblewrap install failed after 3 attempts"
+            exit 1
+          fi
           sudo sysctl -w kernel.unprivileged_userns_clone=1
           if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -28,6 +53,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run e2e tests
+        # The suite drives a live model, so a wedged turn hangs instead of
+        # failing. Bound it well above the ~2min happy path.
+        timeout-minutes: 15
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm run test:e2e
