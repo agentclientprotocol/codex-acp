@@ -24,6 +24,8 @@ export interface AgentFileChangeReportRequest {
 export interface AgentFileChangeWorkspace {
     cwd: string;
     additionalDirectories: string[];
+    /** The lexical display root Codex snapshots before the turn starts. */
+    diffRoot: string;
 }
 
 interface ParsedFileChangeReport {
@@ -57,6 +59,18 @@ export interface UnavailableAgentFileChangeReport {
 }
 
 export type AgentFileChangeReport = ReportedAgentFileChangeReport | UnavailableAgentFileChangeReport;
+
+export function captureAgentFileChangeWorkspace(
+    cwd: string,
+    additionalDirectories: string[],
+): AgentFileChangeWorkspace {
+    const lexicalCwd = parseWorkspaceRoot(cwd);
+    return {
+        cwd,
+        additionalDirectories: [...additionalDirectories],
+        diffRoot: lexicalCwd === null ? cwd : findDiffDisplayRoot(lexicalCwd).value,
+    };
+}
 
 export function parseAgentFileChangeReportRequest(
     meta: Record<string, unknown> | null | undefined,
@@ -134,10 +148,12 @@ function parseTurnDiff(diff: string): ParsedFileChangeReport {
         throw new AgentFileChangeReportError("invalidOutput", "The turn diff contains no parseable file patches");
     }
 
+    const rawFileHeaders = extractRawFileHeaders(diff);
     const paths: string[] = [];
-    for (const patch of patches) {
-        const oldPath = normalizeDiffPath(patch.oldFileName);
-        const newPath = normalizeDiffPath(patch.newFileName);
+    for (const [index, patch] of patches.entries()) {
+        const rawHeaders = rawFileHeaders[index];
+        const oldPath = normalizeDiffPath(selectLosslessFileName(rawHeaders?.oldFileName, patch.oldFileName));
+        const newPath = normalizeDiffPath(selectLosslessFileName(rawHeaders?.newFileName, patch.newFileName));
         if (oldPath === null && newPath === null) {
             throw new AgentFileChangeReportError("invalidOutput", "The turn diff contains a patch without a file path");
         }
@@ -145,6 +161,42 @@ function parseTurnDiff(diff: string): ParsedFileChangeReport {
         if (newPath !== null) paths.push(newPath);
     }
     return {paths, complete: false, uncertainty: TURN_DIFF_UNCERTAINTY};
+}
+
+interface RawFileHeaders {
+    oldFileName: string;
+    newFileName: string;
+}
+
+function extractRawFileHeaders(diff: string): Array<RawFileHeaders | null> {
+    return diff.split(/(?=^diff --git )/m)
+        .filter(section => section.trim() !== "")
+        .map(section => {
+            const lines = section.split(/\r?\n/);
+            for (let index = 0; index < lines.length; index += 1) {
+                const line = lines[index];
+                if (line?.startsWith("@@ ")) return null;
+                const nextLine = lines[index + 1];
+                if (line?.startsWith("--- ") && nextLine?.startsWith("+++ ")) {
+                    return {
+                        oldFileName: line.slice(4),
+                        newFileName: nextLine.slice(4),
+                    };
+                }
+            }
+            return null;
+        });
+}
+
+function selectLosslessFileName(
+    rawFileName: string | undefined,
+    parsedFileName: string | undefined,
+): string | undefined {
+    // Let diff decode a quoted Git filename. Codex's own renderer emits unquoted
+    // headers, whose complete remainder is the filename (including whitespace).
+    return rawFileName === undefined || rawFileName.startsWith('"')
+        ? parsedFileName
+        : rawFileName;
 }
 
 function normalizeDiffPath(value: string | undefined): string | null {
@@ -188,7 +240,10 @@ function normalizeFileChangeReport(
         throw new AgentFileChangeReportError("providerError", "The session working directory is not absolute");
     }
     const cwd = canonicalizeWorkspaceRoot(lexicalCwd);
-    const diffRoot = findDiffDisplayRoot(lexicalCwd);
+    const diffRoot = parseWorkspaceRoot(workspace.diffRoot);
+    if (diffRoot === null || diffRoot.flavor !== cwd.flavor) {
+        throw new AgentFileChangeReportError("providerError", "The captured turn-diff root is invalid");
+    }
     const roots = [cwd, ...workspace.additionalDirectories.flatMap(directory => {
         const root = normalizeWorkspaceRoot(directory);
         return root === null || root.flavor !== cwd.flavor ? [] : [root];

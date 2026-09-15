@@ -148,7 +148,9 @@ import {
     type AgentFileChangeReport,
     type AgentFileChangeReportRequest,
     type AgentFileChangeReportUnavailableReason,
+    type AgentFileChangeWorkspace,
     AgentFileChangeReportError,
+    captureAgentFileChangeWorkspace,
     createReportedAgentFileChangeReport,
     createUnavailableAgentFileChangeReport,
     parseAgentFileChangeReportRequest,
@@ -2179,15 +2181,13 @@ export class CodexAcpServer {
         request: AgentFileChangeReportRequest,
         unavailableReason: AgentFileChangeReportUnavailableReason,
         turnDiff: string,
+        workspace: AgentFileChangeWorkspace,
     ): Promise<void> {
         let report: AgentFileChangeReport;
         try {
             report = turnId === null
                 ? createUnavailableAgentFileChangeReport(request.requestId, unavailableReason)
-                : createReportedAgentFileChangeReport(request.requestId, turnDiff, {
-                    cwd: sessionState.cwd,
-                    additionalDirectories: sessionState.additionalDirectories,
-                });
+                : createReportedAgentFileChangeReport(request.requestId, turnDiff, workspace);
         } catch (error) {
             logger.error(
                 error instanceof AgentFileChangeReportError
@@ -2751,6 +2751,9 @@ export class CodexAcpServer {
         const agentFileChangeReportRequest = clientSupportsAgentFileChangeReports(this.clientCapabilities)
             ? parseAgentFileChangeReportRequest(params._meta)
             : null;
+        const agentFileChangeWorkspace = agentFileChangeReportRequest === null
+            ? null
+            : captureAgentFileChangeWorkspace(sessionState.cwd, sessionState.additionalDirectories);
         let agentFileChangeReportTurnId: string | null = null;
         let agentFileChangeReportUnavailableReason: AgentFileChangeReportUnavailableReason = "providerError";
         let promptWasCancelled = false;
@@ -3195,7 +3198,7 @@ export class CodexAcpServer {
             } catch (error) {
                 logger.error("Failed to publish terminal subagent state during prompt cleanup", error);
             }
-            if (agentFileChangeReportRequest !== null) {
+            if (agentFileChangeReportRequest !== null && agentFileChangeWorkspace !== null) {
                 if (promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)) {
                     agentFileChangeReportTurnId = null;
                     agentFileChangeReportUnavailableReason = "cancelled";
@@ -3212,6 +3215,7 @@ export class CodexAcpServer {
                     agentFileChangeReportTurnId === null || eventHandler === null
                         ? ""
                         : eventHandler.getTurnDiff(agentFileChangeReportTurnId),
+                    agentFileChangeWorkspace,
                 );
             }
             logger.log("Prompt completed", {sessionId: params.sessionId});

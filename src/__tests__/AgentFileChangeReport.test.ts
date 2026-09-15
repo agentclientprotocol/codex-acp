@@ -7,12 +7,17 @@ import {
     AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH,
     AGENT_FILE_CHANGE_REPORT_MAX_TOTAL_BYTES,
     AgentFileChangeReportError,
+    captureAgentFileChangeWorkspace,
     createReportedAgentFileChangeReport,
     parseAgentFileChangeReportRequest,
 } from "../AgentFileChangeReport";
 
 function modified(pathname: string): string {
     return `diff --git a/${pathname} b/${pathname}\n--- a/${pathname}\n+++ b/${pathname}\n@@ -1 +1 @@\n-old\n+new\n`;
+}
+
+function capturedWorkspace(cwd: string, additionalDirectories: string[] = []) {
+    return captureAgentFileChangeWorkspace(cwd, additionalDirectories);
 }
 
 describe("agent file-change report", () => {
@@ -46,7 +51,7 @@ describe("agent file-change report", () => {
         expect(createReportedAgentFileChangeReport(
             "request-id",
             diff,
-            {cwd: "/repo", additionalDirectories: []},
+            capturedWorkspace("/repo"),
         )).toEqual({
             version: 1,
             requestId: "request-id",
@@ -69,7 +74,7 @@ describe("agent file-change report", () => {
         expect(createReportedAgentFileChangeReport(
             "request-empty",
             "",
-            {cwd: "/repo", additionalDirectories: []},
+            capturedWorkspace("/repo"),
         )).toEqual({
             version: 1,
             requestId: "request-empty",
@@ -90,7 +95,7 @@ describe("agent file-change report", () => {
         expect(createReportedAgentFileChangeReport(
             "request-quoted",
             diff,
-            {cwd: "/repo", additionalDirectories: []},
+            capturedWorkspace("/repo"),
         ).paths).toEqual(["/repo/é file.txt"]);
     });
 
@@ -105,8 +110,20 @@ describe("agent file-change report", () => {
         expect(createReportedAgentFileChangeReport(
             "request-spaces",
             diff,
-            {cwd: "/repo", additionalDirectories: []},
+            capturedWorkspace("/repo"),
         ).paths).toEqual(["/repo/ leading.txt", "/repo/trailing.txt "]);
+    });
+
+    it("rejects an ambiguous unquoted tab in a Codex file header without changing the filename", () => {
+        const pathname = "foo\tbar";
+        const report = createReportedAgentFileChangeReport(
+            "request-tab",
+            modified(pathname),
+            capturedWorkspace("/repo"),
+        );
+
+        expect(report.paths).toEqual([]);
+        expect(report.truncated).toBe(true);
     });
 
     it("keeps additional roots and marks rejected paths as incomplete", () => {
@@ -117,7 +134,7 @@ describe("agent file-change report", () => {
         expect(createReportedAgentFileChangeReport(
             "request-id",
             diff,
-            {cwd: "/repo", additionalDirectories: ["/generated"]},
+            capturedWorkspace("/repo", ["/generated"]),
         )).toMatchObject({
             paths: ["/repo/src/A.kt", "/generated/out.txt"],
             declaredComplete: false,
@@ -129,7 +146,7 @@ describe("agent file-change report", () => {
         const report = createReportedAgentFileChangeReport(
             "request-id",
             modified("src/A.kt") + modified("SRC/a.KT"),
-            {cwd: "C:\\Work\\Repo", additionalDirectories: []},
+            capturedWorkspace("C:\\Work\\Repo"),
         );
 
         expect(report.paths).toEqual(["C:\\Work\\Repo\\src\\A.kt"]);
@@ -147,13 +164,35 @@ describe("agent file-change report", () => {
             const report = createReportedAgentFileChangeReport(
                 "request-git-root",
                 modified("packages/app/src/Main.ts"),
-                {cwd, additionalDirectories: []},
+                capturedWorkspace(cwd),
             );
 
             expect(report.paths).toEqual([
                 path.join(fs.realpathSync.native(cwd), "src", "Main.ts"),
             ]);
 
+        } finally {
+            fs.rmSync(repository, {recursive: true, force: true});
+        }
+    });
+
+    it("uses the display root captured before the turn when a nearer Git marker appears", () => {
+        if (process.platform === "win32") return;
+
+        const repository = fs.mkdtempSync(path.join(os.tmpdir(), "file-report-root-snapshot-"));
+        const cwd = path.join(repository, "packages", "app");
+        fs.mkdirSync(path.join(repository, ".git"));
+        fs.mkdirSync(cwd, {recursive: true});
+        const workspace = capturedWorkspace(cwd);
+        fs.mkdirSync(path.join(cwd, ".git"));
+        try {
+            const report = createReportedAgentFileChangeReport(
+                "request-root-snapshot",
+                modified("packages/app/src/Main.ts"),
+                workspace,
+            );
+
+            expect(report.paths).toEqual([path.join(fs.realpathSync.native(cwd), "src", "Main.ts")]);
         } finally {
             fs.rmSync(repository, {recursive: true, force: true});
         }
@@ -172,7 +211,7 @@ describe("agent file-change report", () => {
             const report = createReportedAgentFileChangeReport(
                 "request-additional-root",
                 modified("generated/out.txt"),
-                {cwd, additionalDirectories: [generated]},
+                capturedWorkspace(cwd, [generated]),
             );
 
             expect(report.paths).toEqual([
@@ -193,7 +232,7 @@ describe("agent file-change report", () => {
             const report = createReportedAgentFileChangeReport(
                 "request-symlink-root",
                 modified("generated.ts"),
-                {cwd: linkedRoot, additionalDirectories: []},
+                capturedWorkspace(linkedRoot),
             );
             expect(report.paths).toEqual([path.join(fs.realpathSync.native(realRoot), "generated.ts")]);
         } finally {
@@ -215,7 +254,7 @@ describe("agent file-change report", () => {
             const report = createReportedAgentFileChangeReport(
                 "request-symlink-nested-cwd",
                 modified("src/Main.ts"),
-                {cwd: linkedCwd, additionalDirectories: []},
+                capturedWorkspace(linkedCwd),
             );
 
             expect(report.paths).toEqual([path.join(fs.realpathSync.native(realCwd), "src", "Main.ts")]);
@@ -229,14 +268,14 @@ describe("agent file-change report", () => {
         expect(() => createReportedAgentFileChangeReport(
             "request-id",
             "not a unified diff",
-            {cwd: "/repo", additionalDirectories: []},
+            capturedWorkspace("/repo"),
         )).toThrow(AgentFileChangeReportError);
 
         try {
             createReportedAgentFileChangeReport(
                 "request-id",
                 "not a unified diff",
-                {cwd: "/repo", additionalDirectories: []},
+                capturedWorkspace("/repo"),
             );
         } catch (error) {
             expect(error).toMatchObject({reason: "invalidOutput"});
@@ -247,7 +286,7 @@ describe("agent file-change report", () => {
         expect(() => createReportedAgentFileChangeReport(
             "request-oversized",
             "x".repeat(AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES + 1),
-            {cwd: "/repo", additionalDirectories: []},
+            capturedWorkspace("/repo"),
         )).toThrow(expect.objectContaining({reason: "invalidOutput"}));
     });
 
@@ -255,7 +294,7 @@ describe("agent file-change report", () => {
         const report = createReportedAgentFileChangeReport(
             "request-id",
             modified("valid.txt") + modified("x".repeat(AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH + 1)),
-            {cwd: "/repo", additionalDirectories: []},
+            capturedWorkspace("/repo"),
         );
 
         expect(report.paths).toEqual(["/repo/valid.txt"]);
@@ -268,7 +307,7 @@ describe("agent file-change report", () => {
         const report = createReportedAgentFileChangeReport(
             "request-boundary",
             modified(relativePath),
-            {cwd: "/repo", additionalDirectories: []},
+            capturedWorkspace("/repo"),
         );
 
         expect(report.paths).toEqual([`/repo/${relativePath}`]);
@@ -283,7 +322,7 @@ describe("agent file-change report", () => {
         const report = createReportedAgentFileChangeReport(
             "request-id",
             diff,
-            {cwd: "/repo", additionalDirectories: []},
+            capturedWorkspace("/repo"),
         );
 
         expect(Buffer.byteLength(JSON.stringify(report), "utf8"))
