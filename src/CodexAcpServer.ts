@@ -438,6 +438,12 @@ export class CodexAcpServer {
                 if (this.providerUpdate !== null) {
                     await this.providerUpdate;
                 }
+                if (!this.sessions.has(methodRequest.params.sessionId)) {
+                    throw RequestError.invalidParams(
+                        undefined,
+                        `Unknown session: ${methodRequest.params.sessionId}`,
+                    );
+                }
                 return await this.runWithProcessCheck(
                     () => this.codexAcpClient.rewindSession(methodRequest.params as SessionRewindRequest),
                 );

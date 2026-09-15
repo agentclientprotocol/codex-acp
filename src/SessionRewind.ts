@@ -33,10 +33,9 @@ export async function rewindSession(
     const exact = candidates
         .map(candidate => userTurns.find(({item}) => item.id === candidate))
         .find(match => match !== undefined);
-    const fingerprintMatches = userTurns.filter(({item}) =>
+    const match = exact ?? userTurns.filter(({item}) =>
         fingerprint(userInputVisibleText(item.content)) === request.beforeMessage.messageFingerprint,
-    );
-    const match = exact ?? fingerprintMatches[request.beforeMessage.messageOccurrence - 1];
+    )[request.beforeMessage.messageOccurrence - 1];
     if (!match) {
         throw RequestError.invalidParams(
             {messageId: request.beforeMessage.messageId},

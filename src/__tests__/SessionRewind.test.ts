@@ -81,6 +81,37 @@ describe("session rewind", () => {
         expect(client.threadRevert).toHaveBeenCalledWith({threadId: "thread-1", beforeTurnId: "turn-2"});
     });
 
+    it("does not fingerprint history when an exact message id is found", async () => {
+        const unreadableItem = Object.defineProperty({type: "userMessage", id: "other"}, "content", {
+            enumerable: true,
+            get: () => {
+                throw new Error("fingerprint fallback should not run");
+            },
+        });
+        const client = {
+            threadReadWithHistory: vi.fn().mockResolvedValue({
+                thread: {
+                    turns: [
+                        {id: "turn-1", items: [unreadableItem]},
+                        {id: "turn-2", items: [{type: "userMessage", id: "exact", content: [{type: "text", text: "selected"}]}]},
+                    ],
+                },
+            }),
+            threadRevert: vi.fn().mockResolvedValue({}),
+        } as unknown as CodexAppServerClient;
+
+        await rewindSession({
+            sessionId: "thread-1",
+            beforeMessage: {
+                messageId: "exact",
+                messageFingerprint: `sha256:${"0".repeat(64)}`,
+                messageOccurrence: 1,
+            },
+        }, client);
+
+        expect(client.threadRevert).toHaveBeenCalledWith({threadId: "thread-1", beforeTurnId: "turn-2"});
+    });
+
     it("uses the visible replay text when fingerprinting multimodal and skill inputs", async () => {
         const client = {
             threadReadWithHistory: vi.fn().mockResolvedValue({

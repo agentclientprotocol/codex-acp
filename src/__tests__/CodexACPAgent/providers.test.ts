@@ -353,6 +353,21 @@ describe("Configurable LLM providers (providers/*)", () => {
         expect(replacementRewind).toHaveBeenCalledOnce();
     });
 
+    it("rejects rewind for a thread that is not a loaded ACP session", async () => {
+        const fixture = createCodexMockTestFixture();
+        const rewind = vi.spyOn(fixture.getCodexAcpClient(), "rewindSession");
+
+        await expect(fixture.getCodexAcpAgent().extMethod(SESSION_REWIND_METHOD, {
+            sessionId: "persisted-but-not-loaded",
+            beforeMessage: {
+                messageId: "user-1",
+                messageFingerprint: `sha256:${"0".repeat(64)}`,
+                messageOccurrence: 1,
+            },
+        })).rejects.toThrow("Unknown session: persisted-but-not-loaded");
+        expect(rewind).not.toHaveBeenCalled();
+    });
+
     it("shares state with the legacy gateway auth method", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpClient = fixture.getCodexAcpClient();
