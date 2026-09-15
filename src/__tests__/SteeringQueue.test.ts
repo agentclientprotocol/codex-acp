@@ -58,7 +58,11 @@ describe("SteeringQueue", () => {
     });
 
     it("delivers each handler result to its own caller", async () => {
-        const outcomes: SessionSteeringResponse["outcome"][] = ["injected", "startedNewTurn", "injected"];
+        const outcomes: Array<Exclude<SessionSteeringResponse["outcome"], "promptRequired">> = [
+            "injected",
+            "startedNewTurn",
+            "injected",
+        ];
         let call = 0;
         const queue = new SteeringQueue(async () => ({outcome: outcomes[call++]!}));
 
