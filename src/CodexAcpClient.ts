@@ -1083,6 +1083,12 @@ export class CodexAcpClient {
         });
     }
 
+    async getPlanModeReasoningEffort(cwd: string): Promise<string | null> {
+        const effectiveConfig = await this.codexClient.configRead({includeLayers: false, cwd});
+        const effort = effectiveConfig?.config?.["plan_mode_reasoning_effort"] ?? this.config["plan_mode_reasoning_effort"];
+        return typeof effort === "string" ? effort : null;
+    }
+
     private getCollaborationMode(sessionId: string): ModeKind {
         return this.codexClient.getThreadSettings(sessionId)?.collaborationMode.mode ?? "default";
     }
