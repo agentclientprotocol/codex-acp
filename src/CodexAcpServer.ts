@@ -252,7 +252,7 @@ interface ActiveAuthState {
 
 interface PendingMcpStartupSession {
     requestedServers: Set<string>;
-    afterVersion: number;
+    startup: Promise<McpStartupResult>;
 }
 
 interface PendingTurnStart {
@@ -735,12 +735,25 @@ export class CodexAcpServer {
         resumeSubscribed = false;
 
         const canPublishSessionUpdates = operation !== "fork";
-        if (canPublishSessionUpdates && requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
-            this.pendingMcpStartupSessions.set(sessionId, {
-                requestedServers: new Set(getRequestedMcpServerNames(requestedMcpServers)),
-                afterVersion: mcpServerStartupVersion,
-            });
-            this.publishMcpStartupStatusAsync(sessionId);
+        if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
+            const pendingStartup = this.createPendingMcpStartupSession(
+                requestedMcpServers,
+                mcpServerStartupVersion,
+            );
+            if (canPublishSessionUpdates) {
+                this.pendingMcpStartupSessions.set(sessionId, pendingStartup);
+            }
+            try {
+                await pendingStartup.startup;
+            } catch (err) {
+                if (this.pendingMcpStartupSessions.get(sessionId) === pendingStartup) {
+                    this.pendingMcpStartupSessions.delete(sessionId);
+                }
+                throw err;
+            }
+            if (canPublishSessionUpdates) {
+                this.publishMcpStartupStatusAsync(sessionId);
+            }
         }
 
         if (canPublishSessionUpdates) {
@@ -2001,10 +2014,10 @@ export class CodexAcpServer {
         subscribed = false;
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
-            this.pendingMcpStartupSessions.set(sessionId, {
-                requestedServers: new Set(getRequestedMcpServerNames(requestedMcpServers)),
-                afterVersion: mcpServerStartupVersion,
-            });
+            this.pendingMcpStartupSessions.set(
+                sessionId,
+                this.createPendingMcpStartupSession(requestedMcpServers, mcpServerStartupVersion),
+            );
             this.publishMcpStartupStatusAsync(sessionId);
         }
 
@@ -2468,6 +2481,19 @@ export class CodexAcpServer {
         void this.doPublishMcpStartupStatus(sessionId);
     }
 
+    private createPendingMcpStartupSession(
+        mcpServers: Array<acp.McpServer>,
+        afterVersion: number,
+    ): PendingMcpStartupSession {
+        const requestedServers = new Set(getRequestedMcpServerNames(mcpServers));
+        return {
+            requestedServers,
+            startup: this.runWithProcessCheck(() =>
+                this.codexAcpClient.awaitMcpServerStartup(Array.from(requestedServers), afterVersion)
+            ),
+        };
+    }
+
     private async doPublishMcpStartupStatus(sessionId: string): Promise<void> {
         const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
         if (!pendingStartup) {
@@ -2475,12 +2501,7 @@ export class CodexAcpServer {
         }
 
         try {
-            const mcpStartup = await this.runWithProcessCheck(() =>
-                this.codexAcpClient.awaitMcpServerStartup(
-                    Array.from(pendingStartup.requestedServers),
-                    pendingStartup.afterVersion,
-                )
-            );
+            const mcpStartup = await pendingStartup.startup;
             if (!this.sessions.has(sessionId)
                 || this.sessionIsClosing(sessionId)
                 || this.pendingMcpStartupSessions.get(sessionId) !== pendingStartup) {
