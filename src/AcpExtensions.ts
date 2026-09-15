@@ -15,6 +15,10 @@ import {
     ASYNC_TASK_STOP_METHOD,
     type AsyncTaskStopExtRequest,
 } from "./async-tasks/AsyncTaskExtension";
+import {
+    SESSION_REWIND_METHOD,
+    type SessionRewindRequest,
+} from "./SessionRewind";
 
 export {
     AUTH_STATUS_META_KEY,
@@ -79,6 +83,7 @@ export type ExtMethodRequest =
     | SessionSteeringExtRequest
     | GoalControlExtRequest
     | AsyncTaskStopExtRequest
+    | SessionRewindExtRequest
 
 export function isExtMethodRequest(request: { method: string, params: Record<string, unknown> }): request is ExtMethodRequest {
     return request.method === "authentication/status"
@@ -87,7 +92,8 @@ export function isExtMethodRequest(request: { method: string, params: Record<str
         || request.method === GOAL_CONTROL_METHOD
         || request.method === LEGACY_GOAL_CONTROL_METHOD
         || request.method === SESSION_STEERING_METHOD
-        || request.method === ASYNC_TASK_STOP_METHOD;
+        || request.method === ASYNC_TASK_STOP_METHOD
+        || request.method === SESSION_REWIND_METHOD;
 }
 
 /**
@@ -132,6 +138,13 @@ export type SessionSteeringExtRequest = {
     method: typeof SESSION_STEERING_METHOD;
     params: SessionSteerRequest;
 }
+
+export type SessionRewindExtRequest = {
+    method: typeof SESSION_REWIND_METHOD;
+    params: SessionRewindRequest;
+}
+
+export {SESSION_REWIND_METHOD, type SessionRewindRequest, type SessionRewindResponse} from "./SessionRewind";
 
 export async function steerSessionWithFallback(
     connection: Pick<ClientContext, "request">,

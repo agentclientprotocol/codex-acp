@@ -69,6 +69,7 @@ import {
 } from "./AgentFileChangeReport";
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
+import {rewindSession as runRewindSession, type SessionRewindRequest} from "./SessionRewind";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 
@@ -565,6 +566,12 @@ export class CodexAcpClient {
                 this.createModelId(models, model, reasoningEffort).toString(),
             getCollaborationMode: sessionId => this.getCollaborationMode(sessionId),
         });
+    }
+
+    async rewindSession(request: SessionRewindRequest): Promise<{rewound: boolean}> {
+        const response = await runRewindSession(request, this.codexClient);
+        await this.waitForSessionNotifications(request.sessionId);
+        return response;
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {

@@ -18,6 +18,7 @@ export const AIR_AGENT_FILE_CHANGE_REPORT_KEY = "agentFileChangeReport";
 export const AIR_NATIVE_SUBAGENT_SESSIONS_KEY = "nativeSubagentSessions";
 export const AIR_ASYNC_TASKS_KEY = "asyncTasks";
 export const AIR_RECOMMENDED_CONFIG_VALUE_KEY = "recommendedValue";
+export const AIR_SESSION_REWIND_KEY = "sessionRewind";
 export const AIR_ASYNC_TASKS_BACKGROUNDED_KEY = "backgrounded";
 export const AIR_AGENT_FILE_CHANGE_REPORT_REQUEST_KEY = "agentFileChangeReportRequest";
 export const AIR_EXTENSION_VERSION = 1;
