@@ -738,7 +738,7 @@ export class CodexAcpClient {
             baseUrl: activeProvider.baseUrl,
         });
         const mergedConfig = {
-            ...mergeGatewayConfig(this.config, this.gatewayConfig),
+            ...forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig)),
             projects: Object.fromEntries(sessionRoots.map(root => [root, {
                 trust_level: "trusted",
             }])),
@@ -1284,6 +1284,18 @@ function mergeSandboxWorkspaceWriteRoots(config: JsonObject, roots: string[]): J
         sandbox_workspace_write: {
             ...existingSandboxConfig,
             writable_roots: uniqueStrings([...existingWritableRoots, ...roots]),
+        },
+    };
+}
+
+/** Keep turn-diff path resolution deterministic; cwd-relative paths are experimental in Codex 0.154. */
+function forceGitRootTurnDiffPaths(config: JsonObject): JsonObject {
+    const features = isJsonObject(config["features"]) ? config["features"] : {};
+    return {
+        ...config,
+        features: {
+            ...features,
+            cwd_relative_turn_diffs: false,
         },
     };
 }

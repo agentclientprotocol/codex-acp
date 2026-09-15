@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import {describe, expect, it} from "vitest";
 import {
+    AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES,
     AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH,
     AGENT_FILE_CHANGE_REPORT_MAX_TOTAL_BYTES,
     AgentFileChangeReportError,
@@ -138,14 +139,6 @@ describe("agent file-change report", () => {
                 path.join(fs.realpathSync.native(cwd), "src", "Main.ts"),
             ]);
 
-            const cwdRelativeReport = createReportedAgentFileChangeReport(
-                "request-cwd-root",
-                modified("src/Main.ts"),
-                {cwd, additionalDirectories: []},
-            );
-            expect(cwdRelativeReport.paths).toEqual([
-                path.join(fs.realpathSync.native(cwd), "src", "Main.ts"),
-            ]);
         } finally {
             fs.rmSync(repository, {recursive: true, force: true});
         }
@@ -210,6 +203,14 @@ describe("agent file-change report", () => {
         } catch (error) {
             expect(error).toMatchObject({reason: "invalidOutput"});
         }
+    });
+
+    it("rejects an oversized turn diff before parsing", () => {
+        expect(() => createReportedAgentFileChangeReport(
+            "request-oversized",
+            "x".repeat(AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES + 1),
+            {cwd: "/repo", additionalDirectories: []},
+        )).toThrow(expect.objectContaining({reason: "invalidOutput"}));
     });
 
     it("keeps valid paths when another path exceeds the per-path cap", () => {

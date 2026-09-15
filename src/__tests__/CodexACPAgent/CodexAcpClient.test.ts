@@ -521,6 +521,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(threadStartRequest.config?.["sandbox_workspace_write"]).toEqual({
             writable_roots: ["/workspace/extra"],
         });
+        expect(threadStartRequest.config?.["features"]).toMatchObject({
+            cwd_relative_turn_diffs: false,
+        });
     });
 
     it('applies ACP additional directories to resumed and loaded sessions explicitly', async () => {
