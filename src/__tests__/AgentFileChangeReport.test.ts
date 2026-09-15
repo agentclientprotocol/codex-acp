@@ -151,6 +151,30 @@ describe("agent file-change report", () => {
         }
     });
 
+    it("resolves a repository-relative path into a sibling additional root", () => {
+        if (process.platform === "win32") return;
+
+        const repository = fs.mkdtempSync(path.join(os.tmpdir(), "file-report-roots-"));
+        const cwd = path.join(repository, "packages", "app");
+        const generated = path.join(repository, "generated");
+        fs.mkdirSync(path.join(repository, ".git"));
+        fs.mkdirSync(cwd, {recursive: true});
+        fs.mkdirSync(generated);
+        try {
+            const report = createReportedAgentFileChangeReport(
+                "request-additional-root",
+                modified("generated/out.txt"),
+                {cwd, additionalDirectories: [generated]},
+            );
+
+            expect(report.paths).toEqual([
+                path.join(fs.realpathSync.native(generated), "out.txt"),
+            ]);
+        } finally {
+            fs.rmSync(repository, {recursive: true, force: true});
+        }
+    });
+
     it("accepts canonical paths under a symlinked workspace root", () => {
         if (process.platform === "win32") return;
 
@@ -198,6 +222,18 @@ describe("agent file-change report", () => {
         expect(report.paths).toEqual(["/repo/valid.txt"]);
         expect(report.declaredComplete).toBe(false);
         expect(report.truncated).toBe(true);
+    });
+
+    it("applies the path cap after removing Git's header prefix", () => {
+        const relativePath = "x".repeat(AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH - "/repo/".length);
+        const report = createReportedAgentFileChangeReport(
+            "request-boundary",
+            modified(relativePath),
+            {cwd: "/repo", additionalDirectories: []},
+        );
+
+        expect(report.paths).toEqual([`/repo/${relativePath}`]);
+        expect(report.paths[0]).toHaveLength(AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH);
     });
 
     it("caps the serialized report", () => {

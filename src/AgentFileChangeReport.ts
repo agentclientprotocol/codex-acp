@@ -194,6 +194,7 @@ function normalizeFileChangeReport(
     let truncated = false;
 
     for (const reportedPath of report.paths) {
+        // parseTurnDiff has already decoded Git quoting and removed the a/ or b/ header prefix.
         if (reportedPath.length > AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH) {
             truncated = true;
             continue;
@@ -275,13 +276,13 @@ function normalizeReportedPath(
     } else if (path.posix.isAbsolute(trimmed)) {
         candidate = {value: path.posix.normalize(trimmed.replace(/\\/g, "/")), flavor: "posix"};
     } else if (cwd.flavor === "windows") {
-        const relativeRoot = selectRelativeDiffRoot(trimmed, cwd, defaultDiffRoot);
+        const relativeRoot = selectRelativeDiffRoot(trimmed, cwd, defaultDiffRoot, roots);
         candidate = {
             value: path.win32.resolve(relativeRoot.value, trimmed.replace(/\//g, "\\")),
             flavor: "windows",
         };
     } else {
-        const relativeRoot = selectRelativeDiffRoot(trimmed, cwd, defaultDiffRoot);
+        const relativeRoot = selectRelativeDiffRoot(trimmed, cwd, defaultDiffRoot, roots);
         candidate = {
             value: path.posix.resolve(relativeRoot.value, trimmed.replace(/\\/g, "/")),
             flavor: "posix",
@@ -298,14 +299,24 @@ function selectRelativeDiffRoot(
     value: string,
     cwd: NormalizedPath,
     defaultDiffRoot: NormalizedPath,
+    allowedRoots: NormalizedPath[],
 ): NormalizedPath {
     if (cwd.flavor !== defaultDiffRoot.flavor || cwd.value === defaultDiffRoot.value) return cwd;
     const pathImplementation = cwd.flavor === "windows" ? path.win32 : path.posix;
-    const cwdFromDiffRoot = pathImplementation.relative(defaultDiffRoot.value, cwd.value);
     const reported = pathImplementation.normalize(value.replace(/[\\/]/g, pathImplementation.sep));
-    return reported === cwdFromDiffRoot || reported.startsWith(`${cwdFromDiffRoot}${pathImplementation.sep}`)
-        ? defaultDiffRoot
-        : cwd;
+    for (const root of allowedRoots) {
+        if (root.flavor !== defaultDiffRoot.flavor) continue;
+        const rootFromDiffRoot = pathImplementation.relative(defaultDiffRoot.value, root.value);
+        if (rootFromDiffRoot.length > 0
+            && !pathImplementation.isAbsolute(rootFromDiffRoot)
+            && rootFromDiffRoot !== ".."
+            && !rootFromDiffRoot.startsWith(`..${pathImplementation.sep}`)
+            && (reported === rootFromDiffRoot
+                || reported.startsWith(`${rootFromDiffRoot}${pathImplementation.sep}`))) {
+            return defaultDiffRoot;
+        }
+    }
+    return cwd;
 }
 
 /** Codex 0.154 renders turn-diff paths relative to the nearest Git root by default. */
