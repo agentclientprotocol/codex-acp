@@ -228,6 +228,7 @@ export class CodexEventHandler {
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly turnDiffs = new Map<string, string>();
+    private readonly collectTurnDiffs: boolean;
     private readonly subagents: CodexSubagentEventRouter;
     /** Connection-level `authStatus` sink; the app-server account push feeds it. */
     private readonly onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined;
@@ -244,6 +245,7 @@ export class CodexEventHandler {
             new ACPSessionConnection(connection, sessionState.sessionId),
         ),
         onAccountUpdated?: (notification: AccountUpdatedNotification) => void,
+        collectTurnDiffs = false,
     ) {
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
@@ -252,6 +254,7 @@ export class CodexEventHandler {
         this.sessionFailureEpoch = sessionFailureEpoch;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
         this.subagents = subagents;
+        this.collectTurnDiffs = collectTurnDiffs;
         if (sessionState.sessionFailure !== undefined) {
             this.failuresById.set(sessionState.sessionFailure.id, sessionState.sessionFailure);
         }
@@ -482,7 +485,10 @@ export class CodexEventHandler {
                 this.completeRetryIncidentOnTurnProgress();
                 return await this.updatePlan(notification.params);
             case "turn/diff/updated":
-                this.turnDiffs.set(notification.params.turnId, notification.params.diff);
+                this.completeRetryIncidentOnTurnProgress();
+                if (this.collectTurnDiffs && notification.params.threadId === this.sessionState.sessionId) {
+                    this.turnDiffs.set(notification.params.turnId, notification.params.diff);
+                }
                 return null;
             case "error":
                 return await this.createErrorEvent(notification.params);

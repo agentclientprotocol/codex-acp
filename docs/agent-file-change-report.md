@@ -53,7 +53,7 @@ Each path is an absolute normalized path in the working directory or an addition
 
 The adapter sends at most 1,024 paths. Each path has at most 4,096 characters. The serialized report has at most 256 KiB. The optional uncertainty has at most 2,000 characters.
 
-The adapter marks the result unavailable when the prompt is cancelled, the turn diff is invalid, no provider turn ran, or the provider failed. The corresponding reasons are `cancelled`, `invalidOutput`, `notReported`, and `providerError`. The `timeout` reason remains part of the version-1 wire contract for backward compatibility but is not produced by this implementation. The main prompt still completes.
+The adapter marks the result unavailable when the prompt is cancelled, the turn diff is invalid, no provider turn ran, or the provider failed. The corresponding reasons are `cancelled`, `invalidOutput`, `notReported`, and `providerError`. The `timeout` reason remains part of the version-1 wire contract for backward compatibility but is not produced by this implementation. Report-generation failures do not change the main prompt outcome; failures of the main provider turn still follow the normal prompt error behavior.
 
 The client must match the request identifier. It must ignore a duplicate, stale, malformed, or unavailable report.
 
