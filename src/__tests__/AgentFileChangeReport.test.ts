@@ -60,7 +60,7 @@ describe("agent file-change report", () => {
             ],
             declaredComplete: false,
             truncated: false,
-            uncertainty: "Codex turn diffs may omit changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.",
+            uncertainty: "Codex turn diffs may omit same-content renames and changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.",
         });
     });
 
@@ -76,7 +76,7 @@ describe("agent file-change report", () => {
             paths: [],
             declaredComplete: false,
             truncated: false,
-            uncertainty: "Codex turn diffs may omit changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.",
+            uncertainty: "Codex turn diffs may omit same-content renames and changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.",
         });
     });
 
@@ -135,6 +135,15 @@ describe("agent file-change report", () => {
             );
 
             expect(report.paths).toEqual([
+                path.join(fs.realpathSync.native(cwd), "src", "Main.ts"),
+            ]);
+
+            const cwdRelativeReport = createReportedAgentFileChangeReport(
+                "request-cwd-root",
+                modified("src/Main.ts"),
+                {cwd, additionalDirectories: []},
+            );
+            expect(cwdRelativeReport.paths).toEqual([
                 path.join(fs.realpathSync.native(cwd), "src", "Main.ts"),
             ]);
         } finally {

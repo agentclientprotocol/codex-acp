@@ -50,6 +50,15 @@ describe("CodexEventHandler - turn diff events", () => {
         expect(enabled.getTurnDiff("turn-1")).toBe("root diff");
     });
 
+    it("replaces a prior snapshot when Codex emits an empty aggregate", async () => {
+        const {handler} = createHandler(true);
+        await handler.handleNotification(turnDiff(sessionId, "root diff"));
+
+        await handler.handleNotification(turnDiff(sessionId, ""));
+
+        expect(handler.getTurnDiff("turn-1")).toBe("");
+    });
+
     it("discards retained diffs when disposed", async () => {
         const {handler} = createHandler(true);
         await handler.handleNotification(turnDiff(sessionId, "root diff"));

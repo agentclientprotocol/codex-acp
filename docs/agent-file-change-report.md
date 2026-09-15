@@ -23,7 +23,7 @@ The client adds this object to `session/prompt`:
 
 The request identifier has 1 to 128 characters. It can contain ASCII letters, digits, `.`, `_`, `:`, and `-`.
 
-The adapter derives the report from Codex's final aggregated `turn/diff/updated` snapshot for the main turn. It does not run an additional model turn. In Codex 0.154, this snapshot tracks `apply_patch` mutations but can omit changes made through shell commands, version-control commands, generators, or child processes. The adapter therefore publishes these reports with `declaredComplete: false` and explains the limitation in `uncertainty`.
+The adapter derives the report from Codex's final aggregated `turn/diff/updated` snapshot for the main turn. It does not run an additional model turn. In Codex 0.154, this snapshot tracks `apply_patch` mutations but can omit same-content renames and changes made through shell commands, version-control commands, generators, or child processes. The adapter therefore publishes these reports with `declaredComplete: false` and explains the limitation in `uncertainty`.
 
 The adapter sends one `session_info_update` before the `PromptResponse`:
 
@@ -41,7 +41,7 @@ The adapter sends one `session_info_update` before the `PromptResponse`:
           "paths": ["/workspace/src/App.ts"],
           "declaredComplete": false,
           "truncated": false,
-          "uncertainty": "Codex turn diffs may omit changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes."
+          "uncertainty": "Codex turn diffs may omit same-content renames and changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes."
         }
       }
     }

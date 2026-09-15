@@ -13,7 +13,7 @@ export const AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH = 4_096;
 export const AGENT_FILE_CHANGE_REPORT_MAX_TOTAL_BYTES = 256 * 1_024;
 export const AGENT_FILE_CHANGE_REPORT_MAX_UNCERTAINTY_LENGTH = 2_000;
 
-const TURN_DIFF_UNCERTAINTY = "Codex turn diffs may omit changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.";
+const TURN_DIFF_UNCERTAINTY = "Codex turn diffs may omit same-content renames and changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.";
 
 export interface AgentFileChangeReportRequest {
     version: typeof AGENT_FILE_CHANGE_REPORT_VERSION;
@@ -198,7 +198,7 @@ function normalizeFileChangeReport(
             truncated = true;
             continue;
         }
-        const normalized = normalizeReportedPath(reportedPath, diffRoot, roots);
+        const normalized = normalizeReportedPath(reportedPath, cwd, diffRoot, roots);
         if (normalized === null || normalized.value.length > AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH) {
             truncated = true;
             continue;
@@ -255,7 +255,8 @@ function normalizeWorkspaceRoot(value: string): NormalizedPath | null {
 
 function normalizeReportedPath(
     value: string,
-    relativeRoot: NormalizedPath,
+    cwd: NormalizedPath,
+    defaultDiffRoot: NormalizedPath,
     roots: NormalizedPath[],
 ): NormalizedPath | null {
     const trimmed = value.trim();
@@ -263,7 +264,7 @@ function normalizeReportedPath(
         || /^[A-Za-z]:[^\\/]/.test(trimmed)
         || /^\\\\[?.]\\/.test(trimmed)
         || (/^(?:\\\\|\/\/)/.test(trimmed) && !isWindowsAbsolutePath(trimmed))
-        || (relativeRoot.flavor === "windows" && /^\\(?!\\)/.test(trimmed))
+        || (cwd.flavor === "windows" && /^\\(?!\\)/.test(trimmed))
         || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(trimmed)) {
         return null;
     }
@@ -273,12 +274,14 @@ function normalizeReportedPath(
         candidate = {value: path.win32.normalize(trimmed.replace(/\//g, "\\")), flavor: "windows"};
     } else if (path.posix.isAbsolute(trimmed)) {
         candidate = {value: path.posix.normalize(trimmed.replace(/\\/g, "/")), flavor: "posix"};
-    } else if (relativeRoot.flavor === "windows") {
+    } else if (cwd.flavor === "windows") {
+        const relativeRoot = selectRelativeDiffRoot(trimmed, cwd, defaultDiffRoot);
         candidate = {
             value: path.win32.resolve(relativeRoot.value, trimmed.replace(/\//g, "\\")),
             flavor: "windows",
         };
     } else {
+        const relativeRoot = selectRelativeDiffRoot(trimmed, cwd, defaultDiffRoot);
         candidate = {
             value: path.posix.resolve(relativeRoot.value, trimmed.replace(/\\/g, "/")),
             flavor: "posix",
@@ -288,6 +291,21 @@ function normalizeReportedPath(
     candidate = canonicalizeReportedPath(candidate);
 
     return roots.some(root => pathIsStrictlyInside(root, candidate)) ? candidate : null;
+}
+
+/** Accept both Codex's default Git-root paths and its opt-in cwd-relative paths. */
+function selectRelativeDiffRoot(
+    value: string,
+    cwd: NormalizedPath,
+    defaultDiffRoot: NormalizedPath,
+): NormalizedPath {
+    if (cwd.flavor !== defaultDiffRoot.flavor || cwd.value === defaultDiffRoot.value) return cwd;
+    const pathImplementation = cwd.flavor === "windows" ? path.win32 : path.posix;
+    const cwdFromDiffRoot = pathImplementation.relative(defaultDiffRoot.value, cwd.value);
+    const reported = pathImplementation.normalize(value.replace(/[\\/]/g, pathImplementation.sep));
+    return reported === cwdFromDiffRoot || reported.startsWith(`${cwdFromDiffRoot}${pathImplementation.sep}`)
+        ? defaultDiffRoot
+        : cwd;
 }
 
 /** Codex 0.154 renders turn-diff paths relative to the nearest Git root by default. */
