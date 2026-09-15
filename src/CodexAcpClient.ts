@@ -25,6 +25,7 @@ import type {
 import type {ServiceTier} from "./app-server/ServiceTier";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
+import {toTokenCount, type TokenCount} from "./TokenCount";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
@@ -126,6 +127,7 @@ export class CodexAcpClient {
     private readonly subagents: CodexSubagentSubscriptions;
     private skillExtraRoots: string[] = [];
     private configPath: string | null = null;
+    private readonly threadTokenUsage = new Map<string, TokenCount>();
 
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
@@ -135,6 +137,16 @@ export class CodexAcpClient {
         this.gatewayConfig = null;
         this.gatewayConfigSource = null;
         this.subagents = new CodexSubagentSubscriptions(codexClient);
+        // Capture restored totals even before the ACP session handler is installed.
+        codexClient.onClientTransportEvent(event => {
+            if (event.eventType === "notification" && event.method === "thread/tokenUsage/updated") {
+                this.threadTokenUsage.set(event.params.threadId, toTokenCount(event.params.tokenUsage.total));
+            }
+        });
+    }
+
+    getThreadTokenUsage(sessionId: string): TokenCount | null {
+        return this.threadTokenUsage.get(sessionId) ?? null;
     }
 
     get appServerClient(): CodexAppServerClient {
@@ -638,7 +650,11 @@ export class CodexAcpClient {
             await this.codexClient.threadUnsubscribe({threadId: sessionId});
         } finally {
             this.codexClient.clearThreadHandlers(sessionId);
+            for (const childSessionId of this.subagents.childSessionIds(sessionId)) {
+                this.threadTokenUsage.delete(childSessionId);
+            }
             this.subagents.clear(sessionId);
+            this.threadTokenUsage.delete(sessionId);
         }
     }
 

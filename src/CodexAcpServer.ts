@@ -53,10 +53,10 @@ import {
     REASONING_EFFORT_CONFIG_ID,
 } from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
+import {PromptTokenUsage, ZERO_TOKEN_COUNT} from "./PromptTokenUsage";
 import {toPromptUsage} from "./TokenCount";
 import {CodexCommands, GOAL_CONTINUATION_PROMPT} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
-import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
@@ -164,6 +164,7 @@ export interface SessionState {
     currentTurnId: string | null;
     lastTokenUsage: TokenCount | null;
     totalTokenUsage: TokenCount | null;
+    promptTokenUsage?: PromptTokenUsage;
     modelContextWindow: number | null;
     rateLimits: RateLimitsMap | null;
     account: Account | null;
@@ -669,7 +670,7 @@ export class CodexAcpServer {
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             lastTokenUsage: null,
-            totalTokenUsage: null,
+            totalTokenUsage: operation === "new" ? ZERO_TOKEN_COUNT : null,
             modelContextWindow: null,
             rateLimits: null,
             account: authState.account,
@@ -2753,6 +2754,9 @@ export class CodexAcpServer {
         let agentFileChangeReportUnavailableReason: AgentFileChangeReportUnavailableReason = "providerError";
         let promptWasCancelled = false;
         let recoverableSessionFailure = sessionState.sessionFailure;
+        sessionState.promptTokenUsage = new PromptTokenUsage(
+            this.codexAcpClient.getThreadTokenUsage(params.sessionId) ?? sessionState.totalTokenUsage,
+        );
         sessionState.currentTurnId = null;
         const activePrompt = this.trackActivePrompt(params.sessionId);
         let pendingTurnStart: PendingTurnStart | null = null;
@@ -2913,7 +2917,7 @@ export class CodexAcpServer {
                 await clearRecoveredSessionFailure(eventHandler);
                 return {
                     stopReason: "end_turn",
-                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                    usage: this.buildPromptUsage(sessionState.promptTokenUsage?.tokenCount() ?? null),
                     _meta: this.buildQuotaMeta(sessionState),
                 };
             }
@@ -3147,7 +3151,7 @@ export class CodexAcpServer {
 
             return {
                 stopReason: "end_turn",
-                usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                usage: this.buildPromptUsage(sessionState.promptTokenUsage?.tokenCount() ?? null),
                 _meta: this.buildQuotaMeta(sessionState),
             };
         } catch (err) {
@@ -3248,8 +3252,8 @@ export class CodexAcpServer {
     private cancelledPromptResponse(sessionState: SessionState): acp.PromptResponse {
         return {
             stopReason: "cancelled",
-            usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-            _meta: this.buildQuotaMeta(sessionState),
+            usage: this.buildPromptUsage(sessionState.promptTokenUsage?.tokenCount() ?? null),
+            _meta: this.buildQuotaMeta(sessionState, true),
         };
     }
 
@@ -3265,16 +3269,16 @@ export class CodexAcpServer {
         }
         return {
             stopReason: "end_turn",
-            usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+            usage: this.buildPromptUsage(sessionState.promptTokenUsage?.tokenCount() ?? null),
             _meta: {
-                ...this.buildQuotaMeta(sessionState),
+                ...this.buildQuotaMeta(sessionState, true),
                 ...failureMeta,
             },
         };
     }
 
-    private buildQuotaMeta(sessionState: SessionState): { quota: QuotaMeta } {
-        const lastTokenUsage = sessionState.lastTokenUsage;
+    private buildQuotaMeta(sessionState: SessionState, interrupted = false) {
+        const lastTokenUsage = sessionState.promptTokenUsage?.tokenCount() ?? null;
 
         // Remove the "[reasoning-level]" suffix from currentModelId if present
         const modelName = sessionState.currentModelId.replace(/\[.*?]$/, '');
@@ -3286,9 +3290,10 @@ export class CodexAcpServer {
 
         return {
             quota: {
-                token_count: sessionState.lastTokenUsage,
+                token_count: lastTokenUsage,
                 model_usage: modelUsage
-            }
+            },
+            usageAccounting: sessionState.promptTokenUsage?.accounting(interrupted)
         };
     }
 

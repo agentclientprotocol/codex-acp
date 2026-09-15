@@ -400,7 +400,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
     return {
         currentTurnId: null,
         lastTokenUsage: null,
-        totalTokenUsage: null,
+        totalTokenUsage: {totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0},
         modelContextWindow: null,
         rateLimits: null,
         account: null,
