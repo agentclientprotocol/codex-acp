@@ -499,6 +499,8 @@ export class CodexEventHandler {
                             this.turnDiffs.delete(notification.params.turnId);
                             this.oversizedTurnDiffs.add(notification.params.turnId);
                         } else {
+                            // Codex 0.154 emits an empty snapshot when its tracker transitions
+                            // from a non-empty aggregate to no diff, which clears stale state here.
                             this.oversizedTurnDiffs.delete(notification.params.turnId);
                             this.turnDiffs.set(notification.params.turnId, notification.params.diff);
                         }
