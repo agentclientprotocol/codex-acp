@@ -83,6 +83,7 @@ import {
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import type {SubagentState} from "./subagents/AcpSubagents";
 import {mergeRateLimitSnapshot} from "./RateLimitsMap";
+import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "./AgentFileChangeReport";
 
 export { stripShellPrefix };
 
@@ -228,6 +229,7 @@ export class CodexEventHandler {
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly turnDiffs = new Map<string, string>();
+    private readonly oversizedTurnDiffs = new Set<string>();
     private readonly collectTurnDiffs: boolean;
     private readonly subagents: CodexSubagentEventRouter;
     /** Connection-level `authStatus` sink; the app-server account push feeds it. */
@@ -266,6 +268,10 @@ export class CodexEventHandler {
 
     getTurnDiff(turnId: string): string {
         return this.turnDiffs.get(turnId) ?? "";
+    }
+
+    isTurnDiffOversized(turnId: string): boolean {
+        return this.oversizedTurnDiffs.has(turnId);
     }
 
     getTerminalSessionFailureMeta(
@@ -458,6 +464,7 @@ export class CodexEventHandler {
         this.planDeltaTextByItemId.clear();
         this.lastEmittedPlanTextByItemId.clear();
         this.turnDiffs.clear();
+        this.oversizedTurnDiffs.clear();
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
@@ -488,7 +495,13 @@ export class CodexEventHandler {
                 if (notification.params.threadId === this.sessionState.sessionId) {
                     this.completeRetryIncidentOnTurnProgress();
                     if (!this.disposed && this.collectTurnDiffs) {
-                        this.turnDiffs.set(notification.params.turnId, notification.params.diff);
+                        if (Buffer.byteLength(notification.params.diff, "utf8") > AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES) {
+                            this.turnDiffs.delete(notification.params.turnId);
+                            this.oversizedTurnDiffs.add(notification.params.turnId);
+                        } else {
+                            this.oversizedTurnDiffs.delete(notification.params.turnId);
+                            this.turnDiffs.set(notification.params.turnId, notification.params.diff);
+                        }
                     }
                 }
                 return null;

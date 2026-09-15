@@ -3199,6 +3199,10 @@ export class CodexAcpServer {
                 if (promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)) {
                     agentFileChangeReportTurnId = null;
                     agentFileChangeReportUnavailableReason = "cancelled";
+                } else if (agentFileChangeReportTurnId !== null
+                    && eventHandler?.isTurnDiffOversized(agentFileChangeReportTurnId)) {
+                    agentFileChangeReportTurnId = null;
+                    agentFileChangeReportUnavailableReason = "invalidOutput";
                 }
                 await this.publishAgentFileChangeReport(
                     sessionState,

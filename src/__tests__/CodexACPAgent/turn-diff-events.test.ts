@@ -3,6 +3,7 @@ import type {ServerNotification} from "../../app-server";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import {CodexEventHandler} from "../../CodexEventHandler";
 import {createTestSessionState} from "../acp-test-utils";
+import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "../../AgentFileChangeReport";
 
 describe("CodexEventHandler - turn diff events", () => {
     const sessionId = "root-thread";
@@ -57,6 +58,21 @@ describe("CodexEventHandler - turn diff events", () => {
         await handler.handleNotification(turnDiff(sessionId, ""));
 
         expect(handler.getTurnDiff("turn-1")).toBe("");
+    });
+
+    it("retains only a marker for an oversized aggregate", async () => {
+        const {handler} = createHandler(true);
+        await handler.handleNotification(turnDiff(
+            sessionId,
+            "x".repeat(AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES + 1),
+        ));
+
+        expect(handler.getTurnDiff("turn-1")).toBe("");
+        expect(handler.isTurnDiffOversized("turn-1")).toBe(true);
+
+        await handler.handleNotification(turnDiff(sessionId, "replacement"));
+        expect(handler.getTurnDiff("turn-1")).toBe("replacement");
+        expect(handler.isTurnDiffOversized("turn-1")).toBe(false);
     });
 
     it("discards retained diffs when disposed", async () => {

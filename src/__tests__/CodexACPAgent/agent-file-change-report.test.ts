@@ -9,6 +9,7 @@ import type {SessionState} from "../../CodexAcpServer";
 import {CodexCommands} from "../../CodexCommands";
 import {logger} from "../../Logger";
 import type {Turn, TurnCompletedNotification} from "../../app-server/v2";
+import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "../../AgentFileChangeReport";
 
 function createTurn(id: string, status: Turn["status"]): Turn {
     return {
@@ -201,6 +202,33 @@ describe("agent file-change report lifecycle", () => {
         expect(reportedUpdates(fixture)[0]).toMatchObject({
             _meta: {jetbrains: {air: {agentFileChangeReport: {
                 requestId: "request-invalid",
+                status: "unavailable",
+                reason: "invalidOutput",
+            }}}},
+        });
+    });
+
+    it("publishes invalidOutput without retaining an oversized turn diff", async () => {
+        const {fixture, sessionState, awaitTurnCompleted} = await setupMainPrompt();
+        awaitTurnCompleted.mockImplementationOnce(async () => {
+            fixture.sendServerNotification({
+                method: "turn/diff/updated",
+                params: {
+                    threadId: sessionState.sessionId,
+                    turnId: "main-turn",
+                    diff: "x".repeat(AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES + 1),
+                },
+            });
+            return {threadId: sessionState.sessionId, turn: createTurn("main-turn", "completed")};
+        });
+
+        await expect(fixture.getCodexAcpAgent().prompt(
+            promptWithFileChangeReport(sessionState.sessionId, "request-oversized"),
+        )).resolves.toMatchObject({stopReason: "end_turn"});
+
+        expect(reportedUpdates(fixture)[0]).toMatchObject({
+            _meta: {jetbrains: {air: {agentFileChangeReport: {
+                requestId: "request-oversized",
                 status: "unavailable",
                 reason: "invalidOutput",
             }}}},
