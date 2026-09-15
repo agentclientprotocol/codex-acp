@@ -202,6 +202,39 @@ export class CodexCommands {
         };
     }
 
+    /**
+     * Whether this prompt makes Codex run an agent turn that can call MCP tools.
+     * Keep the switch in sync with {@link tryHandleCommand}.
+     */
+    startsAgentTurn(prompt: acp.ContentBlock[]): boolean {
+        const command = this.parseCommand(prompt);
+        if (command === null) return true;
+        if (command.name.startsWith("$")) return true;
+
+        switch (command.name) {
+            case "plan":
+            case "status":
+            case "skills":
+            case "mcp":
+            case "rename":
+            case "logout":
+            case "compact":
+                return false;
+            case "review":
+            case "review-branch":
+            case "review-commit":
+                return true;
+            // "/goal pause", "/goal clear", and "/goal" (usage) do not start a turn, but the other forms do.
+            case "goal": {
+                const arg = command.rest.trim().toLowerCase();
+                return !(arg.length === 0 || arg === "pause" || arg === "clear" || arg.length > 4000);
+            }
+            default:
+                // Unrecognized commands are forwarded to Codex as raw prompts.
+                return true;
+        }
+    }
+
     async tryHandleCommand(
         prompt: acp.ContentBlock[],
         sessionState: SessionState,
