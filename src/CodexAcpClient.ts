@@ -569,7 +569,9 @@ export class CodexAcpClient {
     }
 
     async rewindSession(request: SessionRewindRequest): Promise<{rewound: boolean}> {
-        return await runRewindSession(request, this.codexClient);
+        const response = await runRewindSession(request, this.codexClient);
+        await this.waitForSessionNotifications(request.sessionId);
+        return response;
     }
 
     async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {

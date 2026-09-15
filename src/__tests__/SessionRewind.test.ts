@@ -1,5 +1,6 @@
 import {describe, expect, it, vi} from "vitest";
 import type {CodexAppServerClient} from "../CodexAppServerClient";
+import {CodexAcpClient} from "../CodexAcpClient";
 import {rewindSession} from "../SessionRewind";
 
 describe("session rewind", () => {
@@ -52,6 +53,31 @@ describe("session rewind", () => {
         }, client);
 
         expect(result).toEqual({rewound: true});
+        expect(client.threadRevert).toHaveBeenCalledWith({threadId: "thread-1", beforeTurnId: "turn-2"});
+    });
+
+    it("prefers the exact segmented message id over its protocol id fallback", async () => {
+        const client = {
+            threadReadWithHistory: vi.fn().mockResolvedValue({
+                thread: {
+                    turns: [
+                        {id: "turn-1", items: [{type: "userMessage", id: "user-1", content: [{type: "text", text: "fallback"}]}]},
+                        {id: "turn-2", items: [{type: "userMessage", id: "user-1:segment:0", content: [{type: "text", text: "exact"}]}]},
+                    ],
+                },
+            }),
+            threadRevert: vi.fn().mockResolvedValue({}),
+        } as unknown as CodexAppServerClient;
+
+        await rewindSession({
+            sessionId: "thread-1",
+            beforeMessage: {
+                messageId: "user-1:segment:0",
+                messageFingerprint: `sha256:${"0".repeat(64)}`,
+                messageOccurrence: 1,
+            },
+        }, client);
+
         expect(client.threadRevert).toHaveBeenCalledWith({threadId: "thread-1", beforeTurnId: "turn-2"});
     });
 
@@ -167,5 +193,31 @@ describe("session rewind", () => {
             },
         }, client)).rejects.toThrow("Rewind message missing was not found");
         expect(client.threadRevert).not.toHaveBeenCalled();
+    });
+
+    it("drains queued session notifications before acknowledging rewind", async () => {
+        const appServerClient = {
+            threadReadWithHistory: vi.fn().mockResolvedValue({
+                thread: {
+                    historyMode: "paginated",
+                    turns: [{id: "turn-1", items: [{type: "userMessage", id: "user-1", content: [{type: "text", text: "one"}]}]}],
+                },
+            }),
+            threadRevert: vi.fn().mockResolvedValue({}),
+        } as unknown as CodexAppServerClient;
+        const client = new CodexAcpClient(appServerClient);
+        const waitForNotifications = vi.spyOn(client, "waitForSessionNotifications").mockResolvedValue();
+
+        await client.rewindSession({
+            sessionId: "thread-1",
+            beforeMessage: {
+                messageId: "user-1",
+                messageFingerprint: `sha256:${"0".repeat(64)}`,
+                messageOccurrence: 1,
+            },
+        });
+
+        expect(waitForNotifications).toHaveBeenCalledWith("thread-1");
+        expect(appServerClient.threadRevert).toHaveBeenCalledBefore(waitForNotifications);
     });
 });

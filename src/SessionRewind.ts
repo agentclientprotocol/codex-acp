@@ -30,7 +30,9 @@ export async function rewindSession(
             ? [{turn, turnIndex, item, itemIndex}]
             : []));
     const candidates = messageIdCandidates(request.beforeMessage.messageId);
-    const exact = userTurns.find(({item}) => candidates.includes(item.id));
+    const exact = candidates
+        .map(candidate => userTurns.find(({item}) => item.id === candidate))
+        .find(match => match !== undefined);
     const fingerprintMatches = userTurns.filter(({item}) =>
         fingerprint(userInputVisibleText(item.content)) === request.beforeMessage.messageFingerprint,
     );

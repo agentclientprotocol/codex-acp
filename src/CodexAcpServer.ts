@@ -435,6 +435,9 @@ export class CodexAcpServer {
                 };
             }
             case SESSION_REWIND_METHOD:
+                if (this.providerUpdate !== null) {
+                    await this.providerUpdate;
+                }
                 return await this.runWithProcessCheck(
                     () => this.codexAcpClient.rewindSession(methodRequest.params as SessionRewindRequest),
                 );
