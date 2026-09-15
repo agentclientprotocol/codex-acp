@@ -187,6 +187,29 @@ describe("agent file-change report", () => {
         }
     });
 
+    it("resolves cwd-relative diffs from a symlink to a nested repository directory", () => {
+        if (process.platform === "win32") return;
+
+        const repository = fs.mkdtempSync(path.join(os.tmpdir(), "file-report-symlink-repo-"));
+        const realCwd = path.join(repository, "packages", "app");
+        const linkedCwd = `${repository}-app-link`;
+        fs.mkdirSync(path.join(repository, ".git"));
+        fs.mkdirSync(realCwd, {recursive: true});
+        fs.symlinkSync(realCwd, linkedCwd, "dir");
+        try {
+            const report = createReportedAgentFileChangeReport(
+                "request-symlink-nested-cwd",
+                modified("src/Main.ts"),
+                {cwd: linkedCwd, additionalDirectories: []},
+            );
+
+            expect(report.paths).toEqual([path.join(fs.realpathSync.native(realCwd), "src", "Main.ts")]);
+        } finally {
+            fs.unlinkSync(linkedCwd);
+            fs.rmSync(repository, {recursive: true, force: true});
+        }
+    });
+
     it("classifies malformed non-empty diff as invalid output", () => {
         expect(() => createReportedAgentFileChangeReport(
             "request-id",

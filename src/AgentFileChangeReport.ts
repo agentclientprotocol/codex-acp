@@ -183,11 +183,12 @@ function normalizeFileChangeReport(
     report: ParsedFileChangeReport,
     workspace: AgentFileChangeWorkspace,
 ): Omit<ReportedAgentFileChangeReport, "version" | "requestId" | "status"> {
-    const cwd = normalizeWorkspaceRoot(workspace.cwd);
-    if (cwd === null) {
+    const lexicalCwd = parseWorkspaceRoot(workspace.cwd);
+    if (lexicalCwd === null) {
         throw new AgentFileChangeReportError("providerError", "The session working directory is not absolute");
     }
-    const diffRoot = findDiffDisplayRoot(cwd);
+    const cwd = canonicalizeWorkspaceRoot(lexicalCwd);
+    const diffRoot = findDiffDisplayRoot(lexicalCwd);
     const roots = [cwd, ...workspace.additionalDirectories.flatMap(directory => {
         const root = normalizeWorkspaceRoot(directory);
         return root === null || root.flavor !== cwd.flavor ? [] : [root];
@@ -239,21 +240,27 @@ interface NormalizedPath {
 }
 
 function normalizeWorkspaceRoot(value: string): NormalizedPath | null {
+    const root = parseWorkspaceRoot(value);
+    return root === null ? null : canonicalizeWorkspaceRoot(root);
+}
+
+/** Preserve the spelling Codex uses for lexical ancestor discovery. */
+function parseWorkspaceRoot(value: string): NormalizedPath | null {
     const trimmed = value.trim();
     if (!isValidPathText(trimmed)) {
         return null;
     }
     if (isWindowsAbsolutePath(trimmed)) {
-        return canonicalizeWorkspaceRoot({
+        return {
             value: path.win32.normalize(trimmed.replace(/\//g, "\\")),
             flavor: "windows",
-        });
+        };
     }
     if (path.posix.isAbsolute(trimmed)) {
-        return canonicalizeWorkspaceRoot({
+        return {
             value: path.posix.normalize(trimmed.replace(/\\/g, "/")),
             flavor: "posix",
-        });
+        };
     }
     return null;
 }
