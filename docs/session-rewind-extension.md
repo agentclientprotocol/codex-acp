@@ -49,8 +49,8 @@ The adapter returns `{ "rewound": true }` only after Codex accepts the rewind. A
 
 ## Codex mapping
 
-The adapter reads the existing Codex thread history and resolves `beforeMessage` to its containing turn. It then calls `thread/revert` with that turn as the exclusive boundary.
+The adapter reads the existing Codex thread history and resolves `beforeMessage` to its containing turn. Rewind is rejected when the selected message is a steer inside an existing turn because Codex cannot remove only that suffix. For paginated history, the adapter calls `thread/revert` with the containing turn as the exclusive boundary; legacy history uses the equivalent turn-count rollback operation.
 
-The Codex thread ID remains the ACP session ID. The adapter does not call `thread/fork`, create a thread, or add a session-list entry. `resumeAtMessage` is not needed for this mapping because Codex reverts at a turn boundary.
+The Codex thread ID remains the ACP session ID. The adapter does not call `thread/fork`, create a thread, or add a session-list entry. `resumeAtMessage` is not needed after the turn-boundary validation.
 
 After a successful response, the client can remove the same transcript suffix and place the selected user text in its editor.

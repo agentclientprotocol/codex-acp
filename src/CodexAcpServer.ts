@@ -60,6 +60,7 @@ import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
+import {userInputToContentBlocks} from "./UserInputContent";
 import {
     AUTH_STATUS_META_KEY,
     AUTH_STATUS_UPDATE_METHOD,
@@ -2294,7 +2295,7 @@ export class CodexAcpServer {
         const updates: UpdateSessionEvent[] = [];
         const messageId = item.id;
         for (const input of item.content) {
-            const blocks = this.userInputToContentBlocks(input);
+            const blocks = userInputToContentBlocks(input);
             for (const block of blocks) {
                 updates.push(createUserMessageChunk(block, messageId));
             }
@@ -2355,34 +2356,6 @@ export class CodexAcpServer {
             item.id,
             createCodexMessagePhaseMeta("final_answer"),
         );
-    }
-
-    private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
-        switch (input.type) {
-            case "text":
-                return input.text.length > 0 ? [{ type: "text", text: input.text }] : [];
-            case "image":
-                return [{ type: "text", text: this.formatUriAsLink("image", input.url) }];
-            case "localImage": {
-                const uri = input.path.startsWith("file://") ? input.path : `file://${input.path}`;
-                return [{ type: "text", text: this.formatUriAsLink(null, uri) }];
-            }
-            case "skill":
-                return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
-        }
-        return [];
-    }
-
-    private formatUriAsLink(name: string | null, uri: string): string {
-        if (name && name.length > 0) {
-            return `[@${name}](${uri})`;
-        }
-        if (uri.startsWith("file://")) {
-            const path = uri.replace("file://", "");
-            const fileName = path.split("/").pop() ?? path;
-            return `[@${fileName}](${uri})`;
-        }
-        return uri;
     }
 
     getSessionState(sessionId: string): SessionState {
