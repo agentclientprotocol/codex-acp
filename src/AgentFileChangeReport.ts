@@ -13,6 +13,8 @@ export const AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH = 4_096;
 export const AGENT_FILE_CHANGE_REPORT_MAX_TOTAL_BYTES = 256 * 1_024;
 export const AGENT_FILE_CHANGE_REPORT_MAX_UNCERTAINTY_LENGTH = 2_000;
 
+const TURN_DIFF_UNCERTAINTY = "Codex turn diffs may omit changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.";
+
 export interface AgentFileChangeReportRequest {
     version: typeof AGENT_FILE_CHANGE_REPORT_VERSION;
     requestId: string;
@@ -112,7 +114,7 @@ export class AgentFileChangeReportError extends Error {
 
 function parseTurnDiff(diff: string): ParsedFileChangeReport {
     if (diff.trim() === "") {
-        return {paths: [], complete: true};
+        return {paths: [], complete: false, uncertainty: TURN_DIFF_UNCERTAINTY};
     }
 
     let patches: ReturnType<typeof parsePatch>;
@@ -138,7 +140,7 @@ function parseTurnDiff(diff: string): ParsedFileChangeReport {
         if (oldPath !== null) paths.push(oldPath);
         if (newPath !== null) paths.push(newPath);
     }
-    return {paths, complete: true};
+    return {paths, complete: false, uncertainty: TURN_DIFF_UNCERTAINTY};
 }
 
 function normalizeDiffPath(value: string | undefined): string | null {
@@ -181,6 +183,7 @@ function normalizeFileChangeReport(
     if (cwd === null) {
         throw new AgentFileChangeReportError("providerError", "The session working directory is not absolute");
     }
+    const diffRoot = findDiffDisplayRoot(cwd);
     const roots = [cwd, ...workspace.additionalDirectories.flatMap(directory => {
         const root = normalizeWorkspaceRoot(directory);
         return root === null || root.flavor !== cwd.flavor ? [] : [root];
@@ -195,7 +198,7 @@ function normalizeFileChangeReport(
             truncated = true;
             continue;
         }
-        const normalized = normalizeReportedPath(reportedPath, cwd, roots);
+        const normalized = normalizeReportedPath(reportedPath, diffRoot, roots);
         if (normalized === null || normalized.value.length > AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH) {
             truncated = true;
             continue;
@@ -252,7 +255,7 @@ function normalizeWorkspaceRoot(value: string): NormalizedPath | null {
 
 function normalizeReportedPath(
     value: string,
-    cwd: NormalizedPath,
+    relativeRoot: NormalizedPath,
     roots: NormalizedPath[],
 ): NormalizedPath | null {
     const trimmed = value.trim();
@@ -260,7 +263,7 @@ function normalizeReportedPath(
         || /^[A-Za-z]:[^\\/]/.test(trimmed)
         || /^\\\\[?.]\\/.test(trimmed)
         || (/^(?:\\\\|\/\/)/.test(trimmed) && !isWindowsAbsolutePath(trimmed))
-        || (cwd.flavor === "windows" && /^\\(?!\\)/.test(trimmed))
+        || (relativeRoot.flavor === "windows" && /^\\(?!\\)/.test(trimmed))
         || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(trimmed)) {
         return null;
     }
@@ -270,14 +273,14 @@ function normalizeReportedPath(
         candidate = {value: path.win32.normalize(trimmed.replace(/\//g, "\\")), flavor: "windows"};
     } else if (path.posix.isAbsolute(trimmed)) {
         candidate = {value: path.posix.normalize(trimmed.replace(/\\/g, "/")), flavor: "posix"};
-    } else if (cwd.flavor === "windows") {
+    } else if (relativeRoot.flavor === "windows") {
         candidate = {
-            value: path.win32.resolve(cwd.value, trimmed.replace(/\//g, "\\")),
+            value: path.win32.resolve(relativeRoot.value, trimmed.replace(/\//g, "\\")),
             flavor: "windows",
         };
     } else {
         candidate = {
-            value: path.posix.resolve(cwd.value, trimmed.replace(/\\/g, "/")),
+            value: path.posix.resolve(relativeRoot.value, trimmed.replace(/\\/g, "/")),
             flavor: "posix",
         };
     }
@@ -285,6 +288,21 @@ function normalizeReportedPath(
     candidate = canonicalizeReportedPath(candidate);
 
     return roots.some(root => pathIsStrictlyInside(root, candidate)) ? candidate : null;
+}
+
+/** Codex 0.154 renders turn-diff paths relative to the nearest Git root by default. */
+function findDiffDisplayRoot(cwd: NormalizedPath): NormalizedPath {
+    if (!isNativePathFlavor(cwd.flavor)) return cwd;
+    const pathImplementation = cwd.flavor === "windows" ? path.win32 : path.posix;
+    let current = cwd.value;
+    while (true) {
+        if (fs.existsSync(pathImplementation.join(current, ".git"))) {
+            return canonicalizeWorkspaceRoot({value: current, flavor: cwd.flavor});
+        }
+        const parent = pathImplementation.dirname(current);
+        if (parent === current) return cwd;
+        current = parent;
+    }
 }
 
 /** Resolve native filesystem aliases such as macOS' /tmp -> /private/tmp. */

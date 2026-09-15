@@ -485,9 +485,11 @@ export class CodexEventHandler {
                 this.completeRetryIncidentOnTurnProgress();
                 return await this.updatePlan(notification.params);
             case "turn/diff/updated":
-                this.completeRetryIncidentOnTurnProgress();
-                if (this.collectTurnDiffs && notification.params.threadId === this.sessionState.sessionId) {
-                    this.turnDiffs.set(notification.params.turnId, notification.params.diff);
+                if (notification.params.threadId === this.sessionState.sessionId) {
+                    this.completeRetryIncidentOnTurnProgress();
+                    if (!this.disposed && this.collectTurnDiffs) {
+                        this.turnDiffs.set(notification.params.turnId, notification.params.diff);
+                    }
                 }
                 return null;
             case "error":

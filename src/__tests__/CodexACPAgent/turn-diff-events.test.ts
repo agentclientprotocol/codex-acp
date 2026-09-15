@@ -55,12 +55,13 @@ describe("CodexEventHandler - turn diff events", () => {
         await handler.handleNotification(turnDiff(sessionId, "root diff"));
 
         await handler.dispose();
+        await handler.handleSessionScopedNotification(turnDiff(sessionId, "late diff"));
 
         expect(handler.getTurnDiff("turn-1")).toBe("");
     });
 
-    it("treats a root-thread diff as progress after a retry warning", async () => {
-        const {handler, sessionState} = createHandler(true);
+    it("treats a root-thread diff as progress even when collection is disabled", async () => {
+        const {handler, sessionState} = createHandler(false);
         await handler.handleNotification({
             method: "error",
             params: {
@@ -80,6 +81,29 @@ describe("CodexEventHandler - turn diff events", () => {
         await handler.handleNotification(turnDiff(sessionId, "recovered diff"));
 
         expect(sessionState.sessionFailure).toBeUndefined();
-        expect(handler.getTurnDiff("turn-1")).toBe("recovered diff");
+        expect(handler.getTurnDiff("turn-1")).toBe("");
+    });
+
+    it("does not treat a child-thread diff as root-turn progress", async () => {
+        const {handler, sessionState} = createHandler(true);
+        await handler.handleNotification({
+            method: "error",
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                willRetry: true,
+                error: {
+                    message: "Provider stream disconnected",
+                    codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
+                    additionalDetails: null,
+                    misalignment: null,
+                },
+            },
+        });
+
+        await handler.handleNotification(turnDiff("child-thread", "child diff"));
+
+        expect(sessionState.sessionFailure).toMatchObject({severity: "warning"});
+        expect(handler.getTurnDiff("turn-1")).toBe("");
     });
 });

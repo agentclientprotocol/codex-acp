@@ -133,8 +133,9 @@ describe("agent file-change report lifecycle", () => {
                     requestId: "request-42",
                     status: "reported",
                     paths: ["/workspace/src/Main.kt"],
-                    declaredComplete: true,
+                    declaredComplete: false,
                     truncated: false,
+                    uncertainty: "Codex turn diffs may omit changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.",
                 },
             }}},
         }]);
@@ -165,7 +166,7 @@ describe("agent file-change report lifecycle", () => {
         });
     });
 
-    it("reports an empty complete list when the turn changed no files", async () => {
+    it("reports an empty incomplete list when the turn emitted no diff", async () => {
         const {fixture, sessionState} = await setupMainPrompt();
 
         await fixture.getCodexAcpAgent().prompt(
@@ -176,7 +177,7 @@ describe("agent file-change report lifecycle", () => {
             _meta: {jetbrains: {air: {agentFileChangeReport: {
                 status: "reported",
                 paths: [],
-                declaredComplete: true,
+                declaredComplete: false,
                 truncated: false,
             }}}},
         });
@@ -225,6 +226,26 @@ describe("agent file-change report lifecycle", () => {
             promptWithFileChangeReport(sessionState.sessionId, "request-cancelled"),
             cancellation.signal,
         )).resolves.toMatchObject({stopReason: "cancelled"});
+
+        expect(reportedUpdates(fixture)[0]).toMatchObject({
+            _meta: {jetbrains: {air: {agentFileChangeReport: {
+                status: "unavailable",
+                reason: "cancelled",
+            }}}},
+        });
+    });
+
+    it("publishes cancelled when cancellation arrives after the provider turn completes", async () => {
+        const {fixture, sessionState} = await setupMainPrompt();
+        const cancellation = new AbortController();
+        sessionState.titleGen = {
+            onTurnCompleted: () => cancellation.abort(),
+        } as unknown as NonNullable<SessionState["titleGen"]>;
+
+        await expect(fixture.getCodexAcpAgent().prompt(
+            promptWithFileChangeReport(sessionState.sessionId, "request-late-cancel"),
+            cancellation.signal,
+        )).resolves.toMatchObject({stopReason: "end_turn"});
 
         expect(reportedUpdates(fixture)[0]).toMatchObject({
             _meta: {jetbrains: {air: {agentFileChangeReport: {

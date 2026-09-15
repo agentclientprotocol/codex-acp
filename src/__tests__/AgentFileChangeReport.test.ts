@@ -58,12 +58,13 @@ describe("agent file-change report", () => {
                 "/repo/after.txt",
                 "/repo/image.png",
             ],
-            declaredComplete: true,
+            declaredComplete: false,
             truncated: false,
+            uncertainty: "Codex turn diffs may omit changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.",
         });
     });
 
-    it("reports an empty complete list when the turn emitted no diff", () => {
+    it("reports an empty incomplete list when the turn emitted no diff", () => {
         expect(createReportedAgentFileChangeReport(
             "request-empty",
             "",
@@ -73,8 +74,9 @@ describe("agent file-change report", () => {
             requestId: "request-empty",
             status: "reported",
             paths: [],
-            declaredComplete: true,
+            declaredComplete: false,
             truncated: false,
+            uncertainty: "Codex turn diffs may omit changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.",
         });
     });
 
@@ -115,7 +117,29 @@ describe("agent file-change report", () => {
         );
 
         expect(report.paths).toEqual(["C:\\Work\\Repo\\src\\A.kt"]);
-        expect(report.declaredComplete).toBe(true);
+        expect(report.declaredComplete).toBe(false);
+    });
+
+    it("resolves repository-relative diff paths from a nested working directory", () => {
+        if (process.platform === "win32") return;
+
+        const repository = fs.mkdtempSync(path.join(os.tmpdir(), "file-report-repo-"));
+        const cwd = path.join(repository, "packages", "app");
+        fs.mkdirSync(path.join(repository, ".git"));
+        fs.mkdirSync(cwd, {recursive: true});
+        try {
+            const report = createReportedAgentFileChangeReport(
+                "request-git-root",
+                modified("packages/app/src/Main.ts"),
+                {cwd, additionalDirectories: []},
+            );
+
+            expect(report.paths).toEqual([
+                path.join(fs.realpathSync.native(cwd), "src", "Main.ts"),
+            ]);
+        } finally {
+            fs.rmSync(repository, {recursive: true, force: true});
+        }
     });
 
     it("accepts canonical paths under a symlinked workspace root", () => {

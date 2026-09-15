@@ -3196,6 +3196,10 @@ export class CodexAcpServer {
                 logger.error("Failed to publish terminal subagent state during prompt cleanup", error);
             }
             if (agentFileChangeReportRequest !== null) {
+                if (promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)) {
+                    agentFileChangeReportTurnId = null;
+                    agentFileChangeReportUnavailableReason = "cancelled";
+                }
                 await this.publishAgentFileChangeReport(
                     sessionState,
                     agentFileChangeReportTurnId,
