@@ -186,6 +186,41 @@ export interface SessionState {
     asyncTasks: CodexBackgroundTerminalTasks;
 }
 
+type RequestedTurnConfiguration = {
+    model: string;
+    effort: ReasoningEffort | null;
+};
+
+type ThreadSettingsConfiguration = RequestedTurnConfiguration & {
+    modelProvider: string;
+};
+
+type TurnModelReroute = {
+    fromModel: string;
+    toModel: string;
+    reason: string;
+};
+
+type PromptTurnConfiguration = {
+    threadId: string;
+    turnId: string;
+    requested: RequestedTurnConfiguration | null;
+    threadSettings: ThreadSettingsConfiguration | null;
+    modelReroutes: TurnModelReroute[];
+};
+
+type PendingPromptTurnConfiguration = Omit<PromptTurnConfiguration, "threadSettings" | "modelReroutes">;
+
+type PromptMeta = {
+    quota: QuotaMeta;
+    codex?: {
+        turnConfiguration: {
+            version: 1;
+            turns: PromptTurnConfiguration[];
+        };
+    };
+};
+
 export type SessionFailureCategory =
     | "connection" | "access" | "limit" | "request" | "service" | "unknown";
 
@@ -2753,6 +2788,20 @@ export class CodexAcpServer {
         let agentFileChangeReportUnavailableReason: AgentFileChangeReportUnavailableReason = "providerError";
         let promptWasCancelled = false;
         let recoverableSessionFailure = sessionState.sessionFailure;
+        const promptTurns = new Map<string, PendingPromptTurnConfiguration>();
+        const modelReroutes = new Map<string, TurnModelReroute[]>();
+        const turnKey = (threadId: string, turnId: string): string => `${threadId}\u0000${turnId}`;
+        const recordTurnStarted = (threadId: string, turnId: string, modelId: ModelId | null): void => {
+            promptTurns.set(turnKey(threadId, turnId), {
+                threadId,
+                turnId,
+                requested: modelId === null ? null : {
+                    model: modelId.model,
+                    effort: modelId.effort as ReasoningEffort,
+                },
+            });
+        };
+        const promptMeta = (): PromptMeta => this.buildPromptMeta(sessionState, promptTurns, modelReroutes);
         sessionState.currentTurnId = null;
         const activePrompt = this.trackActivePrompt(params.sessionId);
         let pendingTurnStart: PendingTurnStart | null = null;
@@ -2780,7 +2829,7 @@ export class CodexAcpServer {
             promptWasCancelled = true;
             agentFileChangeReportTurnId = null;
             agentFileChangeReportUnavailableReason = "cancelled";
-            return this.cancelledPromptResponse(sessionState);
+            return this.cancelledPromptResponse(sessionState, promptMeta());
         };
 
         try {
@@ -2814,6 +2863,16 @@ export class CodexAcpServer {
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
                     await observeInteraction(event);
+                    if (event.method === "model/rerouted") {
+                        const key = turnKey(event.params.threadId, event.params.turnId);
+                        const reroutes = modelReroutes.get(key) ?? [];
+                        reroutes.push({
+                            fromModel: event.params.fromModel,
+                            toModel: event.params.toModel,
+                            reason: event.params.reason,
+                        });
+                        modelReroutes.set(key, reroutes);
+                    }
                     if (!promptNotificationsActive) {
                         await promptEventHandler.handleSessionScopedNotification(event);
                         return;
@@ -2844,6 +2903,7 @@ export class CodexAcpServer {
                     ensurePendingTurnStart();
                 },
                 onTurnStarted: (turnId, threadId) => {
+                    recordTurnStarted(threadId, turnId, null);
                     const turn = {threadId, turnId};
                     activePrompt.currentTurn = turn;
                     if (this.promptShouldStop(params.sessionId, activePrompt)) {
@@ -2901,6 +2961,7 @@ export class CodexAcpServer {
                     sessionState,
                     eventHandler,
                     commandResult.turnCompleted?.turn.id ?? sessionState.currentTurnId,
+                    promptMeta(),
                 );
                 if (terminalFailure) {
                     return terminalFailure;
@@ -2914,7 +2975,7 @@ export class CodexAcpServer {
                 return {
                     stopReason: "end_turn",
                     usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                    _meta: this.buildQuotaMeta(sessionState),
+                    _meta: promptMeta(),
                 };
             }
 
@@ -2958,6 +3019,7 @@ export class CodexAcpServer {
                     sessionState.cwd,
                     sessionState.additionalDirectories,
                     (turnId) => {
+                        recordTurnStarted(params.sessionId, turnId, modelId);
                         const turn = {threadId: params.sessionId, turnId};
                         activePrompt.currentTurn = turn;
                         if (this.promptShouldStop(params.sessionId, activePrompt)) {
@@ -3014,6 +3076,7 @@ export class CodexAcpServer {
                 sessionState,
                 eventHandler,
                 turnCompleted.turn.id,
+                promptMeta(),
             );
             if (terminalFailure) {
                 return terminalFailure;
@@ -3058,6 +3121,7 @@ export class CodexAcpServer {
                             sessionState.cwd,
                             sessionState.additionalDirectories,
                             (turnId) => {
+                                recordTurnStarted(params.sessionId, turnId, modelId);
                                 const turn = {threadId: params.sessionId, turnId};
                                 activePrompt.currentTurn = turn;
                                 if (this.promptShouldStop(params.sessionId, activePrompt)) {
@@ -3115,6 +3179,7 @@ export class CodexAcpServer {
                         sessionState,
                         eventHandler,
                         turnCompleted.turn.id,
+                        promptMeta(),
                     );
                     if (implementationFailure) {
                         return implementationFailure;
@@ -3148,7 +3213,7 @@ export class CodexAcpServer {
             return {
                 stopReason: "end_turn",
                 usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-                _meta: this.buildQuotaMeta(sessionState),
+                _meta: promptMeta(),
             };
         } catch (err) {
             logger.error(`Prompt for session ${params.sessionId} failed`, err);
@@ -3171,6 +3236,7 @@ export class CodexAcpServer {
                     sessionState,
                     eventHandler,
                     sessionState.currentTurnId,
+                    promptMeta(),
                     true,
                 );
                 if (failureResponse !== null) {
@@ -3245,11 +3311,11 @@ export class CodexAcpServer {
         }
     }
 
-    private cancelledPromptResponse(sessionState: SessionState): acp.PromptResponse {
+    private cancelledPromptResponse(sessionState: SessionState, meta?: PromptMeta): acp.PromptResponse {
         return {
             stopReason: "cancelled",
             usage: this.buildPromptUsage(sessionState.lastTokenUsage),
-            _meta: this.buildQuotaMeta(sessionState),
+            _meta: meta ?? this.buildPromptMeta(sessionState),
         };
     }
 
@@ -3257,6 +3323,7 @@ export class CodexAcpServer {
         sessionState: SessionState,
         eventHandler: CodexEventHandler,
         turnId: string | null,
+        meta?: PromptMeta,
         allowUnattributed = false,
     ): acp.PromptResponse | null {
         const failureMeta = eventHandler.getTerminalSessionFailureMeta(turnId, allowUnattributed);
@@ -3267,13 +3334,17 @@ export class CodexAcpServer {
             stopReason: "end_turn",
             usage: this.buildPromptUsage(sessionState.lastTokenUsage),
             _meta: {
-                ...this.buildQuotaMeta(sessionState),
+                ...(meta ?? this.buildPromptMeta(sessionState)),
                 ...failureMeta,
             },
         };
     }
 
-    private buildQuotaMeta(sessionState: SessionState): { quota: QuotaMeta } {
+    private buildPromptMeta(
+        sessionState: SessionState,
+        promptTurns: ReadonlyMap<string, PendingPromptTurnConfiguration> = new Map(),
+        modelReroutes: ReadonlyMap<string, TurnModelReroute[]> = new Map(),
+    ): PromptMeta {
         const lastTokenUsage = sessionState.lastTokenUsage;
 
         // Remove the "[reasoning-level]" suffix from currentModelId if present
@@ -3284,12 +3355,34 @@ export class CodexAcpServer {
             ? [{ model: modelName, token_count: lastTokenUsage }]
             : [];
 
-        return {
+        const meta: PromptMeta = {
             quota: {
                 token_count: sessionState.lastTokenUsage,
                 model_usage: modelUsage
             }
         };
+        if (promptTurns.size === 0) {
+            return meta;
+        }
+
+        meta.codex = {
+            turnConfiguration: {
+                version: 1,
+                turns: [...promptTurns.entries()].map(([key, turn]) => {
+                    const threadSettings = this.codexAcpClient.getThreadSettings(turn.threadId);
+                    return {
+                        ...turn,
+                        threadSettings: threadSettings === undefined ? null : {
+                            model: threadSettings.model,
+                            effort: threadSettings.effort,
+                            modelProvider: threadSettings.modelProvider,
+                        },
+                        modelReroutes: modelReroutes.get(key) ?? [],
+                    };
+                }),
+            },
+        };
+        return meta;
     }
 
     private buildPromptUsage(lastTokenUsage: TokenCount | null): acp.Usage | null {
