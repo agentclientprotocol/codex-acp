@@ -59,6 +59,12 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - API key via `CODEX_API_KEY` or `OPENAI_API_KEY`.
 - A custom OpenAI-compatible gateway, when the client opts in to the gateway auth capability.
 
+For standard ACP clients, terminal ChatGPT authentication failures return
+`AuthRequired` (`-32000`), even when the session still has a saved account. Clients
+can use the advertised ChatGPT auth method to sign in again. Retryable errors do
+not interrupt the prompt, and configured API-key or custom-provider failures keep
+their existing error handling.
+
 ## Runtime options
 
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
