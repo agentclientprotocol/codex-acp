@@ -94,6 +94,21 @@ describe("agent file-change report", () => {
         ).paths).toEqual(["/repo/é file.txt"]);
     });
 
+    it("preserves leading and trailing spaces in decoded Git paths", () => {
+        const diff = [" leading.txt", "trailing.txt "].map(pathname =>
+            `diff --git "a/${pathname}" "b/${pathname}"\n`
+            + `--- "a/${pathname}"\n`
+            + `+++ "b/${pathname}"\n`
+            + "@@ -1 +1 @@\n-old\n+new\n",
+        ).join("");
+
+        expect(createReportedAgentFileChangeReport(
+            "request-spaces",
+            diff,
+            {cwd: "/repo", additionalDirectories: []},
+        ).paths).toEqual(["/repo/ leading.txt", "/repo/trailing.txt "]);
+    });
+
     it("keeps additional roots and marks rejected paths as incomplete", () => {
         const diff = modified("src/A.kt")
             + "diff --git /generated/out.txt /generated/out.txt\n--- /generated/out.txt\n+++ /generated/out.txt\n@@ -1 +1 @@\n-old\n+new\n"
