@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type {JsonValue} from "./app-server/serde_json/JsonValue";
-import type {Turn} from "./app-server/v2";
+import {parsePatch} from "diff";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_REQUEST_KEY,
     AIR_META_KEY,
@@ -9,7 +8,6 @@ import {
 } from "./AirExtension";
 
 export const AGENT_FILE_CHANGE_REPORT_VERSION = 1;
-export const AGENT_FILE_CHANGE_REPORT_TIMEOUT_MS = 30_000;
 export const AGENT_FILE_CHANGE_REPORT_MAX_PATHS = 1_024;
 export const AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH = 4_096;
 export const AGENT_FILE_CHANGE_REPORT_MAX_TOTAL_BYTES = 256 * 1_024;
@@ -25,7 +23,7 @@ export interface AgentFileChangeWorkspace {
     additionalDirectories: string[];
 }
 
-interface ModelFileChangeReport {
+interface ParsedFileChangeReport {
     paths: string[];
     complete: boolean;
     uncertainty?: string;
@@ -57,41 +55,6 @@ export interface UnavailableAgentFileChangeReport {
 
 export type AgentFileChangeReport = ReportedAgentFileChangeReport | UnavailableAgentFileChangeReport;
 
-export const AGENT_FILE_CHANGE_REPORT_OUTPUT_SCHEMA: JsonValue = {
-    type: "object",
-    additionalProperties: false,
-    required: ["paths", "complete", "uncertainty"],
-    properties: {
-        paths: {
-            type: "array",
-            items: {type: "string"},
-        },
-        complete: {type: "boolean"},
-        uncertainty: {
-            anyOf: [{
-                type: "string",
-                maxLength: AGENT_FILE_CHANGE_REPORT_MAX_UNCERTAINTY_LENGTH,
-            }, {
-                type: "null",
-            }],
-        },
-    },
-};
-
-export const AGENT_FILE_CHANGE_REPORT_DEVELOPER_INSTRUCTIONS = `You are running an internal, read-only file-change audit for the immediately preceding turn.
-Do not modify files, run commands that can modify files, or ask the user questions.
-Report files that the preceding turn causally created, modified, deleted, or moved, including changes made by shell commands, version-control commands, generators, and child processes.
-Do not report files that were only read or inspected.
-You may use read-only inspection when needed. If the list may be incomplete, set complete to false and briefly explain why in uncertainty.`;
-
-export function createAgentFileChangeReportPrompt(workspace: AgentFileChangeWorkspace): string {
-    return `List the paths changed by the immediately preceding turn.
-Return only the structured result required by the output schema.
-Relative paths are resolved against the working directory.
-Working directory: ${JSON.stringify(workspace.cwd)}
-Additional allowed directories: ${JSON.stringify(workspace.additionalDirectories)}`;
-}
-
 export function parseAgentFileChangeReportRequest(
     meta: Record<string, unknown> | null | undefined,
 ): AgentFileChangeReportRequest | null {
@@ -112,11 +75,11 @@ export function parseAgentFileChangeReportRequest(
 
 export function createReportedAgentFileChangeReport(
     requestId: string,
-    turn: Turn,
+    diff: string,
     workspace: AgentFileChangeWorkspace,
 ): ReportedAgentFileChangeReport {
-    const modelReport = parseModelFileChangeReport(turn);
-    const normalized = normalizeModelFileChangeReport(modelReport, workspace);
+    const parsedReport = parseTurnDiff(diff);
+    const normalized = normalizeFileChangeReport(parsedReport, workspace);
     return fitReportedAgentFileChangeReport({
         version: AGENT_FILE_CHANGE_REPORT_VERSION,
         requestId,
@@ -147,62 +110,40 @@ export class AgentFileChangeReportError extends Error {
     }
 }
 
-function parseModelFileChangeReport(turn: Turn): ModelFileChangeReport {
-    switch (turn.status) {
-        case "interrupted":
-            throw new AgentFileChangeReportError("cancelled", "The audit turn was interrupted");
-        case "failed":
-            throw new AgentFileChangeReportError(
-                "providerError",
-                `The audit turn failed${turn.error?.message ? `: ${turn.error.message}` : ""}`,
-            );
-        case "inProgress":
-            throw new AgentFileChangeReportError("notReported", "The audit turn did not complete");
-        case "completed":
-            break;
+function parseTurnDiff(diff: string): ParsedFileChangeReport {
+    if (diff.trim() === "") {
+        return {paths: [], complete: true};
     }
 
-    let text: string | null = null;
-    for (let index = turn.items.length - 1; index >= 0; index -= 1) {
-        const item = turn.items[index];
-        if (item?.type === "agentMessage") {
-            text = item.text;
-            break;
-        }
-    }
-    if (text === null) {
-        throw new AgentFileChangeReportError("notReported", "The audit turn returned no agent message");
-    }
-
-    let value: unknown;
+    let patches: ReturnType<typeof parsePatch>;
     try {
-        value = JSON.parse(text);
-    } catch {
-        throw new AgentFileChangeReportError("invalidOutput", "The audit turn returned invalid JSON");
+        patches = parsePatch(diff);
+    } catch (error) {
+        throw new AgentFileChangeReportError(
+            "invalidOutput",
+            `The turn diff is not valid unified diff: ${error instanceof Error ? error.message : String(error)}`,
+        );
     }
-    const report = asRecord(value);
-    if (report === null || !hasOnlyKeys(report, ["paths", "complete", "uncertainty"])) {
-        throw new AgentFileChangeReportError("invalidOutput", "The audit turn returned an invalid object");
+    if (patches.length === 0) {
+        throw new AgentFileChangeReportError("invalidOutput", "The turn diff contains no parseable file patches");
     }
-    const paths = report["paths"];
-    const complete = report["complete"];
-    const uncertainty = report["uncertainty"];
-    if (!Array.isArray(paths)
-        || !paths.every((item): item is string => typeof item === "string")
-        || typeof complete !== "boolean"
-        || (uncertainty !== undefined && uncertainty !== null && typeof uncertainty !== "string")) {
-        throw new AgentFileChangeReportError("invalidOutput", "The audit turn returned invalid fields");
+
+    const paths: string[] = [];
+    for (const patch of patches) {
+        const oldPath = normalizeDiffPath(patch.oldFileName);
+        const newPath = normalizeDiffPath(patch.newFileName);
+        if (oldPath === null && newPath === null) {
+            throw new AgentFileChangeReportError("invalidOutput", "The turn diff contains a patch without a file path");
+        }
+        if (oldPath !== null) paths.push(oldPath);
+        if (newPath !== null) paths.push(newPath);
     }
-    const normalizedUncertainty = typeof uncertainty === "string" ? uncertainty.trim() : undefined;
-    if (normalizedUncertainty !== undefined
-        && normalizedUncertainty.length > AGENT_FILE_CHANGE_REPORT_MAX_UNCERTAINTY_LENGTH) {
-        throw new AgentFileChangeReportError("invalidOutput", "The audit turn returned oversized uncertainty");
-    }
-    return {
-        paths,
-        complete,
-        ...(normalizedUncertainty ? {uncertainty: normalizedUncertainty} : {}),
-    };
+    return {paths, complete: true};
+}
+
+function normalizeDiffPath(value: string | undefined): string | null {
+    if (value === undefined || value === "/dev/null") return null;
+    return value.startsWith("a/") || value.startsWith("b/") ? value.slice(2) : value;
 }
 
 /**
@@ -232,8 +173,8 @@ function fitReportedAgentFileChangeReport(
     return fitted;
 }
 
-function normalizeModelFileChangeReport(
-    report: ModelFileChangeReport,
+function normalizeFileChangeReport(
+    report: ParsedFileChangeReport,
     workspace: AgentFileChangeWorkspace,
 ): Omit<ReportedAgentFileChangeReport, "version" | "requestId" | "status"> {
     const cwd = normalizeWorkspaceRoot(workspace.cwd);

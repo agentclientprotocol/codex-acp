@@ -23,7 +23,7 @@ The client adds this object to `session/prompt`:
 
 The request identifier has 1 to 128 characters. It can contain ASCII letters, digits, `.`, `_`, `:`, and `-`.
 
-The adapter runs a hidden, read-only Codex fork after the main turn. The fork reports files that the main turn changed. Its output does not enter the visible transcript.
+The adapter derives the report from Codex's final aggregated `turn/diff/updated` snapshot for the main turn. It does not run an additional model turn.
 
 The adapter sends one `session_info_update` before the `PromptResponse`:
 
@@ -53,7 +53,7 @@ Each path is an absolute normalized path in the working directory or an addition
 
 The adapter sends at most 1,024 paths. Each path has at most 4,096 characters. The serialized report has at most 256 KiB. The optional uncertainty has at most 2,000 characters.
 
-The adapter marks the result unavailable after 30 seconds. It can also use `cancelled`, `invalidOutput`, `notReported`, or `providerError` as the reason. The main prompt still completes.
+The adapter marks the result unavailable when the prompt is cancelled, the turn diff is invalid, no provider turn ran, or the provider failed. The corresponding reasons are `cancelled`, `invalidOutput`, `notReported`, and `providerError`. The `timeout` reason remains part of the version-1 wire contract for backward compatibility but is not produced by this implementation. The main prompt still completes.
 
 The client must match the request identifier. It must ignore a duplicate, stale, malformed, or unavailable report.
 

@@ -148,6 +148,8 @@ import {
     type AgentFileChangeReport,
     type AgentFileChangeReportRequest,
     type AgentFileChangeReportUnavailableReason,
+    AgentFileChangeReportError,
+    createReportedAgentFileChangeReport,
     createUnavailableAgentFileChangeReport,
     parseAgentFileChangeReportRequest,
 } from "./AgentFileChangeReport";
@@ -2176,27 +2178,27 @@ export class CodexAcpServer {
         turnId: string | null,
         request: AgentFileChangeReportRequest,
         unavailableReason: AgentFileChangeReportUnavailableReason,
-        signal: AbortSignal,
+        turnDiff: string,
     ): Promise<void> {
         let report: AgentFileChangeReport;
         try {
             report = turnId === null
                 ? createUnavailableAgentFileChangeReport(request.requestId, unavailableReason)
-                : await this.codexAcpClient.runAgentFileChangeReport({
-                    sessionId: sessionState.sessionId,
-                    turnId,
-                    // The client owns request-id correlation and duplicate suppression. The wrapper
-                    // stays stateless so a retried ACP prompt still receives a terminal report.
-                    requestId: request.requestId,
-                    workspace: {
-                        cwd: sessionState.cwd,
-                        additionalDirectories: sessionState.additionalDirectories,
-                    },
-                    signal,
+                : createReportedAgentFileChangeReport(request.requestId, turnDiff, {
+                    cwd: sessionState.cwd,
+                    additionalDirectories: sessionState.additionalDirectories,
                 });
         } catch (error) {
-            logger.error("Agent file-change report failed unexpectedly", error);
-            report = createUnavailableAgentFileChangeReport(request.requestId, "providerError");
+            logger.error(
+                error instanceof AgentFileChangeReportError
+                    ? "Agent file-change report unavailable"
+                    : "Agent file-change report failed unexpectedly",
+                error,
+            );
+            report = createUnavailableAgentFileChangeReport(
+                request.requestId,
+                error instanceof AgentFileChangeReportError ? error.reason : "providerError",
+            );
         }
         try {
             const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
@@ -3198,7 +3200,9 @@ export class CodexAcpServer {
                     agentFileChangeReportTurnId,
                     agentFileChangeReportRequest,
                     agentFileChangeReportUnavailableReason,
-                    activePrompt.signal,
+                    agentFileChangeReportTurnId === null || eventHandler === null
+                        ? ""
+                        : eventHandler.getTurnDiff(agentFileChangeReportTurnId),
                 );
             }
             logger.log("Prompt completed", {sessionId: params.sessionId});

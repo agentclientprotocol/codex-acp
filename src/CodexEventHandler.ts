@@ -227,6 +227,7 @@ export class CodexEventHandler {
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
+    private readonly turnDiffs = new Map<string, string>();
     private readonly subagents: CodexSubagentEventRouter;
     /** Connection-level `authStatus` sink; the app-server account push feeds it. */
     private readonly onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined;
@@ -258,6 +259,10 @@ export class CodexEventHandler {
 
     getFailure(): RequestError | null {
         return this.failure;
+    }
+
+    getTurnDiff(turnId: string): string {
+        return this.turnDiffs.get(turnId) ?? "";
     }
 
     getTerminalSessionFailureMeta(
@@ -449,6 +454,7 @@ export class CodexEventHandler {
         this.pendingPlanItemIds.clear();
         this.planDeltaTextByItemId.clear();
         this.lastEmittedPlanTextByItemId.clear();
+        this.turnDiffs.clear();
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
@@ -475,6 +481,9 @@ export class CodexEventHandler {
             case "turn/plan/updated":
                 this.completeRetryIncidentOnTurnProgress();
                 return await this.updatePlan(notification.params);
+            case "turn/diff/updated":
+                this.turnDiffs.set(notification.params.turnId, notification.params.diff);
+                return null;
             case "error":
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
@@ -571,7 +580,6 @@ export class CodexEventHandler {
             case "command/exec/outputDelta":
             case "hook/started":
             case "hook/completed":
-            case "turn/diff/updated":
             case "turn/moderationMetadata":
             case "item/fileChange/outputDelta":
             case "item/fileChange/patchUpdated":
