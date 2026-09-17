@@ -161,6 +161,7 @@ import {
 export interface SessionState {
     sessionId: string,
     currentModelId: string,
+    defaultModeModelId: string | null,
     availableModels: Array<Model>,
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     supportedInputModalities: Array<InputModality>,
@@ -668,6 +669,7 @@ export class CodexAcpServer {
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
+            defaultModeModelId: null,
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
@@ -1392,8 +1394,28 @@ export class CodexAcpServer {
         if (mode === null) {
             throw RequestError.invalidParams();
         }
+        if (mode === PLAN_COLLABORATION_MODE && sessionState.collaborationMode !== PLAN_COLLABORATION_MODE) {
+            sessionState.defaultModeModelId = sessionState.currentModelId;
+            sessionState.currentModelId = await this.createPlanModeModelId(sessionState);
+        } else if (mode === DEFAULT_COLLABORATION_MODE && sessionState.defaultModeModelId !== null) {
+            sessionState.currentModelId = sessionState.defaultModeModelId;
+            sessionState.defaultModeModelId = null;
+        }
         await this.codexAcpClient.setCollaborationMode(sessionState.sessionId, mode, sessionState.currentModelId);
         sessionState.collaborationMode = mode;
+    }
+
+    private async createPlanModeModelId(sessionState: SessionState): Promise<string> {
+        const planEffort = await this.codexAcpClient.getPlanModeReasoningEffort(sessionState.cwd);
+        if (!planEffort) {
+            return sessionState.currentModelId;
+        }
+        const effort = findSupportedEffort(sessionState.supportedReasoningEfforts, planEffort);
+        if (!effort) {
+            return sessionState.currentModelId;
+        }
+        const {model} = ModelId.fromString(sessionState.currentModelId);
+        return ModelId.create(model, effort).toString();
     }
 
     private applyModelChange(sessionState: SessionState, value: string): void {
@@ -1926,6 +1948,7 @@ export class CodexAcpServer {
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
+            defaultModeModelId: null,
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
