@@ -11,29 +11,12 @@ import {CodexEventHandler} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import {CodexCommands, type CommandHandleResult} from "../../CodexCommands";
 
-const configuredAuthFailureCases: Array<{
+const configuredNonAuthFailureCases: Array<{
     name: string;
     turnError: ErrorNotification["error"];
     sessionOverrides?: Partial<SessionState>;
     expectedData: unknown;
 }> = [
-    {
-        name: "rejected API key",
-        sessionOverrides: {
-            account: null,
-            authConfigured: true,
-        },
-        turnError: {
-            message: "API key was rejected",
-            codexErrorInfo: "unauthorized",
-            additionalDetails: null,
-            misalignment: null,
-        },
-        expectedData: {
-            message: "API key was rejected",
-            codexErrorInfo: "unauthorized",
-        },
-    },
     {
         name: "usage limit exceeded",
         turnError: {
@@ -45,28 +28,6 @@ const configuredAuthFailureCases: Array<{
         expectedData: {
             message: "Usage limits were exceeded",
             codexErrorInfo: "usageLimitExceeded",
-        },
-    },
-    {
-        name: "HTTP 401",
-        turnError: {
-            message: "Provider returned 401",
-            codexErrorInfo: {
-                responseStreamDisconnected: {
-                    httpStatusCode: 401,
-                },
-            },
-            additionalDetails: "HTTP status 401",
-            misalignment: null,
-        },
-        expectedData: {
-            message: "HTTP status 401",
-            codexErrorInfo: {
-                responseStreamDisconnected: {
-                    httpStatusCode: 401,
-                },
-            },
-            additionalDetails: "HTTP status 401",
         },
     },
 ];
@@ -801,8 +762,64 @@ describe("CodexEventHandler - auth error events", () => {
         });
     });
 
-    it.each(configuredAuthFailureCases)(
-        "returns InternalError with details for $name when auth is configured",
+    it("returns AuthRequired for expired configured credentials", async () => {
+        const {result: error} = await runPromptWithError(createTestSessionState({
+            sessionId: "expired-chatgpt-session",
+            account: null,
+            authConfigured: true,
+        }), {
+            message: "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
+            codexErrorInfo: "unauthorized",
+            additionalDetails: null,
+            misalignment: null,
+        });
+
+        expect(error).toMatchObject({
+            code: -32000,
+            message: "Authentication required: Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
+            data: {
+                message: "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
+                codexErrorInfo: "unauthorized",
+            },
+        });
+        expect(error).not.toMatchObject({
+            code: -32603,
+        });
+    });
+
+    it("returns AuthRequired for terminal HTTP 401 even when auth is configured", async () => {
+        const {result: error} = await runPromptWithError(createTestSessionState({
+            sessionId: "configured-http-401-session",
+            account: { type: "apiKey" },
+            authConfigured: true,
+        }), {
+            message: "Provider returned 401",
+            codexErrorInfo: {
+                responseStreamDisconnected: {
+                    httpStatusCode: 401,
+                },
+            },
+            additionalDetails: "HTTP status 401",
+            misalignment: null,
+        });
+
+        expect(error).toMatchObject({
+            code: -32000,
+            message: "Authentication required: Provider returned 401",
+            data: {
+                message: "HTTP status 401",
+                codexErrorInfo: {
+                    responseStreamDisconnected: {
+                        httpStatusCode: 401,
+                    },
+                },
+                additionalDetails: "HTTP status 401",
+            },
+        });
+    });
+
+    it.each(configuredNonAuthFailureCases)(
+        "returns InternalError with details for configured non-auth $name",
         async ({turnError, sessionOverrides, expectedData}) => {
             const {result: error} = await runPromptWithError(createTestSessionState({
                 sessionId: "authenticated-session",
