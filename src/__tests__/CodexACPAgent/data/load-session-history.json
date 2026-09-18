@@ -279,7 +279,17 @@
             "newText": "Hello\nWorld\n",
             "path": "/test/project/Added.txt",
             "_meta": {
-              "kind": "add"
+              "kind": "add",
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "diffStats": {
+                    "version": 1,
+                    "added": 2,
+                    "removed": 0
+                  }
+                }
+              }
             }
           }
         ]

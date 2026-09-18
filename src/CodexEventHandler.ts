@@ -83,6 +83,7 @@ import {
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import type {SubagentState} from "./subagents/AcpSubagents";
 import {mergeRateLimitSnapshot} from "./RateLimitsMap";
+import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "./AgentFileChangeReport";
 
 export { stripShellPrefix };
 
@@ -227,6 +228,9 @@ export class CodexEventHandler {
     private readonly terminalCommandIds = new Set<string>();
     private readonly terminalCommandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
+    private readonly turnDiffs = new Map<string, string>();
+    private readonly oversizedTurnDiffs = new Set<string>();
+    private readonly collectTurnDiffs: boolean;
     private readonly subagents: CodexSubagentEventRouter;
     /** Connection-level `authStatus` sink; the app-server account push feeds it. */
     private readonly onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined;
@@ -243,6 +247,8 @@ export class CodexEventHandler {
             new ACPSessionConnection(connection, sessionState.sessionId),
         ),
         onAccountUpdated?: (notification: AccountUpdatedNotification) => void,
+        collectTurnDiffs = false,
+        private readonly supportsCompaction = false,
     ) {
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
@@ -251,6 +257,7 @@ export class CodexEventHandler {
         this.sessionFailureEpoch = sessionFailureEpoch;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
         this.subagents = subagents;
+        this.collectTurnDiffs = collectTurnDiffs;
         if (sessionState.sessionFailure !== undefined) {
             this.failuresById.set(sessionState.sessionFailure.id, sessionState.sessionFailure);
         }
@@ -258,6 +265,14 @@ export class CodexEventHandler {
 
     getFailure(): RequestError | null {
         return this.failure;
+    }
+
+    getTurnDiff(turnId: string): string {
+        return this.turnDiffs.get(turnId) ?? "";
+    }
+
+    isTurnDiffOversized(turnId: string): boolean {
+        return this.oversizedTurnDiffs.has(turnId);
     }
 
     getTerminalSessionFailureMeta(
@@ -294,6 +309,7 @@ export class CodexEventHandler {
             await this.handleNotification(notification);
             return;
         }
+        await this.finishCompactionsForNotification(notification);
         if (notification.params.willRetry) {
             await this.session.update(this.createSessionFailureUpdate(this.recordRetryWarning(notification.params, false)));
             return;
@@ -375,8 +391,13 @@ export class CodexEventHandler {
 
     async handleNotification(notification: ServerNotification) {
         await this.flushPendingErrors();
+        await this.finishCompactionsForNotification(notification);
         const closingChildren = this.subagents.closingChildSessions(notification);
         for (const child of closingChildren) {
+            await this.finishOutstandingCompactions(
+                child.state === "cancelled" ? "cancelled" : "failed",
+                child.sessionId,
+            );
             await this.sessionState.asyncTasks.reconcile(child.threadId, child.sessionId);
         }
         const handledBySubagents = await this.subagents.handle(notification);
@@ -411,11 +432,47 @@ export class CodexEventHandler {
     }
 
     async waitForNativeSubagents(signal: AbortSignal): Promise<void> {
-        await this.subagents.wait(signal);
+        if (await this.subagents.wait(signal) === "timed_out") {
+            await this.finishOutstandingNativeSubagents("failed");
+        }
     }
 
     async finishOutstandingNativeSubagents(state: SubagentState): Promise<void> {
+        await this.finishOutstandingCompactions(state === "cancelled" ? "cancelled" : "failed");
         await this.subagents.finishOutstanding(state);
+    }
+
+    async finishOutstandingCompactions(status: "failed" | "cancelled", sessionId?: string): Promise<void> {
+        if (!this.supportsCompaction) return;
+        for (const {sessionId: targetSessionId, update} of this.sessionState.compactions.finishOutstanding(status, sessionId)) {
+            await this.session.update(update, targetSessionId);
+        }
+    }
+
+    private async finishCompactionsForNotification(notification: ServerNotification): Promise<void> {
+        if (!this.supportsCompaction) return;
+        let updates: UpdateSessionEvent[];
+        const sessionId = this.subagents.notificationSessionId(notification);
+        if (notification.method === "turn/completed") {
+            const turn = notification.params.turn;
+            if (turn.status === "inProgress") return;
+            updates = this.sessionState.compactions.finishTurn(
+                sessionId,
+                turn.id,
+                turn.status === "interrupted" ? "cancelled" : "failed",
+                turn.error?.message ?? "Codex ended the turn before compaction completed.",
+            );
+        } else if (notification.method === "error" && !notification.params.willRetry) {
+            updates = this.sessionState.compactions.finishTurn(
+                sessionId,
+                notification.params.turnId,
+                "failed",
+                notification.params.error.message,
+            );
+        } else {
+            return;
+        }
+        for (const update of updates) await this.session.update(update, sessionId);
     }
 
     async flushPendingPlanUpdates(): Promise<void> {
@@ -449,6 +506,8 @@ export class CodexEventHandler {
         this.pendingPlanItemIds.clear();
         this.planDeltaTextByItemId.clear();
         this.lastEmittedPlanTextByItemId.clear();
+        this.turnDiffs.clear();
+        this.oversizedTurnDiffs.clear();
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
@@ -475,6 +534,22 @@ export class CodexEventHandler {
             case "turn/plan/updated":
                 this.completeRetryIncidentOnTurnProgress();
                 return await this.updatePlan(notification.params);
+            case "turn/diff/updated":
+                if (notification.params.threadId === this.sessionState.sessionId) {
+                    this.completeRetryIncidentOnTurnProgress();
+                    if (!this.disposed && this.collectTurnDiffs) {
+                        if (Buffer.byteLength(notification.params.diff, "utf8") > AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES) {
+                            this.turnDiffs.delete(notification.params.turnId);
+                            this.oversizedTurnDiffs.add(notification.params.turnId);
+                        } else {
+                            // Codex 0.154 emits an empty snapshot when its tracker transitions
+                            // from a non-empty aggregate to no diff, which clears stale state here.
+                            this.oversizedTurnDiffs.delete(notification.params.turnId);
+                            this.turnDiffs.set(notification.params.turnId, notification.params.diff);
+                        }
+                    }
+                }
+                return null;
             case "error":
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
@@ -538,7 +613,11 @@ export class CodexEventHandler {
             case "item/autoApprovalReview/completed":
                 return this.handleGuardianApprovalReviewCompleted(notification.params);
             case "thread/compacted":
-                return this.createContextCompactedEvent();
+                return this.supportsCompaction
+                    ? this.sessionState.compactions.completeLegacy(
+                        this.subagents.notificationSessionId(notification), notification.params.turnId,
+                    )
+                    : this.createContextCompactedEvent();
             case "item/reasoning/summaryTextDelta":
                 this.completeRetryIncidentOnTurnProgress();
                 return this.createReasoningDeltaEvent(notification.params);
@@ -560,6 +639,9 @@ export class CodexEventHandler {
                 return this.createThreadGoalClearedEvent(notification.params);
             case "item/commandExecution/terminalInteraction":
                 return this.createTerminalInteractionEvent(notification.params);
+            case "thread/attachment/updated":
+                // Persisted attachment metadata has no ACP session update counterpart.
+                return null;
             // ignored events
             case "thread/deleted":
             case "thread/reverted":
@@ -571,7 +653,6 @@ export class CodexEventHandler {
             case "command/exec/outputDelta":
             case "hook/started":
             case "hook/completed":
-            case "turn/diff/updated":
             case "turn/moderationMetadata":
             case "item/fileChange/outputDelta":
             case "item/fileChange/patchUpdated":
@@ -748,7 +829,12 @@ export class CodexEventHandler {
                 this.rememberAgentMessagePhase(event.item);
                 return null;
             case "contextCompaction":
-                return createContextCompactionStartUpdate(event.item);
+                return this.supportsCompaction
+                    ? this.sessionState.compactions.start(
+                        this.subagents.notificationSessionId({method: "item/started", params: event}),
+                        event.turnId, event.item.id,
+                    )
+                    : createContextCompactionStartUpdate(event.item);
             case "subAgentActivity":
                 return this.subagents.legacyActivityStarted(event.item);
             case "sleep":
@@ -817,7 +903,12 @@ export class CodexEventHandler {
             case "exitedReviewMode":
                 return this.createExitedReviewModeEvent(event.item);
             case "contextCompaction":
-                return createContextCompactionCompleteUpdate(event.item);
+                return this.supportsCompaction
+                    ? this.sessionState.compactions.complete(
+                        this.subagents.notificationSessionId({method: "item/completed", params: event}),
+                        event.turnId, event.item.id,
+                    )
+                    : createContextCompactionCompleteUpdate(event.item);
             //ignored types
             case "subAgentActivity":
                 return this.subagents.legacyActivityCompleted(event.item);

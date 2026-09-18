@@ -16,7 +16,17 @@
             "newText": "class FileA\n",
             "path": "/test/project/FileA.kt",
             "_meta": {
-              "kind": "add"
+              "kind": "add",
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "diffStats": {
+                    "version": 1,
+                    "added": 1,
+                    "removed": 0
+                  }
+                }
+              }
             }
           },
           {
@@ -25,7 +35,17 @@
             "newText": "class FileB\n",
             "path": "/test/project/FileB.kt",
             "_meta": {
-              "kind": "add"
+              "kind": "add",
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "diffStats": {
+                    "version": 1,
+                    "added": 1,
+                    "removed": 0
+                  }
+                }
+              }
             }
           }
         ]

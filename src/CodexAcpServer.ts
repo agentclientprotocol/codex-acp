@@ -146,10 +146,15 @@ import {
 } from "./AirExtension";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
+import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdate} from "./CodexSessionCompactions";
 import {
     type AgentFileChangeReport,
     type AgentFileChangeReportRequest,
     type AgentFileChangeReportUnavailableReason,
+    type AgentFileChangeWorkspace,
+    AgentFileChangeReportError,
+    captureAgentFileChangeWorkspace,
+    createReportedAgentFileChangeReport,
     createUnavailableAgentFileChangeReport,
     parseAgentFileChangeReportRequest,
 } from "./AgentFileChangeReport";
@@ -187,6 +192,7 @@ export interface SessionState {
     titleGen?: TitleGenerator;
     subagents: CodexSubagentEventRouter;
     asyncTasks: CodexBackgroundTerminalTasks;
+    compactions: CodexSessionCompactions;
 }
 
 export type SessionFailureCategory =
@@ -703,6 +709,7 @@ export class CodexAcpServer {
                 new ACPSessionConnection(this.connection, sessionId),
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
+            compactions: new CodexSessionCompactions(),
         };
         sessionState.titleGen = new TitleGenerator(
             this.codexAcpClient.appServerClient,
@@ -1974,6 +1981,7 @@ export class CodexAcpServer {
                 new ACPSessionConnection(this.connection, sessionId),
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
+            compactions: new CodexSessionCompactions(),
         };
         sessionState.titleGen = new TitleGenerator(
             this.codexAcpClient.appServerClient,
@@ -2202,27 +2210,25 @@ export class CodexAcpServer {
         turnId: string | null,
         request: AgentFileChangeReportRequest,
         unavailableReason: AgentFileChangeReportUnavailableReason,
-        signal: AbortSignal,
+        turnDiff: string,
+        workspace: AgentFileChangeWorkspace,
     ): Promise<void> {
         let report: AgentFileChangeReport;
         try {
             report = turnId === null
                 ? createUnavailableAgentFileChangeReport(request.requestId, unavailableReason)
-                : await this.codexAcpClient.runAgentFileChangeReport({
-                    sessionId: sessionState.sessionId,
-                    turnId,
-                    // The client owns request-id correlation and duplicate suppression. The wrapper
-                    // stays stateless so a retried ACP prompt still receives a terminal report.
-                    requestId: request.requestId,
-                    workspace: {
-                        cwd: sessionState.cwd,
-                        additionalDirectories: sessionState.additionalDirectories,
-                    },
-                    signal,
-                });
+                : createReportedAgentFileChangeReport(request.requestId, turnDiff, workspace);
         } catch (error) {
-            logger.error("Agent file-change report failed unexpectedly", error);
-            report = createUnavailableAgentFileChangeReport(request.requestId, "providerError");
+            logger.error(
+                error instanceof AgentFileChangeReportError
+                    ? "Agent file-change report unavailable"
+                    : "Agent file-change report failed unexpectedly",
+                error,
+            );
+            report = createUnavailableAgentFileChangeReport(
+                request.requestId,
+                error instanceof AgentFileChangeReportError ? error.reason : "providerError",
+            );
         }
         try {
             const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
@@ -2302,7 +2308,9 @@ export class CodexAcpServer {
             case "exitedReviewMode":
                 return [this.createReviewModeUpdate(item, false)];
             case "contextCompaction":
-                return [createCompletedContextCompactionUpdate(item)];
+                return [clientSupportsCompaction(this.clientCapabilities)
+                    ? createCompactionUpdate(item.id, "completed")
+                    : createCompletedContextCompactionUpdate(item)];
             case "plan":
                 return item.text.length > 0 ? [this.createPlanHistoryUpdate(item)] : [];
         }
@@ -2775,6 +2783,9 @@ export class CodexAcpServer {
         const agentFileChangeReportRequest = clientSupportsAgentFileChangeReports(this.clientCapabilities)
             ? parseAgentFileChangeReportRequest(params._meta)
             : null;
+        const agentFileChangeWorkspace = agentFileChangeReportRequest === null
+            ? null
+            : captureAgentFileChangeWorkspace(sessionState.cwd, sessionState.additionalDirectories);
         let agentFileChangeReportTurnId: string | null = null;
         let agentFileChangeReportUnavailableReason: AgentFileChangeReportUnavailableReason = "providerError";
         let promptWasCancelled = false;
@@ -2818,6 +2829,8 @@ export class CodexAcpServer {
                 this.sessionFailureEpoch,
                 sessionState.subagents,
                 (accountUpdated) => this.handleAccountUpdated(accountUpdated),
+                agentFileChangeReportRequest !== null,
+                clientSupportsCompaction(this.clientCapabilities),
             );
             eventHandler = promptEventHandler;
             const permissionLifecycle = this.permissionLifecycleContext(sessionState);
@@ -3216,15 +3229,26 @@ export class CodexAcpServer {
                         : "failed",
                 );
             } catch (error) {
-                logger.error("Failed to publish terminal subagent state during prompt cleanup", error);
+                logger.error("Failed to publish terminal compaction or subagent state during prompt cleanup", error);
             }
-            if (agentFileChangeReportRequest !== null) {
+            if (agentFileChangeReportRequest !== null && agentFileChangeWorkspace !== null) {
+                if (promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)) {
+                    agentFileChangeReportTurnId = null;
+                    agentFileChangeReportUnavailableReason = "cancelled";
+                } else if (agentFileChangeReportTurnId !== null
+                    && eventHandler?.isTurnDiffOversized(agentFileChangeReportTurnId)) {
+                    agentFileChangeReportTurnId = null;
+                    agentFileChangeReportUnavailableReason = "invalidOutput";
+                }
                 await this.publishAgentFileChangeReport(
                     sessionState,
                     agentFileChangeReportTurnId,
                     agentFileChangeReportRequest,
                     agentFileChangeReportUnavailableReason,
-                    activePrompt.signal,
+                    agentFileChangeReportTurnId === null || eventHandler === null
+                        ? ""
+                        : eventHandler.getTurnDiff(agentFileChangeReportTurnId),
+                    agentFileChangeWorkspace,
                 );
             }
             logger.log("Prompt completed", {sessionId: params.sessionId});

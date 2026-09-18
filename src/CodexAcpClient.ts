@@ -56,17 +56,6 @@ import type {AuthenticationStatusResponse} from "./AcpExtensions";
 import {createCodexCollaborationMode} from "./CollaborationModeConfig";
 import type {ModeKind} from "./app-server/ModeKind";
 import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUtils";
-import {
-    AGENT_FILE_CHANGE_REPORT_DEVELOPER_INSTRUCTIONS,
-    AGENT_FILE_CHANGE_REPORT_OUTPUT_SCHEMA,
-    AGENT_FILE_CHANGE_REPORT_TIMEOUT_MS,
-    type AgentFileChangeReport,
-    AgentFileChangeReportError,
-    type AgentFileChangeWorkspace,
-    createAgentFileChangeReportPrompt,
-    createReportedAgentFileChangeReport,
-    createUnavailableAgentFileChangeReport,
-} from "./AgentFileChangeReport";
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
@@ -662,8 +651,12 @@ export class CodexAcpClient {
         }, onTurnStarted);
     }
 
-    async runCompact(sessionId: string): Promise<void> {
-        await this.codexClient.runCompact({threadId: sessionId});
+    async runCompact(
+        sessionId: string,
+        onTurnStarted?: (turnId: string) => void,
+    ): Promise<TurnCompletedNotification | undefined> {
+        const completed = await this.codexClient.runCompact({threadId: sessionId}, onTurnStarted);
+        return completed.method === "turn/completed" ? completed.params : undefined;
     }
 
     async getGoal(sessionId: string): Promise<ThreadGoal | null> {
@@ -749,7 +742,7 @@ export class CodexAcpClient {
             baseUrl: activeProvider.baseUrl,
         });
         const mergedConfig = {
-            ...mergeGatewayConfig(this.config, this.gatewayConfig),
+            ...forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig)),
             projects: Object.fromEntries(sessionRoots.map(root => [root, {
                 trust_level: "trusted",
             }])),
@@ -963,119 +956,6 @@ export class CodexAcpClient {
         }, onTurnStarted);
     }
 
-    async runAgentFileChangeReport(params: {
-        sessionId: string;
-        turnId: string;
-        requestId: string;
-        workspace: AgentFileChangeWorkspace;
-        signal?: AbortSignal;
-    }): Promise<AgentFileChangeReport> {
-        if (params.signal?.aborted) {
-            return createUnavailableAgentFileChangeReport(params.requestId, "cancelled");
-        }
-
-        const budget = new AgentFileChangeReportBudget(params.signal);
-        let forkThreadId: string | null = null;
-        let auditTurnId: string | null = null;
-        let auditTurnCompleted = false;
-        let lateStopReason: "cancelled" | "timeout" | null = null;
-        try {
-            const forkPromise = this.codexClient.threadFork({
-                excludeTurns: true,
-                threadId: params.sessionId,
-                lastTurnId: params.turnId,
-                cwd: params.workspace.cwd,
-                approvalPolicy: "never",
-                sandbox: "read-only",
-                developerInstructions: AGENT_FILE_CHANGE_REPORT_DEVELOPER_INSTRUCTIONS,
-                ephemeral: true,
-            });
-            void forkPromise.then(fork => {
-                if (lateStopReason !== null && forkThreadId === null) {
-                    void this.unsubscribeAgentFileChangeReportThread(fork.thread.id, budget);
-                }
-            }, () => {});
-            const fork = await budget.wait(forkPromise);
-            forkThreadId = fork.thread.id;
-
-            const turnPromise = this.codexClient.runTurn({
-                threadId: forkThreadId,
-                input: [{
-                    type: "text",
-                    text: createAgentFileChangeReportPrompt(params.workspace),
-                    text_elements: [],
-                }],
-                cwd: params.workspace.cwd,
-                approvalPolicy: "never",
-                sandboxPolicy: {type: "readOnly", networkAccess: false},
-                summary: "none",
-                outputSchema: AGENT_FILE_CHANGE_REPORT_OUTPUT_SCHEMA,
-            }, (turnId) => {
-                auditTurnId = turnId;
-                if (lateStopReason !== null && forkThreadId !== null) {
-                    void this.interruptAgentFileChangeReport(forkThreadId, turnId, lateStopReason, budget);
-                }
-            });
-            const outcome = await budget.wait(turnPromise);
-            auditTurnCompleted = true;
-            return createReportedAgentFileChangeReport(
-                params.requestId,
-                outcome.turn,
-                params.workspace,
-            );
-        } catch (error) {
-            if (error instanceof AgentFileChangeReportBudgetError) {
-                lateStopReason = error.reason;
-                if (!auditTurnCompleted && forkThreadId !== null && auditTurnId !== null) {
-                    await this.interruptAgentFileChangeReport(
-                        forkThreadId,
-                        auditTurnId,
-                        error.reason,
-                        budget,
-                    );
-                }
-                return createUnavailableAgentFileChangeReport(params.requestId, error.reason);
-            }
-            if (error instanceof AgentFileChangeReportError) {
-                logger.error("Agent file-change report unavailable", error);
-                return createUnavailableAgentFileChangeReport(params.requestId, error.reason);
-            }
-            logger.error("Agent file-change report failed", error);
-            return createUnavailableAgentFileChangeReport(params.requestId, "providerError");
-        } finally {
-            if (forkThreadId !== null) {
-                await this.unsubscribeAgentFileChangeReportThread(forkThreadId, budget);
-            }
-        }
-    }
-
-    private async interruptAgentFileChangeReport(
-        threadId: string,
-        turnId: string,
-        reason: "cancelled" | "timeout",
-        budget: AgentFileChangeReportBudget,
-    ): Promise<void> {
-        this.codexClient.markTurnStale(threadId, turnId);
-        try {
-            await budget.wait(this.codexClient.turnInterrupt({threadId, turnId}));
-        } catch (error) {
-            logger.error(`Failed to interrupt ${reason} agent file-change report`, error);
-        } finally {
-            this.codexClient.resolveTurnInterrupted(threadId, turnId);
-        }
-    }
-
-    private async unsubscribeAgentFileChangeReportThread(
-        threadId: string,
-        budget: AgentFileChangeReportBudget,
-    ): Promise<void> {
-        try {
-            await budget.wait(this.codexClient.threadUnsubscribe({threadId}));
-        } catch (error) {
-            logger.error("Failed to unsubscribe the agent file-change report thread", error);
-        }
-    }
-
     async setCollaborationMode(sessionId: string, mode: ModeKind, currentModelId: string): Promise<void> {
         await this.codexClient.threadSettingsUpdate({
             threadId: sessionId,
@@ -1267,62 +1147,6 @@ export class CodexAcpClient {
 
 }
 
-class AgentFileChangeReportBudgetError extends Error {
-    constructor(readonly reason: "cancelled" | "timeout") {
-        super(`Agent file-change report ${reason}`);
-        this.name = "AgentFileChangeReportBudgetError";
-    }
-}
-
-/** One wall-clock budget shared by fork, turn, read, interruption, and cleanup. */
-class AgentFileChangeReportBudget {
-    private readonly deadline = Date.now() + AGENT_FILE_CHANGE_REPORT_TIMEOUT_MS;
-
-    constructor(private readonly signal?: AbortSignal) {}
-
-    async wait<T>(operation: Promise<T>): Promise<T> {
-        // A stage can outlive the race at the transport layer. Attach a handler
-        // before the immediate budget checks so a late rejection is never
-        // unhandled even when no time remains to await it.
-        void operation.catch(() => {});
-        const immediateReason = this.stopReason();
-        if (immediateReason !== null) {
-            throw new AgentFileChangeReportBudgetError(immediateReason);
-        }
-
-        return await new Promise<T>((resolve, reject) => {
-            let settled = false;
-            const finish = (action: () => void): void => {
-                if (settled) return;
-                settled = true;
-                clearTimeout(timeout);
-                this.signal?.removeEventListener("abort", onAbort);
-                action();
-            };
-            const onAbort = (): void => finish(() => reject(new AgentFileChangeReportBudgetError("cancelled")));
-            const timeout = setTimeout(
-                () => finish(() => reject(new AgentFileChangeReportBudgetError("timeout"))),
-                Math.max(1, this.deadline - Date.now()),
-            );
-            timeout.unref();
-            this.signal?.addEventListener("abort", onAbort, {once: true});
-            if (this.signal?.aborted) {
-                onAbort();
-            }
-            void operation.then(
-                value => finish(() => resolve(value)),
-                error => finish(() => reject(error)),
-            );
-        });
-    }
-
-    private stopReason(): "cancelled" | "timeout" | null {
-        if (this.signal?.aborted) return "cancelled";
-        if (Date.now() >= this.deadline) return "timeout";
-        return null;
-    }
-}
-
 export type JsonObject = { [key in string]?: JsonValue }
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
@@ -1464,6 +1288,18 @@ function mergeSandboxWorkspaceWriteRoots(config: JsonObject, roots: string[]): J
         sandbox_workspace_write: {
             ...existingSandboxConfig,
             writable_roots: uniqueStrings([...existingWritableRoots, ...roots]),
+        },
+    };
+}
+
+/** Keep turn-diff path resolution deterministic; cwd-relative paths are experimental in Codex 0.154. */
+function forceGitRootTurnDiffPaths(config: JsonObject): JsonObject {
+    const features = isJsonObject(config["features"]) ? config["features"] : {};
+    return {
+        ...config,
+        features: {
+            ...features,
+            cwd_relative_turn_diffs: false,
         },
     };
 }
