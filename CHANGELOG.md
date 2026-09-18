@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.13.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.12.0...v1.13.0) (2026-09-18)
+
+
+### Features
+
+* Add expermental ACP session compaction updates ([#515](https://github.com/agentclientprotocol/codex-acp/issues/515)) ([6ec22f3](https://github.com/agentclientprotocol/codex-acp/commit/6ec22f39774320d759bf9ba37fc536c68766d1af))
+
+
+### Bug Fixes
+
+* update codex to 0.155.0 ([#523](https://github.com/agentclientprotocol/codex-acp/issues/523)) ([d7b07c1](https://github.com/agentclientprotocol/codex-acp/commit/d7b07c1b44a28890cdf3d5450f8974a812db5ae2))
+
 ## [1.12.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.11.0...v1.12.0) (2026-09-15)
 
 
