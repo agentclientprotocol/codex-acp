@@ -59,6 +59,7 @@ import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
+import {readSystemPromptAppend, SYSTEM_PROMPT_CAPABILITY} from "./SystemPrompt";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
 import {
     AUTH_STATUS_META_KEY,
@@ -383,6 +384,7 @@ export class CodexAcpServer {
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
             _meta: {
+                systemPrompt: SYSTEM_PROMPT_CAPABILITY,
                 steering: {
                     supported: true,
                 },
@@ -779,6 +781,7 @@ export class CodexAcpServer {
     }
 
     async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
+        readSystemPromptAppend(params._meta);
         if (this.providerUpdate !== null) {
             await this.providerUpdate;
         }
@@ -806,6 +809,7 @@ export class CodexAcpServer {
     }
 
     async resumeSession(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
+        readSystemPromptAppend(params._meta);
         if (this.providerUpdate !== null) {
             await this.providerUpdate;
         }
@@ -825,6 +829,7 @@ export class CodexAcpServer {
     }
 
     async forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+        readSystemPromptAppend(params._meta);
         if (this.providerUpdate !== null) {
             await this.providerUpdate;
         }
@@ -938,6 +943,7 @@ export class CodexAcpServer {
     async newSession(
         params: acp.NewSessionRequest,
     ): Promise<LegacyNewSessionResponse> {
+        readSystemPromptAppend(params._meta);
         if (this.providerUpdate !== null) {
             await this.providerUpdate;
         }
