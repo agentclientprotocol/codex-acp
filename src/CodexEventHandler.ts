@@ -639,6 +639,9 @@ export class CodexEventHandler {
                 return this.createThreadGoalClearedEvent(notification.params);
             case "item/commandExecution/terminalInteraction":
                 return this.createTerminalInteractionEvent(notification.params);
+            case "thread/attachment/updated":
+                // Persisted attachment metadata has no ACP session update counterpart.
+                return null;
             // ignored events
             case "thread/deleted":
             case "thread/reverted":
