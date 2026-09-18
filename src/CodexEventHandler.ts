@@ -1415,6 +1415,10 @@ export class CodexEventHandler {
             limitName: snapshot.limitName ?? existingEntry?.limitName ?? limitId,
             snapshot,
         });
+        // Per-session merge for `/status` only. The `_account/rate_limits_update`
+        // push is fed from the connection-level listener in CodexAcpServer, not
+        // from here: this baseline is reset on every session create, and the
+        // account notification fans out to every session's handler.
     }
 
     private handleFuzzyFileSearchSessionUpdated(
