@@ -17,6 +17,7 @@ import {
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+import {SESSION_REWIND_METHOD} from "./SessionRewind";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -48,6 +49,18 @@ const goalControlParamsParser = z.discriminatedUnion("action", [
 const asyncTaskStopParamsParser = z.object({
     sessionId: z.string().trim().min(1),
     asyncTaskId: z.string().trim().min(1),
+}).passthrough();
+
+const sessionHistoryPointParser = z.object({
+    messageId: z.string().trim().min(1),
+    messageFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    messageOccurrence: z.number().int().positive(),
+});
+
+const sessionRewindParamsParser = z.object({
+    sessionId: z.string().trim().min(1),
+    beforeMessage: sessionHistoryPointParser,
+    resumeAtMessage: sessionHistoryPointParser.optional(),
 }).passthrough();
 
 if (process.argv.includes("--version")) {
@@ -168,6 +181,7 @@ function startAcpServer() {
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
+        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent().extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .connect(acpJsonStream);
 }

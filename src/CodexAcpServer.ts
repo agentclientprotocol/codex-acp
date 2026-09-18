@@ -60,6 +60,7 @@ import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
+import {userInputToContentBlocks} from "./UserInputContent";
 import {
     AUTH_STATUS_META_KEY,
     AUTH_STATUS_UPDATE_METHOD,
@@ -78,6 +79,8 @@ import {
     type LegacySetSessionModelRequest,
     type LegacySetSessionModelResponse,
     SESSION_STEERING_METHOD,
+    SESSION_REWIND_METHOD,
+    type SessionRewindRequest,
     type SessionSteeringResponse,
     type SessionSteerRequest,
 } from "./AcpExtensions";
@@ -134,6 +137,7 @@ import {
     AIR_ASYNC_TASKS_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+    AIR_SESSION_REWIND_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
@@ -400,6 +404,7 @@ export class CodexAcpServer {
                             AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                             AIR_ASYNC_TASKS_KEY,
                             AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+                            AIR_SESSION_REWIND_KEY,
                         ],
                     },
                 },
@@ -435,6 +440,19 @@ export class CodexAcpServer {
                     ),
                 };
             }
+            case SESSION_REWIND_METHOD:
+                if (this.providerUpdate !== null) {
+                    await this.providerUpdate;
+                }
+                if (!this.sessions.has(methodRequest.params.sessionId)) {
+                    throw RequestError.invalidParams(
+                        undefined,
+                        `Unknown session: ${methodRequest.params.sessionId}`,
+                    );
+                }
+                return await this.runWithProcessCheck(
+                    () => this.codexAcpClient.rewindSession(methodRequest.params as SessionRewindRequest),
+                );
             case GOAL_CONTROL_METHOD:
             case LEGACY_GOAL_CONTROL_METHOD: {
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
@@ -2294,7 +2312,7 @@ export class CodexAcpServer {
         const updates: UpdateSessionEvent[] = [];
         const messageId = item.id;
         for (const input of item.content) {
-            const blocks = this.userInputToContentBlocks(input);
+            const blocks = userInputToContentBlocks(input);
             for (const block of blocks) {
                 updates.push(createUserMessageChunk(block, messageId));
             }
@@ -2355,34 +2373,6 @@ export class CodexAcpServer {
             item.id,
             createCodexMessagePhaseMeta("final_answer"),
         );
-    }
-
-    private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
-        switch (input.type) {
-            case "text":
-                return input.text.length > 0 ? [{ type: "text", text: input.text }] : [];
-            case "image":
-                return [{ type: "text", text: this.formatUriAsLink("image", input.url) }];
-            case "localImage": {
-                const uri = input.path.startsWith("file://") ? input.path : `file://${input.path}`;
-                return [{ type: "text", text: this.formatUriAsLink(null, uri) }];
-            }
-            case "skill":
-                return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
-        }
-        return [];
-    }
-
-    private formatUriAsLink(name: string | null, uri: string): string {
-        if (name && name.length > 0) {
-            return `[@${name}](${uri})`;
-        }
-        if (uri.startsWith("file://")) {
-            const path = uri.replace("file://", "");
-            const fileName = path.split("/").pop() ?? path;
-            return `[@${fileName}](${uri})`;
-        }
-        return uri;
     }
 
     getSessionState(sessionId: string): SessionState {
