@@ -1627,8 +1627,17 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const {mockFixture, sessionState} = setupPromptFixture({
             lastTokenUsage: {
                 totalTokens: 41_500,
-                inputTokens: 40_000,
+                inputTokens: 39_000,
                 cachedInputTokens: 1_000,
+                cacheWriteInputTokens: 1_000,
+                outputTokens: 500,
+                reasoningOutputTokens: 100,
+            },
+            totalTokenUsage: {
+                totalTokens: 41_500,
+                inputTokens: 39_000,
+                cachedInputTokens: 1_000,
+                cacheWriteInputTokens: 1_000,
                 outputTokens: 500,
                 reasoningOutputTokens: 100,
             },
@@ -1644,6 +1653,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(mockFixture.getAcpConnectionDump([])).toContain(
             "**Context window:** 16% used (41.5K used / 258.4K)",
         );
+        expect(mockFixture.getAcpConnectionDump([])).toContain(
+            "**Token usage:** 41.5K total  (39.0K input + 1.0K cache read + 1.0K cache write, 500 output)",
+        );
     });
 
     it('resets the previous context usage before a model turn', async () => {
@@ -1652,6 +1664,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 totalTokens: 41_500,
                 inputTokens: 40_000,
                 cachedInputTokens: 1_000,
+                cacheWriteInputTokens: 0,
                 outputTokens: 500,
                 reasoningOutputTokens: 100,
             },

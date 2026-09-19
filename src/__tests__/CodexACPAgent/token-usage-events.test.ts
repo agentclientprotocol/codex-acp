@@ -60,16 +60,16 @@ describe('Token Usage Events', () => {
                     totalTokens: 5000,
                     inputTokens: 4000,
                     cachedInputTokens: 1000,
-                    cacheWriteInputTokens: 0,
-                    outputTokens: 900,
+                    cacheWriteInputTokens: 500,
+                    outputTokens: 1000,
                     reasoningOutputTokens: 100,
                 },
                 last: {
                     totalTokens: 2500,
                     inputTokens: 2000,
                     cachedInputTokens: 500,
-                    cacheWriteInputTokens: 0,
-                    outputTokens: 450,
+                    cacheWriteInputTokens: 250,
+                    outputTokens: 500,
                     reasoningOutputTokens: 50,
                 },
                 modelContextWindow: 128000,
@@ -87,24 +87,23 @@ describe('Token Usage Events', () => {
             );
         });
 
-        it('should include token_count in PromptResponse on cancelled', async () => {
+        it('should include token_count on cancelled with legacy token usage', async () => {
             const tokenUsageNotification = createTokenUsageNotification(sessionId, {
+                // Older Codex binaries can omit cacheWriteInputTokens at runtime.
                 total: {
                     totalTokens: 3000,
                     inputTokens: 2500,
                     cachedInputTokens: 0,
-                    cacheWriteInputTokens: 0,
                     outputTokens: 500,
                     reasoningOutputTokens: 0,
-                },
+                } as TokenUsageBreakdown,
                 last: {
                     totalTokens: 1500,
                     inputTokens: 1200,
                     cachedInputTokens: 0,
-                    cacheWriteInputTokens: 0,
                     outputTokens: 300,
                     reasoningOutputTokens: 0,
-                },
+                } as TokenUsageBreakdown,
                 modelContextWindow: 128000,
             });
 
@@ -146,8 +145,8 @@ describe('Token Usage Events', () => {
                     modelContextWindow: 128000,
                 }),
                 createTokenUsageNotification(sessionId, {
-                    total: { totalTokens: 3500, inputTokens: 2800, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 600, reasoningOutputTokens: 100 },
-                    last: { totalTokens: 1500, inputTokens: 1200, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 100 },
+                    total: { totalTokens: 3500, inputTokens: 2800, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 700, reasoningOutputTokens: 100 },
+                    last: { totalTokens: 1500, inputTokens: 1200, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 100 },
                     modelContextWindow: 128000,
                 }),
             ];
@@ -201,16 +200,16 @@ describe('Token Usage Events', () => {
                         totalTokens: 5000,
                         inputTokens: 4000,
                         cachedInputTokens: 1000,
-                        cacheWriteInputTokens: 0,
-                        outputTokens: 900,
+                        cacheWriteInputTokens: 500,
+                        outputTokens: 1000,
                         reasoningOutputTokens: 100,
                     },
                     last: {
                         totalTokens: 2500,
                         inputTokens: 2000,
                         cachedInputTokens: 500,
-                        cacheWriteInputTokens: 0,
-                        outputTokens: 450,
+                        cacheWriteInputTokens: 250,
+                        outputTokens: 500,
                         reasoningOutputTokens: 50,
                     },
                     modelContextWindow: 128000,
@@ -233,8 +232,8 @@ describe('Token Usage Events', () => {
                     modelContextWindow: 128000,
                 }),
                 createTokenUsageNotification(sessionId, {
-                    total: { totalTokens: 3500, inputTokens: 2800, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 600, reasoningOutputTokens: 100 },
-                    last: { totalTokens: 1500, inputTokens: 1200, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 100 },
+                    total: { totalTokens: 3500, inputTokens: 2800, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 700, reasoningOutputTokens: 100 },
+                    last: { totalTokens: 1500, inputTokens: 1200, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 100 },
                     modelContextWindow: 128000,
                 }),
             ])();

@@ -480,9 +480,10 @@ export class CodexCommands {
         }
         const total = this.formatTokenCount(usage.totalTokens);
         const input = this.formatTokenCount(usage.inputTokens);
-        const cachedInput = this.formatTokenCount(usage.cachedInputTokens);
+        const cacheRead = this.formatTokenCount(usage.cachedInputTokens);
+        const cacheWrite = this.formatTokenCount(usage.cacheWriteInputTokens);
         const output = this.formatTokenCount(usage.outputTokens);
-        return `${total} total  (${input} input + ${cachedInput} cached input, ${output} output)`;
+        return `${total} total  (${input} input + ${cacheRead} cache read + ${cacheWrite} cache write, ${output} output)`;
     }
 
     private formatContextWindow(usage: TokenCount | null, contextWindow: number | null): string {
