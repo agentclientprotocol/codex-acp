@@ -7,6 +7,7 @@
 - `src/app-server/` — generated Codex app-server API types (regenerate via `npm run generate-types`).
 - `dist/bin/` — release-ready single-file executables and `*.zip` archives.
 - `.github/workflows/ci.yml` — CI mirrors the local workflow: typecheck → tests → bundle.
+- `scripts/` — release tooling (`release-preflight.sh`, `next-preview-version.mjs`), kept outside `src/` so it stays out of `tsc`'s `rootDir` and the published tarball; its tests sit next to it as `*.test.mjs`.
 
 ## Coding Style & Naming Conventions
 
@@ -31,9 +32,12 @@
 
 ## Releasing
 
-- Releases are fully automated by release-please. There is no manual release workflow, and the version is never chosen by hand — it follows from the commit history.
+- Stable releases are fully automated by release-please. There is no manual release workflow, and the version is never chosen by hand — it follows from the commit history.
 - `npm run release:preflight` verifies it is safe to release and prints the PR number and version; then `gh pr merge <pr-number> --squash`.
 - The preflight is the guard-list as code; if it exits non-zero, follow what it prints rather than merging.
+- Pushes to `main` trigger preview publishing directly, without waiting for CI or release-please. Automatic previews skip commits authored by `acp-release-bot[bot]` or whose message starts with `chore(main): release `.
+- Previews build and publish the exact pushed commit to npm under the `preview` dist-tag, then independently tag it as `v<version>` and dispatch the agent registry update. Only `latest` is reserved for stable releases. Manual previews publish the requested ref; `publish_npm` applies only to the stable channel.
+- Preview publish jobs are serialized without cancelling the running job, but newer pushes can replace a queued preview, so not every commit gets a preview. There is no staging branch.
 - Full runbook, including how to recover a stalled release: [`docs/RELEASES.md`](docs/RELEASES.md).
 
 ## Docs

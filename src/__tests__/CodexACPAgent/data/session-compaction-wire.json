@@ -1,0 +1,18 @@
+[
+  {
+    "sessionId": "compaction-session",
+    "update": {
+      "compactionId": "compaction-item",
+      "status": "in_progress",
+      "sessionUpdate": "compaction_update"
+    }
+  },
+  {
+    "sessionId": "compaction-session",
+    "update": {
+      "compactionId": "compaction-item",
+      "status": "completed",
+      "sessionUpdate": "compaction_update"
+    }
+  }
+]

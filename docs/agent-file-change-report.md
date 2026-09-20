@@ -23,7 +23,7 @@ The client adds this object to `session/prompt`:
 
 The request identifier has 1 to 128 characters. It can contain ASCII letters, digits, `.`, `_`, `:`, and `-`.
 
-The adapter runs a hidden, read-only Codex fork after the main turn. The fork reports files that the main turn changed. Its output does not enter the visible transcript.
+The adapter derives the report from Codex's final aggregated `turn/diff/updated` snapshot for the main turn. It does not run an additional model turn. The adapter keeps Codex's experimental `cwd_relative_turn_diffs` feature disabled so paths have the standard Git-root-relative form. In Codex 0.154, this snapshot tracks `apply_patch` mutations but can omit same-content renames and changes made through shell commands, version-control commands, generators, or child processes. The adapter therefore publishes these reports with `declaredComplete: false` and explains the limitation in `uncertainty`.
 
 The adapter sends one `session_info_update` before the `PromptResponse`:
 
@@ -39,9 +39,9 @@ The adapter sends one `session_info_update` before the `PromptResponse`:
           "requestId": "a-unique-request-id",
           "status": "reported",
           "paths": ["/workspace/src/App.ts"],
-          "declaredComplete": true,
+          "declaredComplete": false,
           "truncated": false,
-          "uncertainty": "Optional short explanation"
+          "uncertainty": "Codex turn diffs may omit same-content renames and changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes."
         }
       }
     }
@@ -51,9 +51,9 @@ The adapter sends one `session_info_update` before the `PromptResponse`:
 
 Each path is an absolute normalized path in the working directory or an additional workspace directory. The report contains no file content, diff, line count, or path order guarantee.
 
-The adapter sends at most 1,024 paths. Each path has at most 4,096 characters. The serialized report has at most 256 KiB. The optional uncertainty has at most 2,000 characters.
+The adapter sends at most 1,024 paths. Each path has at most 4,096 characters. The serialized report has at most 256 KiB. The optional uncertainty has at most 2,000 characters. Turn-diff snapshots larger than 8 MiB are rejected before parsing.
 
-The adapter marks the result unavailable after 30 seconds. It can also use `cancelled`, `invalidOutput`, `notReported`, or `providerError` as the reason. The main prompt still completes.
+The adapter marks the result unavailable when the prompt is cancelled, the turn diff is invalid, no provider turn ran, or the provider failed. The corresponding reasons are `cancelled`, `invalidOutput`, `notReported`, and `providerError`. The `timeout` reason remains part of the version-1 wire contract for backward compatibility but is not produced by this implementation. Report-generation failures do not change the main prompt outcome; failures of the main provider turn still follow the normal prompt error behavior.
 
 The client must match the request identifier. It must ignore a duplicate, stale, malformed, or unavailable report.
 

@@ -521,6 +521,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(threadStartRequest.config?.["sandbox_workspace_write"]).toEqual({
             writable_roots: ["/workspace/extra"],
         });
+        expect(threadStartRequest.config?.["features"]).toMatchObject({
+            cwd_relative_turn_diffs: false,
+        });
     });
 
     it('applies ACP additional directories to resumed and loaded sessions explicitly', async () => {
@@ -536,7 +539,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             reasoningEffort: "medium",
             serviceTier: null,
         } as any);
-        const threadReadSpy = vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+        const threadReadSpy = vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
             thread: {id: "thread-id"} as any,
         });
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
@@ -556,6 +559,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             mcpServers: [],
         });
 
+        expect(threadResumeSpy.mock.calls.every(([params]) => params.excludeTurns === true)).toBe(true);
         expect(resumed.additionalDirectories).toEqual(["/workspace/resume-extra"]);
         expect(loaded.additionalDirectories).toEqual(["/workspace/load-extra"]);
         expect(threadResumeSpy.mock.calls[0]![0].config?.["projects"]).toEqual({
@@ -566,10 +570,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             "/workspace": {trust_level: "trusted"},
             "/workspace/load-extra": {trust_level: "trusted"},
         });
-        expect(threadReadSpy).toHaveBeenCalledWith({
-            threadId: "thread-id",
-            includeTurns: true,
-        });
+        expect(threadReadSpy).toHaveBeenCalledWith("thread-id");
     });
 
     it('forks an ACP session through thread/fork with the requested workspace', async () => {
@@ -604,6 +605,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(forked.sessionId).toBe("fork-id");
         expect(forked.additionalDirectories).toEqual(["/workspace/extra"]);
         expect(threadForkSpy).toHaveBeenCalledWith(expect.objectContaining({
+            excludeTurns: true,
             threadId: "source-id",
             cwd: "/workspace",
             config: expect.objectContaining({
@@ -623,7 +625,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
         vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-        vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+        vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
             thread: {
                 id: "source-id",
                 turns: [
@@ -653,6 +655,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         expect(threadForkSpy).toHaveBeenCalledWith(expect.objectContaining({
+            excludeTurns: true,
             threadId: "source-id",
             lastTurnId: "turn-2",
         }));
@@ -666,14 +669,17 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
         vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
-            thread: {
-                id: "source-id",
-                turns: [
-                    {id: "turn-1", items: [{type: "agentMessage", id: "new-item-1", text: "Same answer"}]},
-                    {id: "turn-2", items: [{type: "agentMessage", id: "new-item-2", text: "Same answer"}]},
-                ],
-            },
+            thread: {id: "source-id", turns: []},
         } as any);
+        vi.spyOn(codexAppServerClient, "threadTurnsList")
+            .mockResolvedValueOnce({
+                data: [{id: "turn-2", items: [{type: "agentMessage", id: "new-item-2", text: "Same answer"}]}],
+                nextCursor: "second-page", backwardsCursor: null,
+            } as any)
+            .mockResolvedValueOnce({
+                data: [{id: "turn-1", items: [{type: "agentMessage", id: "new-item-1", text: "Same answer"}]}],
+                nextCursor: null, backwardsCursor: null,
+            } as any);
         const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
             thread: {id: "fork-id"},
             model: "gpt-5",
@@ -700,6 +706,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         expect(threadForkSpy).toHaveBeenCalledWith(expect.objectContaining({
+            excludeTurns: true,
             threadId: "source-id",
             lastTurnId: "turn-2",
         }));
@@ -736,7 +743,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 serviceTier: null,
             } as any;
         });
-        vi.spyOn(codexAppServerClient, "threadRead").mockImplementation(async ({threadId}) => ({
+        vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockImplementation(async (threadId) => ({
             thread: {id: threadId, turns: []},
         } as any));
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
@@ -778,7 +785,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             reasoningEffort: "medium",
             serviceTier: null,
         } as any);
-        vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+        vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
             thread: {id: "thread-id"} as any,
         });
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
@@ -825,7 +832,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             reasoningEffort: "medium",
             serviceTier: null,
         } as any);
-        vi.spyOn(codexAppServerClient, "threadRead").mockResolvedValue({
+        vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
             thread: {id: "thread-id", turns: []} as any,
         });
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
@@ -3523,6 +3530,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     runtimeStatus: null,
                     pluginId: null,
                     serverInfo: null,
+                    toolsError: null,
                     tools: {listFiles: {name: "listFiles", inputSchema: {type: "object"}}},
                     resources: [{name: "workspace", uri: "file:///workspace"}],
                     resourceTemplates: [],
@@ -3533,6 +3541,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     runtimeStatus: null,
                     pluginId: null,
                     serverInfo: null,
+                    toolsError: null,
                     tools: {},
                     resources: [],
                     resourceTemplates: [],
@@ -3874,6 +3883,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 spendControlReached: null,
                 planType: null,
                 rateLimitReachedType: null,
+                normalModelSlug: null,
             }
         });
         rateLimits.set("limit-2", {
@@ -3889,6 +3899,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 spendControlReached: null,
                 planType: null,
                 rateLimitReachedType: null,
+                normalModelSlug: null,
             }
         });
 
@@ -3901,6 +3912,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     it ('should refresh the complete rate-limit snapshot for status', async () => {
         const {mockFixture, sessionState} = setupPromptFixture();
         vi.spyOn(mockFixture.getCodexAcpClient(), "getRateLimits").mockResolvedValue({
+            ordinaryUsageAllowed: null,
             rateLimits: {
                 limitId: "codex",
                 limitName: "Codex",
@@ -3916,6 +3928,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 spendControlReached: null,
                 planType: null,
                 rateLimitReachedType: null,
+                normalModelSlug: null,
             },
             rateLimitsByLimitId: null,
             rateLimitResetCredits: null,
@@ -4054,6 +4067,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     individualLimit: null,
                     planType: null,
                     rateLimitReachedType: null,
+                    normalModelSlug: null,
                 }
             }
         });
@@ -4070,6 +4084,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     individualLimit: null,
                     planType: null,
                     rateLimitReachedType: null,
+                    normalModelSlug: null,
                 }
             }
         });
@@ -4089,6 +4104,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 individualLimit: null,
                 planType: null,
                 rateLimitReachedType: null,
+                normalModelSlug: null,
             }
         });
         expect(sessionState.rateLimits!.get("fast-limit")).toEqual({
@@ -4103,6 +4119,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 individualLimit: null,
                 planType: null,
                 rateLimitReachedType: null,
+                normalModelSlug: null,
             }
         });
     });
@@ -4123,6 +4140,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     spendControlReached: null,
                     planType: null,
                     rateLimitReachedType: null,
+                    normalModelSlug: null,
                 },
             }],
             ["codex_other", {
@@ -4138,6 +4156,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     spendControlReached: null,
                     planType: null,
                     rateLimitReachedType: null,
+                    normalModelSlug: null,
                 },
             }],
         ]);
@@ -4160,6 +4179,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     spendControlReached: null,
                     planType: null,
                     rateLimitReachedType: null,
+                    normalModelSlug: null,
                 },
             },
         });

@@ -32,6 +32,7 @@ type PendingSubagent = {
 export type ClosingChildSession = {
     threadId: string;
     sessionId: string;
+    state: SubagentState;
 };
 
 /** Owns native lifecycle, child routing, waiting, and legacy activity deduplication. */
@@ -188,20 +189,25 @@ export class CodexSubagentEventRouter {
     closingChildSessions(notification: ServerNotification): ClosingChildSession[] {
         if (!this.supported) return [];
         if (notification.method === "turn/completed") {
-            if (terminalStateFromTurn(notification.params.turn.status) === undefined) return [];
-            return this.closingChildSession(notification.params.threadId);
+            const state = terminalStateFromTurn(notification.params.turn.status);
+            if (state === undefined) return [];
+            if (notification.params.threadId === this.rootSessionId && state !== "completed") {
+                return [...this.children.keys()].flatMap(threadId => this.closingChildSession(threadId, state));
+            }
+            return this.closingChildSession(notification.params.threadId, state);
         }
         if (notification.method !== "item/started" && notification.method !== "item/completed") return [];
         const item = notification.params.item;
         if (item.type === "subAgentActivity") {
-            return item.kind === "interrupted" ? this.closingChildSession(item.agentThreadId) : [];
+            return item.kind === "interrupted" ? this.closingChildSession(item.agentThreadId, "cancelled") : [];
         }
         if (item.type !== "collabAgentToolCall") return [];
 
         const closing = new Map<string, ClosingChildSession>();
         for (const [threadId, state] of Object.entries(item.agentsStates)) {
-            if (!state || terminalStateOf(state.status) === undefined) continue;
-            for (const child of this.closingChildSession(threadId)) closing.set(threadId, child);
+            const terminalState = state && terminalStateOf(state.status);
+            if (!terminalState) continue;
+            for (const child of this.closingChildSession(threadId, terminalState)) closing.set(threadId, child);
         }
         return [...closing.values()];
     }
@@ -242,18 +248,18 @@ export class CodexSubagentEventRouter {
         return createSubAgentActivityUpdate(item, "completed", sessionUpdate);
     }
 
+    /** The caller finalizes pending child updates before closing timed-out sessions. */
     async wait(
         signal: AbortSignal,
         timeoutMs = CodexSubagentEventRouter.DEFAULT_WAIT_TIMEOUT_MS,
-    ): Promise<void> {
+    ): Promise<"settled" | "aborted" | "timed_out"> {
         const deadline = Date.now() + timeoutMs;
         while (this.hasOutstanding()) {
-            if (signal.aborted) return;
+            if (signal.aborted) return "aborted";
             const remainingMs = deadline - Date.now();
             if (remainingMs <= 0) {
                 logger.log(`Timed out waiting for subagents in session ${this.rootSessionId}; marking them failed`);
-                await this.finishOutstanding("failed");
-                return;
+                return "timed_out";
             }
             const changed = await new Promise<boolean>((resolve) => {
                 const timeout = setTimeout(() => {
@@ -276,10 +282,10 @@ export class CodexSubagentEventRouter {
             });
             if (!changed) {
                 logger.log(`Timed out waiting for subagents in session ${this.rootSessionId}; marking them failed`);
-                await this.finishOutstanding("failed");
-                return;
+                return "timed_out";
             }
         }
+        return "settled";
     }
 
     async finishOutstanding(state: SubagentState): Promise<void> {
@@ -298,10 +304,10 @@ export class CodexSubagentEventRouter {
                 || this.terminalPendingSpawns.has(threadId));
     }
 
-    private closingChildSession(threadId: string): ClosingChildSession[] {
+    private closingChildSession(threadId: string, state: SubagentState): ClosingChildSession[] {
         const child = this.children.get(threadId);
         return child && child.terminalState === undefined
-            ? [{threadId, sessionId: child.sessionId}]
+            ? [{threadId, sessionId: child.sessionId, state}]
             : [];
     }
 

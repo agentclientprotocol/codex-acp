@@ -1,5 +1,50 @@
 # Changelog
 
+## [1.12.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.11.0...v1.12.0) (2026-09-15)
+
+
+### Features
+
+* Add tool names to ACP tool call events ([#513](https://github.com/agentclientprotocol/codex-acp/issues/513)) ([e46df48](https://github.com/agentclientprotocol/codex-acp/commit/e46df48fe7e54f2a4073cb11f9e24f1a223fc9e6))
+
+
+### Bug Fixes
+
+* improve request_user_input elicitation forms ([#299](https://github.com/agentclientprotocol/codex-acp/issues/299)) ([472e60e](https://github.com/agentclientprotocol/codex-acp/commit/472e60e4e99234c47c6de67a6d9cc8a71ebda47e))
+* update codex to 0.154.0 ([#494](https://github.com/agentclientprotocol/codex-acp/issues/494)) ([a24ebc4](https://github.com/agentclientprotocol/codex-acp/commit/a24ebc4f35e6e800b37ddc59c58e58abe7cf8a5c))
+
+
+### Performance Improvements
+
+* derive file change reports from turn diffs ([#518](https://github.com/agentclientprotocol/codex-acp/issues/518)) ([caddefe](https://github.com/agentclientprotocol/codex-acp/commit/caddefe56ff55a3f0827aa8ad60d03779f168425))
+* supply validated diff statistics to ACP clients ([#501](https://github.com/agentclientprotocol/codex-acp/issues/501)) ([989a8f1](https://github.com/agentclientprotocol/codex-acp/commit/989a8f1735f2465f3db2e8acfa00a4da8f352c00))
+
+## [1.11.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.10.0...v1.11.0) (2026-09-09)
+
+
+### Features
+
+* advertise recommended model and reasoning effort ([#491](https://github.com/agentclientprotocol/codex-acp/issues/491)) ([649b63c](https://github.com/agentclientprotocol/codex-acp/commit/649b63cbcd033f626676c5189a0db3b1166195b0))
+* simplify GPT model display names ([#493](https://github.com/agentclientprotocol/codex-acp/issues/493)) ([df025c7](https://github.com/agentclientprotocol/codex-acp/commit/df025c73ba02d9e35d728aa81a0fbb3b13f4c8fb))
+
+
+### Bug Fixes
+
+* finalize standalone MCP elicitation permission requests ([#471](https://github.com/agentclientprotocol/codex-acp/issues/471)) ([7c374bc](https://github.com/agentclientprotocol/codex-acp/commit/7c374bc9ce6808d278c5d47887fb6a7ad1e65b28))
+* paginate thread history when forking and loading sessions ([#481](https://github.com/agentclientprotocol/codex-acp/issues/481)) ([1a3c01e](https://github.com/agentclientprotocol/codex-acp/commit/1a3c01e8ca317f83e3b60bc5632cf052882bea15))
+
+## [1.10.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.9.0...v1.10.0) (2026-09-04)
+
+
+### Features
+
+* expose background terminals as async tasks ([#460](https://github.com/agentclientprotocol/codex-acp/issues/460)) ([e31c8c3](https://github.com/agentclientprotocol/codex-acp/commit/e31c8c369ec74f551d017d09abdb6d04d926dcab))
+
+
+### Bug Fixes
+
+* update codex to 0.153.3 ([#476](https://github.com/agentclientprotocol/codex-acp/issues/476)) ([b9f1386](https://github.com/agentclientprotocol/codex-acp/commit/b9f1386e0d14e1322dca5b6574146f8faa6ecea6))
+
 ## [1.9.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.8.0...v1.9.0) (2026-09-04)
 
 

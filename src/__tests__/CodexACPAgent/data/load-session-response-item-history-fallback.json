@@ -192,7 +192,8 @@
         "toolCallId": "call-rg",
         "status": "in_progress",
         "kind": "search",
-        "title": "Search for 'Service' in src"
+        "title": "Search for 'Service' in src",
+        "name": "exec_command"
       }
     }
   ]
@@ -223,7 +224,8 @@
         "toolCallId": "call-rg-failed",
         "status": "in_progress",
         "kind": "search",
-        "title": "Search for 'Missing' in src"
+        "title": "Search for 'Missing' in src",
+        "name": "exec_command"
       }
     }
   ]
@@ -259,7 +261,8 @@
           {
             "path": "/test/project/src/index.ts"
           }
-        ]
+        ],
+        "name": "exec_command"
       }
     }
   ]
@@ -290,7 +293,8 @@
         "toolCallId": "call-ls",
         "status": "in_progress",
         "kind": "read",
-        "title": "List files"
+        "title": "List files",
+        "name": "exec_command"
       }
     }
   ]

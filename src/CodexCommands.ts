@@ -226,8 +226,12 @@ export class CodexCommands {
                 return { handled: options.setConfigOption !== undefined };
             }
             case "compact": {
-                await this.runWithProcessCheck(() => this.codexAcpClient.runCompact(sessionId));
-                return { handled: true };
+                options.onTurnStartPending?.();
+                const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.runCompact(
+                    sessionId,
+                    (turnId) => options.onTurnStarted?.(turnId, sessionId),
+                ));
+                return { handled: true, ...(turnCompleted === undefined ? {} : {turnCompleted}) };
             }
             case "goal": {
                 return await this.runGoalCommand(sessionState, command.rest, options);
