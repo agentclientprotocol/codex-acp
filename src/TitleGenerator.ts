@@ -22,6 +22,7 @@ const SYSTEM_PROMPT =
 
 export class TitleGenerator {
     private generated = false;
+    private inFlight: Promise<void> | null = null;
 
     constructor(
         private readonly client: CodexAppServerClient,
@@ -52,9 +53,39 @@ export class TitleGenerator {
         // "unknown": resumed session with indeterminate history — skip
         if (src === "explicit" || src === "unknown") return;
         this.generated = true;
-        this.generateAndPersist(userPromptText).catch(() => {
-            // title generation is best-effort; never surface errors to the user
-        });
+        const run = this.generateAndPersist(userPromptText)
+            .catch(() => {
+                // title generation is best-effort; never surface errors to the user
+            })
+            .finally(() => {
+                if (this.inFlight === run) this.inFlight = null;
+            });
+        this.inFlight = run;
+    }
+
+    /**
+     * Resolves once the fire-and-forget generation started by
+     * {@link onTurnCompleted} has finished, or after `timeoutMs`.
+     *
+     * Generation renames the thread, which Codex echoes back as a
+     * `session_info_update`. `session/load` has to finish replaying a session
+     * before it answers, so it awaits this first rather than letting a title
+     * from an earlier turn surface after the load response.
+     */
+    async waitForIdle(timeoutMs: number): Promise<void> {
+        const pending = this.inFlight;
+        if (pending === null) return;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            await Promise.race([
+                pending,
+                new Promise<void>(resolve => {
+                    timer = setTimeout(resolve, timeoutMs);
+                }),
+            ]);
+        } finally {
+            if (timer !== undefined) clearTimeout(timer);
+        }
     }
 
     private async generateAndPersist(userPromptText: string): Promise<void> {
