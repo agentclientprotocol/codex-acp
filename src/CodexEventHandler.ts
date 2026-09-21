@@ -226,7 +226,7 @@ export class CodexEventHandler {
     private disposed = false;
     private readonly seenReasoningDeltaItemIds = new Set<string>();
     private readonly terminalCommandIds = new Set<string>();
-    private readonly terminalCommandOutputIds = new Set<string>();
+    private readonly commandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly turnDiffs = new Map<string, string>();
     private readonly oversizedTurnDiffs = new Set<string>();
@@ -807,7 +807,7 @@ export class CodexEventHandler {
                     this.terminalCommandIds.add(event.item.id);
                 } else {
                     this.terminalCommandIds.delete(event.item.id);
-                    this.terminalCommandOutputIds.delete(event.item.id);
+                    this.commandOutputIds.delete(event.item.id);
                 }
                 return await createCommandExecutionUpdate(event.item);
             }
@@ -1022,8 +1022,8 @@ export class CodexEventHandler {
     }
 
     private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
-        if (this.terminalCommandIds.has(event.itemId) && event.delta.length > 0) {
-            this.terminalCommandOutputIds.add(event.itemId);
+        if (event.delta.length > 0) {
+            this.commandOutputIds.add(event.itemId);
         }
         return this.createCommandOutputEvent(event.itemId, event.delta, this.commandOutputMode(event.itemId));
     }
@@ -1110,29 +1110,34 @@ export class CodexEventHandler {
             toolCallId: item.id,
             ...(name === undefined ? {} : {name}),
             status: item.status === "completed" ? "completed" : "failed",
-            rawOutput: {
-                formatted_output: item.aggregatedOutput ?? "",
-                exit_code: item.exitCode
-            },
+            ...(this.sessionState.terminalOutputDeltaSupported ? {} : {
+                rawOutput: {
+                    formatted_output: item.aggregatedOutput ?? "",
+                    exit_code: item.exitCode
+                },
+            }),
         };
 
         const commandHadTerminal = this.terminalCommandIds.delete(item.id);
-        const commandHadOutput = this.terminalCommandOutputIds.delete(item.id);
-        if (!commandHadTerminal) {
-            return update;
-        }
+        const commandHadOutput = this.commandOutputIds.delete(item.id);
         const terminalMeta: Record<string, unknown> = {};
-        if (!commandHadOutput && item.aggregatedOutput) {
+        if (!commandHadOutput && item.aggregatedOutput &&
+            (commandHadTerminal || this.sessionState.terminalOutputDeltaSupported)) {
             Object.assign(
                 terminalMeta,
                 createTerminalOutputMeta(this.sessionState.terminalOutputMode, item.id, item.aggregatedOutput)
             );
         }
-        terminalMeta["terminal_exit"] = {
-            exit_code: item.exitCode,
-            signal: null,
-            terminal_id: item.id
-        };
+        if (commandHadTerminal) {
+            terminalMeta["terminal_exit"] = {
+                exit_code: item.exitCode,
+                signal: null,
+                terminal_id: item.id
+            };
+        }
+        if (Object.keys(terminalMeta).length === 0) {
+            return update;
+        }
         return {
             ...update,
             _meta: terminalMeta,
