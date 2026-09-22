@@ -21,7 +21,7 @@ describe("TitleGenerator.waitForIdle", () => {
         await expect(generator.waitForIdle(50)).resolves.toBeUndefined();
     });
 
-    it("waits for the rename a generation is about to make", async () => {
+    it("waits for the rename echo notification before settling", async () => {
         const turn = deferred<{turn: {items: {type: string; text: string}[]}}>();
         const threadSetName = vi.fn().mockResolvedValue({});
         const generator = createGenerator({
@@ -39,9 +39,18 @@ describe("TitleGenerator.waitForIdle", () => {
         expect(settled).toBe(false);
 
         turn.resolve({turn: {items: [{type: "agentMessage", text: '{"title":"A short title"}'}]}});
-        await idle;
-
+        // Flush the microtask chain (extract title -> threadSetName -> start
+        // waiting for the echo) without resolving the echo itself yet.
+        for (let i = 0; i < 10; i++) {
+            await Promise.resolve();
+        }
         expect(threadSetName).toHaveBeenCalledWith({threadId: "thread-id", name: "A short title"});
+        expect(settled).toBe(false);
+
+        // The thread/name/updated notification for this rename arrives.
+        generator.observeRename();
+        await idle;
+        expect(settled).toBe(true);
     });
 
     it("gives up after the timeout rather than holding the caller open", async () => {

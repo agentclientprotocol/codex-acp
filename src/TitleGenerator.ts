@@ -4,6 +4,11 @@ import type { Turn } from "./app-server/v2";
 // Use cheap model to generate a title
 const TITLE_MODEL = "gpt-5.6-luna";
 
+// thread/name/set acks once Codex accepts the rename, but the thread/name/updated
+// notification that echoes it back to the client can lag behind that ack. Cap how
+// long generateAndPersist waits for the echo before giving up on it.
+const RENAME_ECHO_TIMEOUT_MS = 5_000;
+
 const TITLE_OUTPUT_SCHEMA = {
     type: "object",
     properties: { title: { type: "string" } },
@@ -23,6 +28,7 @@ const SYSTEM_PROMPT =
 export class TitleGenerator {
     private generated = false;
     private inFlight: Promise<void> | null = null;
+    private renameEchoResolve: (() => void) | null = null;
 
     constructor(
         private readonly client: CodexAppServerClient,
@@ -37,6 +43,17 @@ export class TitleGenerator {
      */
     markExistingTitle(): void {
         this.generated = true;
+    }
+
+    /**
+     * Call when a `thread/name/updated` notification arrives for this session.
+     * Unblocks {@link generateAndPersist}'s wait for the rename it just issued to
+     * be echoed back, so `waitForIdle` reflects "the client has seen the update"
+     * rather than just "the rename RPC was acknowledged".
+     */
+    observeRename(): void {
+        this.renameEchoResolve?.();
+        this.renameEchoResolve = null;
     }
 
     /**
@@ -120,6 +137,15 @@ export class TitleGenerator {
             threadId: this.mainThreadId,
             name: title,
         });
+        await this.waitForRenameEcho(RENAME_ECHO_TIMEOUT_MS);
+    }
+
+    private async waitForRenameEcho(timeoutMs: number): Promise<void> {
+        await new Promise<void>(resolve => {
+            this.renameEchoResolve = resolve;
+            setTimeout(resolve, timeoutMs);
+        });
+        this.renameEchoResolve = null;
     }
 }
 
