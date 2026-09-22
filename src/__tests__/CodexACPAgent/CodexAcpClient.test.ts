@@ -886,7 +886,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         } as unknown as acp.NewSessionRequest)).rejects.toThrow("additionalDirectories entries must be strings");
     });
 
-    it('sanitizes whitespace in ACP MCP server names before adding them to Codex config', async () => {
+    it('adds same-transport ACP MCP overrides while filtering incompatible conflicts', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
@@ -897,6 +897,13 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 mcp_servers: {
                     shared_mcp: {
                         url: "https://example.com/mcp",
+                    },
+                    stdio_server_one: {
+                        command: "stale-command",
+                        args: ["stale"],
+                    },
+                    global_only: {
+                        command: "global-command",
                     },
                 },
             },
