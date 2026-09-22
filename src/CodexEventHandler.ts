@@ -84,6 +84,7 @@ import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import type {SubagentState} from "./subagents/AcpSubagents";
 import {mergeRateLimitSnapshot} from "./RateLimitsMap";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "./AgentFileChangeReport";
+import {createSessionNotice} from "./SessionNotice";
 
 export { stripShellPrefix };
 
@@ -249,6 +250,7 @@ export class CodexEventHandler {
         onAccountUpdated?: (notification: AccountUpdatedNotification) => void,
         collectTurnDiffs = false,
         private readonly supportsCompaction = false,
+        private readonly supportsNotices = false,
     ) {
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
@@ -710,6 +712,9 @@ export class CodexEventHandler {
     }
 
     private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
+        if (this.supportsNotices) {
+            return createSessionNotice("warning", event.summary.trim() || "Configuration warning", event.details);
+        }
         if (this.supportsTypedSessionFailures) {
             return this.createSessionFailureUpdate(this.recordSessionNotice(...this.sessionNoticeContent(event.summary, event.details)));
         }
@@ -717,12 +722,11 @@ export class CodexEventHandler {
         return createAgentTextMessageChunk(`Config warning: ${text}\n\n`);
     }
 
-    /**
-     * Unlike `warning` and `configWarning`, this notification was dropped outright, so there is no
-     * legacy rendering to preserve. It is surfaced only to clients that negotiated typed records;
-     * every other client keeps seeing exactly what it sees today, which is nothing.
-     */
     private createDeprecationNoticeEvent(event: DeprecationNoticeNotification): UpdateSessionEvent | null {
+        if (this.supportsNotices) {
+            return createSessionNotice("warning", event.summary.trim() || "Deprecated configuration", event.details);
+        }
+        // Legacy clients without typed failures have never received deprecation notices.
         if (!this.supportsTypedSessionFailures) return null;
         return this.createSessionFailureUpdate(
             this.recordSessionNotice(...this.sessionNoticeContent(event.summary, event.details)),
@@ -730,6 +734,9 @@ export class CodexEventHandler {
     }
 
     private createWarningEvent(event: WarningNotification): UpdateSessionEvent {
+        if (this.supportsNotices) {
+            return createSessionNotice("warning", event.message.trim() || "Codex warning");
+        }
         if (this.supportsTypedSessionFailures) {
             return this.createSessionFailureUpdate(this.recordSessionNotice(event.message));
         }
@@ -737,7 +744,14 @@ export class CodexEventHandler {
     }
 
     private createModelReroutedEvent(event: ModelReroutedNotification): UpdateSessionEvent {
-        return createAgentTextThoughtChunk(`Model rerouted from ${event.fromModel} to ${event.toModel} (${event.reason}).\n\n`);
+        if (!this.supportsNotices) {
+            return createAgentTextThoughtChunk(`Model rerouted from ${event.fromModel} to ${event.toModel} (${event.reason}).\n\n`);
+        }
+        return createSessionNotice(
+            "info",
+            "Model rerouted",
+            `Switched from ${event.fromModel} to ${event.toModel} (${event.reason}).`,
+        );
     }
 
     private createThreadGoalUpdatedEvent(event: ThreadGoalUpdatedNotification): UpdateSessionEvent | null {
@@ -1018,7 +1032,14 @@ export class CodexEventHandler {
     }
 
     private createContextCompactedEvent(): UpdateSessionEvent {
-        return createAgentTextMessageChunk("*Context compacted to fit the model's context window.*\n\n");
+        if (!this.supportsNotices) {
+            return createAgentTextMessageChunk("*Context compacted to fit the model's context window.*\n\n");
+        }
+        return createSessionNotice(
+            "info",
+            "Context compacted",
+            "Conversation compacted to fit the model's context window.",
+        );
     }
 
     private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
