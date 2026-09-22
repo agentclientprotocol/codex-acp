@@ -32,7 +32,7 @@ import {isDeepStrictEqual} from "node:util";
 import {logger} from "./Logger";
 import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
 import {listedSessionTitle, normalizeSessionTitle} from "./SessionTitle";
-import {type AcpMcpServer, type WithAcpMcpServers, normalizeMcpServers, toCodexMcpServerConfig} from "./McpServerConfig";
+import {type AcpMcpServer, type NormalizedMcpServer, type WithAcpMcpServers, normalizeMcpServers, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
     AccountUpdatedNotification,
     ApprovalsReviewer,
@@ -1179,9 +1179,17 @@ export class CodexAcpClient {
         const requestedServers = normalizeMcpServers(mcpServers).map(server => ({name: server.name, server}));
         let serversToConfigure = requestedServers;
         if (shouldDeduplicateMcpConflicts()) {
-            // Prevents Codex from deep-merging incompatible field types, such as url and stdio schemas.
-            const existingNames = this.getConfigMcpServerNames(effectiveConfig);
-            serversToConfigure = requestedServers.filter(mcp => !existingNames.has(mcp.name));
+            // Codex deep-merges session config into its persisted config. Let the session replace
+            // connection details when both definitions use the same transport, but keep filtering
+            // incompatible transports because merging e.g. `url` and `command` produces an invalid
+            // hybrid definition.
+            const existingServers = this.getConfigMcpServers(effectiveConfig);
+            serversToConfigure = requestedServers.filter(mcp => {
+                const existing = existingServers.get(mcp.name);
+                // A disabled entry stays disabled after the merge, so the session server would not start.
+                return existing === undefined
+                    || (existing["enabled"] !== false && haveCompatibleMcpTransports(existing, mcp.server));
+            });
         }
         const skippedMcpServers = requestedServers
             .filter(mcp => !serversToConfigure.includes(mcp))
@@ -1206,17 +1214,22 @@ export class CodexAcpClient {
         };
     }
 
-    private getConfigMcpServerNames(response: ConfigReadResponse): Set<string> {
+    private getConfigMcpServers(response: ConfigReadResponse): Map<string, JsonObject> {
         const effectiveMcpServers = response?.config?.["mcp_servers"];
         const configLayers = response?.layers ?? [];
         const layerMcpServers = configLayers.map(layer => {
             return isJsonObject(layer.config) ? layer.config["mcp_servers"] : undefined;
         });
         const configuredMcpServers = [effectiveMcpServers, ...layerMcpServers].filter(isJsonObject);
-        if (configuredMcpServers.length === 0) {
-            return new Set();
+        const servers = new Map<string, JsonObject>();
+        for (const configured of configuredMcpServers) {
+            for (const [name, server] of Object.entries(configured)) {
+                if (!servers.has(name) && isJsonObject(server)) {
+                    servers.set(name, server);
+                }
+            }
         }
-        return new Set(configuredMcpServers.flatMap(server => Object.keys(server)));
+        return servers;
     }
 
     private async fetchPermissionProfiles(projectPath: string): Promise<PermissionProfileSummary[]> {
@@ -1669,6 +1682,15 @@ function formatUriAsLink(name: string | null | undefined, uri: string): string {
 function shouldDeduplicateMcpConflicts(): boolean {
     const disabledByEnv = process.env["DISABLE_MCP_CONFIG_FILTERING"] === "true";
     return !disabledByEnv;
+}
+
+function haveCompatibleMcpTransports(configured: JsonObject, requested: NormalizedMcpServer): boolean {
+    const configuredTransport = "command" in configured && !("url" in configured)
+        ? "stdio"
+        : "url" in configured && !("command" in configured)
+            ? "http"
+            : null;
+    return configuredTransport === requested.type;
 }
 
 type WireApi = "responses";
