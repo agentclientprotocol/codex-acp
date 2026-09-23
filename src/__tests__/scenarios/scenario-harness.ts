@@ -152,13 +152,13 @@ async function runInWorkspace(
 
     if (scenario.history !== undefined) {
         const response = await agent.loadSession({sessionId: SESSION_ID, cwd: workspace, mcpServers});
-        recorded.push({direction: "response", method: "session/load", params: sessionResponse(response)});
+        recorded.push({direction: "response", method: "session/load", params: response});
         await client.waitForSessionNotifications(SESSION_ID);
         return [...recorded, ...collect(fixture.getAcpConnectionEvents([]))];
     }
 
     const newSessionResponse = await agent.newSession({cwd: workspace, mcpServers});
-    recorded.push({direction: "response", method: "session/new", params: sessionResponse(newSessionResponse)});
+    recorded.push({direction: "response", method: "session/new", params: newSessionResponse});
     if (scenario.mcpStartup !== undefined) {
         await vi.waitFor(() => {
             const events = fixture.getAcpConnectionEvents([]);
@@ -224,12 +224,6 @@ async function runInWorkspace(
     recorded.push(...collect(fixture.getAcpConnectionEvents([])));
     recorded.push({direction: "response", method: "session/prompt", params: promptResponse});
     return recorded;
-}
-
-/** The session response without the model list, which the scenarios do not vary. */
-function sessionResponse(response: unknown): unknown {
-    const {models: _models, ...rest} = response as Record<string, unknown>;
-    return rest;
 }
 
 const IGNORED_NOTIFICATIONS = new Set(["_auth/status_update"]);

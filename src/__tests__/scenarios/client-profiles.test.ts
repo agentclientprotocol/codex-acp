@@ -264,6 +264,15 @@ describe("every client", () => {
             expect(repeatedFields(profile)).toEqual([]);
         });
 
+        it(`${profile}: gets the model list in the session/new and session/load responses`, () => {
+            const models = {
+                currentModelId: "model-id[medium]",
+                availableModels: [{modelId: "model-id[medium]", name: "model-id (medium)", description: "model-id model Balanced"}],
+            };
+            expect(response(profile, "plan-stream", "session/new")["models"]).toEqual(models);
+            expect(response(profile, "history-replay", "session/load")["models"]).toEqual(models);
+        });
+
         it(`${profile}: gets empty locations when a fuzzy search finds no file`, () => {
             const reported = updates(profile, "fuzzy-file-search", "fuzzyFileSearch.search-1");
             expect(reported.map(update => update["locations"])).toEqual([
