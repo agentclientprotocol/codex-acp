@@ -642,6 +642,28 @@ Moved to: /test/project/NewFile.kt`,
             });
         });
 
+        it('sends the standard diff when a hunk has a marker line other than the final newline marker', async () => {
+            mockFileContent('/w/Edit.kt', 'old');
+            const content = onlyContent(await createFileChangeUpdate({
+                type: 'fileChange',
+                id: 'fallback-marker',
+                changes: [{
+                    path: '/w/Edit.kt',
+                    kind: {type: 'update', move_path: null},
+                    diff: '@@ -1 +1 @@\n-old\n\\ injected\n+new\n',
+                }],
+                status: 'completed',
+            }, true));
+
+            expect(content).toEqual({
+                type: 'diff',
+                oldText: 'old',
+                newText: 'new\n',
+                path: '/w/Edit.kt',
+                _meta: {kind: 'update'},
+            });
+        });
+
         it('sends the standard diff for a pure rename', async () => {
             mockFileContent('/w/New.kt', 'same\n');
             const content = onlyContent(await createFileChangeUpdate({

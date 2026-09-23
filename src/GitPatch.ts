@@ -101,6 +101,7 @@ function hunkText(diff: string): string | null {
                     newLines--;
                     break;
                 case "\\":
+                    if (line !== NO_NEWLINE_MARKER) return null;
                     break;
                 default:
                     return null;
@@ -108,7 +109,7 @@ function hunkText(diff: string): string | null {
             index++;
         }
         if (oldLines !== 0 || newLines !== 0) return null;
-        while (hunks[index]?.startsWith("\\")) index++;
+        while (hunks[index] === NO_NEWLINE_MARKER) index++;
     }
     return `${hunks.join("\n")}\n`;
 }

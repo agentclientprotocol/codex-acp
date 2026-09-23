@@ -93,4 +93,12 @@ describe("GitPatch", () => {
         expect(createUpdateGitPatch("/w/a", "/w/a", "@@ -1 +1 @@\n-old\n+new\n+extra\n")).toBeNull();
         expect(createUpdateGitPatch("/w/a", "/w/a", "preamble\n@@ -1 +1 @@\n-old\n+new\n")).toBeNull();
     });
+
+    it("accepts only the Git final newline marker after a hunk line", () => {
+        expect(createUpdateGitPatch("/w/a", "/w/a", "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n"))
+            .toContain("-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n");
+        expect(createUpdateGitPatch("/w/a", "/w/a", "@@ -1 +1 @@\n-old\n\\ injected\n+new\n")).toBeNull();
+        expect(createUpdateGitPatch("/w/a", "/w/a", "@@ -1 +1 @@\n-old\n+new\n\\\n")).toBeNull();
+        expect(createUpdateGitPatch("/w/a", "/w/a", "@@ -1 +1 @@\n-old\n+new\n\\ No newline at end of file.\n")).toBeNull();
+    });
 });
