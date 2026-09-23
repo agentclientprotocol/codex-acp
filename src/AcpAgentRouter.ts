@@ -101,7 +101,10 @@ export function createAcpAgentRouter(
         .onRequest(acpV2.methods.agent.session.resume, (ctx) => getAgent().resumeSessionV2(ctx.params))
         .onRequest(acpV2.methods.agent.session.close, (ctx) => getAgent().closeSession(ctx.params))
         // No `session/set_mode`: v2 removed the modes API; modes are config options.
-        .onRequest(acpV2.methods.agent.session.setConfigOption, (ctx) => getAgent().setSessionConfigOptionV2(ctx.params));
+        .onRequest(acpV2.methods.agent.session.setConfigOption, (ctx) => getAgent().setSessionConfigOptionV2(ctx.params))
+        // The v1-only `authentication/status|logout` extensions are not registered on v2.
+        .onRequest(acpV2.methods.agent.auth.login, (ctx) => getAgent().authenticateV2(ctx.params, ctx.requestId))
+        .onRequest(acpV2.methods.agent.auth.logout, (ctx) => getAgent().logoutV2(ctx.params));
 
     return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(v2Agent);
 }

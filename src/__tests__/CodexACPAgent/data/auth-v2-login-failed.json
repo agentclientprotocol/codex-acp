@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": -32602,
+    "message": "Invalid params"
+  },
+  "codexRequests": [
+    {
+      "method": "account/login/start",
+      "params": {
+        "type": "apiKey",
+        "apiKey": "sk-test"
+      }
+    }
+  ]
+}

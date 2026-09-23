@@ -1140,6 +1140,20 @@ export class CodexAcpServer {
         logger.log("Logout request completed");
     }
 
+    /** v2 `auth/login`: same params as v1 `authenticate`, only the method name changed. */
+    async authenticateV2(
+        params: acpV2.LoginAuthRequest,
+        requestId?: acpV2.JsonRpcId,
+    ): Promise<acpV2.LoginAuthResponse> {
+        return await this.authenticate(params, requestId);
+    }
+
+    /** v2 `auth/logout`: same params as v1 `logout`, only the method name changed. */
+    async logoutV2(params: acpV2.LogoutAuthRequest): Promise<acpV2.LogoutAuthResponse> {
+        await this.logout(params);
+        return {};
+    }
+
     listProviders(_params: acp.ListProvidersRequest): acp.ListProvidersResponse {
         return { providers: this.codexAcpClient.listProviders() };
     }
