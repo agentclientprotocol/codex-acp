@@ -4,6 +4,12 @@ import type {AcpSessionUpdate} from "./AcpSessionExtensions";
 import {toV2ConfigOptions} from "./AcpV2ConfigOptions";
 
 /**
+ * `planId` of the structured (tool-driven) plan on v2. A session has at most one such plan and
+ * every update replaces it, so a constant id is stable for the whole session.
+ */
+export const STRUCTURED_PLAN_ID = "codex-structured-plan";
+
+/**
  * Renders an internal (v1-shaped) session update in the ACP v2 wire shape.
  *
  * The v2 SDK sends `session/update` params as-is, without validation, so a variant with no v2
@@ -22,6 +28,23 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
             return update;
         case "config_option_update":
             return {...update, configOptions: toV2ConfigOptions(update.configOptions)};
+        case "plan": {
+            const {entries, _meta} = update;
+            return {
+                sessionUpdate: "plan_update",
+                plan: {type: "items", planId: STRUCTURED_PLAN_ID, entries},
+                ...(_meta != null ? {_meta} : {}),
+            };
+        }
+        // v2 command input is a tagged union; v1 input is the untagged text form.
+        case "available_commands_update":
+            return {
+                ...update,
+                availableCommands: update.availableCommands.map((command) => ({
+                    ...command,
+                    ...(command.input != null ? {input: {...command.input, type: "text" as const}} : {}),
+                })),
+            };
         // v2 removed the modes API. codex-acp never emits this (mode changes go out as
         // `config_option_update`), so there is no v2 rendering to give it.
         case "current_mode_update":
@@ -36,10 +59,7 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         // Topic 6: v2 merges `tool_call` into `tool_call_update` and reshapes diff/terminal content.
         case "tool_call":
         case "tool_call_update":
-        // Topic 9: v2 wraps plans in `plan_update`.
-        case "plan":
-        // Pending research: v2 command input carries a `type` tag; extension updates have no v2 shape yet.
-        case "available_commands_update":
+        // Extension updates have no v2 shape yet.
         case "subagent_spawned":
         case "subagent_state_update":
         case "async_task_spawned":

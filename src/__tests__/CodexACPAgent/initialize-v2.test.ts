@@ -10,6 +10,9 @@ import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
 import {clientSupportsFormElicitation, clientSupportsUrlElicitation} from '../../ElicitationCapabilities';
+import {clientSupportsPlanUpdates} from '../../PlanCapabilities';
+import {clientSupportsCompaction} from '../../CodexSessionCompactions';
+import {clientSupportsNotices} from '../../SessionNotice';
 import {createMockConnections} from './test-utils';
 
 const v2ClientCapabilities: acpV2.ClientCapabilities = {
@@ -132,10 +135,12 @@ describe('ACP v2 client capability normalization', () => {
         expect(clientSupportsAirCapability(view, AIR_NATIVE_SUBAGENT_SESSIONS_KEY)).toBe(true);
     });
 
-    it('reports nothing supported when the v2 client sends no capabilities', () => {
+    it('reports only the capability-free v2 features when the v2 client sends no capabilities', () => {
         const view = toV1ClientCapabilitiesView(undefined);
 
-        expect(view).toBeNull();
+        expect(clientSupportsPlanUpdates(view)).toBe(true);
+        expect(clientSupportsCompaction(view)).toBe(true);
+        expect(clientSupportsNotices(view)).toBe(true);
         expect(clientSupportsFormElicitation(view)).toBe(false);
         expect(clientSupportsUrlElicitation(view)).toBe(false);
         expect(clientSupportsAirCapability(view, AIR_NATIVE_SUBAGENT_SESSIONS_KEY)).toBe(false);

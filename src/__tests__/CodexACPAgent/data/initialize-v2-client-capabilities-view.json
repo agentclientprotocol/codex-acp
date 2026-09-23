@@ -1,4 +1,9 @@
 {
+  "plan": {},
+  "session": {
+    "compaction": {},
+    "notices": {}
+  },
   "elicitation": {
     "form": {},
     "url": {}
