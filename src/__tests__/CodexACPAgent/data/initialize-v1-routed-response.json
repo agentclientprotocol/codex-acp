@@ -1,0 +1,91 @@
+{
+  "protocolVersion": 1,
+  "agentInfo": {
+    "name": "@agentclientprotocol/codex-acp",
+    "title": "Codex",
+    "version": "<version>"
+  },
+  "agentCapabilities": {
+    "auth": {
+      "logout": {}
+    },
+    "providers": {},
+    "loadSession": true,
+    "promptCapabilities": {
+      "embeddedContext": true,
+      "image": true
+    },
+    "sessionCapabilities": {
+      "resume": {},
+      "list": {},
+      "close": {},
+      "delete": {},
+      "fork": {},
+      "additionalDirectories": {},
+      "subagents": {}
+    },
+    "mcpCapabilities": {
+      "acp": false,
+      "http": true,
+      "sse": false
+    },
+    "_meta": {
+      "authStatus": {}
+    }
+  },
+  "authMethods": [
+    {
+      "id": "api-key",
+      "name": "API Key",
+      "description": "Use an API key to authenticate",
+      "_meta": {
+        "api-key": {
+          "provider": "openai"
+        }
+      }
+    },
+    {
+      "id": "chat-gpt",
+      "name": "ChatGPT",
+      "description": "Use ChatGPT to authenticate"
+    },
+    {
+      "id": "gateway",
+      "name": "Custom model gateway",
+      "description": "Use a custom gateway to authenticate and access models",
+      "_meta": {
+        "gateway": {
+          "protocol": "openai",
+          "restartRequired": "false"
+        }
+      }
+    }
+  ],
+  "_meta": {
+    "steering": {
+      "supported": true
+    },
+    "goal": {
+      "version": 1,
+      "controlMethod": "_session/goal",
+      "actions": [
+        "set",
+        "pause",
+        "resume",
+        "clear"
+      ]
+    },
+    "jetbrains": {
+      "air": {
+        "version": 1,
+        "capabilities": [
+          "sessionFailure",
+          "agentFileChangeReport",
+          "nativeSubagentSessions",
+          "asyncTasks",
+          "recommendedValue"
+        ]
+      }
+    }
+  }
+}

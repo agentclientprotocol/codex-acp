@@ -9,7 +9,7 @@ import {
     planImplementationToolCallId,
 } from "./permissions/plan-review";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
-import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./CodexAuthMethod";
+import {type CodexAuthRequest, getCodexAuthMethods, getCodexAuthMethodsV2, isCodexAuthRequest} from "./CodexAuthMethod";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 import {
     CodexAcpClient,
@@ -22,7 +22,15 @@ import {
 import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClient";
 import {isNoActiveTurnError} from "./CodexThreadErrors";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
-import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
+import {
+    type AcpClientConnection,
+    ACPSessionConnection,
+    type AcpV2ClientConnection,
+    AcpV2Connection,
+    type UpdateSessionEvent,
+} from "./ACPSessionConnection";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import {toV1ClientCapabilitiesView} from "./AcpV2ClientCapabilities";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
 import type {
     Account,
@@ -283,6 +291,10 @@ export interface CodexProcessState {
 export class CodexAcpServer {
     private codexAcpClient: CodexAcpClient;
     private readonly connection: AcpClientConnection;
+    /** ACP protocol version of the connection this agent serves, fixed by the protocol router. */
+    readonly protocolVersion: 1 | 2;
+    /** The v2 client handle; `null` on a v1 connection. */
+    private readonly v2Connection: AcpV2ClientConnection | null;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
     private readonly getRecentStderr: () => string;
@@ -308,11 +320,11 @@ export class CodexAcpServer {
     private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
     private readonly codexProcessState: CodexProcessState | null;
     private codexProcessGeneration = 0;
-    private initializeRequest: acp.InitializeRequest | null = null;
+    private initializeRequest: Pick<acp.InitializeRequest, "clientInfo"> | null = null;
     private providerUpdate: Promise<void> | null = null;
 
     constructor(
-        connection: AcpClientConnection,
+        connection: AcpClientConnection | AcpV2Connection,
         codexAcpClient: CodexAcpClient,
         defaultAuthRequest?: CodexAuthRequest,
         getExitCode?: () => number | null,
@@ -329,7 +341,15 @@ export class CodexAcpServer {
         this.sessionOpenGenerations = new Map();
         this.goalControlGenerations = new Map();
         this.permissionLifecycleContexts = new WeakMap();
-        this.connection = connection;
+        if (connection instanceof AcpV2Connection) {
+            this.protocolVersion = 2;
+            this.v2Connection = connection.client;
+            this.connection = connection.extensionOnlyV1View();
+        } else {
+            this.protocolVersion = 1;
+            this.v2Connection = null;
+            this.connection = connection;
+        }
         this.codexAcpClient = codexAcpClient;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.codexProcessState = codexProcessState ?? null;
@@ -407,26 +427,77 @@ export class CodexAcpServer {
                 },
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
-            _meta: {
-                steering: {
-                    supported: true,
-                },
-                goal: {
-                    version: GOAL_EXTENSION_VERSION,
-                    controlMethod: GOAL_CONTROL_METHOD,
-                    actions: [...GOAL_CONTROL_ACTIONS],
-                },
-                [JETBRAINS_META_KEY]: {
-                    [AIR_META_KEY]: {
-                        [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
-                        [AIR_EXTENSION_CAPABILITIES_KEY]: [
-                            AIR_SESSION_FAILURE_KEY,
-                            AIR_AGENT_FILE_CHANGE_REPORT_KEY,
-                            AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
-                            AIR_ASYNC_TASKS_KEY,
-                            AIR_RECOMMENDED_CONFIG_VALUE_KEY,
-                        ],
+            _meta: this.initializeExtensionsMeta(),
+        };
+    }
+
+    async initializeV2(
+        params: acpV2.InitializeRequest,
+    ): Promise<acpV2.InitializeResponse> {
+        logger.log("Initialize request received", {protocolVersion: params.protocolVersion});
+        // Existing capability readers take the v1 shape; v2 fields they read keep their relative path.
+        const clientCapabilities = toV1ClientCapabilitiesView(params.capabilities);
+        this.clientInfo = params.info;
+        this.clientCapabilities = clientCapabilities;
+        this.initializeRequest = {clientInfo: params.info};
+        // Boolean config options are baseline on v2, so there is nothing to probe.
+        this.booleanConfigOptionsSupported = true;
+        await this.runWithProcessCheck(() => this.codexAcpClient.initialize({clientInfo: params.info}));
+        this.publishFirstAuthStatusAfterResponse();
+        return {
+            protocolVersion: 2,
+            info: {
+                name: packageJson.name,
+                title: "Codex",
+                version: packageJson.version,
+            },
+            capabilities: {
+                auth: {
+                    _meta: {
+                        // Presence means "this agent pushes `_auth/status_update`".
+                        [AUTH_STATUS_META_KEY]: authStatusCapability(),
                     },
+                },
+                providers: {},
+                session: {
+                    prompt: {
+                        embeddedContext: {},
+                        image: {},
+                    },
+                    mcp: {
+                        stdio: {},
+                        http: {},
+                    },
+                    delete: {},
+                    additionalDirectories: {},
+                    fork: {},
+                },
+            },
+            authMethods: getCodexAuthMethodsV2(clientCapabilities),
+            _meta: this.initializeExtensionsMeta(),
+        };
+    }
+
+    private initializeExtensionsMeta(): Record<string, unknown> {
+        return {
+            steering: {
+                supported: true,
+            },
+            goal: {
+                version: GOAL_EXTENSION_VERSION,
+                controlMethod: GOAL_CONTROL_METHOD,
+                actions: [...GOAL_CONTROL_ACTIONS],
+            },
+            [JETBRAINS_META_KEY]: {
+                [AIR_META_KEY]: {
+                    [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
+                    [AIR_EXTENSION_CAPABILITIES_KEY]: [
+                        AIR_SESSION_FAILURE_KEY,
+                        AIR_AGENT_FILE_CHANGE_REPORT_KEY,
+                        AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
+                        AIR_ASYNC_TASKS_KEY,
+                        AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+                    ],
                 },
             },
         };

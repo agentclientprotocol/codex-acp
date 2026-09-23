@@ -150,7 +150,7 @@ export class CodexAcpClient {
         name: `${packageJson.name}`, title: "Codex ACP", version: `${packageJson.version}`
     };
 
-    async initialize(request: acp.InitializeRequest): Promise<void> {
+    async initialize(request: Pick<acp.InitializeRequest, "clientInfo">): Promise<void> {
         const response = await this.codexClient.initialize({
             capabilities: {
                 experimentalApi: true,
