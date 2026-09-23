@@ -173,6 +173,8 @@ describe("session notices", () => {
             approvalsReviewer: "user",
             sandbox: {type: "dangerFullAccess"},
             reasoningEffort: model.defaultReasoningEffort,
+            disabledPluginIds: [],
+            collaborationMode: null,
             turnsBackwardsCursor: null,
             itemsBackwardsCursor: null,
         });

@@ -450,6 +450,7 @@ export function createTestModel(overrides?: Partial<Model>): Model {
         availabilityNux: null,
         modelSpecialty: null,
         multiAgentVersion: null,
+        availableAccessPrograms: null,
         displayName: id,
         description: `${id} model`,
         hidden: false,

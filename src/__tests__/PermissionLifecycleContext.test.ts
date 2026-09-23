@@ -27,6 +27,7 @@ function mcpStarted(id: string, turnId: string, threadId = "thread"): ServerNoti
                 status: "inProgress",
                 arguments: {},
                 appContext: null,
+                mcpAppUi: null,
                 readOnlyHint: null,
                 pluginId: null,
                 result: null,

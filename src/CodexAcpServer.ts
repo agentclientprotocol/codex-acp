@@ -2373,15 +2373,24 @@ export class CodexAcpServer {
             case "text":
                 return input.text.length > 0 ? [{ type: "text", text: input.text }] : [];
             case "image":
-                return [{ type: "text", text: this.formatUriAsLink("image", input.url) }];
+                return [{
+                    type: "text",
+                    text: "url" in input
+                        ? this.formatUriAsLink("image", input.url)
+                        : `image:${input.fileId}`,
+                }];
             case "localImage": {
                 const uri = input.path.startsWith("file://") ? input.path : `file://${input.path}`;
                 return [{ type: "text", text: this.formatUriAsLink(null, uri) }];
             }
             case "skill":
                 return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
+            case "audio":
+            case "localAudio":
+            case "mention":
+                // These inputs are not currently represented in ACP history replay.
+                return [];
         }
-        return [];
     }
 
     private formatUriAsLink(name: string | null, uri: string): string {
