@@ -827,9 +827,10 @@ export class CodexAcpServer {
             modelState,
             modeState,
             thread,
+            history,
         } = await this.getOrCreateSessionWithHistory(params);
 
-        await this.streamThreadHistory(sessionId, thread);
+        await this.streamThreadHistory(sessionId, thread, history);
         await this.getSessionState(sessionId).asyncTasks.reconcile();
         // A load response means "the replay is complete"; a late rename echo
         // from a still-running title generation would arrive after it.
@@ -1923,6 +1924,7 @@ export class CodexAcpServer {
         modelState: LegacySessionModelState;
         modeState: SessionModeState;
         thread: Thread;
+        history: AsyncIterable<ThreadItem[]>;
     }> {
         const requestedSessionGeneration = this.beginSessionOpen(request.sessionId);
         await this.checkAuthorization();
@@ -2029,25 +2031,35 @@ export class CodexAcpServer {
             modelState: sessionModelState,
             modeState: sessionModeState,
             thread: thread,
+            history: sessionMetadata.history,
         };
     }
 
-    private async streamThreadHistory(sessionId: string, thread: Thread): Promise<void> {
+    /**
+     * Sends the history of a loaded session one page of items at a time. The
+     * adapter keeps only the current page, not the whole history.
+     */
+    private async streamThreadHistory(sessionId: string, thread: Thread, history: AsyncIterable<ThreadItem[]>): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
         const sessionState = this.getSessionState(sessionId);
-        await this.publishThreadHistoryTitle(session, sessionState, thread);
+        const pages = history[Symbol.asyncIterator]();
+        const first = await pages.next();
+        const firstPage = first.done ? [] : first.value;
+        // The first user message of the first page names the session.
+        await this.publishThreadHistoryTitle(session, sessionState, thread, firstPage);
+        const itemPages = pagesStartingWith(firstPage, pages);
         if (clientSupportsSubagents(this.clientCapabilities)) {
             await this.streamNativeThreadHistory(
                 sessionId,
-                thread,
+                itemPages,
                 sessionState,
                 new Set([sessionId]),
-                new Map([[sessionId, thread]]),
+                new Set(),
             );
             return;
         }
-        for (const turn of thread.turns) {
-            for (const item of turn.items) {
+        for await (const items of itemPages) {
+            for (const item of items) {
                 for (const update of await this.createHistoryUpdates(item, sessionState)) {
                     await session.update(update);
                 }
@@ -2057,15 +2069,15 @@ export class CodexAcpServer {
 
     private async streamNativeThreadHistory(
         sessionId: string,
-        thread: Thread,
+        itemPages: AsyncIterable<ThreadItem[]>,
         sessionState: SessionState,
         ancestry: Set<string>,
-        threadCache: Map<string, Thread | null>,
+        unreadableChildren: Set<string>,
     ): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
         const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean}>();
-        for (const turn of thread.turns) {
-            for (const item of turn.items) {
+        for await (const items of itemPages) {
+            for (const item of items) {
                 if (item.type === "subAgentActivity") {
                     const activityKind = item.kind as string;
                     if (activityKind === "started") {
@@ -2084,33 +2096,31 @@ export class CodexAcpServer {
                             capabilities: {},
                         });
                         announced.set(item.agentThreadId, {generation, sessionId: childSessionId, terminal: false});
-                        if (!ancestry.has(item.agentThreadId)) {
-                            let child = threadCache.get(item.agentThreadId);
-                            if (child === undefined) {
-                                try {
-                                    child = await this.codexAcpClient.readSessionThread(item.agentThreadId);
-                                    threadCache.set(item.agentThreadId, child);
-                                }
-                                catch (error) {
-                                    threadCache.set(item.agentThreadId, null);
-                                    logger.error(`Failed to read subagent history ${item.agentThreadId}`, error);
-                                    child = null;
-                                }
+                        if (!ancestry.has(item.agentThreadId) && !unreadableChildren.has(item.agentThreadId)) {
+                            // Each generation of a child is one turn of the child thread. The
+                            // adapter reads only the items of that turn, one page at a time.
+                            let childItems: AsyncIterable<ThreadItem[]> | null = null;
+                            try {
+                                childItems = await this.codexAcpClient.readSessionTurnItems(item.agentThreadId, generation - 1);
                             }
-                            const childTurn = child?.turns[generation - 1];
-                            if (child && childTurn) {
+                            catch (error) {
+                                unreadableChildren.add(item.agentThreadId);
+                                logger.error(`Failed to read subagent history ${item.agentThreadId}`, error);
+                            }
+                            if (childItems) {
+                                const commandIds = new Set<string>();
                                 await this.streamNativeThreadHistory(
                                     childSessionId,
-                                    {...child, turns: [childTurn]},
+                                    withCommandIds(childItems, commandIds),
                                     sessionState,
                                     new Set([...ancestry, item.agentThreadId]),
-                                    threadCache,
+                                    unreadableChildren,
                                 );
                                 try {
                                     await sessionState.asyncTasks.recover(
                                         item.agentThreadId,
                                         childSessionId,
-                                        commandItemIds(childTurn.items),
+                                        commandIds,
                                     );
                                 } catch (error) {
                                     logger.error(`Failed to restore background terminals for ${item.agentThreadId}`, error);
@@ -2166,6 +2176,7 @@ export class CodexAcpServer {
         session: ACPSessionConnection,
         sessionState: SessionState,
         thread: Thread,
+        firstItems: ThreadItem[],
     ): Promise<void> {
         const explicitTitle = this.normalizeSessionTitle(thread.name);
         if (explicitTitle) {
@@ -2179,21 +2190,19 @@ export class CodexAcpServer {
             return;
         }
 
-        const historyTitle = this.findFirstUserMessageTitle(thread)
+        const historyTitle = this.findFirstUserMessageTitle(firstItems)
             ?? this.normalizeSessionTitle(thread.preview);
         await this.publishFallbackSessionTitle(sessionState, historyTitle);
     }
 
-    private findFirstUserMessageTitle(thread: Thread): string | null {
-        for (const turn of thread.turns) {
-            for (const item of turn.items) {
-                if (item.type !== "userMessage") continue;
-                const title = this.normalizeSessionTitle(item.content
-                    .filter((input): input is Extract<UserInput, {type: "text"}> => input.type === "text")
-                    .map(input => input.text)
-                    .join(" "));
-                if (title) return title;
-            }
+    private findFirstUserMessageTitle(items: ThreadItem[]): string | null {
+        for (const item of items) {
+            if (item.type !== "userMessage") continue;
+            const title = this.normalizeSessionTitle(item.content
+                .filter((input): input is Extract<UserInput, {type: "text"}> => input.type === "text")
+                .map(input => input.text)
+                .join(" "));
+            if (title) return title;
         }
         return null;
     }
@@ -3396,12 +3405,27 @@ export class CodexAcpServer {
     }
 }
 
-function commandItemIds(items: ThreadItem[]): Set<string> {
-    return new Set(items
-        .filter((item): item is Extract<ThreadItem, {type: "commandExecution"}> => item.type === "commandExecution")
-        .map(item => item.id));
-}
-
 function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
     return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(server.name))));
+}
+
+/** The page `first`, then the pages of `rest`. */
+async function* pagesStartingWith<T>(first: T[], rest: AsyncIterator<T[]>): AsyncGenerator<T[]> {
+    if (first.length > 0) yield first;
+    for (let page = await rest.next(); !page.done; page = await rest.next()) {
+        yield page.value;
+    }
+}
+
+/** The pages of `pages`. Adds the id of each command item to `commandIds`. */
+async function* withCommandIds(
+    pages: AsyncIterable<ThreadItem[]>,
+    commandIds: Set<string>,
+): AsyncGenerator<ThreadItem[]> {
+    for await (const items of pages) {
+        for (const item of items) {
+            if (item.type === "commandExecution") commandIds.add(item.id);
+        }
+        yield items;
+    }
 }

@@ -58,6 +58,10 @@ import type {
     ThreadReadResponse,
     ThreadTurnsListParams,
     ThreadTurnsListResponse,
+    ThreadItem,
+    ThreadItemsListParams,
+    ThreadItemsListResponse,
+    Turn,
     ThreadResumeParams,
     ThreadResumeResponse,
     ThreadSettings,
@@ -151,6 +155,12 @@ const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
  * A type-safe client over the Codex App Server's JSON-RPC API.
  * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
  */
+/** The number of turns in one page of a full history read. */
+const HISTORY_PAGE_TURNS = 5;
+
+/** The number of items in one page of a history replay. */
+const HISTORY_PAGE_ITEMS = 100;
+
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
@@ -620,31 +630,50 @@ export class CodexAppServerClient {
         return await this.sendRequest({method: "thread/turns/list", params});
     }
 
-    async threadReadWithHistory(threadId: string): Promise<ThreadReadResponse> {
-        const response = await this.threadRead({threadId});
-        // Legacy stores reconstruct the rollout on each read; paging would repeat
-        // that work. Full-history reads are only deprecated for paginated threads.
-        if (response.thread.historyMode === "legacy") {
-            return await this.threadRead({threadId, includeTurns: true});
-        }
-        const turns = await this.threadReadHistory(threadId);
-        return {...response, thread: {...response.thread, turns}};
+    async threadItemsList(params: ThreadItemsListParams): Promise<ThreadItemsListResponse> {
+        return await this.sendRequest({method: "thread/items/list", params});
     }
 
-    async threadReadHistory(threadId: string, initialCursor: string | null = null): Promise<ThreadReadResponse["thread"]["turns"]> {
-        const turns: ThreadReadResponse["thread"]["turns"] = [];
+    /**
+     * The items of a thread, or of one turn, oldest first, in pages.
+     *
+     * A caller can send each page and drop it, so the history is never in
+     * memory at once, even for a turn with thousands of items. The pages end
+     * at the item of `lastItemCursor`, an `itemsBackwardsCursor` of
+     * thread/resume. Without it, they end at the newest item when the read
+     * starts, so an item that arrives during the read is not in the pages.
+     */
+    async *threadItemPages(
+        threadId: string,
+        options: {lastItemCursor?: string | null; turnId?: string} = {},
+    ): AsyncGenerator<ThreadItem[]> {
+        const turnId = options.turnId ?? null;
+        const last = await this.threadItemsList({
+            threadId,
+            turnId,
+            cursor: options.lastItemCursor ?? null,
+            limit: 1,
+            sortDirection: "desc",
+        });
+        const lastItemId = last.data[0]?.item.id;
+        if (lastItemId === undefined) return;
         const seenCursors = new Set<string>();
-        if (initialCursor !== null) seenCursors.add(initialCursor);
-        let cursor: string | null = initialCursor;
+        let cursor: string | null = null;
         do {
-            const page = await this.threadTurnsList({
+            const page = await this.threadItemsList({
                 threadId,
+                turnId,
                 cursor,
-                limit: 50,
-                sortDirection: "desc",
-                itemsView: "full",
+                limit: HISTORY_PAGE_ITEMS,
+                sortDirection: "asc",
             });
-            turns.push(...page.data);
+            const items = page.data.map(entry => entry.item);
+            const lastIndex = items.findIndex(item => item.id === lastItemId);
+            if (lastIndex >= 0) {
+                yield items.slice(0, lastIndex + 1);
+                return;
+            }
+            yield items;
             cursor = page.nextCursor;
             if (cursor !== null) {
                 if (seenCursors.has(cursor)) {
@@ -653,8 +682,61 @@ export class CodexAppServerClient {
                 seenCursors.add(cursor);
             }
         } while (cursor !== null);
-        // Only reverse turns: items within each full turn are already chronological.
-        return turns.reverse();
+    }
+
+    async threadReadWithHistory(threadId: string): Promise<ThreadReadResponse> {
+        const response = await this.threadRead({threadId});
+        // Legacy stores reconstruct the rollout on each read; paging would repeat
+        // that work. Full-history reads are only deprecated for paginated threads.
+        if (response.thread.historyMode === "legacy") {
+            return await this.threadRead({threadId, includeTurns: true});
+        }
+        const turns: Turn[] = [];
+        for await (const page of this.threadHistoryPages(threadId)) {
+            turns.push(...page);
+        }
+        return {...response, thread: {...response.thread, turns}};
+    }
+
+    /**
+     * The turns of a thread, oldest first, in pages of full turns. The pages
+     * end at the newest turn when the read starts, so a turn that arrives
+     * during the read is not in the pages.
+     */
+    private async *threadHistoryPages(threadId: string): AsyncGenerator<Turn[]> {
+        const last = await this.threadTurnsList({
+            threadId,
+            cursor: null,
+            limit: 1,
+            sortDirection: "desc",
+            itemsView: "notLoaded",
+        });
+        const lastTurnId = last.data[0]?.id;
+        if (lastTurnId === undefined) return;
+        const seenCursors = new Set<string>();
+        let cursor: string | null = null;
+        do {
+            const page = await this.threadTurnsList({
+                threadId,
+                cursor,
+                limit: HISTORY_PAGE_TURNS,
+                sortDirection: "asc",
+                itemsView: "full",
+            });
+            const lastIndex = page.data.findIndex(turn => turn.id === lastTurnId);
+            if (lastIndex >= 0) {
+                yield page.data.slice(0, lastIndex + 1);
+                return;
+            }
+            yield page.data;
+            cursor = page.nextCursor;
+            if (cursor !== null) {
+                if (seenCursors.has(cursor)) {
+                    throw new Error("Codex returned a repeated thread history cursor");
+                }
+                seenCursors.add(cursor);
+            }
+        } while (cursor !== null);
     }
 
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {

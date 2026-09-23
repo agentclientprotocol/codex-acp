@@ -543,7 +543,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             serviceTier: null,
         } as any);
         const threadReadSpy = vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
-            thread: {id: "thread-id"} as any,
+            thread: {id: "thread-id", turns: []} as any,
         });
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
             data: [createTestModel({id: "gpt-5"})],
@@ -675,12 +675,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             thread: {id: "source-id", turns: []},
         } as any);
         vi.spyOn(codexAppServerClient, "threadTurnsList")
+            .mockResolvedValueOnce({data: [{id: "turn-2", items: []}], nextCursor: null, backwardsCursor: null} as any)
             .mockResolvedValueOnce({
-                data: [{id: "turn-2", items: [{type: "agentMessage", id: "new-item-2", text: "Same answer"}]}],
-                nextCursor: "second-page", backwardsCursor: null,
-            } as any)
-            .mockResolvedValueOnce({
-                data: [{id: "turn-1", items: [{type: "agentMessage", id: "new-item-1", text: "Same answer"}]}],
+                data: [
+                    {id: "turn-1", items: [{type: "agentMessage", id: "new-item-1", text: "Same answer"}]},
+                    {id: "turn-2", items: [{type: "agentMessage", id: "new-item-2", text: "Same answer"}]},
+                ],
                 nextCursor: null, backwardsCursor: null,
             } as any);
         const threadForkSpy = vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue({
@@ -789,7 +789,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             serviceTier: null,
         } as any);
         vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
-            thread: {id: "thread-id"} as any,
+            thread: {id: "thread-id", turns: []} as any,
         });
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
             data: [createTestModel({id: "gpt-5"})],

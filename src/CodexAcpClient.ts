@@ -48,6 +48,7 @@ import type {
     ThreadGoalStatus,
     ThreadResumeParams,
     ThreadSourceKind,
+    ThreadItem,
     TurnCompletedNotification,
     TurnSteerResponse,
     UserInput,
@@ -73,7 +74,7 @@ type ResumedThread = {
     modelProvider: string;
     reasoningEffort: ReasoningEffort | null;
     serviceTier: string | null;
-    turnsBackwardsCursor: string | null;
+    itemsBackwardsCursor: string | null;
     materialized: boolean;
 };
 
@@ -553,7 +554,7 @@ export class CodexAcpClient {
                 modelProvider: response.modelProvider,
                 reasoningEffort: response.reasoningEffort,
                 serviceTier: response.serviceTier,
-                turnsBackwardsCursor: response.turnsBackwardsCursor,
+                itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
                 materialized: true,
             };
         } catch (err) {
@@ -576,7 +577,7 @@ export class CodexAcpClient {
                 // An unmaterialized thread has no persisted history to hydrate:
                 // `thread/turns/list` rejects it outright ("not materialized
                 // yet"), and there is nothing to list either way.
-                turnsBackwardsCursor: null,
+                itemsBackwardsCursor: null,
                 materialized: false,
             };
         }
@@ -636,16 +637,18 @@ export class CodexAcpClient {
         onSubscribed?.();
         // Resume cursors bound durable history; later turns arrive through live events.
         // A null paginated cursor means there was no durable history at resume time.
-        const thread = !response.materialized
-            ? {...response.thread, turns: []}
-            : response.thread.historyMode === "paginated"
-            ? {
-                ...response.thread,
-                turns: response.turnsBackwardsCursor === null
-                    ? []
-                    : await this.codexClient.threadReadHistory(response.thread.id, response.turnsBackwardsCursor),
+        let thread: Thread = {...response.thread, turns: []};
+        let history: AsyncIterable<ThreadItem[]> = noItems();
+        if (response.materialized && response.thread.historyMode === "paginated") {
+            if (response.itemsBackwardsCursor !== null) {
+                history = this.codexClient.threadItemPages(response.thread.id, {lastItemCursor: response.itemsBackwardsCursor});
             }
-            : (await this.codexClient.threadReadWithHistory(response.thread.id)).thread;
+        } else if (response.materialized) {
+            // A legacy store reads the whole history in one request.
+            const legacy = (await this.codexClient.threadReadWithHistory(response.thread.id)).thread;
+            thread = {...legacy, turns: []};
+            history = oneItemPage(legacy.turns.flatMap(turn => turn.items));
+        }
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
@@ -656,12 +659,47 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             thread,
+            history,
             additionalDirectories,
         };
     }
 
     async readSessionThread(sessionId: string): Promise<Thread> {
         return (await this.codexClient.threadReadWithHistory(sessionId)).thread;
+    }
+
+    /**
+     * The items of the turn at `index` of a session, oldest first, in pages.
+     * Returns null when the session has fewer turns.
+     */
+    async readSessionTurnItems(sessionId: string, index: number): Promise<AsyncIterable<ThreadItem[]> | null> {
+        const metadata = await this.codexClient.threadRead({threadId: sessionId});
+        if (metadata.thread.historyMode === "legacy") {
+            const legacy = await this.codexClient.threadRead({threadId: sessionId, includeTurns: true});
+            const turn = legacy.thread.turns[index];
+            return turn ? oneItemPage(turn.items) : null;
+        }
+        const seenCursors = new Set<string>();
+        let first = 0;
+        let cursor: string | null = null;
+        do {
+            const page = await this.codexClient.threadTurnsList({
+                threadId: sessionId,
+                cursor,
+                limit: 50,
+                sortDirection: "asc",
+                itemsView: "notLoaded",
+            });
+            const turn = page.data[index - first];
+            if (turn) return this.codexClient.threadItemPages(sessionId, {turnId: turn.id});
+            first += page.data.length;
+            cursor = page.nextCursor;
+            if (cursor !== null) {
+                if (seenCursors.has(cursor)) throw new Error("Codex returned a repeated thread history cursor");
+                seenCursors.add(cursor);
+            }
+        } while (cursor !== null);
+        return null;
     }
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
@@ -1435,4 +1473,10 @@ function mergeGatewayConfig(config: JsonObject, gatewayConfig: GatewayConfig | n
     } else {
         return config;
     }
+}
+
+async function* noItems(): AsyncGenerator<ThreadItem[]> {}
+
+async function* oneItemPage(items: ThreadItem[]): AsyncGenerator<ThreadItem[]> {
+    if (items.length > 0) yield items;
 }

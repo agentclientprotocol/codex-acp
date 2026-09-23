@@ -144,9 +144,11 @@ describe("CodexACPAgent - loadSession", () => {
             sandbox: {type: "dangerFullAccess"},
             reasoningEffort: model.defaultReasoningEffort,
         });
-        appServer.threadReadWithHistory = vi.fn().mockImplementation((threadId) => {
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread: root});
+        // The adapter reads one turn of a child for each generation.
+        appServer.threadRead = vi.fn().mockImplementation(({threadId}) => {
             if (threadId === "orphan-history") return Promise.reject(new Error("missing child history"));
-            return Promise.resolve({thread: threadId === root.id ? root : child});
+            return Promise.resolve({thread: {...child, historyMode: "legacy"}});
         });
         appServer.threadBackgroundTerminalsList = vi.fn().mockImplementation(({threadId}) => Promise.resolve({
             data: threadId === "child-history"
