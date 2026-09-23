@@ -93,7 +93,9 @@ export function createAcpAgentRouter(
 
     const v2Agent = acpV2.agent({name: packageJson.name})
         .onConnect((connection) => attachAgent(createAgent(new AcpV2Connection(connection.client)), connection.signal))
-        .onRequest(acpV2.methods.agent.initialize, (ctx) => getAgent().initializeV2(ctx.params));
+        .onRequest(acpV2.methods.agent.initialize, (ctx) => getAgent().initializeV2(ctx.params))
+        // No `session/set_mode`: v2 removed the modes API; modes are config options.
+        .onRequest(acpV2.methods.agent.session.setConfigOption, (ctx) => getAgent().setSessionConfigOptionV2(ctx.params));
 
     return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(v2Agent);
 }

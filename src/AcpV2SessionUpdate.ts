@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
 import type {AcpSessionUpdate} from "./AcpSessionExtensions";
+import {toV2ConfigOptions} from "./AcpV2ConfigOptions";
 
 /**
  * Renders an internal (v1-shaped) session update in the ACP v2 wire shape.
@@ -19,6 +20,15 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         case "compaction_update":
         case "compaction_summary_chunk":
             return update;
+        case "config_option_update":
+            return {...update, configOptions: toV2ConfigOptions(update.configOptions)};
+        // v2 removed the modes API. codex-acp never emits this (mode changes go out as
+        // `config_option_update`), so there is no v2 rendering to give it.
+        case "current_mode_update":
+            throw acp.RequestError.internalError(
+                undefined,
+                "'current_mode_update' session update does not exist in ACP v2",
+            );
         // Topic 6: v2 message chunks require `messageId`.
         case "user_message_chunk":
         case "agent_message_chunk":
@@ -26,10 +36,8 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         // Topic 6: v2 merges `tool_call` into `tool_call_update` and reshapes diff/terminal content.
         case "tool_call":
         case "tool_call_update":
-        // Topic 9: v2 wraps plans in `plan_update`, removes modes, and renames `id` to `configId`.
+        // Topic 9: v2 wraps plans in `plan_update`.
         case "plan":
-        case "current_mode_update":
-        case "config_option_update":
         // Pending research: v2 command input carries a `type` tag; extension updates have no v2 shape yet.
         case "available_commands_update":
         case "subagent_spawned":

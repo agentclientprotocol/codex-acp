@@ -31,6 +31,7 @@ import {
 } from "./ACPSessionConnection";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
 import {toV1ClientCapabilitiesView} from "./AcpV2ClientCapabilities";
+import {toV1SetSessionConfigOptionRequest, toV2ConfigOptions} from "./AcpV2ConfigOptions";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
 import type {
     Account,
@@ -1442,6 +1443,13 @@ export class CodexAcpServer {
         };
     }
 
+    async setSessionConfigOptionV2(
+        params: acpV2.SetSessionConfigOptionRequest,
+    ): Promise<acpV2.SetSessionConfigOptionResponse> {
+        const response = await this.setSessionConfigOption(toV1SetSessionConfigOptionRequest(params));
+        return {configOptions: toV2ConfigOptions(response.configOptions)};
+    }
+
     private async applySessionConfigOption(sessionState: SessionState, params: acp.SetSessionConfigOptionRequest): Promise<void> {
         switch (params.configId) {
             case FAST_MODE_CONFIG_ID:
@@ -1876,6 +1884,14 @@ export class CodexAcpServer {
         return {
             configOptions: this.createSessionConfigOptions(sessionState),
         };
+    }
+
+    /** The v2 `configOptions` field for session responses (`session/new`, `session/resume`). */
+    private createSessionConfigOptionsResponseV2(sessionState: SessionState): {
+        configOptions?: Array<acpV2.SessionConfigOption>;
+    } {
+        const {configOptions} = this.createSessionConfigOptionsResponse(sessionState);
+        return configOptions ? {configOptions: toV2ConfigOptions(configOptions)} : {};
     }
 
     private isSessionConfigEnabled(): boolean {
