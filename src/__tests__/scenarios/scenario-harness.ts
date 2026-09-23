@@ -145,6 +145,8 @@ async function runInWorkspace(
 
     const initializeResponse = await agent.initialize({protocolVersion: 1, clientCapabilities: typeof profile === "string" ? PROFILES[profile] : profile});
     recorded.push({direction: "response", method: "initialize", params: initializeResponse});
+    // The adapter pushes the first auth status after the initialize response, from a later event loop phase.
+    await recordWhenSent(fixture, recorded, "_auth/status_update");
 
     const mcpServers: acp.McpServer[] = [
         ...(scenario.mcpStartup?.failed ?? []).map(failure => failure.server),
@@ -170,7 +172,8 @@ async function runInWorkspace(
         });
         return [...recorded, ...collect(fixture.getAcpConnectionEvents([]))];
     }
-    fixture.clearAcpConnectionDump();
+    // The adapter publishes the available commands after the session/new response.
+    await recordWhenSent(fixture, recorded, "available_commands_update");
 
     let resolveFirstTurn!: (value: TurnCompletion) => void;
     const firstTurn = new Promise<TurnCompletion>(resolve => {
@@ -227,7 +230,23 @@ async function runInWorkspace(
     return recorded;
 }
 
-const IGNORED_NOTIFICATIONS = new Set(["_auth/status_update"]);
+/**
+ * Waits until the adapter sends a message with this method or session update kind.
+ * Then records every message that the adapter sent, and clears the connection dump.
+ */
+async function recordWhenSent(
+    fixture: ReturnType<typeof createCodexMockTestFixture>,
+    recorded: RecordedMessage[],
+    methodOrUpdate: string,
+): Promise<void> {
+    await vi.waitFor(() => {
+        const sent = collect(fixture.getAcpConnectionEvents([])).some(message => message.method === methodOrUpdate
+            || (message.params as {update?: {sessionUpdate?: string}} | undefined)?.update?.sessionUpdate === methodOrUpdate);
+        if (!sent) throw new Error(`The adapter did not send ${methodOrUpdate}`);
+    });
+    recorded.push(...collect(fixture.getAcpConnectionEvents([])));
+    fixture.clearAcpConnectionDump();
+}
 
 function collect(events: MethodCallEvent[]): RecordedMessage[] {
     return events.flatMap((event): RecordedMessage[] => {
@@ -242,7 +261,6 @@ function collect(events: MethodCallEvent[]): RecordedMessage[] {
                 return [{direction: "notify", method: "elicitation/complete", params: event.args[0]}];
             case "notify":
             case "request":
-                if (IGNORED_NOTIFICATIONS.has(event.args[0])) return [];
                 return [{direction: event.method, method: String(event.args[0]), params: event.args[1]}];
             default:
                 return [{direction: "call", method: event.method, params: event.args}];
