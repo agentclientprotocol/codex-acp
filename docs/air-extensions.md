@@ -57,7 +57,7 @@ Only these differences are allowed:
   After a cancelled or failed permission request, the next update carries every field again.
   ACP defines no merge for `_meta` keys, so the `_meta` of each report keeps every key that the adapter sent before.
 - Bug fixes: a unique MCP startup tool call id, the result of a dynamic tool in `content`,
-  and no output after a tool call ended.
+  no output after a tool call ended, and a terminal status for a replayed image generation.
 - The client gets no AIR-only key.
   That is no `_meta.jetbrains.air` key and none of the earlier keys in [Removed keys](#removed-keys).
 
