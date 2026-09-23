@@ -94,6 +94,25 @@ describe("GitPatch", () => {
         expect(createUpdateGitPatch("/w/a", "/w/a", "preamble\n@@ -1 +1 @@\n-old\n+new\n")).toBeNull();
     });
 
+    it("accepts hunks in order with consistent start lines", () => {
+        const diff = "@@ -1,2 +1,3 @@\n a\n+b\n c\n@@ -10 +11 @@\n-x\n+y\n@@ -20,0 +22 @@\n+z\n@@ -30 +31,0 @@\n-w\n";
+        expect(createUpdateGitPatch("/w/a", "/w/a", diff)).toContain(diff);
+        expect(createUpdateGitPatch("/w/a", "/w/a", "@@ -0,0 +1 @@\n+only\n")).toContain("@@ -0,0 +1 @@\n+only\n");
+        expect(createUpdateGitPatch("/w/a", "/w/a", "@@ -1 +0,0 @@\n-only\n")).toContain("@@ -1 +0,0 @@\n-only\n");
+    });
+
+    it("builds no patch for hunks out of order, overlapping, or with wrong start lines", () => {
+        const update = (diff: string) => createUpdateGitPatch("/w/a", "/w/a", diff);
+        expect(update("@@ -1 +1 @@\n-old\n+new\n@@ -1 +1 @@\n-old\n+new\n")).toBeNull();
+        expect(update("@@ -5 +5 @@\n-old\n+new\n@@ -1 +1 @@\n-old\n+new\n")).toBeNull();
+        expect(update("@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n@@ -3 +3 @@\n-c\n+C\n")).toBeNull();
+        expect(update("@@ -1 +2 @@\n-old\n+new\n")).toBeNull();
+        expect(update("@@ -1 +1,2 @@\n-old\n+new\n+more\n@@ -5 +5 @@\n-x\n+y\n")).toBeNull();
+        expect(update("@@ -0 +0 @@\n-old\n+new\n")).toBeNull();
+        expect(update("@@ -99999999999999999999 +99999999999999999999 @@\n-old\n+new\n")).toBeNull();
+        expect(update("@@ -1,99999999999999999999 +1 @@\n-old\n+new\n")).toBeNull();
+    });
+
     it("accepts only the Git final newline marker after a hunk line", () => {
         expect(createUpdateGitPatch("/w/a", "/w/a", "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n"))
             .toContain("-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n");

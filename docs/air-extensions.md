@@ -380,6 +380,8 @@ The adapter uses the fallback in these cases:
 - The patch text is larger than 1 MiB (`DIFF_PATCH_MAX_BYTES`).
 - A pure rename has no hunk.
 - The update hunks from Codex are malformed. In a hunk, a line that starts with `\` is valid only as the exact `\ No newline at end of file` marker.
+  The hunks must follow each other in the old file without an overlap.
+  The new start line of each hunk must equal its old start line plus the line count change of the hunks before it.
 
 For an update, the fallback reads the file and applies the Codex hunks.
 When the adapter cannot parse or apply the hunks, it omits the block and logs the change.
