@@ -21,7 +21,6 @@ describe("CodexEventHandler - turn diff events", () => {
         const handler = new CodexEventHandler(
             connection,
             sessionState,
-            false,
             true,
             "test-epoch",
             undefined,

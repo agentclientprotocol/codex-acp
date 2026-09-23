@@ -4,9 +4,11 @@ import type { ContentBlock } from "@agentclientprotocol/sdk";
 import type { UpdateSessionEvent } from "./ACPSessionConnection";
 import { stripShellPrefix } from "./CommandUtils";
 import type { CommandAction, Thread, ThreadItem } from "./app-server/v2";
-import { createCommandActionEvent } from "./CodexToolCallMapper";
-import { createTerminalOutputMeta, type TerminalOutputMode } from "./TerminalOutputMode";
-import { createAgentMessageChunk, createCodexMessagePhaseMeta } from "./ContentChunks";
+import { AcpToolCallRenderer } from "./tool-calls/AcpToolCallRenderer";
+import type { ClientCapabilities } from "./tool-calls/ClientCapabilities";
+import { commandActionFacts } from "./tool-calls/reporters/CommandReporter";
+import type { ToolFacts } from "./tool-calls/ToolFacts";
+import { createAgentMessageChunk, createMessagePhaseMeta } from "./ContentChunks";
 import { functionToolName } from "./ToolCallName";
 
 type JsonRecord = Record<string, unknown>;
@@ -16,7 +18,7 @@ type AcpToolCallUpdateStatus = NonNullable<Extract<UpdateSessionEvent, {
     sessionUpdate: "tool_call_update"
 }>["status"]>;
 type LegacyFunctionCallUpdate = {
-    update: AcpToolCallEvent;
+    facts: ToolFacts;
     usesTerminal: boolean;
     isExecCommand: boolean;
 };
@@ -41,7 +43,7 @@ function historyFallbackUpdateKey(update: UpdateSessionEvent): string | null {
 
 export async function createResponseItemHistoryFallbackUpdates(
     thread: Thread,
-    terminalOutputMode: TerminalOutputMode,
+    capabilities: ClientCapabilities,
 ): Promise<UpdateSessionEvent[] | null> {
     if (!thread.path) {
         return null;
@@ -54,14 +56,19 @@ export async function createResponseItemHistoryFallbackUpdates(
         return null;
     }
 
-    return parseResponseItemHistoryFallback(contents, terminalOutputMode, toolCallIdsFromThread(thread));
+    return parseResponseItemHistoryFallback(
+        contents,
+        capabilities,
+        toolCallIdsFromThread(thread),
+    );
 }
 
 export function parseResponseItemHistoryFallback(
     contents: string,
-    terminalOutputMode: TerminalOutputMode,
+    capabilities: ClientCapabilities,
     existingToolCallIds: Set<string> = new Set(),
 ): UpdateSessionEvent[] | null {
+    const renderer = new AcpToolCallRenderer(capabilities);
     const updates: UpdateSessionEvent[] = [];
     const terminalToolCallIds = new Set<string>();
     const execToolCallIds = new Set<string>();
@@ -100,7 +107,7 @@ export function parseResponseItemHistoryFallback(
 
         switch (item["type"]) {
             case "message":
-                pushUpdates(createMessageUpdates(item));
+                pushUpdates(createMessageUpdates(item, capabilities.airClient));
                 break;
             case "reasoning":
                 pushUpdates(createReasoningUpdates(item));
@@ -119,14 +126,14 @@ export function parseResponseItemHistoryFallback(
                     break;
                 }
                 recoveredFunctionCall = true;
-                emittedToolCallIds.add(result.update.toolCallId);
+                emittedToolCallIds.add(result.facts.toolCallId);
                 if (result.usesTerminal) {
-                    terminalToolCallIds.add(result.update.toolCallId);
+                    terminalToolCallIds.add(result.facts.toolCallId);
                 }
                 if (result.isExecCommand) {
-                    execToolCallIds.add(result.update.toolCallId);
+                    execToolCallIds.add(result.facts.toolCallId);
                 }
-                pushUpdates([result.update]);
+                pushUpdates([renderer.render(result.facts)]);
                 break;
             }
             case "function_call_output": {
@@ -134,14 +141,9 @@ export function parseResponseItemHistoryFallback(
                 if (toolCallId && skippedToolCallIds.has(toolCallId)) {
                     break;
                 }
-                const update = createFunctionCallOutputUpdate(
-                    item,
-                    terminalOutputMode,
-                    terminalToolCallIds,
-                    execToolCallIds,
-                );
-                if (update) {
-                    pushUpdates([update]);
+                const facts = createFunctionCallOutputFacts(item, terminalToolCallIds, execToolCallIds);
+                if (facts) {
+                    pushUpdates([renderer.render(facts)]);
                 }
                 break;
             }
@@ -227,7 +229,7 @@ function isLegacyResponseItemType(type: string): boolean {
     }
 }
 
-function createMessageUpdates(item: JsonRecord): UpdateSessionEvent[] {
+function createMessageUpdates(item: JsonRecord, airClient: boolean): UpdateSessionEvent[] {
     const role = item["role"];
     if (role === "user") {
         // User response items can include bootstrap context; user_message events are the visible source.
@@ -239,7 +241,7 @@ function createMessageUpdates(item: JsonRecord): UpdateSessionEvent[] {
 
     const phase = stringValue(item["phase"]);
     return contentBlocksFromResponseContent(item["content"]).map((content) => (
-        createAgentMessageChunk(content, undefined, createCodexMessagePhaseMeta(phase))
+        createAgentMessageChunk(content, undefined, createMessagePhaseMeta(phase, airClient))
     ));
 }
 
@@ -378,8 +380,8 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
     const commandAction = command ? inferCommandAction(command, cwd) : null;
     if (commandAction) {
         return {
-            update: {
-                ...createCommandActionEvent(toolCallId, "inProgress", cwd, commandAction),
+            facts: {
+                ...commandActionFacts(toolCallId, "inProgress", cwd, commandAction),
                 name: toolName,
             },
             usesTerminal: false,
@@ -387,33 +389,25 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
         };
     }
 
-    const update: AcpToolCallEvent = {
-        sessionUpdate: "tool_call",
+    const usesTerminal = functionCallUsesTerminal(item);
+    const facts: ToolFacts = {
         toolCallId,
+        report: "start",
         name: toolName,
         kind: toolKindForFunctionCall(name),
         title: titleForFunctionCall(name, args),
         status: "in_progress",
-        rawInput: rawInputForFunctionCall(name, args),
+        input: rawInputForFunctionCall(name, args),
+        ...(usesTerminal ? { terminal: { cwd } } : {}),
     };
-
-    if (!functionCallUsesTerminal(item)) {
-        return { update, usesTerminal: false, isExecCommand };
-    }
-
-    return {
-        update: withTerminalContent(update, toolCallId, cwd),
-        usesTerminal: true,
-        isExecCommand,
-    };
+    return { facts, usesTerminal, isExecCommand };
 }
 
-function createFunctionCallOutputUpdate(
+function createFunctionCallOutputFacts(
     item: JsonRecord,
-    terminalOutputMode: TerminalOutputMode,
     terminalToolCallIds: Set<string>,
     execToolCallIds: Set<string>,
-): UpdateSessionEvent | null {
+): ToolFacts | null {
     const toolCallId = stringValue(item["call_id"]);
     if (!toolCallId) {
         return null;
@@ -422,36 +416,23 @@ function createFunctionCallOutputUpdate(
     const output = outputText(item["output"]);
     const exitCode = parseExitCode(item["output"], output);
     const status = statusFromExitCode(exitCode, output, execToolCallIds.has(toolCallId));
-    if (!terminalToolCallIds.has(toolCallId)) {
+    const facts: ToolFacts = { toolCallId, report: "update", status };
+    if (terminalToolCallIds.has(toolCallId)) {
         return {
-            sessionUpdate: "tool_call_update",
-            toolCallId,
-            status,
-            rawOutput: { output: item["output"] },
+            ...facts,
+            ...(output.length > 0 ? { terminalOutput: output } : {}),
+            terminalExit: { exitCode },
+            standard: { commandEnd: { output, exitCode, terminal: true, streamed: false, replay: true } },
         };
     }
-
-    const meta: Record<string, unknown> = {
-        terminal_exit: {
-            exit_code: exitCode,
-            signal: null,
-            terminal_id: toolCallId,
-        },
-    };
-    if (output.length > 0) {
-        Object.assign(meta, createTerminalOutputMeta(terminalOutputMode, toolCallId, output));
+    // For AIR, a read, search or list command shows its output as the result.
+    if (execToolCallIds.has(toolCallId)) {
+        const standard = { content: null, rawOutput: { output: item["output"] } };
+        return output.length > 0
+            ? { ...facts, result: [{ type: "content", content: { type: "text", text: output } }], standard }
+            : { ...facts, standard };
     }
-
-    return {
-        sessionUpdate: "tool_call_update",
-        toolCallId,
-        status,
-        rawOutput: {
-            formatted_output: output,
-            exit_code: exitCode,
-        },
-        _meta: meta,
-    };
+    return { ...facts, opaqueResult: { output: item["output"] } };
 }
 
 function parseFunctionArguments(value: unknown): unknown {
@@ -466,7 +447,7 @@ function parseFunctionArguments(value: unknown): unknown {
     }
 }
 
-function rawInputForFunctionCall(name: string, args: unknown): unknown {
+function rawInputForFunctionCall(name: string, args: unknown): Record<string, unknown> {
     if (name === "exec_command") {
         const record = asRecord(args);
         if (record) {
@@ -1028,25 +1009,6 @@ function absolutizePath(cwd: string, targetPath: string): string {
         return targetPath;
     }
     return path.join(cwd, targetPath);
-}
-
-function withTerminalContent(
-    event: AcpToolCallEvent,
-    terminalId: string,
-    cwd: string,
-): AcpToolCallEvent {
-    const { rawInput, ...eventWithoutRawInput } = event;
-    return {
-        ...eventWithoutRawInput,
-        content: [{ type: "terminal", terminalId }],
-        ...(rawInput === undefined ? {} : { rawInput }),
-        _meta: {
-            terminal_info: {
-                cwd,
-                terminal_id: terminalId,
-            },
-        },
-    };
 }
 
 function outputText(output: unknown): string {

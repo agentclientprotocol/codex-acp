@@ -20,6 +20,12 @@ export const AIR_ASYNC_TASKS_KEY = "asyncTasks";
 export const AIR_RECOMMENDED_CONFIG_VALUE_KEY = "recommendedValue";
 export const AIR_ASYNC_TASKS_BACKGROUNDED_KEY = "backgrounded";
 export const AIR_AGENT_FILE_CHANGE_REPORT_REQUEST_KEY = "agentFileChangeReportRequest";
+export const AIR_MESSAGE_PHASE_KEY = "phase";
+export const AIR_GOAL_KEY = "goal";
+export const AIR_KIND_KEY = "kind";
+export const AIR_COMMAND_ACTION_KEY = "commandAction";
+export const AIR_PERMISSION_KEY = "permission";
+export const AIR_CONTEXT_COMPACTION_KEY = "contextCompaction";
 export const AIR_EXTENSION_VERSION = 1;
 
 /** Merge one AIR payload into metadata while preserving other object namespaces. */
@@ -42,6 +48,25 @@ export function withAirMeta(
             },
         },
     };
+}
+
+/**
+ * The metadata of a key that exists only for AIR.
+ * AIR gets `_meta.jetbrains.air.<key>`. Every other client gets no metadata.
+ */
+export function airOnlyMeta(airClient: boolean, key: string, value: unknown): Record<string, unknown> | undefined {
+    return airClient ? withAirMeta(undefined, key, value) : undefined;
+}
+
+/**
+ * Tells whether the client is AIR.
+ * A client is AIR when `clientCapabilities._meta.jetbrains.air` is present.
+ */
+export function isAirClient(capabilities: ClientCapabilities | null | undefined): boolean {
+    const meta = asRecord(capabilities?._meta);
+    const jetbrains = asRecord(meta[JETBRAINS_META_KEY]);
+    const air = jetbrains[AIR_META_KEY];
+    return air !== null && typeof air === "object" && !Array.isArray(air);
 }
 
 export function clientSupportsAirCapability(

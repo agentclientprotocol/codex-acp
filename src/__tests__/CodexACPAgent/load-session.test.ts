@@ -896,7 +896,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         await vi.waitFor(() => {
             const dump = fixture.getAcpConnectionDump([]);
-            expect(dump).toContain('"toolCallId": "mcp_startup.broken-mcp"');
+            expect(dump).toMatch(/"toolCallId": "mcp_startup\.broken-mcp\.[0-9a-f-]{36}"/);
             expect(dump).toContain('MCP server `broken-mcp` failed to start: boom');
         });
     });

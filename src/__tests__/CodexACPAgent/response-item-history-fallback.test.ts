@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UpdateSessionEvent } from "../../ACPSessionConnection";
 import { parseResponseItemHistoryFallback } from "../../ResponseItemHistoryFallback";
+import { ClientCapabilities } from "../../tool-calls/ClientCapabilities";
 
 type ToolCallUpdate = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call_update" }>;
 
@@ -38,7 +39,7 @@ describe("ResponseItemHistoryFallback", () => {
                 },
             },
             functionCallOutput("call-search", "Chunk ID: search\nProcess exited with code 0\nOutput:\nsrc/index.ts\n"),
-        ]), "terminal_output");
+        ]), ClientCapabilities.DEFAULT);
 
         await expect(`${JSON.stringify(updates, null, 2)}\n`).toMatchFileSnapshot(
             "data/response-item-history-tool-names.json",
@@ -51,7 +52,7 @@ describe("ResponseItemHistoryFallback", () => {
             functionCallOutput("call-existing", "Chunk ID: existing\nProcess exited with code 0\nOutput:\nsrc/existing.ts\n"),
             functionCall("call-missing", "rg \"Missing\" src"),
             functionCallOutput("call-missing", "Chunk ID: missing\nProcess exited with code 0\nOutput:\nsrc/missing.ts\n"),
-        ]), "terminal_output", new Set(["call-existing"]));
+        ]), ClientCapabilities.DEFAULT, new Set(["call-existing"]));
 
         expect(toolCallIds(updates)).toEqual(["call-missing"]);
         expect(toolCallUpdateStatuses(updates)).toEqual([
@@ -65,7 +66,7 @@ describe("ResponseItemHistoryFallback", () => {
             functionCallOutput("call-existing-a", "Chunk ID: existing-a\nProcess exited with code 0\nOutput:\nsrc/a.ts\n"),
             functionCall("call-existing-b", "rg \"ExistingB\" src"),
             functionCallOutput("call-existing-b", "Chunk ID: existing-b\nProcess exited with code 0\nOutput:\nsrc/b.ts\n"),
-        ]), "terminal_output", new Set(["call-existing-a", "call-existing-b"]));
+        ]), ClientCapabilities.DEFAULT, new Set(["call-existing-a", "call-existing-b"]));
 
         expect(toolCallIds(updates)).toEqual([]);
         expect(toolCallUpdateStatuses(updates)).toEqual([]);
@@ -90,13 +91,13 @@ describe("ResponseItemHistoryFallback", () => {
             },
             functionCall("call-search", "rg \"Needle\" src"),
             functionCallOutput("call-search", "Chunk ID: search\nProcess exited with code 0\nOutput:\nsrc/index.ts\n"),
-        ]), "terminal_output");
+        ]), ClientCapabilities.DEFAULT);
 
         expect(thoughtTexts(updates)).toEqual(["Need to inspect the directory."]);
     });
 
     it("preserves assistant message phase metadata from response items", () => {
-        const updates = parseResponseItemHistoryFallback(jsonl([
+        const history = jsonl([
             {
                 type: "response_item",
                 payload: {
@@ -108,18 +109,21 @@ describe("ResponseItemHistoryFallback", () => {
             },
             functionCall("call-missing", "ls"),
             functionCallOutput("call-missing", "Chunk ID: missing\nProcess exited with code 0\nOutput:\nREADME.md\n"),
-        ]), "terminal_output");
-
-        expect(agentMessageMetas(updates)).toEqual([
-            { codex: { phase: "final_answer" } },
         ]);
+        const airUpdates = parseResponseItemHistoryFallback(history, ClientCapabilities.DEFAULT.with({ airClient: true }));
+        const otherUpdates = parseResponseItemHistoryFallback(history, ClientCapabilities.DEFAULT);
+
+        expect(agentMessageMetas(airUpdates)).toEqual([
+            { jetbrains: { air: { version: 1, phase: "final_answer" } } },
+        ]);
+        expect(agentMessageMetas(otherUpdates)).toEqual([undefined]);
     });
 
     it("marks exec command outputs without exit footers failed when they report command errors", () => {
         const updates = parseResponseItemHistoryFallback(jsonl([
             functionCall("call-read-failed", "cat missing.txt"),
             functionCallOutput("call-read-failed", "Error: No such file or directory\n"),
-        ]), "terminal_output");
+        ]), ClientCapabilities.DEFAULT);
 
         expect(toolCallUpdateStatuses(updates)).toEqual([
             { toolCallId: "call-read-failed", status: "failed" },
@@ -130,7 +134,7 @@ describe("ResponseItemHistoryFallback", () => {
         const updates = parseResponseItemHistoryFallback(jsonl([
             functionCall("call-read-ok", "cat existing.txt"),
             functionCallOutput("call-read-ok", "existing file contents\n"),
-        ]), "terminal_output");
+        ]), ClientCapabilities.DEFAULT);
 
         expect(toolCallUpdateStatuses(updates)).toEqual([
             { toolCallId: "call-read-ok", status: "completed" },

@@ -21,16 +21,7 @@
           {
             "name": "plan",
             "description": "Turn plan mode on.",
-            "input": null,
-            "_meta": {
-              "commandAction": {
-                "kind": "setConfigOption",
-                "configId": "collaboration_mode",
-                "value": "plan",
-                "resetValue": "default",
-                "presentation": "state"
-              }
-            }
+            "input": null
           },
           {
             "name": "mcp",
@@ -78,12 +69,6 @@
             "description": "Set a goal to keep pursuing.",
             "input": {
               "hint": "[<objective>|clear|pause|resume]"
-            },
-            "_meta": {
-              "commandAction": {
-                "kind": "prefixPrompt",
-                "presentation": "state"
-              }
             }
           },
           {
@@ -99,20 +84,6 @@
             "input": null
           }
         ]
-      }
-    }
-  ]
-}
-{
-  "method": "sessionUpdate",
-  "args": [
-    {
-      "sessionId": "session-legacy",
-      "update": {
-        "sessionUpdate": "session_info_update",
-        "_meta": {
-          "goal": null
-        }
       }
     }
   ]
@@ -172,11 +143,6 @@
         "content": {
           "type": "text",
           "text": "Inspect project files"
-        },
-        "_meta": {
-          "codex": {
-            "phase": "final_answer"
-          }
         }
       }
     }
@@ -190,10 +156,10 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "call-rg",
-        "status": "in_progress",
+        "name": "exec_command",
         "kind": "search",
         "title": "Search for 'Service' in src",
-        "name": "exec_command"
+        "status": "in_progress"
       }
     }
   ]
@@ -222,10 +188,10 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "call-rg-failed",
-        "status": "in_progress",
+        "name": "exec_command",
         "kind": "search",
         "title": "Search for 'Missing' in src",
-        "name": "exec_command"
+        "status": "in_progress"
       }
     }
   ]
@@ -254,15 +220,15 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "call-read",
-        "status": "in_progress",
+        "name": "exec_command",
         "kind": "read",
         "title": "Read file '/test/project/src/index.ts'",
+        "status": "in_progress",
         "locations": [
           {
             "path": "/test/project/src/index.ts"
           }
-        ],
-        "name": "exec_command"
+        ]
       }
     }
   ]
@@ -291,10 +257,10 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "call-ls",
-        "status": "in_progress",
+        "name": "exec_command",
         "kind": "read",
         "title": "List files",
-        "name": "exec_command"
+        "status": "in_progress"
       }
     }
   ]
