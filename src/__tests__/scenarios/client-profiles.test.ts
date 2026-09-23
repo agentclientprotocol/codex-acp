@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {beforeAll, describe, expect, it} from "vitest";
+import packageJson from "../../../package.json";
 import {schemaErrors} from "./acp-schema";
 import {airOnlyKeys, expectedFromBaseline, lines, mergedReports, metaObjects} from "./baseline";
 import {
@@ -110,6 +111,34 @@ describe("clients that are not AIR, compared with the baseline", () => {
                 fs.writeFileSync(baselineFile(profile, each.name), toJsonLines(recording(profile, each.name)));
             }
         }
+    });
+});
+
+describe("normalization of the recorded messages", () => {
+    const id = "0f8fe1f5-7c4a-4d3e-9d8a-1b2c3d4e5f60";
+    const message = (method: string, params: unknown): RecordedMessage => ({direction: "notify", method, params});
+
+    it("replaces only the random id of an MCP startup tool call and the package version", () => {
+        const initialize = (version: string): RecordedMessage =>
+            ({direction: "response", method: "initialize", params: {agentInfo: {version}}});
+        expect(normalize([initialize(packageJson.version), initialize("0.0.1")]))
+            .toEqual([initialize("<version>"), initialize("0.0.1")]);
+        expect(normalize([
+            message("session/update", {update: {toolCallId: `mcp_startup.db.${id}`}}),
+            message("session/update", {update: {toolCallId: "t", content: `see mcp_startup.db.${id}`}}),
+        ])).toEqual([
+            message("session/update", {update: {toolCallId: "mcp_startup.db.<uuid>"}}),
+            message("session/update", {update: {toolCallId: "t", content: "see mcp_startup.db.<uuid>"}}),
+        ]);
+    });
+
+    it("keeps every other id, version, path, and time", () => {
+        const kept = [
+            message("session/update", {update: {toolCallId: id, locations: [{path: "/elsewhere/App.ts"}]}}),
+            message("session/update", {update: {_meta: {goal: {createdAt: 1710000000, updatedAt: 1710000001}}}}),
+            {direction: "response", method: "session/new", params: {_meta: {version: "9.9.9"}}},
+        ];
+        expect(normalize(kept)).toEqual(kept);
     });
 });
 
