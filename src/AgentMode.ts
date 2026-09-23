@@ -35,10 +35,10 @@ export class AgentMode {
         this.sandboxMode = sandboxMode; // same as sandboxPolicy, need to look for
     }
 
-    static readonly ReadAccess = new AgentMode(
+    static readonly ReadOnly = new AgentMode(
         "read-only",
-        "Read Access",
-        "Ask before editing files or running commands that modify files.",
+        "Read-only",
+        "Requires approval to edit files and access the internet.",
         "standard",
         "on-request",
         "user",
@@ -48,10 +48,10 @@ export class AgentMode {
         },
         "read-only",
     );
-    static readonly WorkspaceAccess = new AgentMode(
-        "approval-required",
-        "Workspace Access",
-        "Ask before editing files outside the workspace or using the internet.",
+    static readonly WorkspaceWrite = new AgentMode(
+        "workspace-write",
+        "Workspace access",
+        "Edit workspace files; ask before writing outside the workspace or accessing the network.",
         "standard",
         "on-request",
         "user",
@@ -66,7 +66,7 @@ export class AgentMode {
     );
     static readonly Agent = new AgentMode(
         "agent",
-        "Auto Review",
+        "Auto review",
         "Only ask for actions detected as potentially unsafe",
         "auto_review",
         "on-request",
@@ -76,18 +76,18 @@ export class AgentMode {
             writableRoots: [],
             networkAccess: false,
             excludeTmpdirEnvVar: false,
-            excludeSlashTmp: false,
+            excludeSlashTmp: false
         },
         "workspace-write",
     );
     static readonly AgentFullAccess = new AgentMode(
         "agent-full-access",
-        "Full Access",
+        "Full access",
         "Unrestricted access to the internet and any file on your computer",
         "full_access",
         "never",
         "user",
-        { type: "dangerFullAccess" },
+        {"type": "dangerFullAccess"},
         "danger-full-access",
     );
 
@@ -127,7 +127,7 @@ export class AgentMode {
     }
 
     static all(): AgentMode[] {
-        return [AgentMode.ReadAccess, AgentMode.WorkspaceAccess, AgentMode.Agent, AgentMode.AgentFullAccess, ];
+        return [AgentMode.ReadOnly, AgentMode.WorkspaceWrite, AgentMode.Agent, AgentMode.AgentFullAccess];
     }
 
     static find(modeId: string): AgentMode | null {
