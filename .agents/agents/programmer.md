@@ -1,7 +1,7 @@
 ---
 name: programmer
 description: "Implements one well-scoped slice of work on codex-acp: writes code and tests, runs the suite, and iterates until it is green, directly on the current branch. TypeScript + npm + Vitest. Use for any change to src/, AGENTS.md, or skill definitions. Do not use it to research protocol behavior — it must escalate unclear protocol questions instead of guessing."
-model: sonnet
+model: opus
 effort: medium
 color: green
 ---
