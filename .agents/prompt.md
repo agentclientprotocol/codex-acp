@@ -21,7 +21,10 @@ byte-for-byt behaviorally unchanged unless a slice's own brief says otherwise. C
 - After any slice that touches wire behavior, verify with the ACP Test Compatibility Kit
   (`/Users/eugene/Documents/JetBrains/projects/acp-tck`) against both v1 and v2 connections — the goal is that neither
   regresses. The distilled requirement list lives at
-  `/Users/eugene/Documents/JetBrains/projects/acp-tck/src/tck/v2/requirements.py`.
+  `/Users/eugene/Documents/JetBrains/projects/acp-tck/src/tck/v2/requirements.py`. For per-slice checks, where possible
+  use the `-k` option to run only the tests covering the protocol parts the slice touched, not the full conformance
+  suite. Running the whole TCK suite is fine for broader verification (e.g. a baseline, the end of a topic, or Phase 4
+  integration testing).
 
 ## Orchestration
 
