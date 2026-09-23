@@ -65,6 +65,12 @@ The keys of Zed, of upstream ACP, and of other JetBrains teams stay as they were
 See [JetBrains shared keys](#jetbrains-shared-keys) and [Zed conventions](#zed-conventions).
 [Codex items and ACP fields](#codex-items-and-acp-fields) lists the fields of each client.
 
+The scenario tests in `src/__tests__/scenarios/` record every outbound message for three client profiles.
+The profiles are a plain ACP client, Zed, and AIR. The tests validate each message against the ACP schema.
+They keep the AIR messages as snapshots, one message per line.
+They compare the messages of the plain client and of Zed with the messages of the adapter before these extensions.
+The comparison applies only the differences above.
+
 ## Negotiation
 
 ### Client declaration
