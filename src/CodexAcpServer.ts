@@ -69,6 +69,7 @@ import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
+import {type AcpMcpServer, getMcpServerName} from "./McpServerConfig";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
 import {
     AUTH_STATUS_META_KEY,
@@ -191,7 +192,7 @@ export interface SessionState {
     authProvider: string | null;
     cwd: string;
     additionalDirectories: string[];
-    mcpServers?: Array<acp.McpServer>;
+    mcpServers?: Array<AcpMcpServer>;
     fastModeEnabled: boolean;
     currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
@@ -2532,7 +2533,7 @@ export class CodexAcpServer {
     }
 
     private resolveSessionMcpServers(
-        mcpServers: Array<acp.McpServer>,
+        mcpServers: Array<AcpMcpServer>,
         recoverFromStartup: boolean,
     ): Array<string> {
         // Explicit MCP servers from the request are the primary source of truth for the session.
@@ -3598,6 +3599,6 @@ function historyUpdateContentKey(update: UpdateSessionEvent): string | null {
     }
 }
 
-function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
-    return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(server.name))));
+function getRequestedMcpServerNames(mcpServers: Array<AcpMcpServer>): Array<string> {
+    return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(getMcpServerName(server)))));
 }

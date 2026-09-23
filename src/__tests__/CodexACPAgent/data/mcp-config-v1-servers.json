@@ -1,0 +1,17 @@
+{
+  "stdio-v1": {
+    "command": "npx",
+    "args": [
+      "server"
+    ],
+    "env": {
+      "EXAMPLE": "1"
+    }
+  },
+  "http-v1": {
+    "url": "https://example.com/mcp",
+    "http_headers": {
+      "Authorization": "Bearer token"
+    }
+  }
+}

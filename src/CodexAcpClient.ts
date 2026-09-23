@@ -8,7 +8,7 @@ import {
 } from "./CodexAuthMethod";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
-import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk";
 import type {
     ApprovalHandler,
     CodexAppServerClient,
@@ -29,6 +29,7 @@ import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
+import {type AcpMcpServer, type WithAcpMcpServers, getMcpServerName, normalizeMcpServer, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
@@ -582,7 +583,7 @@ export class CodexAcpClient {
         }
     }
 
-    async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
+    async resumeSession(request: WithAcpMcpServers<acp.ResumeSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -607,7 +608,7 @@ export class CodexAcpClient {
         }
     }
 
-    async forkSession(request: acp.ForkSessionRequest): Promise<SessionMetadata> {
+    async forkSession(request: WithAcpMcpServers<acp.ForkSessionRequest>): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         return await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
@@ -622,7 +623,7 @@ export class CodexAcpClient {
         });
     }
 
-    async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+    async loadSession(request: WithAcpMcpServers<acp.LoadSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -664,12 +665,12 @@ export class CodexAcpClient {
         return (await this.codexClient.threadReadWithHistory(sessionId)).thread;
     }
 
-    async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
+    async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadStart({
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });
@@ -807,7 +808,7 @@ export class CodexAcpClient {
     private async createSessionConfig(
         projectPath: string,
         additionalDirectories: string[],
-        mcpServers: Array<McpServer>
+        mcpServers: Array<AcpMcpServer>
     ): Promise<JsonObject> {
         const sessionRoots = [projectPath, ...additionalDirectories];
         const activeProvider = this.gatewayConfig
@@ -835,7 +836,7 @@ export class CodexAcpClient {
         }
 
         const requestedServers = mcpServers.map(mcp => ({
-            name: sanitizeMcpServerName(mcp.name),
+            name: sanitizeMcpServerName(getMcpServerName(mcp)),
             server: mcp,
         }));
         let serversToConfigure = requestedServers;
@@ -850,7 +851,7 @@ export class CodexAcpClient {
 
         return {
             ...configWithWorkspaceRoots,
-            "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+            "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, toCodexMcpServerConfig(normalizeMcpServer(mcp.server))])),
         };
     }
 
@@ -895,30 +896,6 @@ export class CodexAcpClient {
             cwds: [cwd, ...additionalRoots],
             forceReload: true,
         });
-    }
-
-    /**
-     * Create a codex config entry for MCP server
-     */
-    private createMcpSeverConfig(mcpServer: McpServer): JsonObject {
-        if ("type" in mcpServer) {
-            switch (mcpServer.type) {
-                case "acp":
-                    throw RequestError.invalidRequest("Codex doesn't support MCP ACP transport protocol")
-                case "sse":
-                    throw RequestError.invalidRequest("Codex doesn't support MCP SSE transport protocol")
-                case "http":
-                    return {
-                        "url": mcpServer.url,
-                        "http_headers": Object.fromEntries(mcpServer.headers.map(h => [h.name, h.value])),
-                    }
-            }
-        }
-        return {
-            "command": mcpServer.command,
-            "args": mcpServer.args,
-            "env": Object.fromEntries(mcpServer.env.map(env => [env.name, env.value])),
-        }
     }
 
     /**

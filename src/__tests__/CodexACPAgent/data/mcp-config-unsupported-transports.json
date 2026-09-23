@@ -1,0 +1,22 @@
+{
+  "v2 sse": {
+    "code": -32600,
+    "message": "Invalid request",
+    "data": "Codex doesn't support MCP SSE transport protocol"
+  },
+  "v2 custom": {
+    "code": -32600,
+    "message": "Invalid request",
+    "data": "Codex doesn't support MCP '_custom' transport protocol"
+  },
+  "v1 sse": {
+    "code": -32600,
+    "message": "Invalid request",
+    "data": "Codex doesn't support MCP SSE transport protocol"
+  },
+  "v1 acp": {
+    "code": -32600,
+    "message": "Invalid request",
+    "data": "Codex doesn't support MCP ACP transport protocol"
+  }
+}
