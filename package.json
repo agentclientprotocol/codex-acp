@@ -58,6 +58,7 @@
   "type": "module",
   "devDependencies": {
     "@types/node": "^26.1.0",
+    "ajv": "^8.20.0",
     "esbuild": "^0.28.2",
     "mcp-hello-world": "^1.1.2",
     "tsx": "^4.23.12",
