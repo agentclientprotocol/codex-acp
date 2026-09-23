@@ -32,14 +32,21 @@ export function createJSONRPCWriter(writable: Writable): MessageWriter {
 export function createJSONRPCReader(readable: Readable): MessageReader {
     return {
         listen(callback: DataCallback): Disposable {
-            let buf = '';
+            const fragments: string[] = [];
             const onData = (chunk: Buffer) => {
-                buf += chunk.toString();
+                const text = chunk.toString();
+                let start = 0;
                 for (;;) {
-                    const i = buf.indexOf('\n');
-                    if (i < 0) break;
-                    const line = buf.slice(0, i).trim();
-                    buf = buf.slice(i + 1);
+                    // Scan only the new chunk; large history responses may span thousands of chunks.
+                    const i = text.indexOf('\n', start);
+                    if (i < 0) {
+                        if (start < text.length) fragments.push(text.slice(start));
+                        break;
+                    }
+                    fragments.push(text.slice(start, i));
+                    const line = fragments.join('').trim();
+                    fragments.length = 0;
+                    start = i + 1;
                     if (!line) continue;
                     try {
                         const msg = JSON.parse(line);
@@ -54,6 +61,7 @@ export function createJSONRPCReader(readable: Readable): MessageReader {
             return {
                 dispose() {
                     readable.off('data', onData);
+                    fragments.length = 0;
                 }
             }
         },
