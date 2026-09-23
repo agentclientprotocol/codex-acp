@@ -8,7 +8,7 @@ Subagents require bilateral capability negotiation during `initialize`.
 
 - The canonical client field is `clientCapabilities.subagents: {}`.
 - The agent returns `agentCapabilities.sessionCapabilities.subagents: {}`.
-- Because released SDKs may strip the draft field, AIR clients can instead advertise `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`; this adapter always advertises that key in its initialize response.
+- Because released SDKs may strip the draft field, AIR clients can instead advertise `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`; this adapter always advertises that key in its initialize response. See [AIR extensions](air-extensions.md#native-subagent-sessions).
 - New clients and agents must prefer the canonical field.
 
 ## Lifecycle events
