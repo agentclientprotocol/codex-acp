@@ -2,6 +2,34 @@ Let's research how this ACP wrapper can be migrated to the ACP v2.
 No actual migration is needed for now, only research. 
 You goal is to estimate the effort and how the new architecture will look like.
 
+## IMPORTANT: v1 compatibility must be preserved
+
+This is NOT a cutover from v1 to v2 — the agent must continue to speak ACP v1 for existing
+clients while also speaking ACP v2. Every topic's research and every architecture/plan section
+must explicitly address how the two protocol versions coexist, not just how v2 alone would work.
+Concretely, each subagent should consider and report on:
+
+- How does version selection/negotiation actually happen on the wire (e.g. does the client
+  signal which version it speaks during `initialize`/handshake, is it a distinct transport,
+  a schema field, a CLI flag, or something else)? Check `docs/protocol/v2/migration.mdx` and
+  `docs/protocol/v2/initialization.mdx` for any explicit guidance on dual-version agents, and
+  check whether the `@agentclientprotocol/sdk` package has any built-in support for serving both
+  versions from one process (via `check-acp-typescript-sdk`).
+- For the subagent's specific topic area, is the v1 and v2 behavior different enough that the
+  underlying implementation needs a real branch/adapter (two code paths), or can a single
+  internal representation be projected into either wire shape cheaply?
+- Whether shared internal state (session lifecycle, event mapping, permission handling, etc.)
+  can be version-agnostic with only the boundary/serialization layer forking per version, versus
+  needing genuinely divergent internal logic.
+- Any concrete risk of the two versions interfering with each other (e.g. a v1 session and a v2
+  session held open concurrently in the same process, shared caches/singletons, etc.).
+
+The effort estimate in `plan.md` and the design in `architecture.md` must reflect the cost of
+building and maintaining a dual-version-capable agent, not the cost of a v1→v2 rewrite. If a
+subagent concludes full dual support is impractical for its area and some kind of trade-off is
+unavoidable, it must say so explicitly and flag it back to the orchestrator rather than silently
+assuming a v1 deprecation.
+
 There's a helper ACP Test Compatibility Kit located at /Users/eugene/Documents/JetBrains/projects/acp-tck, which can be used
 to assess agent conformance to ACP v1 or v2. During implementation it can be used to verify the compatibility.
 You can also check a distilled list of core v2 requirements in this ACP TCK, they are located at /Users/eugene/Documents/JetBrains/projects/acp-tck/src/tck/v2/requirements.py.
