@@ -33,14 +33,17 @@ export class ImageGenerationReporter {
         };
     }
 
-    /** The only report of a generation whose start the adapter did not see, for example in the history. */
-    static whole(item: ImageGenerationItem, options?: {terminalStatus?: boolean}): ToolFacts {
+    /**
+     * The only report of a finished generation whose start the adapter did not see, for example in the history.
+     * The item is finished, so a provider status such as `generating` becomes `completed`.
+     */
+    static whole(item: ImageGenerationItem): ToolFacts {
         return {
             toolCallId: item.id,
             report: "start",
             kind: "other",
             title: TITLE,
-            status: options?.terminalStatus ? terminalStatus(item.status) : toolStatus(item.status),
+            status: terminalStatus(item.status),
             result: imageResult(item),
             standard: standardResult(item),
         };
@@ -84,20 +87,6 @@ function imageResult(item: ImageGenerationItem): acp.ToolCallContent[] {
         result.push({type: "content", content: {type: "resource_link", name: savedPath, uri: savedPath}});
     }
     return result;
-}
-
-function toolStatus(status: string): acp.ToolCallStatus {
-    switch (status) {
-        case "generating":
-        case "in_progress":
-        case "inProgress":
-        case "incomplete":
-            return "in_progress";
-        case "failed":
-            return "failed";
-        default:
-            return "completed";
-    }
 }
 
 function terminalStatus(status: string): acp.ToolCallStatus {

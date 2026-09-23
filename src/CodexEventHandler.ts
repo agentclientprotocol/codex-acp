@@ -837,7 +837,7 @@ export class CodexEventHandler {
             case "imageGeneration":
                 return this.renderer.render(this.activeImageGenerationItems.delete(event.item.id)
                     ? ImageGenerationReporter.completed(event.item)
-                    : ImageGenerationReporter.whole(event.item, {terminalStatus: true}));
+                    : ImageGenerationReporter.whole(event.item));
             case "reasoning":
                 if (this.seenReasoningDeltaItemIds.delete(event.item.id)) {
                     return null;

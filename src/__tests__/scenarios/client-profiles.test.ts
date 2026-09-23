@@ -824,3 +824,22 @@ describe("AIR", () => {
         expect(text).not.toContain("\"terminal_output\"");
     });
 });
+
+describe("history replay", () => {
+    for (const profile of PROFILE_NAMES) {
+        it(`${profile}: ends a replayed image generation that Codex saved while it was generating`, async () => {
+            const messages = await runScenario({
+                name: "history-image-generating",
+                history: [{
+                    type: "imageGeneration", id: "h-gen", status: "generating", revisedPrompt: null, result: "",
+                    failure: null,
+                }],
+            }, profile);
+            const reported = messages
+                .filter(message => message.method === "session/update")
+                .map(message => (message.params as {update: Update}).update)
+                .filter(update => update["toolCallId"] === "h-gen");
+            expect(reported.map(update => update["status"])).toEqual(["completed"]);
+        });
+    }
+});
