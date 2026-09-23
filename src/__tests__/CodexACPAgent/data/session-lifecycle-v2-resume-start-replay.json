@@ -1,0 +1,4 @@
+{
+  "code": -32603,
+  "message": "Internal error: session/resume with replayFrom 'start' is not supported on an ACP v2 connection yet"
+}

@@ -69,7 +69,7 @@ import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
-import {type AcpMcpServer, getMcpServerName} from "./McpServerConfig";
+import {type AcpMcpServer, getMcpServerName, type WithAcpMcpServers} from "./McpServerConfig";
 import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
 import {
     AUTH_STATUS_META_KEY,
@@ -613,7 +613,9 @@ export class CodexAcpServer {
         }
     }
 
-    async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
+    async getOrCreateSession(
+        request: WithAcpMcpServers<acp.NewSessionRequest> | WithAcpMcpServers<acp.ResumeSessionRequest>,
+    ): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
         try {
             return await this.tryCreateSession(request);
         } catch (e) {
@@ -705,10 +707,12 @@ export class CodexAcpServer {
     }
 
     async tryCreateSession(
-        request: acp.NewSessionRequest | acp.ResumeSessionRequest | acp.ForkSessionRequest,
+        request: WithAcpMcpServers<acp.NewSessionRequest>
+            | WithAcpMcpServers<acp.ResumeSessionRequest>
+            | WithAcpMcpServers<acp.ForkSessionRequest>,
         operation: "new" | "resume" | "fork" = "sessionId" in request ? "resume" : "new",
     ): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
-        const existingSessionRequest = request as acp.ResumeSessionRequest | acp.ForkSessionRequest;
+        const existingSessionRequest = request as WithAcpMcpServers<acp.ResumeSessionRequest> | WithAcpMcpServers<acp.ForkSessionRequest>;
         const requestedSessionGeneration = operation === "resume"
             ? this.beginSessionOpen(existingSessionRequest.sessionId)
             : null;
@@ -721,7 +725,7 @@ export class CodexAcpServer {
         let sessionMetadata: SessionMetadata;
         let resumeSubscribed = false;
         if (operation === "resume") {
-            const resumeRequest = request as acp.ResumeSessionRequest;
+            const resumeRequest = request as WithAcpMcpServers<acp.ResumeSessionRequest>;
             logger.log(`Resume existing session: ${resumeRequest.sessionId}...`);
             try {
                 sessionMetadata = await this.runWithProcessCheck(() =>
@@ -736,12 +740,12 @@ export class CodexAcpServer {
                 throw err;
             }
         } else if (operation === "fork") {
-            const forkRequest = request as acp.ForkSessionRequest;
+            const forkRequest = request as WithAcpMcpServers<acp.ForkSessionRequest>;
             logger.log(`Fork existing session: ${forkRequest.sessionId}...`);
             sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.forkSession(forkRequest));
         } else {
             logger.log(`Create new session...`);
-            sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(request as acp.NewSessionRequest));
+            sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(request as WithAcpMcpServers<acp.NewSessionRequest>));
         }
 
         const {sessionId, currentModelId, models} = sessionMetadata;
@@ -911,7 +915,7 @@ export class CodexAcpServer {
         };
     }
 
-    async resumeSession(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
+    async resumeSession(params: WithAcpMcpServers<acp.ResumeSessionRequest>): Promise<LegacyResumeSessionResponse> {
         if (this.providerUpdate !== null) {
             await this.providerUpdate;
         }
@@ -928,6 +932,22 @@ export class CodexAcpServer {
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
         };
+    }
+
+    async resumeSessionV2(params: acpV2.ResumeSessionRequest): Promise<acpV2.ResumeSessionResponse> {
+        const {replayFrom, ...request} = params;
+        if (replayFrom != null) {
+            if (replayFrom.type !== "start") {
+                throw RequestError.invalidParams(undefined, `Unsupported replayFrom type: ${replayFrom.type}`);
+            }
+            // History replay emits message and tool call updates, which have no v2 rendering yet.
+            throw RequestError.internalError(
+                undefined,
+                "session/resume with replayFrom 'start' is not supported on an ACP v2 connection yet",
+            );
+        }
+        await this.resumeSession(request);
+        return this.createSessionConfigOptionsResponseV2(this.getSessionState(params.sessionId));
     }
 
     async forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
@@ -1042,7 +1062,7 @@ export class CodexAcpServer {
     }
 
     async newSession(
-        params: acp.NewSessionRequest,
+        params: WithAcpMcpServers<acp.NewSessionRequest>,
     ): Promise<LegacyNewSessionResponse> {
         if (this.providerUpdate !== null) {
             await this.providerUpdate;
@@ -1061,6 +1081,14 @@ export class CodexAcpServer {
             models: modelState,
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
+        };
+    }
+
+    async newSessionV2(params: acpV2.NewSessionRequest): Promise<acpV2.NewSessionResponse> {
+        const {sessionId} = await this.newSession(params);
+        return {
+            sessionId,
+            ...this.createSessionConfigOptionsResponseV2(this.getSessionState(sessionId)),
         };
     }
 

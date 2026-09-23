@@ -1,0 +1,33 @@
+[
+  {
+    "method": "thread/start",
+    "params": {
+      "config": {
+        "features": {
+          "cwd_relative_turn_diffs": false
+        },
+        "projects": {
+          "/workspace": {
+            "trust_level": "trusted"
+          }
+        },
+        "mcp_servers": {
+          "files": {
+            "command": "/usr/local/bin/mcp-fs",
+            "args": [
+              "--root",
+              "/workspace"
+            ],
+            "env": {}
+          },
+          "remote": {
+            "url": "https://example.com/mcp",
+            "http_headers": {}
+          }
+        }
+      },
+      "modelProvider": null,
+      "cwd": "/workspace"
+    }
+  }
+]

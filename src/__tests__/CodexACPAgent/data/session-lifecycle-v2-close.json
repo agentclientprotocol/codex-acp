@@ -1,0 +1,11 @@
+{
+  "response": {},
+  "codexRequests": [
+    {
+      "method": "thread/unsubscribe",
+      "params": {
+        "threadId": "thread-1"
+      }
+    }
+  ]
+}

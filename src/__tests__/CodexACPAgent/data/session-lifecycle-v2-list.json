@@ -1,0 +1,29 @@
+{
+  "response": {
+    "sessions": [
+      {
+        "sessionId": "thread-1",
+        "cwd": "/workspace",
+        "title": "Earlier session",
+        "updatedAt": "1970-01-01T00:03:20.000Z"
+      }
+    ],
+    "nextCursor": null
+  },
+  "codexRequests": [
+    {
+      "method": "thread/list",
+      "params": {
+        "cursor": null,
+        "modelProviders": [],
+        "sourceKinds": [
+          "cli",
+          "vscode",
+          "exec",
+          "appServer",
+          "unknown"
+        ]
+      }
+    }
+  ]
+}
