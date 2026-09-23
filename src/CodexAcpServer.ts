@@ -138,6 +138,7 @@ import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
     AIR_ASYNC_TASKS_KEY,
+    AIR_DIFF_PATCH_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     AIR_RECOMMENDED_CONFIG_VALUE_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
@@ -421,6 +422,7 @@ export class CodexAcpServer {
                         [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
                         [AIR_EXTENSION_CAPABILITIES_KEY]: [
                             AIR_SESSION_FAILURE_KEY,
+                            AIR_DIFF_PATCH_KEY,
                             AIR_AGENT_FILE_CHANGE_REPORT_KEY,
                             AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                             AIR_ASYNC_TASKS_KEY,
@@ -2290,7 +2292,10 @@ export class CodexAcpServer {
             case "reasoning":
                 return this.createReasoningUpdates(item);
             case "fileChange":
-                return [await createFileChangeUpdate(item)];
+                return [await createFileChangeUpdate(
+                    item,
+                    clientSupportsAirCapability(this.clientCapabilities, AIR_DIFF_PATCH_KEY),
+                )];
             case "commandExecution": {
                 const updates = [await createCommandExecutionUpdate(item)];
                 const completeUpdate = createCommandExecutionCompleteUpdate(item, sessionState.terminalOutputMode);
@@ -2863,6 +2868,7 @@ export class CodexAcpServer {
                 agentFileChangeReportRequest !== null,
                 clientSupportsCompaction(this.clientCapabilities),
                 clientSupportsNotices(this.clientCapabilities),
+                clientSupportsAirCapability(this.clientCapabilities, AIR_DIFF_PATCH_KEY),
             );
             eventHandler = promptEventHandler;
             const permissionLifecycle = this.permissionLifecycleContext(sessionState);
