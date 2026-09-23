@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {vi} from "vitest";
+import packageJson from "../../../package.json";
 import {createCodexMockTestFixture, createTestModel, type MethodCallEvent} from "../acp-test-utils";
 import {SESSION_ID, TURN_ID, type Scenario} from "./scenarios";
 
@@ -249,18 +250,30 @@ function collect(events: MethodCallEvent[]): RecordedMessage[] {
     });
 }
 
-const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+/** The random part of an MCP startup tool call id, which `randomUUID()` makes. */
+const MCP_STARTUP_TOOL_CALL_ID = /^mcp_startup\.[^.]+\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
-/** Replaces random ids and wall-clock times with stable placeholders. */
+/**
+ * Replaces the exact values that change from run to run or from release to release with stable placeholders.
+ * - The package version in `initialize.agentInfo.version` becomes `<version>`.
+ * - The random id of each MCP startup tool call becomes `<uuid>`, wherever that exact id occurs.
+ *
+ * `runScenario` already replaces the exact temporary workspace path.
+ * Every other value stays as it is, so a wrong path, id, or time fails the comparison.
+ */
 export function normalize(messages: RecordedMessage[]): RecordedMessage[] {
-    return JSON.parse(JSON.stringify(messages, (key, value) => {
-        if (key === "version" && typeof value === "string") return "<version>";
-        if (typeof value === "string") return value.replace(UUID, "<uuid>");
-        if (typeof value === "number" && /(At|AtMs|Time|timestamp)$/.test(key) && value > 1_000_000_000) {
-            return "<time>";
-        }
+    const randomIds = new Set<string>();
+    JSON.stringify(messages, (key, value) => {
+        const match = key === "toolCallId" && typeof value === "string" ? MCP_STARTUP_TOOL_CALL_ID.exec(value) : null;
+        if (match !== null) randomIds.add(match[1]!);
         return value;
-    }));
+    });
+    return messages.map(message => {
+        if (message.method !== "initialize" || message.direction !== "response") return message;
+        const params = message.params as {agentInfo?: {version?: unknown}};
+        if (params.agentInfo?.version !== packageJson.version) return message;
+        return {...message, params: {...params, agentInfo: {...params.agentInfo, version: "<version>"}}};
+    }).map(message => [...randomIds].reduce((result, id) => replaceText(result, id, "<uuid>"), message));
 }
 
 /** The value with the keys of each object in sorted order. */
