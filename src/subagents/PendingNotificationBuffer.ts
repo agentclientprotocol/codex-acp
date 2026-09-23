@@ -15,7 +15,7 @@ const DELTA_FIELDS: Partial<Record<ServerNotification["method"], string>> = {
  * Holds the notifications of a subagent until the adapter can route them to its session.
  *
  * The buffer keeps every notification. Adjacent text deltas of the same item merge into one notification,
- * so a long stream does not grow the count. The buffer is bounded by bytes.
+ * so a long stream does not grow the count. The buffer is bounded by the bytes of the serialized notifications.
  * Only when that hard cap is hit does it drop a notification, and it logs the drop.
  */
 export class PendingNotificationBuffer {
@@ -32,7 +32,7 @@ export class PendingNotificationBuffer {
         const last = this.notifications.at(-1);
         if (deltaField !== undefined && last !== undefined && sameStream(last, notification, deltaField)) {
             const delta = String((notification.params as Record<string, unknown>)[deltaField] ?? "");
-            if (!this.reserve(Buffer.byteLength(delta, "utf8"))) return;
+            if (!this.reserve(serializedDeltaBytes(delta))) return;
             const params = last.params as Record<string, unknown>;
             (last as {params: Record<string, unknown>}).params = {...params, [deltaField]: `${params[deltaField]}${delta}`};
             return;
@@ -62,6 +62,14 @@ export class PendingNotificationBuffer {
         }
         return false;
     }
+}
+
+/**
+ * The growth of the serialized notification when the delta is appended to its text.
+ * That is the delta as a JSON string without the two quotes, so an escaped character counts with its escape.
+ */
+function serializedDeltaBytes(delta: string): number {
+    return Buffer.byteLength(JSON.stringify(delta), "utf8") - 2;
 }
 
 function sameStream(previous: ServerNotification, next: ServerNotification, deltaField: string): boolean {
