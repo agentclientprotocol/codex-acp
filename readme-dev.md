@@ -103,7 +103,3 @@ Command replies, review results, and terminal/retrying errors retain their exist
 failure channels. Clients advertising session compaction support continue to receive the dedicated
 compaction lifecycle instead of the legacy completion advisory.
 
-### AIR diff statistics
-
-See the [diff statistics specification](docs/diff-statistics-extension.md) for the
-`_meta.jetbrains.air.diffStats` payload and its compatibility rules.

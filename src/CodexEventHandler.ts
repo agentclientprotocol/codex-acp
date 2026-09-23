@@ -252,6 +252,7 @@ export class CodexEventHandler {
         collectTurnDiffs = false,
         private readonly supportsCompaction = false,
         private readonly supportsNotices = false,
+        private readonly supportsDiffPatch = false,
     ) {
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
@@ -825,7 +826,7 @@ export class CodexEventHandler {
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                return await createFileChangeUpdate(event.item);
+                return await createFileChangeUpdate(event.item, this.supportsDiffPatch);
             case "commandExecution": {
                 if (commandExecutionUsesTerminalOutput(event.item)) {
                     this.terminalCommandIds.add(event.item.id);
