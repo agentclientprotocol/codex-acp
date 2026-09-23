@@ -9,6 +9,8 @@ import type { ThreadItem } from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
 import {AgentMode} from "../../AgentMode";
 
+import {DIFF_PATCH_MAX_BYTES} from '../../GitPatch';
+
 async function createFileChangeUpdate(item: ThreadItem & {type: 'fileChange'}, diffPatch = false) {
     return new AcpToolCallRenderer(ClientCapabilities.DEFAULT).render(await FileChangeReporter.started(item, diffPatch));
 }
@@ -371,107 +373,6 @@ describe('CodexEventHandler - file change events', () => {
         ]);
     });
 
-    it('should not emit completion before a slow file-change start event', async () => {
-        mockFileContent('/test/project/OldFile.kt', 'package test.project\n\nclass OldFile {}\n');
-
-        let releaseRead = () => {};
-        const blockedRead = new Promise<void>((resolve) => {
-            releaseRead = resolve;
-        });
-        delayMockFileRead('/test/project/OldFile.kt', blockedRead);
-
-        const fileChange = {
-            type: 'fileChange',
-            id: 'file-change-slow-start',
-            changes: [
-                {
-                    path: '/test/project/OldFile.kt',
-                    kind: { type: 'update', move_path: null },
-                    diff:
-`@@ -1,3 +1,3 @@
- package test.project
- 
--class OldFile {}
-+class UpdatedFile {}
-`,
-                },
-            ],
-        } satisfies Omit<ThreadItem & { type: 'fileChange' }, 'status'>;
-
-        const fileChangeStarted: ServerNotification = {
-            method: 'item/started',
-            params: {
-                threadId: sessionId,
-                turnId: 'turn-1',
-                startedAtMs: 0,
-                item: {
-                    ...fileChange,
-                    status: 'inProgress',
-                },
-            },
-        };
-        const fileChangeCompleted: ServerNotification = {
-            method: 'item/completed',
-            params: {
-                threadId: sessionId,
-                turnId: 'turn-1',
-                completedAtMs: 0,
-                item: {
-                    ...fileChange,
-                    status: 'completed',
-                },
-            },
-        };
-
-        const codexAcpAgent = mockFixture.getCodexAcpAgent();
-        const codexAppServerClient = mockFixture.getCodexAppServerClient();
-        const turn = { id: 'turn-id', items: [], status: 'inProgress' as const, error: null };
-        codexAppServerClient.turnStart = vi.fn().mockResolvedValue({ turn });
-        codexAppServerClient.awaitTurnCompleted = vi.fn().mockResolvedValue({
-            threadId: sessionId,
-            turn: { ...turn, status: 'completed' },
-        });
-        vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
-
-        await codexAcpAgent.prompt({
-            sessionId,
-            prompt: [{ type: 'text', text: 'test prompt' }],
-        });
-
-        mockFixture.clearAcpConnectionDump();
-        mockFixture.sendServerNotification(fileChangeStarted);
-        mockFixture.sendServerNotification(fileChangeCompleted);
-
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(mockFixture.getAcpConnectionEvents([])).toEqual([]);
-
-        releaseRead();
-        await vi.waitFor(() => {
-            expect(mockFixture.getAcpConnectionEvents([])).toHaveLength(2);
-        });
-
-        const updates = mockFixture.getAcpConnectionEvents([]).map((event) => event.args[0].update);
-        expect(updates).toMatchObject([
-            {
-                sessionUpdate: 'tool_call',
-                toolCallId: 'file-change-slow-start',
-                status: 'in_progress',
-                content: [
-                    {
-                        oldText: 'package test.project\n\nclass OldFile {}\n',
-                        newText: 'package test.project\n\nclass UpdatedFile {}\n',
-                        path: '/test/project/OldFile.kt',
-                    },
-                ],
-            },
-            {
-                sessionUpdate: 'tool_call_update',
-                toolCallId: 'file-change-slow-start',
-                status: 'completed',
-            },
-        ]);
-    });
-
     it('should parse update diffs with move metadata appended', async () => {
         mockFileContent('/test/project/OriginalFile.kt', 'old code line\n');
 
@@ -587,6 +488,42 @@ Moved to: /test/project/NewFile.kt`,
         expect(patches[2]).toContain('@@ -1 +1 @@');
     });
 
+    it('builds one standard diff per hunk from the Codex diff alone, without reading the file', async () => {
+        clearMockFiles();
+        const update = await createFileChangeUpdate({
+            type: 'fileChange',
+            id: 'hunks',
+            changes: [{
+                path: '/w/Large.kt',
+                kind: {type: 'update', move_path: null},
+                diff: '@@ -10,3 +10,3 @@\n a\n-b\n+B\n c\n@@ -500,2 +500,3 @@\n x\n+y\n z\n',
+            }],
+            status: 'completed',
+        });
+
+        if (update.sessionUpdate !== 'tool_call') throw new Error('Expected a tool call');
+        expect(update.content).toEqual([
+            {type: 'diff', oldText: 'a\nb\nc\n', newText: 'a\nB\nc\n', path: '/w/Large.kt', _meta: {kind: 'update'}},
+            {type: 'diff', oldText: 'x\nz\n', newText: 'x\ny\nz\n', path: '/w/Large.kt', _meta: {kind: 'update'}},
+        ]);
+    });
+
+    it('sends no diff for a change whose text is larger than the limit', async () => {
+        const text = 'x'.repeat(DIFF_PATCH_MAX_BYTES + 1);
+        const update = await createFileChangeUpdate({
+            type: 'fileChange',
+            id: 'large',
+            changes: [
+                {path: '/w/big.txt', kind: {type: 'add'}, diff: text},
+                {path: '/w/small.txt', kind: {type: 'add'}, diff: 'ok\n'},
+            ],
+            status: 'completed',
+        }, true);
+
+        if (update.sessionUpdate !== 'tool_call') throw new Error('Expected a tool call');
+        expect(update.content?.map(content => content.type === 'diff' ? content.path : null)).toEqual(['/w/small.txt']);
+    });
+
     describe('diff patch fallback', () => {
         function onlyContent(event: Awaited<ReturnType<typeof createFileChangeUpdate>>) {
             if (event.sessionUpdate !== 'tool_call') throw new Error('Expected a tool call');
@@ -672,7 +609,6 @@ Moved to: /test/project/NewFile.kt`,
         });
 
         it('sends the standard diff for a pure rename', async () => {
-            mockFileContent('/w/New.kt', 'same\n');
             const content = onlyContent(await createFileChangeUpdate({
                 type: 'fileChange',
                 id: 'pure-rename',
@@ -680,7 +616,7 @@ Moved to: /test/project/NewFile.kt`,
                 status: 'completed',
             }, true));
 
-            expect(content).toMatchObject({type: 'diff', oldText: 'same\n', newText: 'same\n', path: '/w/New.kt'});
+            expect(content).toMatchObject({type: 'diff', oldText: '', newText: '', path: '/w/New.kt'});
         });
 
         it('uses the target path of a rename in the patch block', async () => {

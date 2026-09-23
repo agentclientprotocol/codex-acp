@@ -291,7 +291,7 @@ The other clients get the same fields as before the AIR extensions.
 | --- | --- | --- |
 | `commandExecution` with one `read`, `search`, or `listFiles` action | `kind` `read` or `search`, a title that names the path or the query, `locations`. No terminal. The output of a `search` or a `listFiles` streams to `_meta.terminal_output_delta`, and output that did not stream goes there once at completion. A `read` sends no output: AIR does not need the file text. | The same start. The output is in `rawOutput.formatted_output` at completion. |
 | Any other `commandExecution` | `kind: execute`, `title` is the command, `rawInput = {command, cwd}`, a terminal. Output streams to `_meta.terminal_output_delta`. Stdin goes to `_meta.terminal_input`. The end sends `_meta.terminal_exit`. With `asyncTasks`, a command that keeps running gets `_meta.jetbrains.air.asyncTasks.backgrounded`. | The same start. Output and stdin follow [Zed conventions](#zed-conventions). The end also carries `rawOutput.formatted_output` and `rawOutput.exit_code`. |
-| `fileChange` | `kind: edit`, `title: "Editing files"`, one `diff` block per changed file with `oldText` and `newText`. The block has `_meta.kind` `add`, `update`, or `delete`. With `diffPatch`, each block carries a Git patch. | The same, without a patch. |
+| `fileChange` | `kind: edit`, `title: "Editing files"`. With `diffPatch`, one `diff` block per changed file carries a Git patch. Without a patch, see [Fallback](#fallback): one block per hunk of an update, the whole text of an added or a deleted file. The block has `_meta.kind` `add`, `update`, or `delete`. | The same, without a patch. |
 | `mcpToolCall` | `kind: execute`, `title: "mcp.<server>.<tool>"`, `rawInput = {server, tool, arguments}`, `_meta.is_mcp_tool_call`. No `content`. `rawOutput = {result, error}` with the whole Codex result and error. AIR shows the text of `result` and `error.message`. No progress. | The same. The progress text goes to `_meta.mcp_output_delta`, trimmed. |
 | `dynamicToolCall` | `name`, `kind: execute`, `title` is the tool, `rawInput = {arguments}`. The content items go to `content`. | The same. |
 | `collabAgentToolCall`, without native subagent sessions | `kind: other`, `title` is the Codex tool name, `rawInput` holds the prompt, `senderThreadId`, `receiverThreadIds`, `agentsStates`, the model, and the effort. AIR recognizes a collaboration tool call by these three keys. Only `spawnAgent` gets `_meta.jetbrains.air.subagent: true`. Without `rawInputRendering`, one copy of the prompt in `content`. | `rawInput` also holds the Codex `status`. No `rawOutput`, no `content`, no `_meta`. |
@@ -377,14 +377,22 @@ The adapter uses the fallback in these cases:
 
 - The file is empty, so no hunk can express it.
 - The content is binary. The content is binary when its first 8000 characters contain a NUL character.
-- The patch text is larger than 1 MiB (`DIFF_PATCH_MAX_BYTES`).
+- The patch text is larger than 1 MiB (`DIFF_PATCH_MAX_BYTES`), while the Codex diff itself is not.
 - A pure rename has no hunk.
 - The update hunks from Codex are malformed. In a hunk, a line that starts with `\` is valid only as the exact `\ No newline at end of file` marker.
   The hunks must follow each other in the old file without an overlap.
   The new start line of each hunk must equal its old start line plus the line count change of the hunks before it.
 
-For an update, the fallback reads the file and applies the Codex hunks.
-When the adapter cannot parse or apply the hunks, it omits the block and logs the change.
+The standard diff comes from the Codex diff alone. The adapter never reads the file.
+
+- An update gets one diff block per Codex hunk. `oldText` and `newText` hold the context lines and the changed lines of the hunk, not the whole file.
+  A line keeps its line break, except a line that the `\ No newline at end of file` marker follows.
+- A pure rename gets one block for the new path, with empty `oldText` and `newText`.
+- An added or a deleted file gets its whole text, because the change is the whole file.
+- A Codex diff larger than 1 MiB gets no block. The tool call still names the change in its title.
+
+When the adapter cannot parse the hunks, it omits the block and logs the change.
+These rules apply to every client, because the standard diff is the ACP diff.
 
 ### Receiver validation
 
