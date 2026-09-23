@@ -1,6 +1,6 @@
 ---
-name: check-specification
-description: Check the current Agent Client Protocol source of truth, including its documentation, RFDs, Rust models, and JSON schemas. Use when ACP protocol behavior or models must be verified against the latest upstream specification. Do not use it as a Rust reference implementation.
+name: check-acp-specification
+description: Check the current Agent Client Protocol specification, including its documentation, RFDs, Rust models, and JSON schemas. Use when ACP protocol behavior or models must be verified against the latest upstream specification. Do not use it as a Rust reference implementation.
 ---
 
 # Check the ACP specification
