@@ -24,7 +24,7 @@
       },
       {
         "type": "image",
-        "url": "https://example.com/image.png"
+        "url": "data:image/png;base64,abc123"
       },
       {
         "type": "text",
