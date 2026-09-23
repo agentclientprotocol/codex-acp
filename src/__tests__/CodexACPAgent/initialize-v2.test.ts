@@ -148,10 +148,11 @@ describe('ACP v2 connection before the v2 send path exists', () => {
         const view = new AcpV2Connection(client as any).extensionOnlyV1View();
 
         await view.notify("_auth/status_update", {authStatus: {kind: "none"}});
-        await expect(view.notify(acp.methods.client.session.update, {
+        await expect(view.request(acp.methods.client.session.requestPermission, {
             sessionId: "session",
-            update: {sessionUpdate: "agent_message_chunk", content: {type: "text", text: "hi"}},
-        })).rejects.toThrow("'session/update' is not supported on an ACP v2 connection yet");
+            toolCall: {toolCallId: "call-1"},
+            options: [],
+        })).rejects.toThrow("'session/request_permission' is not supported on an ACP v2 connection yet");
 
         expect(client.notify.mock.calls).toEqual([["_auth/status_update", {authStatus: {kind: "none"}}]]);
     });
