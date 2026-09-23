@@ -114,6 +114,29 @@ describe("clients that are not AIR, compared with the baseline", () => {
     });
 });
 
+describe("session start messages", () => {
+    for (const profile of PROFILE_NAMES) {
+        it(`${profile}: records the auth status after initialize and the available commands of every scenario`, () => {
+            for (const each of SCENARIOS) {
+                const messages = recording(profile, each.name);
+                expect(messages.slice(0, 2).map(message => `${message.direction} ${message.method}`), each.name)
+                    .toEqual(["response initialize", "notify _auth/status_update"]);
+                expect(messages[1]!.params, each.name).toEqual({authStatus: {kind: "none", label: "Not logged in"}});
+                expect(updates(profile, each.name).filter(update => update["sessionUpdate"] === "available_commands_update"),
+                    each.name).toHaveLength(1);
+            }
+        });
+    }
+
+    it("validates the auth status notification", () => {
+        const auth = (params: unknown): RecordedMessage => ({direction: "notify", method: "_auth/status_update", params});
+        expect(schemaErrors(auth({authStatus: {kind: "none", label: "Not logged in"}}))).toEqual([]);
+        expect(schemaErrors(auth({authStatus: {kind: "unknown", label: "Not logged in"}}))).not.toEqual([]);
+        expect(schemaErrors(auth({authStatus: {kind: "none"}}))).not.toEqual([]);
+        expect(schemaErrors({direction: "notify", method: "_unknown/extension", params: {}})).not.toEqual([]);
+    });
+});
+
 describe("normalization of the recorded messages", () => {
     const id = "0f8fe1f5-7c4a-4d3e-9d8a-1b2c3d4e5f60";
     const message = (method: string, params: unknown): RecordedMessage => ({direction: "notify", method, params});
@@ -209,7 +232,7 @@ describe("clients that are not AIR", () => {
                 status: "inProgress",
             });
             expect(updates(profile, "collab-agent", "collab-1")[0]).not.toHaveProperty("content");
-            expect(updates(profile, "guardian-review")[0]!["content"]).toEqual([{
+            expect(updates(profile, "guardian-review").find(update => update["sessionUpdate"] === "tool_call")!["content"]).toEqual([{
                 type: "content",
                 content: {
                     type: "text",
@@ -314,12 +337,16 @@ describe("every client", () => {
     }
 });
 
-/** The session and the update kind of each session update, with the tool call id when there is one. */
+/**
+ * The session and the update kind of each session update, with the tool call id when there is one.
+ * The session title and the available commands of the session start are left out.
+ */
 function timeline(profile: ProfileName, name: string): string[] {
     return recording(profile, name)
         .filter(message => message.method === "session/update")
         .map(message => message.params as {sessionId: string; update: Update})
-        .filter(({update}) => update["sessionUpdate"] !== "session_info_update")
+        .filter(({update}) => update["sessionUpdate"] !== "session_info_update"
+            && update["sessionUpdate"] !== "available_commands_update")
         .map(({sessionId, update}) => [sessionId, update["sessionUpdate"], update["toolCallId"] ?? update["subagentSessionId"]]
             .filter(part => part !== undefined).join(" "));
 }

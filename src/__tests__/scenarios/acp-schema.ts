@@ -28,6 +28,37 @@ const MESSAGE_TYPES: Record<string, string> = {
 };
 
 /**
+ * The schemas of the extension notifications of the adapter. ACP defines no schema for them.
+ * ACP requires only that the method starts with `_`, see `ExtNotification`.
+ * The schema of `_auth/status_update` follows `AuthStatusUpdateNotification` in `src/AuthStatusMeta.ts`.
+ */
+const EXTENSION_NOTIFICATION_SCHEMAS: Record<string, object> = {
+    "_auth/status_update": {
+        type: "object",
+        required: ["authStatus"],
+        additionalProperties: false,
+        properties: {
+            authStatus: {
+                type: "object",
+                required: ["kind", "label"],
+                additionalProperties: false,
+                properties: {
+                    kind: {enum: ["account", "api_key", "gateway", "external", "none"]},
+                    label: {type: "string"},
+                    detail: {type: "string"},
+                    account: {
+                        type: "object",
+                        additionalProperties: false,
+                        properties: {email: {type: "string"}, organization: {type: "string"}, plan: {type: "string"}},
+                    },
+                    vendor: {type: "object"},
+                },
+            },
+        },
+    },
+};
+
+/**
  * Session updates of the AIR extension that the ACP schema does not define.
  * The adapter sends them only to a client that negotiated them, see `docs/air-extensions.md`.
  */
@@ -54,8 +85,19 @@ export function acpMessageType(message: RecordedMessage): string | null {
     return type;
 }
 
+/** Returns the schema errors of an extension notification, or `null` when the message is not one. */
+function extensionNotificationErrors(message: RecordedMessage): string[] | null {
+    if (message.direction !== "notify" || !message.method.startsWith("_")) return null;
+    const schema = EXTENSION_NOTIFICATION_SCHEMAS[message.method];
+    if (schema === undefined) return [`No schema for the extension notification ${message.method}`];
+    const validate = ajv.compile(schema);
+    return validate(message.params) ? [] : [`${message.method}: ${ajv.errorsText(validate.errors)}`];
+}
+
 /** Returns the schema errors of one message, or an empty list. */
 export function schemaErrors(message: RecordedMessage): string[] {
+    const extensionErrors = extensionNotificationErrors(message);
+    if (extensionErrors !== null) return extensionErrors;
     const type = acpMessageType(message);
     if (type === null) return [];
     const validate = validator(type);
