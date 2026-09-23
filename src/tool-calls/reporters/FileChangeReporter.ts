@@ -1,9 +1,13 @@
 import type {ToolCallContent} from "@agentclientprotocol/sdk";
-import {applyPatch, parsePatch, reversePatch, type StructuredPatch} from "diff";
-import {readFile} from "node:fs/promises";
+import {parsePatch, type StructuredPatch} from "diff";
 import {AIR_DIFF_PATCH_KEY, withAirMeta} from "../../AirExtension";
 import type {FileChangeRequestApprovalParams, FileUpdateChange, ThreadItem} from "../../app-server/v2";
-import {createAddedFileGitPatch, createDeletedFileGitPatch, createUpdateGitPatch} from "../../GitPatch";
+import {
+    createAddedFileGitPatch,
+    createDeletedFileGitPatch,
+    createUpdateGitPatch,
+    DIFF_PATCH_MAX_BYTES,
+} from "../../GitPatch";
 import {logger} from "../../Logger";
 import type {PermissionToolFacts, ToolFacts} from "../ToolFacts";
 import {toToolStatus} from "./ToolStatus";
@@ -13,16 +17,19 @@ type FileChangeItem = ThreadItem & {type: "fileChange"};
 export const FILE_CHANGE_TITLE = "Editing files";
 
 /**
- * Reports a Codex file change. The diff in `content` carries the file text.
- * With the AIR `diffPatch` capability, the diff is a Git patch, see `docs/air-extensions.md#diff-patch`.
+ * Reports a Codex file change from the Codex diff alone. The reporter never reads the file.
+ *
+ * An update gets one ACP diff per Codex hunk: `oldText` and `newText` hold the changed lines and the context lines
+ * of the hunk, not the whole file. An added or a deleted file gets its whole text. A diff whose text is larger than
+ * {@link DIFF_PATCH_MAX_BYTES} is not sent. With the AIR `diffPatch` capability, the diff is a Git patch,
+ * see `docs/air-extensions.md#diff-patch`.
  */
 export class FileChangeReporter {
-    static async started(item: FileChangeItem, diffPatch: boolean): Promise<ToolFacts> {
+    static started(item: FileChangeItem, diffPatch: boolean): ToolFacts {
         const diffs: ToolCallContent[] = [];
         for (const change of item.changes) {
-            // An unparseable change has no diff.
-            const content = await createPatchContent(change, diffPatch);
-            if (content) diffs.push(content);
+            // An unparseable or a too large change has no diff.
+            diffs.push(...createPatchContent(change, diffPatch));
         }
         return {
             toolCallId: item.id,
@@ -57,86 +64,112 @@ export class FileChangeReporter {
     }
 }
 
-async function createPatchContent(
-    change: FileUpdateChange,
-    supportsDiffPatch: boolean,
-): Promise<ToolCallContent | null> {
+function createPatchContent(change: FileUpdateChange, supportsDiffPatch: boolean): ToolCallContent[] {
     try {
         switch (change.kind.type) {
             case "add":
-                return createAddFileContent(change, supportsDiffPatch);
+                return createWholeFileContent(change, "add", supportsDiffPatch);
             case "delete":
-                return createDeleteFileContent(change, supportsDiffPatch);
+                return createWholeFileContent(change, "delete", supportsDiffPatch);
             case "update":
-                return await createUpdateFileContent(change, change.kind.move_path, supportsDiffPatch);
+                return createUpdateFileContent(change, change.kind.move_path, supportsDiffPatch);
         }
     } catch (error) {
         logger.log(`Error processing file update change: ${error}`);
-        return null;
+        return [];
     }
 }
 
-function createAddFileContent(
+/** The diff of an added or a deleted file. Codex sends the whole file text in `diff`. */
+function createWholeFileContent(
     change: FileUpdateChange,
+    kind: "add" | "delete",
     supportsDiffPatch: boolean,
-): ToolCallContent {
-    // app-server always returns file content instead of diff
-    const patch = supportsDiffPatch ? createAddedFileGitPatch(change.path, change.diff) : null;
-    if (patch !== null) {
-        return createPatchOnlyContent(change.path, "add", patch);
+): ToolCallContent[] {
+    if (!fitsDiffLimit(change.diff)) {
+        logger.log("Skipped the diff of a file that is too large", {path: change.path});
+        return [];
     }
-    return {
+    const patch = !supportsDiffPatch ? null
+        : kind === "add" ? createAddedFileGitPatch(change.path, change.diff)
+        : createDeletedFileGitPatch(change.path, change.diff);
+    if (patch !== null) return [createPatchOnlyContent(change.path, kind, patch)];
+    return [{
         type: "diff",
-        oldText: null,
-        newText: change.diff,
+        oldText: kind === "add" ? null : change.diff,
+        newText: kind === "add" ? change.diff : "",
         path: change.path,
-        _meta: { kind: "add" },
-    };
+        _meta: {kind},
+    }];
 }
 
-async function createUpdateFileContent(
+/** The diffs of an updated file: one diff per Codex hunk. */
+function createUpdateFileContent(
     change: FileUpdateChange,
     movePath: string | null,
     supportsDiffPatch: boolean,
-): Promise<ToolCallContent | null> {
+): ToolCallContent[] {
     const unifiedDiff = recoverCorruptedDiff(change.diff);
     const targetPath = movePath ?? change.path;
+    if (!fitsDiffLimit(unifiedDiff)) {
+        logger.log("Skipped the diff of a file change that is too large", {path: targetPath});
+        return [];
+    }
 
     const gitPatch = supportsDiffPatch ? createUpdateGitPatch(change.path, targetPath, unifiedDiff) : null;
     if (gitPatch !== null) {
-        return createPatchOnlyContent(targetPath, "update", gitPatch);
+        return [createPatchOnlyContent(targetPath, "update", gitPatch)];
     }
 
-    // The standard diff needs the file text, so it reads the file and applies the Codex hunks.
+    // A pure rename has no hunks. Its diff names the new path and changes no line.
+    if (movePath !== null && unifiedDiff.trim().length === 0) {
+        return [{type: "diff", oldText: "", newText: "", path: targetPath, _meta: {kind: "update"}}];
+    }
     const patch = parseSinglePatch(unifiedDiff);
     if (patch === null) {
         logger.log("Skipped a file change whose diff has no single valid patch", {path: change.path});
-        return null;
+        return [];
     }
+    return patch.hunks.map(hunk => {
+        const {oldText, newText} = hunkTexts(hunk.lines);
+        return {type: "diff", oldText, newText, path: targetPath, _meta: {kind: "update"}};
+    });
+}
 
-    const oldContent = await readFileContent(change.path);
-    if (oldContent !== null) {
-        const patchedContent = applyPatch(oldContent, patch);
-        if (patchedContent === false) {
-            // If Codex runs in full access mode, the file might already be patched.
-            // we can verify this by checking if the reverted patch applies.
-            const revertedContent = applyPatch(oldContent, reversePatch(patch));
-            if (revertedContent !== false) {
-                return createUpdateDiffContent(targetPath, revertedContent, oldContent);
-            }
-            return null;
+/**
+ * The old and the new text of one hunk. Each line keeps its line break, except a line that the
+ * `\\ No newline at end of file` marker follows.
+ */
+function hunkTexts(lines: string[]): {oldText: string; newText: string} {
+    const oldLines: string[] = [];
+    const newLines: string[] = [];
+    let previous = " ";
+    for (const line of lines) {
+        const sign = line[0] ?? " ";
+        if (sign === "\\") {
+            if (previous !== "+") stripLineBreak(oldLines);
+            if (previous !== "-") stripLineBreak(newLines);
+            continue;
         }
-        return createUpdateDiffContent(targetPath, oldContent, patchedContent);
+        const text = `${line.slice(1)}\n`;
+        if (sign !== "+") oldLines.push(text);
+        if (sign !== "-") newLines.push(text);
+        previous = sign;
     }
+    return {oldText: oldLines.join(""), newText: newLines.join("")};
+}
 
-    if (!movePath) return null;
-    const newContent = await readFileContent(movePath);
-    if (newContent === null) return null;
+function stripLineBreak(lines: string[]): void {
+    const last = lines.at(-1);
+    if (last !== undefined) lines[lines.length - 1] = last.slice(0, -1);
+}
 
-    const revertedContent = applyPatch(newContent, reversePatch(patch));
-    if (revertedContent === false) return null;
-
-    return createUpdateDiffContent(movePath, revertedContent, newContent);
+/**
+ * Whether a diff text is small enough to send. The UTF-16 length is a lower bound of the UTF-8 size, so a text
+ * over the limit is rejected before it is encoded or copied.
+ */
+function fitsDiffLimit(text: string): boolean {
+    return text.length <= DIFF_PATCH_MAX_BYTES && Buffer.byteLength(text, "utf8") <= DIFF_PATCH_MAX_BYTES;
 }
 
 function parseSinglePatch(diff: string): StructuredPatch | null {
@@ -146,34 +179,6 @@ function parseSinglePatch(diff: string): StructuredPatch | null {
     } catch {
         return null;
     }
-}
-
-function createUpdateDiffContent(path: string, oldText: string, newText: string): ToolCallContent {
-    return {
-        type: "diff",
-        oldText,
-        newText,
-        path,
-        _meta: { kind: "update" },
-    };
-}
-
-function createDeleteFileContent(
-    change: FileUpdateChange,
-    supportsDiffPatch: boolean,
-): ToolCallContent {
-    // app-server always returns file content instead of diff
-    const patch = supportsDiffPatch ? createDeletedFileGitPatch(change.path, change.diff) : null;
-    if (patch !== null) {
-        return createPatchOnlyContent(change.path, "delete", patch);
-    }
-    return {
-        type: "diff",
-        oldText: change.diff,
-        newText: "",
-        path: change.path,
-        _meta: { kind: "delete" },
-    };
 }
 
 function createPatchOnlyContent(path: string, kind: string, patch: string): ToolCallContent {
@@ -188,10 +193,6 @@ function createPatchOnlyContent(path: string, kind: string, patch: string): Tool
             text: patch,
         }),
     };
-}
-
-async function readFileContent(filePath: string): Promise<string | null> {
-    return await readFile(filePath, { encoding: "utf8" }).catch(() => null);
 }
 
 /**
