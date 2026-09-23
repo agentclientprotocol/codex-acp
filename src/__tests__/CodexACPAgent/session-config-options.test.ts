@@ -1,4 +1,4 @@
-import {describe, expect, it, vi} from "vitest";
+import {afterEach, describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import {AgentMode, MODE_CONFIG_ID} from "../../AgentMode";
@@ -6,7 +6,7 @@ import {
     MODEL_CONFIG_ID,
     REASONING_EFFORT_CONFIG_ID,
 } from "../../ModelConfigOption";
-import type {Model, ReasoningEffortOption} from "../../app-server/v2";
+import type {Model, ReasoningEffortOption, Turn} from "../../app-server/v2";
 import {LEGACY_SET_SESSION_MODEL_METHOD} from "../../AcpExtensions";
 import {
     COLLABORATION_MODE_CONFIG_ID,
@@ -41,6 +41,7 @@ async function createSession(
     currentModelId: string,
     availableModels: Array<Model>,
     clientCapabilities?: acp.ClientCapabilities,
+    additionalDirectories: string[] = [],
 ) {
     const fixture = createCodexMockTestFixture();
     const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -53,18 +54,26 @@ async function createSession(
         currentModelId,
         models: availableModels,
         collaborationMode: "default",
-        additionalDirectories: [],
+        additionalDirectories,
     });
 
     if (clientCapabilities) {
         await codexAcpAgent.initialize({protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities});
     }
 
-    const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
+    const response = await codexAcpAgent.newSession({
+        cwd: "/test/cwd",
+        mcpServers: [],
+        _meta: {additionalRoots: additionalDirectories},
+    });
     return {fixture, codexAcpAgent, codexAcpClient, response};
 }
 
 describe("Session config options", () => {
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
     it("exposes mode, model, reasoning_effort and fast-mode in the new session response", async () => {
         const {fast, slow} = buildModels();
         const {response} = await createSession("fast-model[medium]", [fast, slow]);
@@ -105,12 +114,17 @@ describe("Session config options", () => {
             options: [
                 {
                     value: "read-only",
-                    name: "Ask for approval",
-                    description: "Always ask to edit external files and use the internet",
+                    name: "Read-only",
+                    description: "Requires approval to edit files and access the internet.",
+                },
+                {
+                    value: "workspace-write",
+                    name: "Workspace access",
+                    description: "Edit workspace files; ask before writing outside the workspace or accessing the network.",
                 },
                 {
                     value: "agent",
-                    name: "Approve for me",
+                    name: "Auto review",
                     description: "Only ask for actions detected as potentially unsafe",
                 },
                 {
@@ -123,6 +137,9 @@ describe("Session config options", () => {
         expect((modeOption as any).options.map((o: any) => o.value)).toEqual(
             AgentMode.all().map(m => m.id)
         );
+        expect(response.modes?.availableModes.map(mode => mode.id)).toEqual([
+            "read-only", "workspace-write", "agent", "agent-full-access",
+        ]);
     });
 
     it("shows the current uncataloged model as its own selectable option", async () => {
@@ -233,6 +250,62 @@ describe("Session config options", () => {
         expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.Agent);
         const modeOption = result.configOptions?.find(o => o.id === MODE_CONFIG_ID);
         expect((modeOption as any).currentValue).toBe(AgentMode.Agent.id);
+    });
+
+    it.each([
+        {selection: "INITIAL_AGENT_MODE", initialMode: "read-only", modeId: "read-only"},
+        {selection: "session/set_mode", initialMode: "agent", modeId: "read-only"},
+        {selection: "session/set_mode", initialMode: "workspace-write", modeId: "read-only"},
+        {selection: "session/set_mode", initialMode: "agent-full-access", modeId: "read-only"},
+        {selection: "session/set_config_option", initialMode: "agent", modeId: "read-only"},
+        {selection: "session/set_config_option", initialMode: "workspace-write", modeId: "read-only"},
+        {selection: "session/set_config_option", initialMode: "agent-full-access", modeId: "read-only"},
+        {selection: "INITIAL_AGENT_MODE", initialMode: "workspace-write", modeId: "workspace-write"},
+        {selection: "session/set_mode", initialMode: "read-only", modeId: "workspace-write"},
+        {selection: "session/set_config_option", initialMode: "read-only", modeId: "workspace-write"},
+    ])("applies $modeId permissions after $selection from $initialMode", async ({selection, initialMode, modeId}) => {
+        vi.stubEnv("INITIAL_AGENT_MODE", initialMode);
+        const {fast} = buildModels();
+        const {fixture, codexAcpAgent, response} = await createSession("fast-model[medium]", [fast], {
+            fs: {readTextFile: false, writeTextFile: false},
+            terminal: false,
+        }, ["/test/extra"]);
+        expect(response.modes?.currentModeId).toBe(initialMode);
+
+        if (selection === "session/set_mode") {
+            await codexAcpAgent.setSessionMode({sessionId: response.sessionId, modeId});
+        } else if (selection === "session/set_config_option") {
+            const result = await codexAcpAgent.setSessionConfigOption({
+                sessionId: response.sessionId,
+                configId: "mode",
+                value: modeId,
+            });
+            expect(result.configOptions.find(option => option.id === "mode")?.currentValue).toBe(modeId);
+        }
+
+        const appServer = fixture.getCodexAppServerClient();
+        vi.spyOn(appServer, "listSkills").mockResolvedValue({data: []});
+        const turn: Turn = {
+            id: "turn-id", items: [], itemsView: "notLoaded", status: "inProgress", error: null,
+            startedAt: null, completedAt: null, durationMs: null,
+        };
+        const turnStart = vi.spyOn(appServer, "turnStart").mockResolvedValue({turn});
+        vi.spyOn(appServer, "awaitTurnCompleted").mockResolvedValue({
+            threadId: response.sessionId,
+            turn: {...turn, status: "completed"},
+        });
+
+        await codexAcpAgent.prompt({
+            sessionId: response.sessionId,
+            prompt: [{type: "text", text: "Create summary.md containing PINEAPPLE."}],
+        });
+
+        // Assert the actual outgoing policy, independently of the preset object.
+        // Additional session roots are writable only in the workspace-write preset.
+        const policies = turnStart.mock.calls.map(([{approvalPolicy, approvalsReviewer, sandboxPolicy}]) => ({
+            approvalPolicy, approvalsReviewer, sandboxPolicy,
+        }));
+        await expect(JSON.stringify(policies, null, 2) + "\n").toMatchFileSnapshot(`data/${modeId}-mode-policy.json`);
     });
 
     it("changes collaboration mode without starting a model turn", async () => {

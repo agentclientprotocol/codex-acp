@@ -129,7 +129,11 @@ describe('CodexEventHandler - terminal output events', () => {
         );
     });
 
-    it('should send formatted output on command completion', async () => {
+    it('should send one delta when command completion has no streamed output', async () => {
+        const deltaSessionState = createTestSessionState({
+            sessionId,
+            terminalOutputDeltaSupported: true,
+        });
         const commandCompletedNotification: ServerNotification = {
             method: 'item/completed',
             params: {
@@ -154,7 +158,7 @@ describe('CodexEventHandler - terminal output events', () => {
             },
         };
 
-        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [commandCompletedNotification]);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, deltaSessionState, [commandCompletedNotification]);
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
             'data/terminal-command-completed.json'
@@ -222,6 +226,10 @@ describe('CodexEventHandler - terminal output events', () => {
     });
 
     it('should handle full terminal output flow: start -> delta -> complete', async () => {
+        const deltaSessionState = createTestSessionState({
+            sessionId,
+            terminalOutputDeltaSupported: true,
+        });
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
             params: {
@@ -280,7 +288,7 @@ describe('CodexEventHandler - terminal output events', () => {
             },
         };
 
-        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+        await setupPromptAndSendNotifications(mockFixture, sessionId, deltaSessionState, [
             commandStartNotification,
             outputDeltaNotification,
             commandCompletedNotification

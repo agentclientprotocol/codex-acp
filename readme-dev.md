@@ -9,7 +9,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `CODEX_CONFIG` - JSON object merged into the Codex session config.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
-- `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
+- `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
 
@@ -84,6 +84,24 @@ npm run package:all
 1. Update the `@openai/codex` version in `package.json` (under `dependencies`).
 2. Regenerate Codex types in `src/app-server/`: `npm run generate-types`
 3. Ensure there are no type errors or failed tests: `npm run typecheck` and `npm run test`
+
+### Session notices
+
+The adapter implements [Session Notices](https://agentclientprotocol.com/rfds/session-notices)
+for Codex warnings, configuration warnings, deprecation notices, model rerouting, and the legacy
+`thread/compacted` advisory when the client advertises `clientCapabilities.session.notices: {}`.
+These are live `session/update` notifications with
+`sessionUpdate: "notice"`, a severity, a plain-text title, and optional description.
+They are not replayed from session history and repeated notices remain independent events.
+
+Without that capability (including absent or null capability objects), the adapter preserves
+the existing assistant/thought text or AIR `sessionFailure` advisory records. When notices are
+enabled, they take precedence over AIR advisory records. Clients control their presentation;
+the adapter does not rely on notices being displayed.
+
+Command replies, review results, and terminal/retrying errors retain their existing response or
+failure channels. Clients advertising session compaction support continue to receive the dedicated
+compaction lifecycle instead of the legacy completion advisory.
 
 ### AIR diff statistics
 

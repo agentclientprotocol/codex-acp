@@ -49,7 +49,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             codexAcpAgent.newSession({cwd: "", mcpServers: []})
         ).rejects.toThrow("Authentication required");
 
-        const transportDump = authFixture.getCodexConnectionDump(ignoredFields);
+        const transportDump = authFixture.getCodexConnectionDump(ignoredFields, {
+            placeholderResponseMethods: ["account/read"],
+        });
         await expect(transportDump).toMatchFileSnapshot("data/auth-failed.json");
     });
 
@@ -445,6 +447,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 availabilityNux: null,
                 modelSpecialty: null,
                 multiAgentVersion: null,
+                availableAccessPrograms: null,
                 displayName: "gpt-5",
                 description: "test model",
                 hidden: false,
@@ -3530,6 +3533,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     runtimeStatus: null,
                     pluginId: null,
                     serverInfo: null,
+                    serverCapabilities: null,
                     toolsError: null,
                     tools: {listFiles: {name: "listFiles", inputSchema: {type: "object"}}},
                     resources: [{name: "workspace", uri: "file:///workspace"}],
@@ -3541,6 +3545,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     runtimeStatus: null,
                     pluginId: null,
                     serverInfo: null,
+                    serverCapabilities: null,
                     toolsError: null,
                     tools: {},
                     resources: [],
@@ -3591,6 +3596,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
+            availableAccessPrograms: null,
             displayName: 'Codex 5.2',
             description: 'Coding model',
             hidden: false,
@@ -3614,6 +3620,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
+            availableAccessPrograms: null,
             displayName: 'Standard 5.1',
             description: 'Standard model',
             hidden: false,

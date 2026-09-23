@@ -1,0 +1,54 @@
+[
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "notice-session",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "messageId": "before-compaction",
+          "content": {
+            "type": "text",
+            "text": "Before compaction."
+          }
+        }
+      }
+    ]
+  },
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "notice-session",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "history-compaction",
+          "kind": "think",
+          "title": "Compact conversation",
+          "status": "completed",
+          "_meta": {
+            "contextCompaction": {
+              "version": 1
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "notice-session",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "messageId": "after-compaction",
+          "content": {
+            "type": "text",
+            "text": "After compaction."
+          }
+        }
+      }
+    ]
+  }
+]

@@ -37,8 +37,21 @@ export class AgentMode {
 
     static readonly ReadOnly = new AgentMode(
         "read-only",
-        "Ask for approval",
-        "Always ask to edit external files and use the internet",
+        "Read-only",
+        "Requires approval to edit files and access the internet.",
+        "standard",
+        "on-request",
+        "user",
+        {
+            type: "readOnly",
+            networkAccess: false,
+        },
+        "read-only",
+    );
+    static readonly WorkspaceWrite = new AgentMode(
+        "workspace-write",
+        "Workspace access",
+        "Edit workspace files; ask before writing outside the workspace or accessing the network.",
         "standard",
         "on-request",
         "user",
@@ -53,7 +66,7 @@ export class AgentMode {
     );
     static readonly Agent = new AgentMode(
         "agent",
-        "Approve for me",
+        "Auto review",
         "Only ask for actions detected as potentially unsafe",
         "auto_review",
         "on-request",
@@ -114,7 +127,7 @@ export class AgentMode {
     }
 
     static all(): AgentMode[] {
-        return [AgentMode.ReadOnly, AgentMode.Agent, AgentMode.AgentFullAccess];
+        return [AgentMode.ReadOnly, AgentMode.WorkspaceWrite, AgentMode.Agent, AgentMode.AgentFullAccess];
     }
 
     static find(modeId: string): AgentMode | null {
