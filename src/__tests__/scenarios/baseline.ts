@@ -131,8 +131,10 @@ export function expectedFromBaseline(scenario: string, baseline: RecordedMessage
  * Each tool call report as the client stores it after the merge.
  *
  * A `tool_call_update` can omit a top-level field that did not change, because the client merges the update into the
- * stored tool call. The permission request of a tool call counts as a report. Each report becomes the whole stored
- * tool call. A `tool_call_update` that changes no field and has no `_meta` is removed.
+ * stored tool call. Each `tool_call_update` becomes the whole stored tool call. A `tool_call_update` that changes no
+ * field and has no `_meta` is removed.
+ * The tool call of a permission request stays as it is, because the client shows it before it merges it.
+ * Its fields still go into the stored tool call.
  * The `_meta` of each report stays as it is, because ACP defines no merge for the `_meta` keys.
  */
 export function mergedReports(messages: RecordedMessage[]): RecordedMessage[] {
@@ -154,10 +156,8 @@ export function mergedReports(messages: RecordedMessage[]): RecordedMessage[] {
         if (message.method === "session/request_permission") {
             const {toolCallId, _meta, ...fields} = params["toolCall"] as Json;
             const key = `${String(params["sessionId"])} ${String(toolCallId)}`;
-            const next = {...stored.get(key) ?? {}, ...fields};
-            stored.set(key, next);
-            const toolCall = {toolCallId, fields: next, ...(_meta === undefined ? {} : {_meta})};
-            return [{...message, params: {...params, toolCall}}];
+            stored.set(key, {...stored.get(key) ?? {}, ...fields});
+            return [message];
         }
         return [message];
     });

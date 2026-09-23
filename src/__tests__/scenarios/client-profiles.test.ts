@@ -88,6 +88,21 @@ describe("clients that are not AIR, compared with the baseline", () => {
         }
     }
 
+    it("catches a permission request that omits the kind of a reported tool call", () => {
+        const started: RecordedMessage = {
+            direction: "notify",
+            method: "session/update",
+            params: {sessionId: "s", update: {sessionUpdate: "tool_call", toolCallId: "t", kind: "execute", title: "t"}},
+        };
+        const request = (toolCall: Record<string, unknown>): RecordedMessage => ({
+            direction: "request",
+            method: "session/request_permission",
+            params: {sessionId: "s", toolCall: {toolCallId: "t", status: "pending", ...toolCall}, options: []},
+        });
+        expect(lines(mergedReports([started, request({})])))
+            .not.toEqual(lines(mergedReports([started, request({kind: "execute"})])));
+    });
+
     it.runIf(RECORD_BASELINE)("records the baseline", () => {
         for (const profile of ["plain", "zed"] as const) {
             for (const each of SCENARIOS) {
