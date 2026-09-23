@@ -80,7 +80,7 @@ describe("command output is sent once", () => {
         });
     });
 
-    it("sends the output of a read command once in the content to AIR", () => {
+    it("sends no output of a file read to AIR", () => {
         const update = completion(command({
             commandActions: [{type: "read", command: "cat a.txt", name: "a.txt", path: "/workspace/a.txt"}],
         }), DELTA_CLIENT);
@@ -89,7 +89,19 @@ describe("command output is sent once", () => {
             sessionUpdate: "tool_call_update",
             toolCallId: "cmd-1",
             status: "completed",
-            content: [{type: "content", content: {type: "text", text: "a.txt\nb.txt\n"}}],
+        });
+    });
+
+    it("sends the output of a list that did not stream once to the AIR terminal channel", () => {
+        const update = completion(command({
+            commandActions: [{type: "listFiles", command: "ls", path: "/workspace"}],
+        }), DELTA_CLIENT);
+
+        expect(update).toEqual({
+            sessionUpdate: "tool_call_update",
+            toolCallId: "cmd-1",
+            status: "completed",
+            _meta: {terminal_output_delta: {data: "a.txt\nb.txt\n", terminal_id: "cmd-1"}},
         });
     });
 
@@ -153,7 +165,7 @@ describe("command output is sent once", () => {
         expect(dump).not.toContain("terminal_output_delta");
     });
 
-    it("sends the streamed output of a read command once in the content", async () => {
+    it("sends neither the chunks nor the result of a live file read", async () => {
         const fixture = createCodexMockTestFixture();
         const sessionId = "read-once";
         const read = {commandActions: [{type: "read" as const, command: "cat a.txt", name: "a.txt", path: "/workspace/a.txt"}]};
@@ -164,10 +176,24 @@ describe("command output is sent once", () => {
             liveCommand(sessionId, read),
         );
 
+        expect(occurrences(fixture.getAcpConnectionDump([]), "a.txt\nb.txt\n")).toBe(0);
+    });
+
+    it("streams the output of a live search once, as chunks", async () => {
+        const fixture = createCodexMockTestFixture();
+        const sessionId = "search-once";
+        const search = {commandActions: [{type: "search" as const, command: "rg a", query: "a", path: "/workspace"}]};
+        await setupPromptAndSendNotifications(
+            fixture,
+            sessionId,
+            createTestSessionState({sessionId}),
+            liveCommand(sessionId, search),
+        );
+
         const dump = fixture.getAcpConnectionDump([]);
         expect(occurrences(dump, "a.txt\nb.txt\n")).toBe(1);
-        expect(dump).not.toContain("terminal_output_delta");
-        expect(dump).toContain("\"content\"");
+        expect(dump).toContain("terminal_output_delta");
+        expect(dump).not.toContain("\"content\":[{\"type\":\"content\"");
     });
 });
 
