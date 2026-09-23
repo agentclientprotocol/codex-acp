@@ -11,7 +11,7 @@ export const DIFF_PATCH_MAX_BYTES = 1024 * 1024;
 /** Git reads a file as binary when its first 8000 bytes contain a NUL byte. */
 const BINARY_PROBE_LENGTH = 8000;
 const NO_NEWLINE_MARKER = "\\ No newline at end of file";
-const HUNK_HEADER = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/;
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 const REGULAR_FILE_MODE = "100644";
 
 /**
@@ -68,6 +68,9 @@ function createWholeFilePatch(filePath: string, text: string, change: "added" | 
 /**
  * Returns the hunks of a Codex diff, or `null` when a hunk is malformed.
  * Codex can put file headers before the first hunk. They are dropped.
+ *
+ * The hunks must follow each other in the old file without an overlap.
+ * The new start of each hunk must equal its old start plus the line count change of the hunks before it.
  */
 function hunkText(diff: string): string | null {
     const lines = diff.split("\n");
@@ -79,11 +82,20 @@ function hunkText(diff: string): string | null {
     const hunks = lines.slice(first);
 
     let index = 0;
+    /** The first old line after the previous hunk. */
+    let oldEnd = 1;
+    /** The line count change of the previous hunks. */
+    let offset = 0;
     while (index < hunks.length) {
         const header = HUNK_HEADER.exec(hunks[index]!);
         if (header === null) return null;
-        let oldLines = header[1] === undefined ? 1 : Number(header[1]);
-        let newLines = header[2] === undefined ? 1 : Number(header[2]);
+        const old = hunkRange(header[1]!, header[2]);
+        const current = hunkRange(header[3]!, header[4]);
+        if (old === null || current === null || old.first < oldEnd || current.first - old.first !== offset) return null;
+        oldEnd = old.first + old.count;
+        offset += current.count - old.count;
+        let oldLines = old.count;
+        let newLines = current.count;
         index++;
         while (oldLines > 0 || newLines > 0) {
             const line = hunks[index];
@@ -112,6 +124,19 @@ function hunkText(diff: string): string | null {
         while (hunks[index] === NO_NEWLINE_MARKER) index++;
     }
     return `${hunks.join("\n")}\n`;
+}
+
+/**
+ * Reads the start and the line count of one side of a hunk header.
+ * An empty range starts after the line that the header names, so its first line is one more.
+ * Returns `null` for a number that is not a safe integer, or for start 0 with lines.
+ */
+function hunkRange(start: string, count: string | undefined): {first: number; count: number} | null {
+    const startLine = Number(start);
+    const lineCount = count === undefined ? 1 : Number(count);
+    if (!Number.isSafeInteger(startLine) || !Number.isSafeInteger(lineCount)) return null;
+    if (lineCount === 0) return {first: startLine + 1, count: 0};
+    return startLine === 0 ? null : {first: startLine, count: lineCount};
 }
 
 function isFileHeaderLine(line: string): boolean {
