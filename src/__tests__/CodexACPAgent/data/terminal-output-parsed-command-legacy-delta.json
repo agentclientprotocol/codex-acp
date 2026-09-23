@@ -6,9 +6,9 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "command-read-file",
-        "status": "in_progress",
         "kind": "read",
         "title": "Read file '/test/project/README.md'",
+        "status": "in_progress",
         "locations": [
           {
             "path": "/test/project/README.md"
@@ -26,29 +26,16 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-read-file",
-        "_meta": {
-          "terminal_output_delta": {
-            "data": "# Project\n",
-            "terminal_id": "command-read-file"
-          }
-        }
-      }
-    }
-  ]
-}
-{
-  "method": "sessionUpdate",
-  "args": [
-    {
-      "sessionId": "test-session-id",
-      "update": {
-        "sessionUpdate": "tool_call_update",
-        "toolCallId": "command-read-file",
         "status": "completed",
-        "rawOutput": {
-          "formatted_output": "# Project\n",
-          "exit_code": 0
-        }
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "# Project\n"
+            }
+          }
+        ]
       }
     }
   ]

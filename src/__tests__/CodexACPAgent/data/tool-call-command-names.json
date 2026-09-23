@@ -38,15 +38,15 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "unifiedExecStartup-read",
-        "status": "in_progress",
+        "name": "exec_command",
         "kind": "read",
         "title": "Read file '/repo/config.json'",
+        "status": "in_progress",
         "locations": [
           {
             "path": "/repo/config.json"
           }
-        ],
-        "name": "exec_command"
+        ]
       }
     }
   ]
@@ -91,15 +91,15 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "unifiedExecInteraction-read",
-        "status": "in_progress",
+        "name": "write_stdin",
         "kind": "read",
         "title": "Read file '/repo/config.json'",
+        "status": "in_progress",
         "locations": [
           {
             "path": "/repo/config.json"
           }
-        ],
-        "name": "write_stdin"
+        ]
       }
     }
   ]
@@ -143,9 +143,9 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "agent-read",
-        "status": "in_progress",
         "kind": "read",
         "title": "Read file '/repo/config.json'",
+        "status": "in_progress",
         "locations": [
           {
             "path": "/repo/config.json"
@@ -194,9 +194,9 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "userShell-read",
-        "status": "in_progress",
         "kind": "read",
         "title": "Read file '/repo/config.json'",
+        "status": "in_progress",
         "locations": [
           {
             "path": "/repo/config.json"

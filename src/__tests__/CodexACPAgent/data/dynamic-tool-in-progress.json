@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "dyn-call-id",
+        "name": "list_apps",
         "kind": "execute",
         "title": "list_apps",
         "status": "in_progress",
@@ -13,8 +14,7 @@
           "arguments": {
             "includeDisabled": false
           }
-        },
-        "name": "list_apps"
+        }
       }
     }
   ]

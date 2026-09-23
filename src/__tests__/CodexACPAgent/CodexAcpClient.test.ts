@@ -1031,7 +1031,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             const dump = mockFixture.getAcpConnectionDump([]);
             expect(dump).toContain('"sessionId": "thread-id"');
             expect(dump).toContain('"sessionUpdate": "tool_call"');
-            expect(dump).toContain('"toolCallId": "mcp_startup.broken-mcp"');
+            expect(dump).toMatch(/"toolCallId": "mcp_startup\.broken-mcp\.[0-9a-f-]{36}"/);
             expect(dump).toContain('MCP server `broken-mcp` failed to start: boom');
         });
 
@@ -2029,7 +2029,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             args: [expect.objectContaining({
                 update: {
                     sessionUpdate: "session_info_update",
-                    _meta: {
+                    _meta: {jetbrains: {air: {version: 1,
                         goal: {
                             objective: "Ship the migration and keep tests green",
                             status: "active",
@@ -2040,7 +2040,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                             updatedAt: 1710000100000,
                             controlMethod: "_session/goal",
                         },
-                    },
+                    }}},
                 },
             })],
         }));
@@ -2811,21 +2811,21 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             expect.objectContaining({
                 args: [expect.objectContaining({
                     update: expect.objectContaining({
-                        _meta: {goal: expect.objectContaining({status: "paused"})},
+                        _meta: {jetbrains: {air: {version: 1, goal: expect.objectContaining({status: "paused"})}}},
                     }),
                 })],
             }),
             expect.objectContaining({
                 args: [expect.objectContaining({
                     update: expect.objectContaining({
-                        _meta: {goal: expect.objectContaining({status: "active"})},
+                        _meta: {jetbrains: {air: {version: 1, goal: expect.objectContaining({status: "active"})}}},
                     }),
                 })],
             }),
             expect.objectContaining({
                 args: [expect.objectContaining({
                     update: expect.objectContaining({
-                        _meta: {goal: null},
+                        _meta: {jetbrains: {air: {version: 1, goal: null}}},
                     }),
                 })],
             }),
@@ -3049,9 +3049,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             && event.args[0]?.update?.sessionUpdate === "session_info_update"
         );
         expect(goalUpdates).toHaveLength(1);
-        expect(goalUpdates[0]?.args[0]?.update?._meta).toEqual({
+        expect(goalUpdates[0]?.args[0]?.update?._meta).toEqual({jetbrains: {air: {
+            version: 1,
             goal: expect.objectContaining({objective: "current", createdAt: 200000}),
-        });
+        }}});
     });
 
     it('suppresses the first routed goal notification after cancellation marks the turn stale', async () => {

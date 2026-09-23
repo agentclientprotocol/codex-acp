@@ -4,6 +4,7 @@ import {AgentMode} from "../../AgentMode";
 import type {SessionState} from "../../CodexAcpServer";
 import {CodexEventHandler} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
+import type {ClientCapabilities} from "../../tool-calls/ClientCapabilities";
 import {
     createCodexMockTestFixture,
     createTestSessionState,
@@ -30,7 +31,7 @@ describe("CodexEventHandler - plan events", () => {
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
     });
 
-    it("emits the authoritative completed plan after buffering deltas", async () => {
+    it("streams plan deltas as message text and keeps them when the completed plan differs", async () => {
         const notifications: ServerNotification[] = [
             {
                 method: "item/started",
@@ -85,7 +86,7 @@ describe("CodexEventHandler - plan events", () => {
         );
     });
 
-    it("falls back to buffered deltas when the completed plan is empty", async () => {
+    it("sends nothing more when the completed plan is empty after streamed deltas", async () => {
         const notifications: ServerNotification[] = [
             {
                 method: "item/plan/delta",
@@ -183,12 +184,16 @@ describe("CodexEventHandler - plan events", () => {
     describe("plan update coalescing", () => {
         function createHandler(
             notify = vi.fn(async (_method: unknown, _params: unknown) => {}),
+            capabilities: Parameters<ClientCapabilities["with"]>[0] = {},
         ) {
             const connection = {
                 notify,
                 request: vi.fn(),
             } as unknown as AcpClientConnection;
-            const handler = new CodexEventHandler(connection, sessionState, true);
+            const handler = new CodexEventHandler(connection, {
+                ...sessionState,
+                clientCapabilities: sessionState.clientCapabilities.with({planUpdates: true, ...capabilities}),
+            });
             const planUpdates = () => notify.mock.calls
                 .map(call => call[1] as {update?: {sessionUpdate?: string, plan?: {planId: string, content: string}}})
                 .filter(params => params.update?.sessionUpdate === "plan_update")

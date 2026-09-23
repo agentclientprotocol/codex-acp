@@ -1,10 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
-import { createFileChangeUpdate } from '../../CodexToolCallMapper';
+import { AcpToolCallRenderer } from '../../tool-calls/AcpToolCallRenderer';
+import { ClientCapabilities } from '../../tool-calls/ClientCapabilities';
+import { FileChangeReporter } from '../../tool-calls/reporters/FileChangeReporter';
+
 import type { ThreadItem } from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
 import {AgentMode} from "../../AgentMode";
+
+async function createFileChangeUpdate(item: ThreadItem & {type: 'fileChange'}, diffPatch = false) {
+    return new AcpToolCallRenderer(ClientCapabilities.DEFAULT).render(await FileChangeReporter.started(item, diffPatch));
+}
 
 const { mockFiles, mockReadDelays, mockFileContent, delayMockFileRead, removeMockFile, clearMockFiles } = vi.hoisted(() => {
     const files = new Map<string, string>();

@@ -1,6 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type {AvailableCommand} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
+import {AIR_COMMAND_ACTION_KEY, airOnlyMeta} from "./AirExtension";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, SkillsListParams, TurnCompletedNotification} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
@@ -60,7 +61,10 @@ export class CodexCommands {
                 return;
             }
             const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
-            const availableCommands = this.buildAvailableCommands(skillsResponse?.data ?? []);
+            const availableCommands = this.buildAvailableCommands(
+                skillsResponse?.data ?? [],
+                sessionState.clientCapabilities.airClient,
+            );
             if (availableCommands.length === 0 || !shouldPublish()) {
                 return;
             }
@@ -83,10 +87,10 @@ export class CodexCommands {
         };
     }
 
-    private buildAvailableCommands(skillsEntries: SkillsListEntry[]): AvailableCommand[] {
+    private buildAvailableCommands(skillsEntries: SkillsListEntry[], airClient: boolean): AvailableCommand[] {
         const commands = new Map<string, AvailableCommand>();
 
-        for (const builtin of this.getBuiltinCommands()) {
+        for (const builtin of this.getBuiltinCommands(airClient)) {
             commands.set(builtin.name, builtin);
         }
 
@@ -107,22 +111,25 @@ export class CodexCommands {
 
     /**
      * See the original cli commands documentation here: https://developers.openai.com/codex/cli/slash-commands/
+     * Only AIR gets a command action, in `_meta.jetbrains.air.commandAction`.
      */
-    private getBuiltinCommands(): AvailableCommand[] {
+    private getBuiltinCommands(airClient: boolean): AvailableCommand[] {
+        const commandAction = (action: Record<string, unknown>) => {
+            const meta = airOnlyMeta(airClient, AIR_COMMAND_ACTION_KEY, action);
+            return meta ? {_meta: meta} : {};
+        };
         return [
             {
                 name: "plan",
                 description: "Turn plan mode on.",
                 input: null,
-                _meta: {
-                    commandAction: {
-                        kind: "setConfigOption",
-                        configId: COLLABORATION_MODE_CONFIG_ID,
-                        value: PLAN_COLLABORATION_MODE,
-                        resetValue: DEFAULT_COLLABORATION_MODE,
-                        presentation: "state",
-                    },
-                },
+                ...commandAction({
+                    kind: "setConfigOption",
+                    configId: COLLABORATION_MODE_CONFIG_ID,
+                    value: PLAN_COLLABORATION_MODE,
+                    resetValue: DEFAULT_COLLABORATION_MODE,
+                    presentation: "state",
+                }),
             },
             {
                 name: "mcp",
@@ -163,12 +170,10 @@ export class CodexCommands {
                 name: "goal",
                 description: "Set a goal to keep pursuing.",
                 input: { hint: "[<objective>|clear|pause|resume]" },
-                _meta: {
-                    commandAction: {
-                        kind: "prefixPrompt",
-                        presentation: "state",
-                    },
-                },
+                ...commandAction({
+                    kind: "prefixPrompt",
+                    presentation: "state",
+                }),
             },
             {
                 name: "rename",

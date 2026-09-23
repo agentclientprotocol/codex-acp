@@ -421,7 +421,6 @@ describe("authStatus extension", () => {
                 connection,
                 createTestSessionState(),
                 false,
-                false,
                 "epoch",
                 undefined,
                 (notification: AccountUpdatedNotification) => received.push(notification),

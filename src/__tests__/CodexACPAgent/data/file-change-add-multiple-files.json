@@ -6,8 +6,8 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-change-2",
-        "title": "Editing files",
         "kind": "edit",
+        "title": "Editing files",
         "status": "completed",
         "content": [
           {

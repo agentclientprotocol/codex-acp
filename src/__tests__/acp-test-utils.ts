@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import type {CreateElicitationResponse, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
 import {CodexAcpClient} from '../CodexAcpClient';
+import {ToolCallReports} from "../ToolCallReports";
 import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';
 import {type CodexConnection, startCodexConnection} from "../CodexJsonRpcConnection";
 import {CodexAcpServer, type CodexProcessState, type SessionState} from "../CodexAcpServer";
@@ -18,6 +19,7 @@ import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
 import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTerminalTasks";
 import {CodexSessionCompactions} from "../CodexSessionCompactions";
 import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
+import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -418,12 +420,12 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         collaborationMode: DEFAULT_COLLABORATION_MODE,
         fastModeEnabled: false,
         currentModelSupportsFast: false,
-        terminalOutputMode: "terminal_output_delta",
-        terminalOutputDeltaSupported: false,
+        clientCapabilities: ClientCapabilities.DEFAULT.with({airClient: true, terminalOutputDelta: true}),
         goalRevision: 0,
         sessionTitle: null,
         sessionTitleSource: "unknown",
         compactions: new CodexSessionCompactions(),
+        toolCallReports: new ToolCallReports(),
         subagents: new CodexSubagentEventRouter(
             sessionId,
             false,

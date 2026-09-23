@@ -2,10 +2,10 @@
   {
     "sessionUpdate": "tool_call",
     "toolCallId": "call-search",
-    "status": "in_progress",
+    "name": "exec_command",
     "kind": "search",
     "title": "Search for 'Needle' in src",
-    "name": "exec_command"
+    "status": "in_progress"
   },
   {
     "sessionUpdate": "tool_call",

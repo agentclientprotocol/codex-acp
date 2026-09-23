@@ -446,7 +446,13 @@ async function createFixture(clientCapabilities: acp.ClientCapabilities = compac
         );
     }
     vi.spyOn(agent, "getSessionState").mockReturnValue(sessionState);
-    await agent.initialize({protocolVersion: 1, clientCapabilities});
+    // The test session state renders for AIR, so the client declares AIR too.
+    await agent.initialize({
+        protocolVersion: 1,
+        clientCapabilities: clientCapabilities._meta == null
+            ? {...clientCapabilities, _meta: {jetbrains: {air: {version: 1, capabilities: []}}}}
+            : clientCapabilities,
+    });
     await agent.prompt({sessionId, prompt: [{type: "text", text: "Continue."}]});
     fixture.clearAcpConnectionDump();
     return fixture;

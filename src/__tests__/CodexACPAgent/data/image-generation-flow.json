@@ -8,10 +8,7 @@
         "toolCallId": "image-generation-1",
         "kind": "other",
         "title": "Image generation",
-        "status": "in_progress",
-        "rawInput": {
-          "id": "image-generation-1"
-        }
+        "status": "in_progress"
       }
     }
   ]
@@ -42,13 +39,7 @@
               "uri": "/tmp/codex/generated-blue-square.png"
             }
           }
-        ],
-        "rawOutput": {
-          "status": "generating",
-          "revisedPrompt": "A tiny blue square",
-          "result": "iVBORw0KGgo=",
-          "savedPath": "/tmp/codex/generated-blue-square.png"
-        }
+        ]
       }
     }
   ]

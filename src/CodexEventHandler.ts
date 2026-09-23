@@ -1,6 +1,4 @@
 import type {
-    FuzzyFileSearchSessionCompletedNotification,
-    FuzzyFileSearchSessionUpdatedNotification,
     ServerNotification
 } from "./app-server";
 import type {
@@ -16,21 +14,16 @@ import type {
     AccountUpdatedNotification,
     AgentMessageDeltaNotification,
     CodexErrorInfo,
-    CommandExecutionOutputDeltaNotification,
     ConfigWarningNotification,
     DeprecationNoticeNotification,
     ErrorNotification,
-    ItemGuardianApprovalReviewCompletedNotification,
-    ItemGuardianApprovalReviewStartedNotification,
     ItemCompletedNotification,
     ItemStartedNotification,
     ThreadItem,
     ModelReroutedNotification,
-    PlanDeltaNotification,
     ReasoningSummaryPartAddedNotification,
     ReasoningSummaryTextDeltaNotification,
     ReasoningTextDeltaNotification,
-    TerminalInteractionNotification,
     ThreadGoalClearedNotification,
     ThreadGoalUpdatedNotification,
     ThreadTokenUsageUpdatedNotification,
@@ -38,35 +31,23 @@ import type {
     TurnPlanUpdatedNotification,
     WarningNotification
 } from "./app-server/v2";
-import type { McpStartupCompleteEvent } from "./app-server/McpStartupCompleteEvent";
 import {toTokenCount} from "./TokenCount";
-import {
-    commandExecutionUsesTerminalOutput,
-    createCommandExecutionUpdate,
-    createContextCompactionCompleteUpdate,
-    createContextCompactionStartUpdate,
-    createDynamicToolCallUpdate,
-    createFileChangeUpdate,
-    createGuardianApprovalReviewToolCall,
-    createGuardianApprovalReviewToolCallUpdate,
-    createImageGenerationCompleteUpdate,
-    createImageGenerationStartUpdate,
-    createImageGenerationUpdate,
-    createImageViewUpdate,
-    createMcpRawInput,
-    createMcpRawOutput,
-    createFuzzyFileSearchComplete,
-    createFuzzyFileSearchStartOrUpdate,
-    createMcpToolCallUpdate,
-    createWebSearchCompleteUpdate,
-    createWebSearchStartUpdate,
-    fuzzyFileSearchToolCallId,
-} from "./CodexToolCallMapper";
 import { stripShellPrefix } from "./CommandUtils";
-import {commandToolName, functionToolName} from "./ToolCallName";
-import {createTerminalOutputMeta, type TerminalOutputMode} from "./TerminalOutputMode";
+import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
+import type {ToolFacts} from "./tool-calls/ToolFacts";
+import {CommandReporter} from "./tool-calls/reporters/CommandReporter";
+import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
+import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
+import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
+import {FuzzySearchReporter} from "./tool-calls/reporters/FuzzySearchReporter";
+import {GuardianReporter} from "./tool-calls/reporters/GuardianReporter";
+import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationReporter";
+import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
+import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
+import {WebSearchReporter} from "./tool-calls/reporters/WebSearchReporter";
+import {CodexPlanStream} from "./CodexPlanStream";
 import {
-    createCodexMessagePhaseMeta,
+    createMessagePhaseMeta,
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
 } from "./ContentChunks";
@@ -76,9 +57,11 @@ import {randomUUID} from "node:crypto";
 import {
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
+    AIR_GOAL_KEY,
     AIR_META_KEY,
     AIR_SESSION_FAILURE_KEY,
     JETBRAINS_META_KEY,
+    withAirMeta,
 } from "./AirExtension";
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import type {SubagentState} from "./subagents/AcpSubagents";
@@ -199,10 +182,7 @@ const STRUCTURED_CODEX_ERROR_CATEGORIES = {
 
 export class CodexEventHandler {
 
-    private static readonly PLAN_UPDATE_INTERVAL_MS = 150;
-
     private readonly sessionState: SessionState;
-    private readonly supportsPlanUpdates: boolean;
     private readonly supportsTypedSessionFailures: boolean;
     private readonly sessionFailureEpoch: string;
     private readonly pendingErrors: ErrorNotification[] = [];
@@ -214,20 +194,16 @@ export class CodexEventHandler {
     private nextNoticeId = 1;
     private failure: RequestError | null = null;
     private completedPlan: CompletedPlan | null = null;
-    private readonly activeFuzzyFileSearchSessions = new Set<string>();
-    private readonly activeGuardianApprovalReviews = new Set<string>();
     private readonly activeImageGenerationItems = new Set<string>();
     private readonly emittedImageViewItems = new Set<string>();
-    private readonly planDeltaTextByItemId = new Map<string, string>();
-    private readonly pendingPlanItemIds = new Set<string>();
-    private readonly lastEmittedPlanTextByItemId = new Map<string, string>();
     private readonly session: ACPSessionConnection;
-    private planUpdateTimer: ReturnType<typeof setTimeout> | null = null;
-    private planUpdateChain: Promise<void> = Promise.resolve();
+    private readonly renderer: AcpToolCallRenderer;
+    private readonly commands = new CommandReporter();
+    private readonly fuzzySearches = new FuzzySearchReporter();
+    private readonly guardianReviews = new GuardianReporter();
+    private readonly plans: CodexPlanStream;
     private disposed = false;
     private readonly seenReasoningDeltaItemIds = new Set<string>();
-    private readonly terminalCommandIds = new Set<string>();
-    private readonly commandOutputIds = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly turnDiffs = new Map<string, string>();
     private readonly oversizedTurnDiffs = new Set<string>();
@@ -239,7 +215,6 @@ export class CodexEventHandler {
     constructor(
         connection: AcpClientConnection,
         sessionState: SessionState,
-        supportsPlanUpdates = false,
         supportsTypedSessionFailures = false,
         sessionFailureEpoch: string = randomUUID(),
         subagents: CodexSubagentEventRouter = new CodexSubagentEventRouter(
@@ -251,14 +226,14 @@ export class CodexEventHandler {
         collectTurnDiffs = false,
         private readonly supportsCompaction = false,
         private readonly supportsNotices = false,
-        private readonly supportsDiffPatch = false,
     ) {
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
-        this.supportsPlanUpdates = supportsPlanUpdates;
         this.supportsTypedSessionFailures = supportsTypedSessionFailures;
         this.sessionFailureEpoch = sessionFailureEpoch;
         this.session = new ACPSessionConnection(connection, sessionState.sessionId);
+        this.renderer = new AcpToolCallRenderer(sessionState.clientCapabilities);
+        this.plans = new CodexPlanStream(this.session, sessionState.clientCapabilities);
         this.subagents = subagents;
         this.collectTurnDiffs = collectTurnDiffs;
         if (sessionState.sessionFailure !== undefined) {
@@ -479,23 +454,12 @@ export class CodexEventHandler {
     }
 
     async flushPendingPlanUpdates(): Promise<void> {
-        this.cancelPlanUpdateTimer();
-        do {
-            const itemIds = [...this.pendingPlanItemIds];
-            this.pendingPlanItemIds.clear();
-            await Promise.all(itemIds.map(itemId => {
-                const text = this.planDeltaTextByItemId.get(itemId) ?? "";
-                return text.length > 0
-                    ? this.enqueuePlanSnapshot(itemId, text)
-                    : Promise.resolve();
-            }));
-            await this.planUpdateChain;
-        } while (this.pendingPlanItemIds.size > 0);
+        await this.plans.flush();
     }
 
     async dispose(): Promise<void> {
         if (this.disposed) return;
-        await this.flushPendingPlanUpdates();
+        await this.plans.dispose();
         if (this.pendingErrors.length > 0) {
             logger.log("Discarding app-server errors that arrived before a turn started", {
                 sessionId: this.sessionState.sessionId,
@@ -505,10 +469,6 @@ export class CodexEventHandler {
             this.pendingErrors.splice(0);
         }
         this.disposed = true;
-        this.cancelPlanUpdateTimer();
-        this.pendingPlanItemIds.clear();
-        this.planDeltaTextByItemId.clear();
-        this.lastEmittedPlanTextByItemId.clear();
         this.turnDiffs.clear();
         this.oversizedTurnDiffs.clear();
     }
@@ -527,7 +487,7 @@ export class CodexEventHandler {
                 return await this.createTextEvent(notification.params);
             case "item/plan/delta":
                 this.completeRetryIncidentOnTurnProgress();
-                return this.createPlanDeltaEvent(notification.params);
+                return this.plans.delta(notification.params.itemId, notification.params.delta);
             case "item/started":
                 this.completeRetryIncidentOnTurnProgress();
                 return await this.createItemEvent(notification.params);
@@ -560,9 +520,10 @@ export class CodexEventHandler {
                 await this.flushPendingErrors();
                 return null;
             case "turn/completed":
-                await this.flushPendingPlanUpdates();
-                this.clearPlanTurnState();
+                await this.plans.flush();
+                this.plans.clearTurn();
                 this.sessionState.currentTurnId = null;
+                this.sessionState.toolCallReports.releaseOpen(this.subagents.notificationSessionId(notification));
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
@@ -594,10 +555,15 @@ export class CodexEventHandler {
                 });
             case "item/commandExecution/outputDelta":
                 this.completeRetryIncidentOnTurnProgress();
-                return this.createCommandOutputDeltaEvent(notification.params);
+                return this.renderFacts(this.commands.outputDelta(notification.params.itemId, notification.params.delta));
             case "item/mcpToolCall/progress":
                 this.completeRetryIncidentOnTurnProgress();
-                return this.createMcpToolProgressEvent(notification.params);
+                // AIR does not show MCP progress.
+                if (this.renderer.capabilities.airClient) return null;
+                return this.renderer.render(McpToolReporter.progress(
+                    notification.params.itemId,
+                    notification.params.message,
+                ));
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
                 return null;
@@ -613,9 +579,9 @@ export class CodexEventHandler {
             case "deprecationNotice":
                 return this.createDeprecationNoticeEvent(notification.params);
             case "item/autoApprovalReview/started":
-                return this.handleGuardianApprovalReviewStarted(notification.params);
+                return this.renderer.render(this.guardianReviews.started(notification.params));
             case "item/autoApprovalReview/completed":
-                return this.handleGuardianApprovalReviewCompleted(notification.params);
+                return this.renderer.render(this.guardianReviews.completed(notification.params));
             case "thread/compacted":
                 return this.supportsCompaction
                     ? this.sessionState.compactions.completeLegacy(
@@ -634,15 +600,18 @@ export class CodexEventHandler {
             case "model/rerouted":
                 return this.createModelReroutedEvent(notification.params);
             case "fuzzyFileSearch/sessionUpdated":
-                return this.handleFuzzyFileSearchSessionUpdated(notification.params);
+                return this.renderer.render(this.fuzzySearches.updated(notification.params));
             case "fuzzyFileSearch/sessionCompleted":
-                return this.handleFuzzyFileSearchSessionCompleted(notification.params);
+                return this.renderer.render(this.fuzzySearches.completed(notification.params));
             case "thread/goal/updated":
                 return this.createThreadGoalUpdatedEvent(notification.params);
             case "thread/goal/cleared":
                 return this.createThreadGoalClearedEvent(notification.params);
             case "item/commandExecution/terminalInteraction":
-                return this.createTerminalInteractionEvent(notification.params);
+                return this.renderFacts(this.commands.terminalInput(
+                    notification.params.itemId,
+                    notification.params.stdin,
+                ));
             case "thread/attachment/updated":
                 // Persisted attachment metadata has no ACP session update counterpart.
                 return null;
@@ -710,7 +679,8 @@ export class CodexEventHandler {
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
         const phase = this.agentMessagePhases.get(event.itemId) ?? null;
-        return createAgentTextMessageChunk(event.delta, event.itemId, createCodexMessagePhaseMeta(phase));
+        const meta = createMessagePhaseMeta(phase, this.sessionState.clientCapabilities.airClient);
+        return createAgentTextMessageChunk(event.delta, event.itemId, meta);
     }
 
     private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
@@ -777,10 +747,12 @@ export class CodexEventHandler {
         return this.createGoalSessionInfoUpdate(null);
     }
 
-    private createGoalSessionInfoUpdate(goal: ThreadGoalSnapshot | null): UpdateSessionEvent {
+    /** Only AIR gets the goal. The update carries nothing else, so another client gets no update. */
+    private createGoalSessionInfoUpdate(goal: ThreadGoalSnapshot | null): UpdateSessionEvent | null {
+        if (!this.sessionState.clientCapabilities.airClient) return null;
         return {
             sessionUpdate: "session_info_update",
-            _meta: {goal},
+            _meta: withAirMeta(undefined, AIR_GOAL_KEY, goal),
         };
     }
 
@@ -789,20 +761,6 @@ export class CodexEventHandler {
     ): UpdateSessionEvent {
         this.seenReasoningDeltaItemIds.add(event.itemId);
         return this.createAgentThoughtEvent(event.delta, event.itemId);
-    }
-
-    private createPlanDeltaEvent(event: PlanDeltaNotification): null {
-        if (event.delta.length === 0) {
-            return null;
-        }
-        const text = this.planDeltaTextByItemId.get(event.itemId) ?? "";
-        const updatedText = text + event.delta;
-        this.planDeltaTextByItemId.set(event.itemId, updatedText);
-        if (this.supportsPlanUpdates) {
-            this.pendingPlanItemIds.add(event.itemId);
-            this.schedulePlanUpdate();
-        }
-        return null;
     }
 
     private createReasoningSectionBreakEvent(event: ReasoningSummaryPartAddedNotification): UpdateSessionEvent {
@@ -817,30 +775,26 @@ export class CodexEventHandler {
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                return await createFileChangeUpdate(event.item, this.supportsDiffPatch);
-            case "commandExecution": {
-                if (commandExecutionUsesTerminalOutput(event.item)) {
-                    this.terminalCommandIds.add(event.item.id);
-                } else {
-                    this.terminalCommandIds.delete(event.item.id);
-                    this.commandOutputIds.delete(event.item.id);
-                }
-                return await createCommandExecutionUpdate(event.item);
-            }
+                return this.renderer.render(await FileChangeReporter.started(
+                    event.item,
+                    this.sessionState.clientCapabilities.air.diffPatch,
+                ));
+            case "commandExecution":
+                return this.renderer.render(this.commands.started(event.item));
             case "mcpToolCall":
-                return await createMcpToolCallUpdate(event.item);
+                return this.renderer.render(McpToolReporter.started(event.item));
             case "dynamicToolCall":
-                return await createDynamicToolCallUpdate(event.item);
+                return this.renderer.render(DynamicToolReporter.started(event.item));
             case "webSearch":
-                return createWebSearchStartUpdate(event.item);
+                return this.renderer.render(WebSearchReporter.started(event.item));
             case "imageView":
                 this.emittedImageViewItems.add(event.item.id);
-                return createImageViewUpdate(event.item);
+                return this.renderer.render(ImageViewReporter.viewed(event.item));
             case "imageGeneration":
                 this.activeImageGenerationItems.add(event.item.id);
-                return createImageGenerationStartUpdate(event.item);
+                return this.renderer.render(ImageGenerationReporter.started(event.item));
             case "collabAgentToolCall":
-                return this.subagents.legacyCollaborationStarted(event.item);
+                return this.renderer.render(this.subagents.legacyCollaborationStarted(event.item));
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
                 return null;
@@ -850,9 +804,9 @@ export class CodexEventHandler {
                         this.subagents.notificationSessionId({method: "item/started", params: event}),
                         event.turnId, event.item.id,
                     )
-                    : createContextCompactionStartUpdate(event.item);
+                    : this.renderer.render(CompactionReporter.started(event.item));
             case "subAgentActivity":
-                return this.subagents.legacyActivityStarted(event.item);
+                return this.renderer.render(this.subagents.legacyActivityStarted(event.item));
             case "sleep":
             case "functionCallOutput":
             case "userMessage":
@@ -868,54 +822,36 @@ export class CodexEventHandler {
     private async completeItemEvent(event: ItemCompletedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                return {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: event.item.id,
-                    status: event.item.status === "completed" ? "completed" : "failed",
-                }
+                return this.renderer.render(FileChangeReporter.completed(event.item));
             case "dynamicToolCall":
-                return {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: event.item.id,
-                    name: functionToolName(event.item.tool, event.item.namespace),
-                    status: event.item.status === "completed" ? "completed" : "failed",
-                }
+                return this.renderer.render(DynamicToolReporter.completed(event.item));
             case "mcpToolCall":
-                return {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: event.item.id,
-                    status: event.item.status === "completed" ? "completed" : "failed",
-                    rawInput: createMcpRawInput(event.item.server, event.item.tool, event.item.arguments),
-                    rawOutput: createMcpRawOutput(event.item.result, event.item.error),
-                }
+                return this.renderer.render(McpToolReporter.completed(event.item));
             case "commandExecution":
-                return this.completeCommandExecutionEvent(event.item);
+                return this.renderer.render(this.commands.completed(event.item, true));
             case "imageView":
                 if (this.emittedImageViewItems.delete(event.item.id)) {
                     return null;
                 }
-                return createImageViewUpdate(event.item);
+                return this.renderer.render(ImageViewReporter.viewed(event.item));
             case "imageGeneration":
-                if (this.activeImageGenerationItems.delete(event.item.id)) {
-                    return createImageGenerationCompleteUpdate(event.item);
-                }
-                return createImageGenerationUpdate(event.item, { terminalStatus: true });
+                return this.renderer.render(this.activeImageGenerationItems.delete(event.item.id)
+                    ? ImageGenerationReporter.completed(event.item)
+                    : ImageGenerationReporter.whole(event.item, {terminalStatus: true}));
             case "reasoning":
                 if (this.seenReasoningDeltaItemIds.delete(event.item.id)) {
                     return null;
                 }
                 return this.createCompletedReasoningEvent(event.item);
             case "webSearch":
-                return createWebSearchCompleteUpdate(event.item);
+                return this.renderer.render(WebSearchReporter.completed(event.item));
             case "collabAgentToolCall":
-                return this.subagents.legacyCollaborationCompleted(event.item);
+                return this.renderer.render(this.subagents.legacyCollaborationCompleted(event.item));
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
                 return null;
-            case "plan": {
-                const deltaText = this.planDeltaTextByItemId.get(event.item.id) ?? "";
-                return await this.createCompletedPlanEvent(event.item, deltaText);
-            }
+            case "plan":
+                return await this.createCompletedPlanEvent(event.item);
             case "exitedReviewMode":
                 return this.createExitedReviewModeEvent(event.item);
             case "contextCompaction":
@@ -924,18 +860,21 @@ export class CodexEventHandler {
                         this.subagents.notificationSessionId({method: "item/completed", params: event}),
                         event.turnId, event.item.id,
                     )
-                    : createContextCompactionCompleteUpdate(event.item);
-            //ignored types
+                    : this.renderer.render(CompactionReporter.completed(event.item));
             case "subAgentActivity":
-                return this.subagents.legacyActivityCompleted(event.item);
+                return this.renderer.render(this.subagents.legacyActivityCompleted(event.item));
+            //ignored types
             case "sleep":
             case "functionCallOutput":
             case "userMessage":
             case "hookPrompt":
             case "enteredReviewMode":
                 return null;
-
         }
+    }
+
+    private renderFacts(facts: ToolFacts | null): UpdateSessionEvent | null {
+        return facts === null ? null : this.renderer.render(facts);
     }
 
     private rememberAgentMessagePhase(item: ThreadItem & { type: "agentMessage" }): void {
@@ -951,78 +890,11 @@ export class CodexEventHandler {
         return this.createAgentThoughtEvent(text, item.id);
     }
 
-    private async createCompletedPlanEvent(
-        item: ThreadItem & { type: "plan" },
-        deltaText: string,
-    ): Promise<UpdateSessionEvent | null> {
-        const text = item.text.length > 0 ? item.text : deltaText;
-        this.pendingPlanItemIds.delete(item.id);
-        if (this.pendingPlanItemIds.size === 0) {
-            this.cancelPlanUpdateTimer();
-        }
-        this.planDeltaTextByItemId.delete(item.id);
-        if (text.length === 0) {
-            return null;
-        }
-        this.completedPlan = {itemId: item.id, text};
-        if (this.supportsPlanUpdates) {
-            await this.enqueuePlanSnapshot(item.id, text);
-            return null;
-        }
-        return this.createPlanTextEvent(text, item.id);
-    }
-
-    private schedulePlanUpdate(): void {
-        if (this.disposed || this.planUpdateTimer !== null) return;
-        this.planUpdateTimer = setTimeout(() => {
-            this.planUpdateTimer = null;
-            void this.flushPendingPlanUpdates().catch(error => {
-                logger.error("Failed to flush throttled plan updates", error);
-            });
-        }, CodexEventHandler.PLAN_UPDATE_INTERVAL_MS);
-    }
-
-    private cancelPlanUpdateTimer(): void {
-        if (this.planUpdateTimer === null) return;
-        clearTimeout(this.planUpdateTimer);
-        this.planUpdateTimer = null;
-    }
-
-    private enqueuePlanSnapshot(itemId: string, text: string): Promise<void> {
-        const send = async () => {
-            if (this.lastEmittedPlanTextByItemId.get(itemId) === text) return;
-            await this.session.update(this.createPlanUpdateEvent(text, itemId));
-            this.lastEmittedPlanTextByItemId.set(itemId, text);
-        };
-        const result = this.planUpdateChain.then(send);
-        this.planUpdateChain = result.catch(() => {});
-        return result;
-    }
-
-    private clearPlanTurnState(): void {
-        this.cancelPlanUpdateTimer();
-        this.pendingPlanItemIds.clear();
-        this.planDeltaTextByItemId.clear();
-        this.lastEmittedPlanTextByItemId.clear();
-    }
-
-    private createPlanUpdateEvent(text: string, planId: string): UpdateSessionEvent {
-        return {
-            sessionUpdate: "plan_update",
-            plan: {
-                type: "markdown",
-                planId,
-                content: text,
-            },
-        };
-    }
-
-    private createPlanTextEvent(text: string, messageId: string): UpdateSessionEvent {
-        return createAgentTextMessageChunk(
-            text,
-            messageId,
-            createCodexMessagePhaseMeta("final_answer"),
-        );
+    private async createCompletedPlanEvent(item: ThreadItem & { type: "plan" }): Promise<UpdateSessionEvent | null> {
+        const completed = await this.plans.completed(item.id, item.text);
+        if (completed === null) return null;
+        this.completedPlan = {itemId: item.id, text: completed.text};
+        return completed.update;
     }
 
     private createExitedReviewModeEvent(item: ThreadItem & { type: "exitedReviewMode" }): UpdateSessionEvent | null {
@@ -1042,129 +914,6 @@ export class CodexEventHandler {
             "Context compacted",
             "Conversation compacted to fit the model's context window.",
         );
-    }
-
-    private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
-        if (event.delta.length > 0) {
-            this.commandOutputIds.add(event.itemId);
-        }
-        return this.createCommandOutputEvent(event.itemId, event.delta, this.commandOutputMode(event.itemId));
-    }
-
-    private createCommandOutputEvent(
-        itemId: string,
-        data: string,
-        terminalOutputMode: TerminalOutputMode
-    ): UpdateSessionEvent {
-        return {
-            sessionUpdate: "tool_call_update",
-            toolCallId: itemId,
-            _meta: createTerminalOutputMeta(terminalOutputMode, itemId, data),
-        }
-    }
-
-    private createTerminalInteractionEvent(event: TerminalInteractionNotification): UpdateSessionEvent {
-        return this.createCommandOutputDeltaEvent({
-            threadId: event.threadId,
-            turnId: event.turnId,
-            itemId: event.itemId,
-            delta: `\n${event.stdin}\n`,
-        });
-    }
-
-    private commandOutputMode(itemId: string): TerminalOutputMode {
-        if (this.sessionState.terminalOutputMode === "terminal_output" && !this.terminalCommandIds.has(itemId)) {
-            return "terminal_output_delta";
-        }
-        return this.sessionState.terminalOutputMode;
-    }
-
-    private createMcpToolProgressEvent(event: { itemId: string, message: string }): UpdateSessionEvent {
-        const logDelta = event.message.trim();
-        return {
-            sessionUpdate: "tool_call_update",
-            toolCallId: event.itemId,
-            _meta: {
-                mcp_output_delta: {
-                    data: logDelta,
-                }
-            }
-        };
-    }
-
-    static createMcpStartupUpdates(event: McpStartupCompleteEvent): UpdateSessionEvent[] {
-        const failedUpdates = event.failed.map((server: McpStartupCompleteEvent["failed"][number]) => this.createMcpStartupToolCallUpdate(
-            server.server,
-            `[codex-acp forwarded startup error] MCP server \`${server.server}\` failed to start: ${server.error}`
-        ));
-        const cancelledUpdates = event.cancelled.map((server: McpStartupCompleteEvent["cancelled"][number]) => this.createMcpStartupToolCallUpdate(
-            server,
-            `[codex-acp forwarded startup error] MCP server \`${server}\` startup was cancelled.`
-        ));
-
-        return [...failedUpdates, ...cancelledUpdates];
-    }
-
-    private static createMcpStartupToolCallUpdate(serverName: string, message: string): UpdateSessionEvent {
-        return {
-            sessionUpdate: "tool_call",
-            toolCallId: this.getMcpStartupToolCallId(serverName),
-            kind: "other",
-            title: `mcp__${serverName}__startup`,
-            status: "failed",
-            content: [{
-                type: "content",
-                content: {
-                    type: "text",
-                    text: message,
-                },
-            }],
-        };
-    }
-
-    private static getMcpStartupToolCallId(serverName: string): string {
-        return `mcp_startup.${encodeURIComponent(serverName)}`;
-    }
-
-    private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {
-        const name = commandToolName(item.source);
-        const update: UpdateSessionEvent = {
-            sessionUpdate: "tool_call_update",
-            toolCallId: item.id,
-            ...(name === undefined ? {} : {name}),
-            status: item.status === "completed" ? "completed" : "failed",
-            ...(this.sessionState.terminalOutputDeltaSupported ? {} : {
-                rawOutput: {
-                    formatted_output: item.aggregatedOutput ?? "",
-                    exit_code: item.exitCode
-                },
-            }),
-        };
-
-        const commandHadTerminal = this.terminalCommandIds.delete(item.id);
-        const commandHadOutput = this.commandOutputIds.delete(item.id);
-        const terminalMeta: Record<string, unknown> = {};
-        if (!commandHadOutput && item.aggregatedOutput &&
-            (commandHadTerminal || this.sessionState.terminalOutputDeltaSupported)) {
-            Object.assign(
-                terminalMeta,
-                createTerminalOutputMeta(this.sessionState.terminalOutputMode, item.id, item.aggregatedOutput)
-            );
-        }
-        if (commandHadTerminal) {
-            terminalMeta["terminal_exit"] = {
-                exit_code: item.exitCode,
-                signal: null,
-                terminal_id: item.id
-            };
-        }
-        if (Object.keys(terminalMeta).length === 0) {
-            return update;
-        }
-        return {
-            ...update,
-            _meta: terminalMeta,
-        };
     }
 
     private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {
@@ -1233,6 +982,10 @@ export class CodexEventHandler {
             this.failure = this.sessionState.authConfigured
                 ? RequestError.internalError(this.createTurnErrorData(params.error))
                 : RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message);
+        }
+        // The prompt error carries the message of such a failure, so the transcript does not repeat it.
+        if (this.failure !== null && params.error.additionalDetails === null) {
+            return null;
         }
         return createAgentTextMessageChunk(`${params.error.message}\n\n`);
     }
@@ -1445,41 +1198,6 @@ export class CodexEventHandler {
         });
     }
 
-    private handleFuzzyFileSearchSessionUpdated(
-        params: FuzzyFileSearchSessionUpdatedNotification
-    ): UpdateSessionEvent {
-        const toolCallId = fuzzyFileSearchToolCallId(params.sessionId);
-        const started = !this.activeFuzzyFileSearchSessions.has(toolCallId);
-        this.activeFuzzyFileSearchSessions.add(toolCallId);
-        return createFuzzyFileSearchStartOrUpdate(params, started);
-    }
-
-    private handleFuzzyFileSearchSessionCompleted(
-        params: FuzzyFileSearchSessionCompletedNotification
-    ): UpdateSessionEvent {
-        const toolCallId = fuzzyFileSearchToolCallId(params.sessionId);
-        this.activeFuzzyFileSearchSessions.delete(toolCallId);
-        return createFuzzyFileSearchComplete(params);
-    }
-
-    private handleGuardianApprovalReviewStarted(
-        params: ItemGuardianApprovalReviewStartedNotification
-    ): UpdateSessionEvent {
-        if (this.activeGuardianApprovalReviews.has(params.reviewId)) {
-            return createGuardianApprovalReviewToolCallUpdate(params);
-        }
-        this.activeGuardianApprovalReviews.add(params.reviewId);
-        return createGuardianApprovalReviewToolCall(params);
-    }
-
-    private handleGuardianApprovalReviewCompleted(
-        params: ItemGuardianApprovalReviewCompletedNotification
-    ): UpdateSessionEvent {
-        if (this.activeGuardianApprovalReviews.delete(params.reviewId)) {
-            return createGuardianApprovalReviewToolCallUpdate(params);
-        }
-        return createGuardianApprovalReviewToolCall(params);
-    }
 }
 
 function toolCallTitle(update: UpdateSessionEvent | null | undefined): string | undefined {

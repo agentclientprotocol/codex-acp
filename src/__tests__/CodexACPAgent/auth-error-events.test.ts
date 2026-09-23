@@ -628,7 +628,7 @@ describe("CodexEventHandler - auth error events", () => {
                     updates.push(params.update);
                 }),
             } as unknown as AcpClientConnection;
-            const handler = new CodexEventHandler(connection, state, false, true);
+            const handler = new CodexEventHandler(connection, state, true);
             await handler.handleSessionScopedNotification({
                 method: "error",
                 params: {
@@ -683,7 +683,7 @@ describe("CodexEventHandler - auth error events", () => {
                 updates.push(params.update);
             }),
         } as unknown as AcpClientConnection;
-        const handler = new CodexEventHandler(connection, state, false, true, "test-epoch");
+        const handler = new CodexEventHandler(connection, state, true, "test-epoch");
         const retryError = (message: string) => ({
             method: "error" as const,
             params: {
@@ -820,6 +820,37 @@ describe("CodexEventHandler - auth error events", () => {
             });
         },
     );
+});
+
+describe("CodexEventHandler - error text once", () => {
+    it("does not repeat the prompt error message as agent text", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "limited-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Usage limits were exceeded",
+            codexErrorInfo: "usageLimitExceeded",
+            additionalDetails: null,
+            misalignment: null,
+        });
+
+        expect(result).toMatchObject({data: {message: "Usage limits were exceeded"}});
+        expect(JSON.stringify(updates)).not.toContain("Usage limits were exceeded");
+    });
+
+    it("keeps the message as agent text when the prompt error carries other details", async () => {
+        const {updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "details-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Provider returned 401",
+            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: 401}},
+            additionalDetails: "HTTP status 401",
+            misalignment: null,
+        });
+
+        expect(JSON.stringify(updates)).toContain("Provider returned 401");
+    });
 });
 
 async function runPromptWithError(
