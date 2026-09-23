@@ -234,7 +234,7 @@ So a plain ACP client gets the output chunks in `_meta.terminal_output_delta`,
 and it sees the output of every command in `rawOutput.formatted_output` when the command ends.
 
 AIR gets no `rawOutput.formatted_output` and no `rawOutput.exit_code`.
-AIR gets stdin in `_meta.terminal_input`, and the output of a read, search, or list command once in `content`.
+AIR gets stdin in `_meta.terminal_input`. It gets the output of a search or a list command in `_meta.terminal_output_delta`, and no output of a file read.
 
 This adapter offers no `terminal-auth` authentication method.
 
@@ -289,7 +289,7 @@ The other clients get the same fields as before the AIR extensions.
 
 | Codex item | AIR | Other clients |
 | --- | --- | --- |
-| `commandExecution` with one `read`, `search`, or `listFiles` action | `kind` `read` or `search`, a title that names the path or the query, `locations`. The output goes to `content` once, at completion. No terminal. | The same start. The output is in `rawOutput.formatted_output` at completion. |
+| `commandExecution` with one `read`, `search`, or `listFiles` action | `kind` `read` or `search`, a title that names the path or the query, `locations`. No terminal. The output of a `search` or a `listFiles` streams to `_meta.terminal_output_delta`, and output that did not stream goes there once at completion. A `read` sends no output: AIR does not need the file text. | The same start. The output is in `rawOutput.formatted_output` at completion. |
 | Any other `commandExecution` | `kind: execute`, `title` is the command, `rawInput = {command, cwd}`, a terminal. Output streams to `_meta.terminal_output_delta`. Stdin goes to `_meta.terminal_input`. The end sends `_meta.terminal_exit`. With `asyncTasks`, a command that keeps running gets `_meta.jetbrains.air.asyncTasks.backgrounded`. | The same start. Output and stdin follow [Zed conventions](#zed-conventions). The end also carries `rawOutput.formatted_output` and `rawOutput.exit_code`. |
 | `fileChange` | `kind: edit`, `title: "Editing files"`, one `diff` block per changed file with `oldText` and `newText`. The block has `_meta.kind` `add`, `update`, or `delete`. With `diffPatch`, each block carries a Git patch. | The same, without a patch. |
 | `mcpToolCall` | `kind: execute`, `title: "mcp.<server>.<tool>"`, `rawInput = {server, tool, arguments}`, `_meta.is_mcp_tool_call`. No `content`. `rawOutput = {result, error}` with the whole Codex result and error. AIR shows the text of `result` and `error.message`. No progress. | The same. The progress text goes to `_meta.mcp_output_delta`, trimmed. |

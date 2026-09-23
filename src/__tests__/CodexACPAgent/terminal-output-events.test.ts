@@ -449,7 +449,7 @@ describe('CodexEventHandler - terminal output events', () => {
         );
     });
 
-    it('should send parsed non-terminal command output once in the content', async () => {
+    it('should send no output of a file read to AIR', async () => {
         const terminalOutputSessionState = createTestSessionState({
             sessionId,
             currentModelId: 'model-id[effort]',

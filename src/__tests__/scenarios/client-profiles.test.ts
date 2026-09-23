@@ -672,13 +672,15 @@ describe("AIR", () => {
         ]);
     });
 
-    it("gets the output of a read, search or list command once, in content", () => {
-        const ends = updates("air", "read-search-list").filter(update => update["status"] === "completed");
-        expect(ends.map(update => [update["content"], update["rawOutput"], update["_meta"]])).toEqual([
-            [[{type: "content", content: {type: "text", text: "export const a = 1;\n"}}], undefined, undefined],
-            [[{type: "content", content: {type: "text", text: "src/app.ts:3: // TODO\n"}}], undefined, undefined],
-            [[{type: "content", content: {type: "text", text: "app.ts\n"}}], undefined, undefined],
-        ]);
+    it("gets no output of a file read, and the output of a search or a list once as a chunk", () => {
+        const all = updates("air", "read-search-list");
+        const chunks = all.flatMap(update => {
+            const chunk = (update["_meta"] as {terminal_output_delta?: {data: string}} | undefined)?.terminal_output_delta;
+            return chunk ? [[update["toolCallId"], chunk.data]] : [];
+        });
+        expect(chunks).toEqual([["search-1", "src/app.ts:3: // TODO\n"], ["list-1", "app.ts\n"]]);
+        expect(all.some(update => update["content"] !== undefined && update["status"] === "completed")).toBe(false);
+        expect(all.some(update => update["rawOutput"] !== undefined)).toBe(false);
     });
 
     it("gets the AIR keys in _meta.jetbrains.air", () => {
