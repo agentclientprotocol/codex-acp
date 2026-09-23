@@ -150,6 +150,18 @@ describe("ACP tool call contract", () => {
             .toEqual([{type: "content", content: {type: "text", text: "Pick a value"}}]);
     });
 
+    it("sends kind execute in the approval request of a started MCP tool call to every client", () => {
+        const facts = ElicitationReporter.permission({
+            threadId: "s", turnId: "t", serverName: "srv", mode: "form", _meta: null,
+            message: "Allow the tool?", requestedSchema: {type: "object", properties: {}},
+        } as never, true, "mcp-1", () => "unused");
+
+        for (const capabilities of [AIR, ZED, ClientCapabilities.from(null)]) {
+            expect(new AcpToolCallRenderer(capabilities).renderPermissionToolCall(facts))
+                .toEqual({toolCallId: "mcp-1", kind: "execute", status: "pending"});
+        }
+    });
+
     it("sends trimmed MCP progress text to a client that is not AIR, and none to AIR", () => {
         const zed = new AcpToolCallRenderer(ZED).render(McpToolReporter.progress("mcp", "  line 1\n"));
         expect(zed._meta).toEqual({mcp_output_delta: {data: "line 1"}});

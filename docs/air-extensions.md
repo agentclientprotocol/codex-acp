@@ -53,6 +53,7 @@ Only these differences are allowed:
 
 - A `tool_call_update` omits a top-level field that did not change since the last report of the same tool call.
   The permission request of a tool call counts as a report. ACP clients merge an update into the stored tool call.
+  The permission request itself omits no field that the adapter sent in it before, such as the `kind`.
   After a cancelled or failed permission request, the next update carries every field again.
   ACP defines no merge for `_meta` keys, so the `_meta` of each report keeps every key that the adapter sent before.
 - Bug fixes: a unique MCP startup tool call id, the result of a dynamic tool in `content`,

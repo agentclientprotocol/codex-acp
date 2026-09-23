@@ -16,8 +16,8 @@ export class ElicitationReporter {
     ): PermissionToolFacts {
         if (params.mode === "form" || params.mode === "openai/form") {
             if (correlatedCallId !== undefined) {
-                // The client already shows the MCP tool call. Only its status changes.
-                return {toolCallId: correlatedCallId, status: "pending"};
+                // The client already shows the MCP tool call. The request keeps the kind, as before the contract.
+                return {toolCallId: correlatedCallId, kind: "execute", status: "pending"};
             }
             return {
                 toolCallId: nextStandaloneToolCallId(),
