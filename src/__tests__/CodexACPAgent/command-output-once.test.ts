@@ -5,7 +5,6 @@ import {AcpToolCallRenderer} from "../../tool-calls/AcpToolCallRenderer";
 import {ClientCapabilities} from "../../tool-calls/ClientCapabilities";
 import {CommandReporter} from "../../tool-calls/reporters/CommandReporter";
 import {McpStartupReporter} from "../../tool-calls/reporters/McpStartupReporter";
-import {parseResponseItemHistoryFallback} from "../../ResponseItemHistoryFallback";
 import {createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications} from "../acp-test-utils";
 
 type CommandItem = ThreadItem & {type: "commandExecution"};
@@ -169,26 +168,6 @@ describe("command output is sent once", () => {
         expect(occurrences(dump, "a.txt\nb.txt\n")).toBe(1);
         expect(dump).not.toContain("terminal_output_delta");
         expect(dump).toContain("\"content\"");
-    });
-
-    it("replays fallback history output only in the terminal channel for AIR, and also in rawOutput for Zed", () => {
-        const jsonl = [
-            {type: "response_item", payload: {type: "function_call", name: "exec_command", call_id: "call-1", arguments: JSON.stringify({cmd: "npm test", workdir: "/workspace", yield_time_ms: 1000})}},
-            {type: "response_item", payload: {type: "function_call_output", call_id: "call-1", output: "Process exited with code 0\nOutput:\nfallback-output\n"}},
-        ].map(line => JSON.stringify(line)).join("\n");
-
-        const air = parseResponseItemHistoryFallback(jsonl, DELTA_CLIENT)
-            ?.find(update => update.sessionUpdate === "tool_call_update");
-        expect(air).not.toHaveProperty("rawOutput");
-        expect(occurrences(air, "fallback-output")).toBe(1);
-        expect(air).toHaveProperty("_meta.terminal_exit");
-
-        const zed = parseResponseItemHistoryFallback(jsonl, ZED_CLIENT)
-            ?.find(update => update.sessionUpdate === "tool_call_update");
-        expect(occurrences(zed, "fallback-output")).toBe(2);
-        expect(zed).toHaveProperty("rawOutput.formatted_output");
-        expect(zed).toHaveProperty("_meta.terminal_output");
-        expect(zed).toHaveProperty("_meta.terminal_exit");
     });
 });
 

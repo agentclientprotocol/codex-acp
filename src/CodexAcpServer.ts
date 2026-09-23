@@ -55,7 +55,6 @@ import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
-import {createResponseItemHistoryFallbackUpdates} from "./ResponseItemHistoryFallback";
 import type {ToolCallReports} from "./ToolCallReports";
 import {ToolCallReportingConnection} from "./ToolCallReportingConnection";
 import {
@@ -2047,24 +2046,12 @@ export class CodexAcpServer {
             );
             return;
         }
-        const responseItemFallbackUpdates = await createResponseItemHistoryFallbackUpdates(
-            thread,
-            sessionState.clientCapabilities,
-        );
-
-        const threadUpdates: UpdateSessionEvent[] = [];
         for (const turn of thread.turns) {
             for (const item of turn.items) {
-                const updates = await this.createHistoryUpdates(item, sessionState);
-                threadUpdates.push(...updates);
+                for (const update of await this.createHistoryUpdates(item, sessionState)) {
+                    await session.update(update);
+                }
             }
-        }
-
-        const updates = responseItemFallbackUpdates
-            ? mergeHistoryUpdates(responseItemFallbackUpdates, threadUpdates)
-            : threadUpdates;
-        for (const update of updates) {
-            await session.update(update);
         }
     }
 
@@ -3409,93 +3396,10 @@ export class CodexAcpServer {
     }
 }
 
-function mergeHistoryUpdates(
-    responseItemFallbackUpdates: UpdateSessionEvent[],
-    threadUpdates: UpdateSessionEvent[],
-): UpdateSessionEvent[] {
-    const merged: UpdateSessionEvent[] = [];
-    const seen = new Set<string>();
-    let fallbackIndex = 0;
-
-    const pushUpdate = (update: UpdateSessionEvent) => {
-        const key = historyUpdateKey(update);
-        if (key && seen.has(key)) {
-            return;
-        }
-        if (key) {
-            seen.add(key);
-        }
-        merged.push(update);
-    };
-
-    const flushFallbackBeforeMatchingDuplicate = (targetUpdate: UpdateSessionEvent): void => {
-        const targetKey = historyUpdateKey(targetUpdate);
-        const targetContentKey = historyUpdateContentKey(targetUpdate);
-        if (!targetKey && !targetContentKey) {
-            return;
-        }
-
-        const matchIndex = responseItemFallbackUpdates.findIndex((update, index) => (
-            index >= fallbackIndex
-            && (
-                (targetKey !== null && historyUpdateKey(update) === targetKey)
-                || (targetContentKey !== null && historyUpdateContentKey(update) === targetContentKey)
-            )
-        ));
-        if (matchIndex === -1) {
-            return;
-        }
-
-        while (fallbackIndex < matchIndex) {
-            pushUpdate(responseItemFallbackUpdates[fallbackIndex]!);
-            fallbackIndex += 1;
-        }
-        fallbackIndex += 1;
-    };
-
-    for (const update of threadUpdates) {
-        flushFallbackBeforeMatchingDuplicate(update);
-        pushUpdate(update);
-    }
-
-    while (fallbackIndex < responseItemFallbackUpdates.length) {
-        pushUpdate(responseItemFallbackUpdates[fallbackIndex]!);
-        fallbackIndex += 1;
-    }
-
-    return merged;
-}
-
 function commandItemIds(items: ThreadItem[]): Set<string> {
     return new Set(items
         .filter((item): item is Extract<ThreadItem, {type: "commandExecution"}> => item.type === "commandExecution")
         .map(item => item.id));
-}
-
-function historyUpdateKey(update: UpdateSessionEvent): string | null {
-    switch (update.sessionUpdate) {
-        case "user_message_chunk":
-        case "agent_message_chunk":
-        case "agent_thought_chunk":
-            return `${update.sessionUpdate}:${update.messageId ?? ""}:${JSON.stringify(update.content)}`;
-        case "tool_call":
-            return `tool_call:${update.toolCallId}:start`;
-        case "tool_call_update":
-            return `tool_call:${update.toolCallId}:update`;
-        default:
-            return null;
-    }
-}
-
-function historyUpdateContentKey(update: UpdateSessionEvent): string | null {
-    switch (update.sessionUpdate) {
-        case "user_message_chunk":
-        case "agent_message_chunk":
-        case "agent_thought_chunk":
-            return `${update.sessionUpdate}:${JSON.stringify(update.content)}`;
-        default:
-            return historyUpdateKey(update);
-    }
 }
 
 function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
