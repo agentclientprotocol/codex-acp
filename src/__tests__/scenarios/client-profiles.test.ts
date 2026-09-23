@@ -174,6 +174,16 @@ describe("ACP schema", () => {
         });
     }
 
+    it("checks the envelope of an AIR session update", () => {
+        const update = (params: unknown): RecordedMessage => ({direction: "notify", method: "session/update", params});
+        expect(schemaErrors(update({sessionId: "s", update: {sessionUpdate: "subagent_spawned", subagentSessionId: "c"}})))
+            .toEqual([]);
+        expect(schemaErrors(update({update: {sessionUpdate: "subagent_spawned"}}))).not.toEqual([]);
+        expect(schemaErrors(update({sessionId: 1, update: {sessionUpdate: "async_task_spawned"}}))).not.toEqual([]);
+        expect(schemaErrors(update({sessionId: "s", update: {sessionUpdate: "subagent_state_update", _meta: "x"}})))
+            .not.toEqual([]);
+    });
+
     it("rejects an invalid tool call", () => {
         expect(schemaErrors({
             direction: "notify",

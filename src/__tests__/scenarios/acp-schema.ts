@@ -69,17 +69,46 @@ export const AIR_SESSION_UPDATES = new Set([
     "async_task_state_update",
 ]);
 
+/**
+ * The envelope of an AIR session update: the `SessionNotification` fields of ACP, with an update of an AIR kind.
+ * The payload of the update stays unchecked, because no schema defines it.
+ */
+const validateAirSessionUpdateEnvelope = ajv.compile({
+    type: "object",
+    required: ["sessionId", "update"],
+    properties: {
+        sessionId: {$ref: `${SCHEMA_ID}#/$defs/SessionId`},
+        _meta: {type: ["object", "null"]},
+        update: {
+            type: "object",
+            required: ["sessionUpdate"],
+            properties: {
+                sessionUpdate: {enum: [...AIR_SESSION_UPDATES]},
+                _meta: {type: ["object", "null"]},
+            },
+        },
+    },
+});
+
+function isAirSessionUpdate(message: RecordedMessage): boolean {
+    const update = (message.params as {update?: {sessionUpdate?: string}} | undefined)?.update;
+    return message.direction === "notify" && message.method === "session/update"
+        && AIR_SESSION_UPDATES.has(update?.sessionUpdate ?? "");
+}
+
 function validator(type: string): ValidateFunction {
     const validate = ajv.getSchema(`${SCHEMA_ID}#/$defs/${type}`);
     if (validate === undefined) throw new Error(`The ACP schema has no type ${type}`);
     return validate;
 }
 
-/** Returns the ACP type of a message, or `null` when the message is not an ACP message of the adapter. */
+/**
+ * Returns the ACP type of a message.
+ * Returns `null` when the ACP schema does not define the message: a response to the app-server or an AIR session update.
+ */
 export function acpMessageType(message: RecordedMessage): string | null {
     if (message.direction === "codexResponse") return null;
-    const update = (message.params as {update?: {sessionUpdate?: string}} | undefined)?.update;
-    if (message.method === "session/update" && AIR_SESSION_UPDATES.has(update?.sessionUpdate ?? "")) return null;
+    if (isAirSessionUpdate(message)) return null;
     const type = MESSAGE_TYPES[`${message.direction} ${message.method}`];
     if (type === undefined) throw new Error(`No ACP type for ${message.direction} ${message.method}`);
     return type;
@@ -98,6 +127,11 @@ function extensionNotificationErrors(message: RecordedMessage): string[] | null 
 export function schemaErrors(message: RecordedMessage): string[] {
     const extensionErrors = extensionNotificationErrors(message);
     if (extensionErrors !== null) return extensionErrors;
+    if (isAirSessionUpdate(message)) {
+        return validateAirSessionUpdateEnvelope(message.params)
+            ? []
+            : [`AIR session update: ${ajv.errorsText(validateAirSessionUpdateEnvelope.errors)}`];
+    }
     const type = acpMessageType(message);
     if (type === null) return [];
     const validate = validator(type);

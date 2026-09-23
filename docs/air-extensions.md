@@ -67,8 +67,11 @@ See [JetBrains shared keys](#jetbrains-shared-keys) and [Zed conventions](#zed-c
 
 The scenario tests in `src/__tests__/scenarios/` record every outbound message for three client profiles.
 This includes the `_auth/status_update` notification and the `available_commands_update` of the session start.
-The profiles are a plain ACP client, Zed, and AIR. The tests validate each message against the ACP schema.
-The ACP schema defines no `_auth/status_update`, so the tests validate it against the payload in `src/AuthStatusMeta.ts`.
+The profiles are a plain ACP client, Zed, and AIR.
+The tests validate only the standard ACP messages against the ACP schema.
+The ACP schema does not define the AIR session updates of subagents and async tasks.
+For these updates, the tests check only the `SessionNotification` envelope: the `sessionId`, the update kind, and `_meta`.
+The ACP schema also defines no `_auth/status_update`, so the tests validate it against the payload in `src/AuthStatusMeta.ts`.
 They keep the AIR messages as snapshots, one message per line.
 They compare the messages of the plain client and of Zed with the messages of the adapter before these extensions.
 The comparison applies only the differences above.
