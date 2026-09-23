@@ -1,3 +1,4 @@
+import {createInterface} from "node:readline";
 import {Readable, Writable} from "node:stream";
 import {Emitter} from "vscode-jsonrpc/node";
 import type {DataCallback, Disposable, Message, MessageReader, MessageWriter, PartialMessageInfo} from "vscode-jsonrpc/node";
@@ -32,28 +33,23 @@ export function createJSONRPCWriter(writable: Writable): MessageWriter {
 export function createJSONRPCReader(readable: Readable): MessageReader {
     return {
         listen(callback: DataCallback): Disposable {
-            let buf = '';
-            const onData = (chunk: Buffer) => {
-                buf += chunk.toString();
-                for (;;) {
-                    const i = buf.indexOf('\n');
-                    if (i < 0) break;
-                    const line = buf.slice(0, i).trim();
-                    buf = buf.slice(i + 1);
-                    if (!line) continue;
-                    try {
-                        const msg = JSON.parse(line);
-                        if (msg && typeof msg === 'object' && msg.jsonrpc === undefined) {
-                            msg.jsonrpc = '2.0';
-                        }
-                        callback(msg);
-                    } catch {/* ignore malformed lines; they're still logged above */}
-                }
-            };
-            readable.on('data', onData);
+            // readline decodes UTF-8 across chunk boundaries and searches only
+            // the new chunk for a line break, so a long line costs linear time.
+            const lines = createInterface({input: readable, crlfDelay: Infinity});
+            lines.on('line', (text: string) => {
+                const line = text.trim();
+                if (!line) return;
+                try {
+                    const msg = JSON.parse(line);
+                    if (msg && typeof msg === 'object' && msg.jsonrpc === undefined) {
+                        msg.jsonrpc = '2.0';
+                    }
+                    callback(msg);
+                } catch {/* ignore malformed lines; they're still logged above */}
+            });
             return {
                 dispose() {
-                    readable.off('data', onData);
+                    lines.close();
                 }
             }
         },
