@@ -13,9 +13,9 @@ part-done; topic 10 not started (2026-09-24).
 
 State as of the flush for a fresh orchestrator restart (2026-09-24, second flush): **no agents in
 flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`, last code commit
-`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`, 3(b) `8815bd5`, 3(c) `6aa86ed`, 3(d) `17d8a62`, 3-full `30cc414`, 4(b) `f901d30`) and in the acp-tck fork (`main`, 4
+`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`, 3(b) `8815bd5`, 3(c) `6aa86ed`, 3(d) `17d8a62`, 3-full `30cc414`, 4(b) `f901d30`, 5b-1 `bcab7b7`) and in the acp-tck fork (`main`, 4
 local commits, **not pushed**; the user said don't push). Keep committing with explicit pathspecs.
-Suite: **914 pass / 26 skip** (after 4(b)). **In flight: 5b-1 (programmer), Q-5B research. Next after 5b-1: 4(c).**
+Suite: **915 pass / 26 skip** (after 5b-1). **Next: 4(c), then 5b-2 (Q-5B decisions; Q1 pending).**
 
 **Standing user rules (2026-09-24):** preserve v1 client-visible behavior (change v1 only to fix a
 real bug, with nothing else v1-visible changing); **always assume the latest Codex** (currently the
@@ -182,7 +182,22 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
    `requires_action` for child-session permissions) → topic 10; idle-time requests use the finished
    prompt's `interactionSignal` so `session/cancel` can't abort them (unscheduled); OAuth elicitation
    may precede the `session/new` response (unscheduled).
-4. **Topic 5b**, resume replay (list below, item 6). 5b-1 (basic replay) programmer in flight.
+4. **Topic 5b**, resume replay (list below, item 6).
+   **5b-1** — **Done (bcab7b7)**: `loadSessionAndReplayHistory` (shared by v1 `loadSession` and v2
+   `resumeSessionV2` `start`; replay awaited before the response); v2-only in `streamThreadHistory`:
+   fallback `user_message_chunk`s dropped (merge anchors only) + `sendReplayMessageStart` primer
+   (`content: []`, once per kind+id, none for id-less chunks) via new
+   `AcpV2Connection.startReplayMessage` / `ACPSessionConnection.startReplayMessage`
+   (`ReplayMessageKind`); `createUserMessageUpdates` id = `clientId ?? item.id` on v2. Primer rule
+   is replay-only (live unchanged). Still random ids: review-mode entered/exited chunks, unmatched
+   fallback agent/thought chunks. Tests in `session-lifecycle-v2.test.ts` (+1 net) + snapshot
+   `session-lifecycle-v2-resume-start-replay.json`; no v1 snapshot changed. Suite 915 / 26. TCK v1
+   `-k test_session` 18/0/2; v2 `-k "test_session or test_resume"` 24/0/2: **RESUME-201..205 PASS**,
+   DELETE-202 skip.
+   **User decisions (2026-09-24) on Q-5B:** Q2 hide the reviewer prompt on **v2 only**; Q4 **accept**
+   the subagent fail-loud until topic 10; Q5 **skip the fallback when a rollout has
+   `thread_rolled_back`** (v1 + v2 bug fix). Q1 (fallback agent/thought ids: A never emit on v2 vs
+   B `fallback:<line>`) — user asked to clarify; pending.
    **Q-5B research done** (`.agents/research/v2-resume-replay-open-questions.md`, HEAD 7e2ec21):
    - Q1 ids: spec needs unique ids + RESUME-204 prompt ids only; stability is a judgment call.
      agentMessage/reasoning/review-mode items already stable (item ids). Review-mode chunks: set
@@ -617,7 +632,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i), J11, J11b, G-render done | — (topic 2 done apart from small follow-ups) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | **Done** | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | In progress | 4(a), 4(b) done | 4(c) no `requires_action` when idle | Depends on topic 2's `state_update` fork existing |
-| 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
+| 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a, 5b-1 done | 5b-2 (Q-5B decisions) | Depends on topics 1, 9 |
 | 6 | Tool calls, messages & terminal streaming | **Done** | — | — | 6(a)-6(d); end-of-topic full TCK in `.agents/tck/6-full-v1-v2.md` |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
 | 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
