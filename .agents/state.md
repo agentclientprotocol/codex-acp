@@ -32,14 +32,19 @@ start` replay), `session/set_config_option`, `session/cancel`, `auth/login|logou
 **Latest TCK:** full run after topic 3 (`.agents/tck/3-full-v1-v2.md`): v1 CONFORMANT 50/1
 (SCHEMA-002 advisory)/5; v2 81/2/20 — RESUME-202 (fixed since by 5b-1: RESUME-201..205 pass in
 scoped runs) and EXT-202 (advisory, `capabilities.providers` placement → topic 10). Expected v2
-full-run fails now: EXT-202 only.
+full-run fails now: none (EXT-202 fixed in the TCK fork, see below).
 
-**BLOCKING (fourth session, 2026-09-25): EXT-202 TCK fix in the acp-tck fork.** User chose Q1 (a)
-"in the same blocking manner as before": pause all codex-acp work, do a proper fix in acp-tck
-(`main`, no worktree, no push, follow its AGENTS.md) so unstable-schema capabilities such as
-`capabilities.providers` are not flagged, verify it works; **no codex-acp work until the fix is
-verified and the user confirms continuing.** Programmer in flight; result note →
-`.agents/tck/tck-fix-ext-202.md`.
+**EXT-202 TCK fix — done, awaiting user OK to resume codex-acp** (fourth session, 2026-09-25). User
+chose Q1 (a) in the blocking manner: no codex-acp work until the fix is verified and the user
+confirms. acp-tck `main` (not pushed) `6e29654` (fix) + `b15c7bd` (self-tests): vendored v2
+`schema.unstable.json` (spec `d8805733`) + `load_unstable_schema()`; `_allowed_root_properties`
+unions stable + unstable properties (used by `find_unknown_root_keys` → EXT-202, SCHEMA-002); full
+jsonschema validation (SCHEMA-001) stays stable-only; no requirement text changed. Fixtures
+`unstable_capability_key.py` (PASS) / `unknown_capability_root_key.py` (still FAIL). acp-tck suite
+286 pass. codex-acp @ `f9d477b`: scoped `-k "test_initialize or test_extensibility"` v2 only
+EXT-202 FAIL→PASS, v1 identical (SCHEMA-002 advisory unchanged). **Full v2 84/0/19 CONFORMANT; full
+v1 50/1 (SCHEMA-002)/5 CONFORMANT.** Note `.agents/tck/tck-fix-ext-202.md`. acp-tck now 6 local
+commits ahead, not pushed.
 
 **5b-2b done (f9d477b)** → **topic 5 done.** v2-only filter in `streamThreadHistory` also drops
 fallback `agent_message_chunk`/`agent_thought_chunk` (identity check against
