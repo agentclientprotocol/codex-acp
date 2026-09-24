@@ -81,59 +81,12 @@ Keep it current with, at minimum:
 Update this file as part of finishing each slice, before dispatching the next one — treat it as part of the definition
 of done for a slice, not an afterthought.
 
-## Useful tools for research subagents
+## Useful tools for subagents
 
-Prefer the context-search skill and the idea MCP's code-intelligence tools over "grep"/"sed" etc. when reading and
-understanding code — they resolve symbols and calls precisely and cost fewer tokens than raw text search. The idea MCP
-exposes many tools unrelated to this research; stick to this shortlist:
-
-- `mcp__idea__search_symbol` — find a class/method/field by name fragment; the entry point for "where is X defined".
-- `mcp__idea__analyze_calls` — given a fully qualified symbol (from `search_symbol`), list its callers
-  (`INCOMING_CALLS`)
-  or callees (`OUTGOING_CALLS`). Use this instead of text search whenever you need to trace how a method is wired in,
-  e.g. tracing every call site that would need to change for a v1→v2 API shift.
-- `mcp__idea__get_symbol_info` — quick-doc lookup (signature, declaration, doc comment) for the symbol at a file:line.
-- `mcp__idea__search_text` / `mcp__idea__search_regex` — fast text/regex search with match coordinates, for cases
-  `search_symbol` doesn't cover (string literals, config keys, comments).
-- `mcp__idea__search_file` / `mcp__idea__list_directory_tree` — locate files by glob or browse a directory's structure
-  before diving in.
-- `mcp__idea__read_file` — read project files (also decompiles/reads inside jars if a dependency needs inspecting).
-- `mcp__idea__get_project_modules` / `mcp__idea__get_project_dependencies` — get a structured view of module layout and
-  library dependencies, useful when sketching the current vs. proposed architecture.
-
-## Useful tools for programmer subagents
-
-Programmer subagents should prefer the idea MCP's code-intelligence and editing tools over raw shell text-munging
-(`sed`/`awk`) wherever they fit — they're precise about symbols and cost fewer tokens than re-reading whole files. The
-idea MCP exposes many tools unrelated to this work; stick to this shortlist:
-
-- `mcp__idea__search_symbol` / `mcp__idea__get_symbol_info` — find a class/method/field and get its signature/doc
-  without opening the whole file; the entry point for "where is X defined."
-- `mcp__idea__analyze_calls` — list a symbol's callers/callees; use this instead of text search to find every call site
-  that needs updating for a wire-shape or signature change (e.g. every place that constructs a v1 `ToolCallUpdate`
-  before adding a v2 sibling).
-- `mcp__idea__search_text` / `mcp__idea__search_regex` — fast text/regex search with match coordinates for string
-  literals, `_meta` keys, config flags — cases symbol search doesn't cover.
-- `mcp__idea__search_file` / `mcp__idea__list_directory_tree` — locate files by glob or browse a directory's structure
-  before editing.
-- `mcp__idea__read_file` — read project files (also decompiles/reads inside jars/deps if needed).
-- `mcp__idea__apply_patch` — make precise, reviewable edits instead of full-file rewrites when a change is a small,
-  structured diff (new handler registration, added branch, field rename).
-- `mcp__idea__rename_refactoring` — use for genuine renames (e.g. a field rename like `id`→
-  `configId` across a type and its call sites) instead of hand-editing every occurrence.
-- `mcp__idea__get_file_problems` / `mcp__idea__lint_files` — check for type errors/lint issues in touched files before
-  handing a slice back as done.
-- `mcp__idea__build_project` — verify the project still typechecks/builds after a change, cheaper than shelling out
-  where available.
-- `mcp__idea__execute_run_configuration` / `mcp__idea__execute_terminal_command` — run the Vitest suite (or a narrowed
-  subset) and any other project scripts (`npm run generate-types`, lint, release-preflight-adjacent scripts) as part of
-  iterating to green.
-- `mcp__idea__reformat_file` — normalize formatting on touched files to match project style.
-- `mcp__idea__git_status` — check what's already changed/staged before starting, to avoid clobbering another in-flight
-  subagent's work within the same session.
-
-Editing/refactoring tools are in scope here (unlike for research subagents, which are read-only). Debugging tools
-(`xdebug_*`), notebook/database/SQL tools, and Python-environment tools are still out of scope for this work.
+Each subagent definition (`.agents/agents/researcher.md`, `.agents/agents/programmer.md`) documents its own
+"Useful tools" section with a shortlist of idea MCP tools to prefer over raw grep/sed for that role. These are
+advisory, not mandatory — subagents should still use their judgment and fall back to grep/sed/direct exact reads
+when that's faster and has a relatively high signal-to-noise ratio, so as not to pollute their context.
 
 Reference paths from the agent-client-protocol repository (`check-acp-specification` skill):
 `docs/protocol/v2/migration.mdx`, and `docs/protocol/v2/` generally — read concrete files on demand rather than all at

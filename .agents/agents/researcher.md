@@ -49,6 +49,33 @@ For code discovery inside a checkout or inside this repo, prefer one semantic se
 (`context-search` skill / `jbcontext search`) to bootstrap, then read the returned files and their
 neighbors directly. Fall back to `rg` when semantic search misses.
 
+## Useful tools (advisory, not mandatory)
+
+Prefer the context-search skill and the idea MCP's code-intelligence tools over "grep"/"sed" etc.
+when reading and understanding code — they resolve symbols and calls precisely and cost fewer
+tokens than raw text search. These are suggestions, not requirements: use your judgment, and fall
+back to grep/exact reads/direct search when they'll be faster and have a relatively high
+signal-to-noise ratio, so you don't pollute your context with irrelevant tool output. The idea MCP
+exposes many tools unrelated to this research; stick to this shortlist:
+
+- `mcp__idea__search_symbol` — find a class/method/field by name fragment; the entry point for
+  "where is X defined".
+- `mcp__idea__analyze_calls` — given a fully qualified symbol (from `search_symbol`), list its
+  callers (`INCOMING_CALLS`) or callees (`OUTGOING_CALLS`). Use this instead of text search whenever
+  you need to trace how a method is wired in, e.g. tracing every call site that would need to change
+  for a v1→v2 API shift.
+- `mcp__idea__get_symbol_info` — quick-doc lookup (signature, declaration, doc comment) for the
+  symbol at a file:line.
+- `mcp__idea__search_text` / `mcp__idea__search_regex` — fast text/regex search with match
+  coordinates, for cases `search_symbol` doesn't cover (string literals, config keys, comments).
+- `mcp__idea__search_file` / `mcp__idea__list_directory_tree` — locate files by glob or browse a
+  directory's structure before diving in.
+- `mcp__idea__read_file` — read project files (also decompiles/reads inside jars if a dependency
+  needs inspecting).
+- `mcp__idea__get_project_modules` / `mcp__idea__get_project_dependencies` — get a structured view
+  of module layout and library dependencies, useful when sketching the current vs. proposed
+  architecture.
+
 ## Rules
 
 - **Scope discipline.** Answer the question you were given. If you discover an adjacent question

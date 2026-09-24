@@ -81,6 +81,44 @@ refactors, and well-specified slices do not need this — just do the work.
    programmer subagent to continue from here. This keeps the next subagent's context free of stale
    file reads and tool noise from work that's already done and committed.
 
+## Useful tools (advisory, not mandatory)
+
+Prefer the idea MCP's code-intelligence and editing tools over raw shell text-munging
+(`sed`/`awk`) wherever they fit — they're precise about symbols and cost fewer tokens than
+re-reading whole files. These are suggestions, not requirements: use your judgment, and fall back
+to grep/sed/direct exact reads when they'll be faster and have a relatively high signal-to-noise
+ratio, so you don't pollute your context with irrelevant tool output. The idea MCP exposes many
+tools unrelated to this work; stick to this shortlist:
+
+- `mcp__idea__search_symbol` / `mcp__idea__get_symbol_info` — find a class/method/field and get its
+  signature/doc without opening the whole file; the entry point for "where is X defined."
+- `mcp__idea__analyze_calls` — list a symbol's callers/callees; use this instead of text search to
+  find every call site that needs updating for a wire-shape or signature change (e.g. every place
+  that constructs a v1 `ToolCallUpdate` before adding a v2 sibling).
+- `mcp__idea__search_text` / `mcp__idea__search_regex` — fast text/regex search with match
+  coordinates for string literals, `_meta` keys, config flags — cases symbol search doesn't cover.
+- `mcp__idea__search_file` / `mcp__idea__list_directory_tree` — locate files by glob or browse a
+  directory's structure before editing.
+- `mcp__idea__read_file` — read project files (also decompiles/reads inside jars/deps if needed).
+- `mcp__idea__apply_patch` — make precise, reviewable edits instead of full-file rewrites when a
+  change is a small, structured diff (new handler registration, added branch, field rename).
+- `mcp__idea__rename_refactoring` — use for genuine renames (e.g. a field rename like `id`→
+  `configId` across a type and its call sites) instead of hand-editing every occurrence.
+- `mcp__idea__get_file_problems` / `mcp__idea__lint_files` — check for type errors/lint issues in
+  touched files before handing a slice back as done.
+- `mcp__idea__build_project` — verify the project still typechecks/builds after a change, cheaper
+  than shelling out where available.
+- `mcp__idea__execute_run_configuration` / `mcp__idea__execute_terminal_command` — run the Vitest
+  suite (or a narrowed subset) and any other project scripts (`npm run generate-types`, lint,
+  release-preflight-adjacent scripts) as part of iterating to green.
+- `mcp__idea__reformat_file` — normalize formatting on touched files to match project style.
+- `mcp__idea__git_status` — check what's already changed/staged before starting, to avoid clobbering
+  another in-flight subagent's work within the same session.
+
+Editing/refactoring tools are in scope here (unlike for research subagents, which are read-only).
+Debugging tools (`xdebug_*`), notebook/database/SQL tools, and Python-environment tools are still
+out of scope for this work.
+
 ## Escalation — do not guess
 
 Stop and report back if:
