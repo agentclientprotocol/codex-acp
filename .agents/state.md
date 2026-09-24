@@ -6,8 +6,8 @@
 
 ## Current position in the sequencing plan
 
-Phase: **Phase 2/3 — nearly done.** Prerequisite, topics 1, 2, 3, 4, 6, 7, 8, 9 done; topic 5 almost
-done (5b-2b left); topic 10 not started; then Phase 4 (2026-09-25). Rough progress ~80%.
+Phase: **Phase 2/3 — nearly done.** Prerequisite, topics 1-9 done; topic 10 researched, blocked on
+the EXT-202 TCK fix; then Phase 4 (2026-09-25). Rough progress ~80%.
 
 ### Resume here (for a fresh orchestrator)
 
@@ -34,8 +34,51 @@ start` replay), `session/set_config_option`, `session/cancel`, `auth/login|logou
 scoped runs) and EXT-202 (advisory, `capabilities.providers` placement → topic 10). Expected v2
 full-run fails now: EXT-202 only.
 
+**BLOCKING (fourth session, 2026-09-25): EXT-202 TCK fix in the acp-tck fork.** User chose Q1 (a)
+"in the same blocking manner as before": pause all codex-acp work, do a proper fix in acp-tck
+(`main`, no worktree, no push, follow its AGENTS.md) so unstable-schema capabilities such as
+`capabilities.providers` are not flagged, verify it works; **no codex-acp work until the fix is
+verified and the user confirms continuing.** Programmer in flight; result note →
+`.agents/tck/tck-fix-ext-202.md`.
+
+**5b-2b done (f9d477b)** → **topic 5 done.** v2-only filter in `streamThreadHistory` also drops
+fallback `agent_message_chunk`/`agent_thought_chunk` (identity check against
+`responseItemFallbackUpdates`; still merge anchors). Tests in `v2-resume-replay.test.ts`: tool call
+only, in position (snapshot `data/v2-resume-replay-fallback-tool-call-only.json`); fallback
+determinism sibling; v1 regression. `connectV2Client` gained `threadPath`. Suite 926 / 26. TCK
+(`.agents/tck/5b-2b-v1-v2.md`) v1 `-k test_session` 18/0/2; v2 `-k "test_session or test_resume"`
+24/0/2 (= baseline).
+
+**User decisions (2026-09-25) on topic 10 research:** Q1 EXT-202 → (a) keep + fix TCK (blocking,
+above); Q2 forks match v1 (no `available_commands_update` on v2); Q3 leave the disabled-`openai`
+`current` gap + document in Phase 4; Q6 unknown → flag as an open AIR contract question in the
+Phase 4 docs.
+
+**Topic 10 research done** (`.agents/research/v2-fork-providers-and-extension-methods.md`): no
+protocol changes needed; all four are thin v2 wrappers over v1 logic. **Bug:** v2 `initialize`
+already advertises `session.fork`, `capabilities.providers`, `_meta.goal.controlMethod` but none is
+registered (-32601). Fork: unstable-only; request = v1 (incl. `mcpServers`, `WithAcpMcpServers`
+type widen); response must drop `modes` (+ `createSessionConfigOptionsResponseV2`); no replay/state
+obligation. Providers: same shapes (v2 SDK validates `baseUrl` as uri → -32602 on v2 only); direct
+delegates via `acpV2.methods.agent.providers.*`. `_session/goal` / `_session/async_task/stop`: same
+zod parsers + `extMethod` like `_session/steering`; goal request is not a prompt (existing tracker
+sends `running`/`idle`); async stop is inert until the `_async_task_*` renderer cases land. TCK has
+no tests for these methods (Vitest must cover); filters: `-k "test_initialize or test_extensibility"`,
+`-k test_session`, `-k "test_session or test_prompt"` (v1 too). **Slices:** 10(a) renderer cases
+(before 10(c)); 10(b) `_session/goal`; 10(c) `_session/async_task/stop`; 10(d) `session/fork`;
+10(e) `providers/*` + EXT-202. **Open, user decisions:** Q1 EXT-202 (a: keep + fix TCK fork, rec.);
+Q2 no `available_commands_update` for forks on v2 (parity, rec.); Q3 disabled `openai` still listed
+as current (RFD MUST `current:null`; rec. leave + document). **Unverified (confirm before 10(e)):**
+Q4 provider restart re-resumes sessions without reinstalling the baseline turn tracker (v1+v2; v2
+may miss `idle` for a running goal turn); Q5 v1 fork `thread/unsubscribe`s → inherited goal turns
+invisible until first prompt; Q6 (ask AIR) fork points match Codex item ids, but v2 user message id
+is our `clientId`.
+
 **Next steps, in order (one programmer at a time; researchers may run in parallel):**
-1. **5b-2b** (programmer, small): Q1 option A (user decision) — on v2 the
+0. (after the blocking TCK fix + user OK) topic 10 slices 10(a)..10(e) per the research above;
+   confirm Q4/Q5 (researcher) before 10(e). The old items below are history for 1; 2 is superseded
+   by the topic 10 research block.
+1. ~~**5b-2b**~~ done (programmer, small): Q1 option A (user decision) — on v2 the
    `ResponseItemHistoryFallback` contributes only its recovered tool calls (`tool_call` /
    `tool_call_update`); every fallback `user_message_chunk` / `agent_message_chunk` /
    `agent_thought_chunk` is a merge anchor only and never sent (extend 5b-1's filter in
@@ -660,7 +703,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 2 | Prompt lifecycle & turn state machine | **Done** | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i), J11, J11b, G-render done | — (topic 2 done apart from small follow-ups) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | **Done** | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | **Done** | — | — | Depends on topic 2's `state_update` fork existing |
-| 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a, 5b-1, 5b-2a done | 5b-2b (fallback: tool calls only on v2) | Depends on topics 1, 9 |
+| 5 | Session lifecycle (new/resume/list/close/delete) | Done | 5a, 5b-1, 5b-2a, 5b-2b (f9d477b) | — | Depends on topics 1, 9 |
 | 6 | Tool calls, messages & terminal streaming | **Done** | — | — | 6(a)-6(d); end-of-topic full TCK in `.agents/tck/6-full-v1-v2.md` |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
 | 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
