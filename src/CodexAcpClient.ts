@@ -924,15 +924,12 @@ export class CodexAcpClient {
             return;
         }
 
+        // Codex reads the skill files again for each turn by itself, so only a change of the roots needs a request.
         const skillExtraRoots = additionalRoots.map(root => path.join(root, ".agents", "skills"));
         if (!arraysEqual(this.skillExtraRoots, skillExtraRoots)) {
             await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
             this.skillExtraRoots = skillExtraRoots;
         }
-        await this.codexClient.listSkills({
-            cwds: [cwd, ...additionalRoots],
-            forceReload: true,
-        });
     }
 
     /**

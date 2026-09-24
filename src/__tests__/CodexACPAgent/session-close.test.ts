@@ -113,10 +113,12 @@ describe("ACP session close", () => {
         });
     });
 
-    it("does not start a turn after close while prompt startup is still refreshing skills", async () => {
+    it("does not start a turn after close while prompt startup is still setting the skill roots", async () => {
         const {fixture, codexAcpAgent} = await createSession();
-        const skillRefresh = deferred<{data: []}>();
-        const listSkillsSpy = vi.spyOn(fixture.getCodexAppServerClient(), "listSkills")
+        // New skill roots make the prompt set them before the turn starts.
+        codexAcpAgent.getSessionState(sessionId).additionalDirectories = ["/workspace/extra"];
+        const skillRefresh = deferred<void>();
+        const listSkillsSpy = vi.spyOn(fixture.getCodexAppServerClient(), "skillsExtraRootsSet")
             .mockReturnValue(skillRefresh.promise);
         const turnStartSpy = vi.spyOn(fixture.getCodexAppServerClient(), "turnStart")
             .mockResolvedValue(createTurnStartResponse("turn-id"));
@@ -133,7 +135,7 @@ describe("ACP session close", () => {
         await expect(codexAcpAgent.closeSession({sessionId})).resolves.toEqual({});
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
 
-        skillRefresh.resolve({data: []});
+        skillRefresh.resolve();
         await waitForMicrotasks();
 
         expect(turnStartSpy).not.toHaveBeenCalled();
