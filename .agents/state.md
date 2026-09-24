@@ -554,7 +554,19 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     continuation serialized behind a v2 prompt); `prompt-v2-overlap-rejected.json` deleted. Suite
     881 / 26. TCK v1 `-k "test_prompt or test_session or test_cancel"` 26/0/3; v2 31/1 (RESUME-202,
     confirmed pre-existing)/5.
-    **2(c)-1(ii)** J8 + M2 adopt (**in flight, programmer dispatched 2026-09-24**). Original 2(c)-1 scope: shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
+    **2(c)-1(ii)** J8 + M2 adopt — **Done (d58869f)**: J8 needed no code (an unowned goal turn holds
+    no reservation, so B's `turn/start` goes out at once). M2: `promptAfterReservation` snapshots
+    `priorRunningTurnId = codexReportedRunningTurnId` synchronously before `sendPrompt`; if the
+    `turn/start` response id equals it → `insertion.onTurnAdopted()` (new in `UserMessageInsertion`).
+    `promptV2`: `inserted`/`turnWasAdopted` flags; adopted → `onInserted` resolves `{messageId}`
+    without a second `running`; never-inserted guard is `!inserted`; an adopted-but-never-inserted
+    prompt sends one compensating `idle`. Ownership: `v2PromptsInFlight.add` before dispatch already
+    suppresses `reportUnownedTurnState`. A steer missed by the snapshot (goal turn starts inside the
+    `turn/start` window) degrades to B sending its own `running` (a harmless duplicate) + one `idle`.
+    Only the main dispatch path does M2 (not the plan-impl 2nd turn / local-command callback). 4
+    tests in `prompt-v2.test.ts`. Suite 885 / 26. TCK unchanged (v1 26/0/3; v2 31/1 RESUME-202/5).
+    No live probe.
+    **2(c)-2** (**in flight, programmer dispatched 2026-09-24**). Original 2(c)-1 scope: shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
     until insertion + J8 (goal turn running → `turn/start` directly) + M2 adopt (J9/J10);
     **2(c)-2** `_session/steering` minted id + `user_message` on landing, steering fallback through
     the reservation (with `running`/`idle`), remove C1 goal-continuation fallback (J11). Cancel
