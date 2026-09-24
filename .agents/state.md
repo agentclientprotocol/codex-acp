@@ -6,29 +6,82 @@
 
 ## Current position in the sequencing plan
 
-Phase: **Phase 2 — in progress.** Prerequisite and Phase 1 (topic 1) done; topics 9 and 7 done
-(2026-09-24).
+Phase: **Phase 2/3 — in progress.** Prerequisite, topics 1, 6, 7, 8, 9 done; topic 2 done except
+J11; topics 4 and 5 part-done; topics 3 and 10 not started (2026-09-24).
 
 ### Resume here (for a fresh orchestrator)
 
-State as of the flush for a fresh orchestrator restart (2026-09-24): **no agents in flight; everything
-is committed** in codex-acp (branch `eugenethedev/acp-v2`) and in the acp-tck fork (`main`, 4 local
-commits, **not pushed** — the user said don't push). Keep committing with explicit pathspecs.
+State as of the flush for a fresh orchestrator restart (2026-09-24, second flush): **no agents in
+flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`, last code commit
+`b2b81d7`) and in the acp-tck fork (`main`, 4 local commits, **not pushed**; the user said don't
+push). Keep committing with explicit pathspecs. Suite: **890 pass / 26 skip**.
 
-Done: prerequisite (SDK `~1.5.0`); topic 1 (1a, 1b; 1c dropped); topics 6, 7, 8, 9; topic 5a;
-topic 2 slices 2(a1), 2(r), 2(b), 2(e), 2(h). The v2 chain registers: `initialize`,
-`session/new|list|close|delete|resume` (no replay), `session/set_config_option`, `auth/login`,
-`auth/logout`, `session/prompt`.
+**Standing user rules (2026-09-24):** preserve v1 client-visible behavior (change v1 only to fix a
+real bug, with nothing else v1-visible changing); **always assume the latest Codex** (currently the
+pinned 0.156.1), never design for older Codex; prefer simple, maintainable logic over workarounds.
 
-**acp-tck fork fixes (user-requested, done, `/Users/eugene/Documents/JetBrains/projects/acp-tck`):**
-`1997552`, `473a1b5` (quiet-period checks only fail on replies), `b7cb958`, `e644ee7`
-(reply-waiting checks skip agent-initiated lines). See "Open questions" TCK-U1 and
-`.agents/tck/tck-fix-quiet-period.md`. With the fixed TCK, v2 BATCH-202, JSONRPC-003, EXT-201 pass;
-v1 full is still 50/1/5 CONFORMANT. The expected v2 full-run fails are now: cancel rows (topic 3),
-RESUME-202 (5b), EXT-202 (`capabilities.providers` placement; topic 1/10), and JSONRPC-001 +
-BATCH-204/205 (omitted `params`, fixed by 2(u2)).
+Done since the first flush: 2(u2), 2(a2-i..iv), 2(a2-v)-1 (+ fix), 2(c)-1(i)/(ii), 2(c)-2(i), 4(a).
+The v2 chain now registers: `initialize`, `session/new|list|close|delete|resume` (no replay),
+`session/set_config_option`, `auth/login`, `auth/logout`, `session/prompt`, `_session/steering`.
+v2 prompts: all slash commands, synthetic prompts, FIFO queue (shared per-session reservation, v1
+too), agent-initiated turns get `running`/`idle`, steered-prompt adoption (M2), permissions with
+`requires_action`. Detail per slice: the numbered log below and "Open questions" Q3.
+
+**Latest TCK (scoped, after b2b81d7):** v1 `-k "test_prompt or test_session or test_cancel or
+test_extensibility"` 27 pass / 1 fail (SCHEMA-002, known advisory) / 3 skip. v2 `-k "test_prompt or
+test_session or test_permission or test_state or test_extensibility"` 37 / 2 / 5: RESUME-202 (5b),
+EXT-202 (known advisory, `capabilities.providers` placement → topic 1/10). Expected v2 full-run
+fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
+
+**Pending user decisions (ask first thing; research `.agents/research/v2-goal-continuation-fallback-v1-impact.md`):**
+- **J11 (C1 removal).** On 0.156.1 C1 fires when `_session/goal set|resume` lands during a busy
+  turn that goes quiet >1 s (`runGoalSet`'s 1000 ms wait, `CodexAppServerClient.ts:150,424-431,
+  509-570`; reproduced 3/3), and on `budgetLimited` (then its `getGoal` check starts nothing). Harm:
+  the goal turn runs on "Continue working toward the active goal." — a **phantom user message**
+  persisted in the thread and replayed on v1 `session/load`; if the running turn is Codex's own goal
+  turn, it is steered in mid-turn (code-derived). No duplicate turns/output seen. Without C1, a v1
+  client sees the same live output (prompt A's handler stays subscribed, `CodexAcpServer.ts:3532-
+  3536`); **only v1-visible change: the `_session/goal` `{}` response comes back ~1 s after the
+  request instead of after A ends.** Researcher verdict: mixed, leaning bug fix. Options: (a) plain
+  removal (calls at `CodexAcpServer.ts:670-677,697-703`, method `:2042-2062`, return `{}`); (b)
+  wait-only guard keeping the response timing (wait via the reservation for Codex's next
+  `turn/started` or 1 s idle; never `turn/start`). **Ask the user: (a) or (b)?**
+- **J11b.** `/goal` slash-command fallback (`CodexCommands.ts:452-455`, used at
+  `CodexAcpServer.ts:3644-3656`): same trigger, no goal-status check → `/goal …` on a
+  budget-exhausted goal starts a real model turn. Proposed: `createGoalCommandResult(null)` →
+  `{handled: true}`. **Ask the user.**
+- **Gap G-render (pre-existing bug, v1 and v2):** on a session where no `session/prompt` has run yet,
+  a goal turn Codex starts itself (`_session/goal set` right after `session/new`/`session/load`,
+  resume with an active goal) is **invisible**: the baseline tracker (`startCodexTurnTracker`) only
+  tracks turn state and renders no items (live: v1 got zero updates, `{}` after 7.7 s). On v2 the
+  client gets `running`/`idle` with no content. Proposed owner: a new slice after J11 (baseline
+  tracker renders unowned-turn items, reusing the prompt handler's rendering); it's a v1 bug fix,
+  so confirm with the user.
 
 **Next steps, in order (one programmer at a time; researchers may run in parallel):**
+1. Get the J11 / J11b / G-render decisions, then one small slice each (J11 as a separate
+   `fix:` commit; update the v1 tests the research lists).
+2. **Topic 3**, cancellation: `ctx.signal` / `$/cancel_request` (incl. a queued prompt → only it is
+   dropped with -32800) and v2 `session/cancel` (drops all queued not-yet-inserted prompts with
+   -32800, one `idle`/`cancelled` for the running turn; `session/close` acts like cancel; the queue
+   hook is in `acquireTurnStartReservation`/`promptV2`); v1 cancel-retry option B; retry
+   `Close`-named interrupts. Note: CANCEL-202 safety depends on goals pausing on interrupt
+   (unverified, `v2-agent-initiated-turns.md` Q2 TCK note).
+3. **Topic 4(b)**, v2 `elicitation/create` send path (MCP OAuth re-auth, `chat-gpt-device-code`
+   login via `createUrlElicitationRequester`) + a v2 device-code test. `extensionOnlyV1View()` still
+   rejects it.
+4. **Topic 5b**, resume replay (list below, item 6).
+5. **Topic 10**, `session/fork`, providers, `_session/goal`, `_session/async_task/stop` on v2 +
+   subagent/async-task renderer cases; EXT-202 placement.
+6. **Phase 4**, full TCK v1 + v2; AIR v2 contract docs (idle `_meta` `sessionFailure`/quota;
+   subagent/async renames; the SDK client counts any `idle` as a pending prompt's stop; steers show
+   as `user_message` on landing).
+- Small unscheduled follow-ups: `titleGen.onTurnCompleted` latch on non-inserted turns (2(a2-iv));
+  M2 only on the main dispatch path; stale v2 test doc comments.
+
+### Slice log (detail; items marked Done are history, the list above is authoritative)
+
+**Original next-steps list (history):**
 1. **2(u2)** — **Done (9ff318c).** `withOmittedParamsWorkaround(agent)` in `src/AcpAgentRouter.ts`,
    passed only to `.withV2(...)`: a `TransformStream` on the inbound stream adds `params: {}` to
    `session/list`/`auth/logout` items (batch entries too) with no own `params` key; `null` and other
@@ -430,7 +483,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i) done | J11 decision (research in flight), then topic done | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i) done | J11/J11b decisions pending (see Resume here) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | In progress | 4(a) done | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
