@@ -255,6 +255,63 @@ describe("Kandev guarded TTY ACP extension", () => {
         expect(terminate).toHaveBeenCalledOnce();
     });
 
+    it("terminates an in-flight execution on session/cancel notification", async () => {
+        const fixture = createCodexMockTestFixture();
+        installSession(fixture);
+        const response = deferred<CommandExecResponse>();
+        vi.spyOn(fixture.getCodexAppServerClient(), "commandExec").mockReturnValue(response.promise);
+        const terminate = vi.spyOn(fixture.getCodexAppServerClient(), "commandExecTerminate")
+            .mockResolvedValue({});
+        const execution = fixture.getCodexAcpAgent().extMethod(KANDEV_GUARDED_TTY_EXEC_METHOD, {
+            sessionId: "session-id",
+            argv: ["sh", "-lc", "sleep 30"],
+        });
+        await vi.waitFor(() => expect(fixture.getCodexAppServerClient().commandExec).toHaveBeenCalledOnce());
+
+        await fixture.getCodexAcpAgent().cancel({sessionId: "session-id"});
+        await expect(execution).resolves.toMatchObject({
+            outcome: "failed",
+            denial_code: "cancelled",
+            dispatched_tty: true,
+        });
+        expect(terminate).toHaveBeenCalledOnce();
+        response.resolve({exitCode: 0, stdout: "", stderr: ""});
+        await Promise.resolve();
+        expect(terminate).toHaveBeenCalledOnce();
+    });
+
+    it("terminates an in-flight execution on ACP client disconnect", async () => {
+        const acpConnection = new AbortController();
+        const fixture = createCodexMockTestFixture(undefined, undefined, acpConnection.signal);
+        installSession(fixture);
+        const response = deferred<CommandExecResponse>();
+        vi.spyOn(fixture.getCodexAppServerClient(), "commandExec").mockReturnValue(response.promise);
+        const terminate = vi.spyOn(fixture.getCodexAppServerClient(), "commandExecTerminate")
+            .mockResolvedValue({});
+        const execution = fixture.getCodexAcpAgent().extMethod(KANDEV_GUARDED_TTY_EXEC_METHOD, {
+            sessionId: "session-id",
+            argv: ["sh", "-lc", "sleep 30"],
+        });
+        await vi.waitFor(() => expect(fixture.getCodexAppServerClient().commandExec).toHaveBeenCalledOnce());
+
+        acpConnection.abort();
+        await expect(execution).resolves.toMatchObject({
+            outcome: "failed",
+            denial_code: "stale_session",
+            dispatched_tty: true,
+        });
+        expect(terminate).toHaveBeenCalledOnce();
+        response.resolve({exitCode: 0, stdout: "", stderr: ""});
+        await Promise.resolve();
+        expect(terminate).toHaveBeenCalledOnce();
+
+        await expect(fixture.getCodexAcpAgent().extMethod(KANDEV_GUARDED_TTY_EXEC_METHOD, {
+            sessionId: "session-id",
+            argv: ["pwd"],
+        })).resolves.toMatchObject({outcome: "denied", denial_code: "stale_session"});
+        expect(fixture.getCodexAppServerClient().commandExec).toHaveBeenCalledOnce();
+    });
+
     it("returns stable failures for invalid output and App Server errors", async () => {
         const fixture = createCodexMockTestFixture();
         installSession(fixture);

@@ -128,6 +128,7 @@ export async function executeGuardedTtyExec(
         resolveTerminal(event);
     };
     const fail = (code: KandevGuardedTtyDenialCode) => {
+        if (finalized) return;
         requestTermination();
         finalize({kind: "failure", code});
     };

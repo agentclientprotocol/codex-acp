@@ -131,7 +131,7 @@ function startAcpServer() {
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
-    function createAgent(connection: acp.AgentContext): CodexAcpServer {
+    function createAgent(connection: acp.AgentContext, disconnectSignal: AbortSignal): CodexAcpServer {
         const appServerClient = new CodexAppServerClient(codexProcessState.connection.connection);
         const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
         return new CodexAcpServer(
@@ -141,6 +141,7 @@ function startAcpServer() {
             undefined,
             undefined,
             codexProcessState,
+            disconnectSignal,
         );
     }
 
@@ -154,7 +155,7 @@ function startAcpServer() {
 
     acp.agent({name: packageJson.name})
         .onConnect((connection) => {
-            const agent = createAgent(connection.client);
+            const agent = createAgent(connection.client, connection.signal);
             codexAcpServer = agent;
             connection.signal.addEventListener("abort", () => {
                 if (codexAcpServer === agent) {

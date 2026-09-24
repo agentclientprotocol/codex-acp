@@ -318,6 +318,7 @@ export class CodexAcpServer {
     private readonly sessionOpenGenerations: Map<string, number>;
     private readonly goalControlGenerations: Map<string, number>;
     private readonly guardedTtyExecutions: Map<string, Set<AbortController>>;
+    private acpDisconnected = false;
     private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
     private readonly codexProcessState: CodexProcessState | null;
     private codexProcessGeneration = 0;
@@ -331,6 +332,7 @@ export class CodexAcpServer {
         getExitCode?: () => number | null,
         getRecentStderr?: () => string,
         codexProcessState?: CodexProcessState,
+        acpConnectionSignal?: AbortSignal,
     ) {
         this.sessions = new Map();
         this.pendingMcpStartupSessions = new Map();
@@ -359,6 +361,11 @@ export class CodexAcpServer {
         this.currentAuthStatus = null;
         this.availableCommands = this.createAvailableCommands(codexAcpClient);
         this.observeCodexProcess();
+        if (acpConnectionSignal?.aborted) {
+            this.onAcpDisconnect();
+        } else {
+            acpConnectionSignal?.addEventListener("abort", () => this.onAcpDisconnect(), {once: true});
+        }
     }
 
     private createAvailableCommands(client: CodexAcpClient): CodexCommands {
@@ -965,11 +972,19 @@ export class CodexAcpServer {
         return {};
     }
 
-    private abortGuardedTtyExecutions(sessionId: string): void {
+    private abortGuardedTtyExecutions(sessionId: string, reason: "cancelled" | "stale_session" = "stale_session"): void {
         const executions = this.guardedTtyExecutions.get(sessionId);
         if (!executions) return;
         for (const execution of executions) {
-            execution.abort("stale_session");
+            execution.abort(reason);
+        }
+    }
+
+    private onAcpDisconnect(): void {
+        if (this.acpDisconnected) return;
+        this.acpDisconnected = true;
+        for (const sessionId of this.guardedTtyExecutions.keys()) {
+            this.abortGuardedTtyExecutions(sessionId);
         }
     }
 
@@ -1535,7 +1550,7 @@ export class CodexAcpServer {
         params: KandevGuardedTtyCapabilityRequest,
     ): KandevGuardedTtyCapabilityResponse {
         const sessionState = this.sessions.get(params.sessionId);
-        if (!sessionState || !this.sessionPublishIsCurrent(
+        if (this.acpDisconnected || !sessionState || !this.sessionPublishIsCurrent(
             sessionState,
             this.getSessionGeneration(params.sessionId),
         )) {
@@ -1556,7 +1571,7 @@ export class CodexAcpServer {
         requestSignal?: AbortSignal,
     ): Promise<KandevGuardedTtyExecReceipt> {
         const sessionState = this.sessions.get(params.sessionId);
-        if (!sessionState || this.sessionIsClosing(params.sessionId)) {
+        if (this.acpDisconnected || !sessionState || this.sessionIsClosing(params.sessionId)) {
             return createUndispatchedGuardedTtyReceipt(params.sessionId, "stale_session");
         }
         const sessionGeneration = this.getSessionGeneration(params.sessionId);
@@ -1578,7 +1593,8 @@ export class CodexAcpServer {
                 cwd: sessionState.cwd,
                 sandboxPolicy: sessionState.agentMode.sandboxPolicy,
                 signal: controller.signal,
-                isSessionCurrent: () => this.sessionPublishIsCurrent(sessionState, sessionGeneration),
+                isSessionCurrent: () => !this.acpDisconnected
+                    && this.sessionPublishIsCurrent(sessionState, sessionGeneration),
             });
         } finally {
             requestSignal?.removeEventListener("abort", abortFromRequest);
@@ -3531,6 +3547,7 @@ export class CodexAcpServer {
     }
 
     async cancel(params: acp.CancelNotification): Promise<void> {
+        this.abortGuardedTtyExecutions(params.sessionId, "cancelled");
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) {
             logger.log("Cancel request rejected: session not found", {sessionId: params.sessionId});
