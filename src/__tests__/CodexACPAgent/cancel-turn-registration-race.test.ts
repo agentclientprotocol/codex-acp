@@ -49,16 +49,23 @@ describe("session/cancel racing Codex's turn registration", () => {
         await turn.finish();
     });
 
-    it("does not retry on close, which tears the session down anyway", async () => {
+    it("retries a close interrupt the same way as a cancel", async () => {
         const turn = await startPrompt();
         const turnInterrupt = vi.spyOn(turn.codexAcpClient, "turnInterrupt")
-            .mockRejectedValue(NO_ACTIVE_TURN);
+            .mockRejectedValueOnce(NO_ACTIVE_TURN)
+            .mockRejectedValueOnce(NO_ACTIVE_TURN)
+            .mockResolvedValueOnce(undefined);
 
         const closed = turn.codexAcpAgent.closeSession({sessionId});
+        // The turn is still active while the retries run: only resolve it once
+        // `turnInterrupt` has gone through its retry budget, otherwise the underlying
+        // prompt would complete and drop the session from the active-prompts set first.
+        await vi.waitFor(() => expect(turnInterrupt).toHaveBeenCalledTimes(3));
         await turn.finish();
         await closed;
 
-        expect(turnInterrupt).toHaveBeenCalledTimes(1);
+        expect(turnInterrupt).toHaveBeenCalledTimes(3);
+        expect(turnInterrupt).toHaveBeenLastCalledWith({threadId: sessionId, turnId});
     });
 });
 

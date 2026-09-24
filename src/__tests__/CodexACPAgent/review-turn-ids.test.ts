@@ -135,6 +135,63 @@ describe("/review turn ids", () => {
         await expect(review.prompt).resolves.toMatchObject({stopReason: "cancelled"});
     });
 
+    it("recomputes the turn id between retries once the child turn starts", async () => {
+        vi.useFakeTimers();
+        try {
+            const review = await startReview(undefined, undefined, false);
+            const turnInterrupt = vi.spyOn(review.fixture.getCodexAcpClient(), "turnInterrupt")
+                .mockRejectedValueOnce(new Error("no active turn to interrupt"))
+                .mockImplementationOnce(async () => {
+                    review.send(turnCompleted("interrupted"));
+                });
+
+            const cancelPromise = review.agent.cancel({sessionId});
+            await vi.advanceTimersByTimeAsync(0);
+            expect(turnInterrupt).toHaveBeenCalledTimes(1);
+            expect(turnInterrupt).toHaveBeenNthCalledWith(1, {threadId: sessionId, turnId: parentTurnId});
+
+            // The child turn registers between the first (rejected) attempt and the retry.
+            review.send({method: "turn/started", params: {threadId: sessionId, turn: turn(childTurnId, "inProgress")}});
+            await review.fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+
+            await vi.advanceTimersByTimeAsync(25);
+            await cancelPromise;
+            expect(turnInterrupt).toHaveBeenCalledTimes(2);
+            expect(turnInterrupt).toHaveBeenNthCalledWith(2, {threadId: sessionId, turnId: childTurnId});
+            await expect(review.prompt).resolves.toMatchObject({stopReason: "cancelled"});
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("retries with the turn id Codex reports as active on an 'expected active turn id' mismatch", async () => {
+        const review = await startReview(undefined, undefined, false);
+        const turnInterrupt = vi.spyOn(review.fixture.getCodexAcpClient(), "turnInterrupt")
+            .mockRejectedValueOnce(new Error(`expected active turn id ${parentTurnId} but found ${childTurnId}`))
+            .mockImplementationOnce(async () => {
+                review.send(turnCompleted("interrupted"));
+            });
+
+        await review.agent.cancel({sessionId});
+
+        expect(turnInterrupt).toHaveBeenCalledTimes(2);
+        expect(turnInterrupt).toHaveBeenNthCalledWith(1, {threadId: sessionId, turnId: parentTurnId});
+        expect(turnInterrupt).toHaveBeenNthCalledWith(2, {threadId: sessionId, turnId: childTurnId});
+        await expect(review.prompt).resolves.toMatchObject({stopReason: "cancelled"});
+    });
+
+    it("does not retry an 'expected active turn id' mismatch for a stale (already-completed) turn", async () => {
+        const review = await startReview();
+        const turnInterrupt = vi.spyOn(review.fixture.getCodexAcpClient(), "turnInterrupt")
+            .mockRejectedValueOnce(new Error("expected active turn id some-other-turn but found unrelated-turn"));
+
+        await review.agent.cancel({sessionId});
+
+        expect(turnInterrupt).toHaveBeenCalledTimes(1);
+        review.send(turnCompleted("completed"));
+        await expect(review.prompt).resolves.toMatchObject({stopReason: "end_turn"});
+    });
+
     it("ends the review prompt when Codex fails before starting the review", async () => {
         const review = await startReview(undefined, undefined, false, false);
 
