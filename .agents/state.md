@@ -49,9 +49,19 @@ BATCH-204/205 (omitted `params`, fixed by 2(u2)).
    command. Reviewer message suppression needed no code: `CodexEventHandler` returns `null` for live
    `userMessage` items on both versions. 2(r)/2(h) machinery reused unchanged. 4 tests + 4 snapshots
    (old `prompt-v2-codex-turn-commands.json` removed). Suite 858 / 26. TCK v1 `-k "test_prompt or
-   test_cancel"` 8/1, v2 `-k test_prompt` 9/1 (baseline). No live probe; **2(a2-iii)** synthetic prompts (plan-implementation, goal continuation) (**in flight,
-   programmer dispatched 2026-09-24**); **2(a2-iv)** overlap check for
-   `startNewTurnFromExternalPrompt` + fallback title fix for non-inserted prompts. — Codex command turns (`/review`, `/compact`, `/goal`) and synthetic prompts
+   test_cancel"` 8/1, v2 `-k test_prompt` 9/1 (baseline). No live probe; **2(a2-iii)** synthetic prompts — **Done (2b12a51)**: `UserMessageInsertion.onSyntheticInserted`;
+   `prompt()` has `pendingSyntheticInsertions` + `registerSyntheticInsertion()` (only when `insertion`
+   is given → v2 only; v1 `turn/start` still has no `clientUserMessageId`). Minted ids on the
+   plan-implementation follow-up turn and the `/goal` → `GOAL_CONTINUATION_PROMPT` fallback; live
+   `user_message_chunk` on the matching userMessage item, inside the original running…idle pair.
+   Harness gained `PromptSession.request(method, params)`. 2 tests + 2 snapshots; no v1 snapshot
+   diffs. Suite 860 / 26. TCK v1/v2 `-k test_prompt` baseline. **Not covered (→ research TCK-Q3):**
+   `startGoalContinuationIfCurrent` → `startNewTurnFromExternalPrompt` (`_goal/control`; also used by
+   steering) can start a turn with no v2 `session/prompt` in flight → no minted id, no user message,
+   no states;
+   **2(a2-iv)** fallback session title fix for non-inserted prompts (**in flight, programmer
+   dispatched 2026-09-24**); **2(a2-v)** overlap check + v2 rendering for
+   `startNewTurnFromExternalPrompt` turns — blocked on research Q3. — Codex command turns (`/review`, `/compact`, `/goal`) and synthetic prompts
    (plan-implementation, goal continuation) on v2. Use the two-id tracking from 2(r), with no clientId matcher
    for reviews. On `review/start` success, send the response + live-only `user_message`, then
    `running`, then exactly one `idle`. Synthetic prompts get a minted `clientUserMessageId`. Also:
@@ -399,7 +409,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i), 2(a2-ii) done | 2(a2-iii), 2(a2-iv), 2(c) | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i/ii/iii) done | 2(a2-iv), 2(a2-v) (blocked on Q3), 2(c) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
@@ -430,6 +440,13 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   handler 150-152, `cancelV2Turn` 182-190, cancelled catch 255-268; prompt handler 108-149.
 
 ## Open questions sent to a researcher subagent
+
+- (2026-09-24) **Q3** — agent-initiated turns on v2: `startNewTurnFromExternalPrompt` turns
+  (`_goal/control` goal continuation via `startGoalContinuationIfCurrent`, steering fallback) can start
+  when no v2 `session/prompt` is in flight. What `state_update`/`user_message` sequence does ACP v2
+  allow/require for a turn the client didn't request; how should they interact with a v2 prompt that
+  arrives meanwhile (overlap check / 2(c) queue)? → `.agents/research/v2-agent-initiated-turns.md`.
+  Status: **in flight.**
 
 - (2026-09-24) **TCK-U1** — v2 `_auth/status_update` pushed right after `initialize` fails
   BATCH-202/JSONRPC-003/EXT-201. Is the push allowed; what exactly do those checks accept; does v1
