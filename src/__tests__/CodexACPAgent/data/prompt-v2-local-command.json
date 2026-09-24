@@ -16,6 +16,12 @@
   },
   {
     "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionUpdate": {
       "configOptions": [
         {
           "currentValue": "agent",
@@ -102,6 +108,13 @@
         }
       ],
       "sessionUpdate": "config_option_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "stopReason": "end_turn",
+      "state": "idle",
+      "sessionUpdate": "state_update"
     }
   }
 ]

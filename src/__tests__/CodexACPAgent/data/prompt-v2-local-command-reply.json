@@ -13,5 +13,11 @@
     "promptResponse": {
       "messageId": "<messageId>"
     }
+  },
+  {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
   }
 ]

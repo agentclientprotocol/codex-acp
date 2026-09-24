@@ -2984,10 +2984,16 @@ export class CodexAcpServer {
         const messageId = randomUUID();
         const session = new ACPSessionConnection(this.connection, sessionId);
         this.v2PromptsInFlight.add(sessionId);
+        const sendState = async (state: acpV2.StateUpdate) => {
+            try {
+                await session.updateState(state);
+            } catch (error) {
+                logger.error(`Failed to send the '${state.state}' state for session ${sessionId}`, error);
+            }
+        };
         return await new Promise<acpV2.PromptResponse>((resolve, reject) => {
-            let inserted = false;
+            let running: Promise<void> | null = null;
             const onInserted = async () => {
-                inserted = true;
                 try {
                     for (const block of request.prompt) {
                         await session.update(createUserMessageChunk(block, messageId));
@@ -2996,6 +3002,12 @@ export class CodexAcpServer {
                     logger.error(`Failed to send the user message for session ${sessionId}`, error);
                 }
                 resolve({messageId});
+                // Report `running` only after the response has been queued, as the spec's sequence
+                // shows (response, user message, then `running`). Awaiting it here holds back the
+                // turn's later updates until it is sent.
+                running = new Promise<void>(resolveTimer => setTimeout(resolveTimer, 0))
+                    .then(() => sendState({state: "running"}));
+                await running;
             };
             const run = async () => {
                 if (promptKind.kind === "localCommand") {
@@ -3005,22 +3017,30 @@ export class CodexAcpServer {
                 return await this.prompt(request, undefined, undefined, {clientUserMessageId: messageId, onInserted});
             };
             run().then(
-                () => {
-                    if (!inserted) {
+                async (response) => {
+                    this.v2PromptsInFlight.delete(sessionId);
+                    if (running === null) {
                         reject(RequestError.internalError(
                             undefined,
                             "The prompt ended before Codex recorded the user message",
                         ));
+                        return;
                     }
+                    await running;
+                    // The session takes the next prompt before `idle` goes out, so a client that
+                    // prompts again as soon as it sees `idle` is not rejected as overlapping.
+                    // The stop reason v1 would have answered with ends the v2 turn.
+                    await sendState({state: "idle", stopReason: response.stopReason});
                 },
                 (error: unknown) => {
-                    if (inserted) {
+                    this.v2PromptsInFlight.delete(sessionId);
+                    if (running !== null) {
                         logger.error(`Prompt for session ${sessionId} failed after it was inserted`, error);
                     } else {
                         reject(error);
                     }
                 },
-            ).finally(() => this.v2PromptsInFlight.delete(sessionId));
+            );
         });
     }
 

@@ -28,6 +28,14 @@ export class AcpV2Connection {
         });
     }
 
+    /** Sends a `state_update`, which only exists on v2 and so needs no rendering. */
+    async updateState(sessionId: string, state: acpV2.StateUpdate): Promise<void> {
+        await this.client.notify(acpV2.methods.client.session.update, {
+            sessionId,
+            update: {sessionUpdate: "state_update", ...state},
+        });
+    }
+
     /**
      * A v1-typed view for code that has no v2 send path yet. `_`-prefixed extension methods
      * are forwarded as-is: their payloads are the same on both versions. `session/update` is
@@ -85,6 +93,14 @@ export class ACPSessionConnection {
 
     get protocolVersion(): 1 | 2 {
         return this.v2Connection ? 2 : 1;
+    }
+
+    /** Reports the session's foreground-work state. v1 has no such update, so this is v2 only. */
+    async updateState(state: acpV2.StateUpdate): Promise<void> {
+        if (!this.v2Connection) {
+            throw acp.RequestError.internalError(undefined, "'state_update' does not exist in ACP v1");
+        }
+        await this.v2Connection.updateState(this.sessionId, state);
     }
 
     async update(update: UpdateSessionEvent, sessionId: string = this.sessionId) {
