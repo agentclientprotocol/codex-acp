@@ -1,0 +1,94 @@
+[
+  {
+    "codexRequest": "turn/start",
+    "params": {
+      "threadId": "thread-1",
+      "input": [
+        {
+          "type": "text",
+          "text": "Hello",
+          "text_elements": []
+        }
+      ],
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "auto_review",
+      "sandboxPolicy": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": false,
+        "excludeSlashTmp": false
+      },
+      "summary": "auto",
+      "effort": "medium",
+      "model": "gpt-5",
+      "serviceTier": null,
+      "clientUserMessageId": "<messageId>"
+    }
+  },
+  {
+    "codexResponse": "turn/start"
+  },
+  {
+    "codexNotification": "turn/started"
+  },
+  {
+    "codexNotification": "item/completed"
+  },
+  {
+    "sessionUpdate": {
+      "messageId": "<messageId>",
+      "content": {
+        "text": "Hello",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "promptResponse": {
+      "messageId": "<messageId>"
+    }
+  },
+  {
+    "codexNotification": "item/started"
+  },
+  {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "messageId": "<steerMessageId>",
+      "content": {
+        "text": "also do this",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "codexNotification": "turn/completed"
+  },
+  {
+    "sessionUpdate": {
+      "title": "Hello",
+      "sessionUpdate": "session_info_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "stopReason": "end_turn",
+      "_meta": {
+        "quota": {
+          "token_count": null,
+          "model_usage": []
+        }
+      },
+      "state": "idle",
+      "sessionUpdate": "state_update"
+    }
+  }
+]

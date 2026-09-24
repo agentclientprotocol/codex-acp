@@ -1166,11 +1166,12 @@ export class CodexAcpClient {
         });
     }
 
-    async steerTurn(params: { threadId: string, turnId: string, prompt: acp.ContentBlock[] }): Promise<TurnSteerResponse> {
+    async steerTurn(params: { threadId: string, turnId: string, prompt: acp.ContentBlock[], clientUserMessageId: string }): Promise<TurnSteerResponse> {
         return await this.codexClient.turnSteer({
             threadId: params.threadId,
             expectedTurnId: params.turnId,
             input: buildPromptItems(params.prompt),
+            clientUserMessageId: params.clientUserMessageId,
         });
     }
 

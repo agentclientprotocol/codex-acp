@@ -148,7 +148,8 @@ export function createAcpAgentRouter(
         // The v1-only `authentication/status|logout` extensions are not registered on v2.
         .onRequest(acpV2.methods.agent.auth.login, (ctx) => getAgent().authenticateV2(ctx.params, ctx.requestId))
         .onRequest(acpV2.methods.agent.auth.logout, (ctx) => getAgent().logoutV2(ctx.params))
-        .onRequest(acpV2.methods.agent.session.prompt, (ctx) => getAgent().promptV2(ctx.params));
+        .onRequest(acpV2.methods.agent.session.prompt, (ctx) => getAgent().promptV2(ctx.params))
+        .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params));
 
     return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(withOmittedParamsWorkaround(v2Agent));
 }
