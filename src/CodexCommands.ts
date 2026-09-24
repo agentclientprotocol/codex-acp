@@ -42,6 +42,8 @@ export class CodexCommands {
     private readonly codexAcpClient: CodexAcpClient;
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
     private readonly onLogout: LogoutHandler;
+    /** The commands that each session got last, to skip a publish that changes nothing. */
+    private readonly published = new WeakMap<SessionState, string>();
 
     constructor(
         connection: AcpClientConnection,
@@ -55,7 +57,12 @@ export class CodexCommands {
         this.onLogout = onLogout;
     }
 
-    async publish(sessionState: SessionState, shouldPublish: () => boolean = () => true): Promise<void> {
+    /** Sends the available commands. With `onlyChanges`, it sends nothing when the commands did not change. */
+    async publish(
+        sessionState: SessionState,
+        shouldPublish: () => boolean = () => true,
+        onlyChanges = false,
+    ): Promise<void> {
         try {
             if (!shouldPublish()) {
                 return;
@@ -68,6 +75,11 @@ export class CodexCommands {
             if (availableCommands.length === 0 || !shouldPublish()) {
                 return;
             }
+            const key = JSON.stringify(availableCommands);
+            if (onlyChanges && this.published.get(sessionState) === key) {
+                return;
+            }
+            this.published.set(sessionState, key);
 
             const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
             await session.update({

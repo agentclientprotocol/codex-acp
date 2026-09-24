@@ -3188,6 +3188,14 @@ export class CodexAcpServer {
 
             await clearRecoveredSessionFailure(eventHandler);
 
+            // Codex sends no notification for a new skill file. A skill that appeared during the turn becomes a
+            // slash command after it. Never await: the prompt response does not wait for the skill list.
+            void this.availableCommands.publish(
+                sessionState,
+                () => this.sessions.get(sessionState.sessionId) === sessionState,
+                true,
+            );
+
             // Fire-and-forget: generate an AI title from the first turn.
             // Never await — must not block the prompt response.
             // Note: turn.items contains only agent output, not the user message —

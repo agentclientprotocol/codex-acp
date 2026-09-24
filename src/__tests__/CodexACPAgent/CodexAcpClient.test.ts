@@ -423,11 +423,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(logoutSpy).toHaveBeenCalledWith({});
     });
 
-    it('prefetches session additional skill roots before thread start', async () => {
+    it('sets the session additional skill roots before thread start, without a skill reload', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
 
+        const extraRootsSetSpy = vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
         const listSkillsSpy = vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({ data: [] });
         const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
             thread: { id: "thread-id" } as any,
@@ -471,11 +472,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             }
         });
 
-        expect(listSkillsSpy).toHaveBeenCalledWith({
-            cwds: ["/workspace", "/skills/one", "/skills/two"],
-            forceReload: true,
+        expect(extraRootsSetSpy).toHaveBeenCalledWith({
+            extraRoots: ["/skills/one/.agents/skills", "/skills/two/.agents/skills"],
         });
-        expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
+        expect(extraRootsSetSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
+        expect(listSkillsSpy).not.toHaveBeenCalled();
     });
 
     it('prefers ACP additional directories over legacy meta roots for new session skill discovery', async () => {
@@ -509,12 +510,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(extraRootsSetSpy).toHaveBeenCalledWith({
             extraRoots: ["/workspace/extra/.agents/skills"],
         });
-        expect(listSkillsSpy).toHaveBeenCalledWith({
-            cwds: ["/workspace", "/workspace/extra"],
-            forceReload: true,
-        });
         expect(extraRootsSetSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
-        expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
+        expect(listSkillsSpy).not.toHaveBeenCalled();
 
         const threadStartRequest = threadStartSpy.mock.calls[0]![0];
         expect(threadStartRequest.config?.["projects"]).toEqual({
@@ -1038,7 +1035,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(session.sessionId).toBe("thread-id");
     });
 
-    it('prefetches skills before turn start', async () => {
+    it('does not reload the skills before a turn', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
@@ -1062,12 +1059,12 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             prompt: [{ type: "text", text: "Hello" }],
         };
         await codexAcpAgent.prompt(promptRequest);
+        await flushAsyncWork();
 
-        expect(listSkillsSpy).toHaveBeenCalledWith({
-            cwds: ["/workspace"],
-            forceReload: true,
-        });
-        expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(turnStartSpy.mock.invocationCallOrder[0]!);
+        // Codex reads the skill files again for each turn by itself.
+        expect(listSkillsSpy).not.toHaveBeenCalledWith(expect.objectContaining({forceReload: true}));
+        expect(listSkillsSpy.mock.invocationCallOrder.every(order => order > turnStartSpy.mock.invocationCallOrder[0]!))
+            .toBe(true);
     });
 
     it('applies ACP additional directories to turn skill discovery and sandbox policy', async () => {
@@ -1100,10 +1097,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(extraRootsSetSpy).toHaveBeenCalledWith({
             extraRoots: ["/workspace/extra/.agents/skills"],
         });
-        expect(listSkillsSpy).toHaveBeenCalledWith({
-            cwds: ["/workspace", "/workspace/extra"],
-            forceReload: true,
-        });
+        expect(listSkillsSpy).not.toHaveBeenCalledWith(expect.objectContaining({forceReload: true}));
         expect(turnStartSpy.mock.calls[0]![0].sandboxPolicy).toMatchObject({
             type: "workspaceWrite",
             writableRoots: ["/workspace/extra"],
@@ -1486,9 +1480,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('returns cancelled when the ACP prompt request is cancelled during startup work', async () => {
-        const { mockFixture, turnStartSpy } = setupPromptFixture();
-        const skillsRefresh = deferred<{data: []}>();
-        const listSkillsSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "listSkills")
+        // New skill roots make the prompt set them before the turn starts.
+        const { mockFixture, turnStartSpy } = setupPromptFixture({additionalDirectories: ["/workspace/extra"]});
+        const skillsRefresh = deferred<void>();
+        const listSkillsSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "skillsExtraRootsSet")
             .mockReturnValue(skillsRefresh.promise);
         const controller = new AbortController();
 
@@ -1504,7 +1499,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         controller.abort();
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
 
-        skillsRefresh.resolve({data: []});
+        skillsRefresh.resolve();
         await flushAsyncWork();
         expect(turnStartSpy).not.toHaveBeenCalled();
     });
@@ -1613,6 +1608,29 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-skills.json");
+    });
+
+    it('publishes the commands again after a turn only when the skills changed', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const skill = (name: string) => ({
+            name, description: name, shortDescription: name, path: "/workspace", scope: "user" as const, enabled: true, pluginId: null,
+        });
+        const listSkills = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills");
+        const sessionState = createTestSessionState({sessionId: "session-id", cwd: "/workspace"});
+        const published = () => mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "available_commands_update")
+            .length;
+        // @ts-expect-error - exercising private helper
+        const publish = () => codexAcpAgent.availableCommands.publish(sessionState, () => true, true);
+
+        listSkills.mockResolvedValue({data: [{cwd: "/workspace", skills: [skill("build")], errors: []}]});
+        await publish();
+        await publish();
+        listSkills.mockResolvedValue({data: [{cwd: "/workspace", skills: [skill("build"), skill("deploy")], errors: []}]});
+        await publish();
+
+        expect(published()).toBe(2);
     });
 
     it('handles builtin slash command locally', async () => {
