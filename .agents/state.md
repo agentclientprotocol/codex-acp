@@ -182,7 +182,26 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
    `requires_action` for child-session permissions) → topic 10; idle-time requests use the finished
    prompt's `interactionSignal` so `session/cancel` can't abort them (unscheduled); OAuth elicitation
    may precede the `session/new` response (unscheduled).
-4. **Topic 5b**, resume replay (list below, item 6).
+4. **Topic 5b**, resume replay (list below, item 6). 5b-1 (basic replay) programmer in flight.
+   **Q-5B research done** (`.agents/research/v2-resume-replay-open-questions.md`, HEAD 7e2ec21):
+   - Q1 ids: spec needs unique ids + RESUME-204 prompt ids only; stability is a judgment call.
+     agentMessage/reasoning/review-mode items already stable (item ids). Review-mode chunks: set
+     `item.id` in `createReviewModeUpdate` (v2 only). Fallback agent/thought chunks: A never emit on
+     v2 (merge anchors only) vs B `fallback:<line>` ids → **user decision**.
+   - Q2 hide reviewer prompt: U hidden iff `clientId==null`, first item of turn T, next turn starts
+     with `enteredReviewMode`, `T.id > P.id` (UUIDv7), optionally T has no agentMessage/other user
+     msg; hide only U; both native and non-native paths. v2 only vs v1 too → **user decision**.
+   - Q3 interrupted reviews: no special handling beyond Q1/Q2/primers.
+   - Q4 subagents: with AIR `nativeSubagentSessions`, a thread with `subAgentActivity` makes v2
+     `session/resume` replay fail -32603 midway (fail-loud renderer); async tasks silently lost
+     (`reconcile` catches). Maps 1:1 once topic 10 adds renderer cases → sequencing **user decision**.
+   - Q5: 0.156.1 has no `thread/rollback`; old rollouts with `thread_rolled_back` still resurrect
+     rolled-back tool calls via the fallback (v1 bug). Skip the fallback when that record exists
+     (changes v1 output) → **user decision**.
+   - Q6: `content: []` primer before the first chunk of every replayed user/agent/thought message
+     (one per id, none for zero-chunk messages), also in the native path + child sessions; needs a
+     v2-only send (like `updateState`). Add a replay-twice determinism test. MCP startup status may
+     land after the resume response (RESUME-202 quiet period) — open.
 5. **Topic 10**, `session/fork`, providers, `_session/goal`, `_session/async_task/stop` on v2 +
    subagent/async-task renderer cases; EXT-202 placement.
 6. **Phase 4**, full TCK v1 + v2; AIR v2 contract docs (idle `_meta` `sessionFailure`/quota;
