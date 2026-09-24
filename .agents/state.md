@@ -6,17 +6,18 @@
 
 ## Current position in the sequencing plan
 
-Phase: **Phase 2/3 — nearly done.** Prerequisite, topics 1-9 done; topic 10 researched, blocked on
-the EXT-202 TCK fix; then Phase 4 (2026-09-25). Rough progress ~80%.
+Phase: **Phase 2/3 — nearly done.** Prerequisite, topics 1-9 done; topic 10 in progress (10(a) done,
+next 10(b)); then Phase 4 (2026-09-25). Rough progress ~80%.
 
 ### Resume here (for a fresh orchestrator)
 
-State as of the **third flush** (2026-09-25): **no agents in flight; everything is committed** in
-codex-acp (branch `eugenethedev/acp-v2`; last code commit `1cd3e3b`) and in the acp-tck fork
-(`main`, 4 local commits, **not pushed**; the user said don't push). Keep committing with explicit
-pathspecs (the user has unrelated staged edits to `.agents/agents/*.md`). Suite: **923 pass / 26
-skip**. `bun` is missing locally: programmers use `npm run build` for the TCK (see
-`.agents/tck/HOW-TO-RUN.md`).
+State as of the **fourth flush** (2026-09-25): **no agents in flight; everything is committed** in
+codex-acp (branch `eugenethedev/acp-v2`; last code commit `1ac2e35`) and in the acp-tck fork
+(`main` @ `b15c7bd`, 6 local commits, **not pushed**; the user said don't push). Keep committing
+with explicit pathspecs (the user may have unrelated staged edits to `.agents/agents/*.md`). Suite:
+**934 pass / 26 skip**. `bun` is missing locally: programmers use `npm run build` for the TCK (see
+`.agents/tck/HOW-TO-RUN.md`). **Next slice: 10(b) `_session/goal` on v2** (see "Topic 10 slice
+order" under Next steps; details in the fourth-flush block below).
 
 **Standing user rules:** preserve v1 client-visible behavior (change v1 only to fix a real bug, with
 nothing else v1-visible changing; the user decides v1-visible trade-offs); **always assume the
@@ -34,8 +35,26 @@ start` replay), `session/set_config_option`, `session/cancel`, `auth/login|logou
 scoped runs) and EXT-202 (advisory, `capabilities.providers` placement → topic 10). Expected v2
 full-run fails now: none (EXT-202 fixed in the TCK fork, see below).
 
-**EXT-202 TCK fix — done; user OK'd resuming codex-acp (2026-09-25).** In flight: programmer on
-**10(a)** renderer cases (`_subagent_update`, `_async_task_*`); Q4/Q5 research done (below). User
+**Fourth flush (2026-09-25, graceful shutdown requested by the user): no agents in flight;
+everything committed.** Next slice to dispatch: **10(b) `_session/goal` on v2** (see "Topic 10
+slice order" in Next steps). Suite **934 pass / 26 skip**. acp-tck `main` @ `b15c7bd` (6 local
+commits, not pushed).
+
+**10(a) done (1ac2e35):** `toV2SessionUpdate` (`src/AcpV2SessionUpdate.ts`): `subagent_spawned` /
+`subagent_state_update` → `_subagent_update` (`{subagentSessionId, name, task, capabilities: {}}` /
+`{subagentSessionId, state}`, `_meta` passed through; comment: rename on RFD PR #1992);
+`async_task_spawned` / `async_task_state_update` → `_async_task_*` (payload unchanged);
+`async_task_progress` stays fail-loud (never emitted). No renderer gate: gating is upstream and the
+same on v1/v2 (`clientSupportsSubagents()` reduces to AIR `nativeSubagentSessions` on v2;
+`createAsyncTasks()` gates on AIR `asyncTasks`). Tests: `session-update-v2.test.ts` (+1, snapshot
+`data/session-update-v2-subagent-and-async-task.json`), new `subagent-and-async-task-updates-v2.test.ts`
+(4, gated on/off), new `v2-resume-replay-subagents.test.ts` (3: resume replay no longer -32603;
+child content replays; running background terminal announced as `_async_task_spawned` on replay via
+`CodexBackgroundTerminalTasks.recover()`, so async tasks are not lost). Existing
+`v2-session-update-guard.ts` already covers the unknown-tag guard. No v1 snapshot changed. TCK
+(`.agents/tck/10a-targeted.md`) `-k "test_session or test_prompt"`: v1 24/0/3, v2 33/0/3.
+
+**EXT-202 TCK fix — done; user OK'd resuming codex-acp (2026-09-25).** Q4/Q5 research done (below). User
 chose Q1 (a) in the blocking manner: no codex-acp work until the fix is verified and the user
 confirms. acp-tck `main` (not pushed) `6e29654` (fix) + `b15c7bd` (self-tests): vendored v2
 `schema.unstable.json` (spec `d8805733`) + `load_unstable_schema()`; `_allowed_root_properties`
@@ -119,7 +138,7 @@ is our `clientId`.
 0. **Topic 10 slice order** (one programmer at a time; research + decisions are all recorded in the
    blocks above and in `v2-fork-providers-and-extension-methods.md`,
    `v2-provider-restart-and-fork-tracking.md`, `v2-resume-goal-turn-timing.md`):
-   10(a) renderer cases (in flight / see its result above) → 10(b) `_session/goal` on v2 →
+   ~~10(a)~~ done (1ac2e35) → 10(b) `_session/goal` on v2 →
    10(c) `_session/async_task/stop` on v2 → 10(d) `session/fork` on v2 (drop `modes`, no
    `available_commands_update`, Q6 flagged for docs) → 10(e) `providers/*` on v2 (EXT-202 already
    fixed in the TCK) → 10(f1) early-subscribe tracker on resume/load (v1+v2) → 10(f2)
@@ -756,7 +775,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
 | 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
 | 9 | Config options, modes & plans | **Done** | — | — | 9a + 9b landed |
-| 10 | Unstable/extension methods on v2 (plan gap) | In progress | research done | 10(a) renderer cases | Not owned by plan.md topics: register `session/fork` and `providers/{list,set,disable}` via typed `acpV2.methods.agent.*`; `_session/goal`, `_session/async_task/stop` via `onRequest("_…", parser, h)`; outbound `_auth/status_update` via `client.notify`; subagent/async-task renderer cases (see Open questions). `_session/steering` is owned by topic 2(c). Depends on topic 1 |
+| 10 | Unstable/extension methods on v2 (plan gap) | In progress | research, 10(a) (1ac2e35) | 10(b) `_session/goal` | Not owned by plan.md topics: register `session/fork` and `providers/{list,set,disable}` via typed `acpV2.methods.agent.*`; `_session/goal`, `_session/async_task/stop` via `onRequest("_…", parser, h)`; outbound `_auth/status_update` via `client.notify`; subagent/async-task renderer cases (see Open questions). `_session/steering` is owned by topic 2(c). Depends on topic 1 |
 
 ## Deviations from `architecture.md`
 
