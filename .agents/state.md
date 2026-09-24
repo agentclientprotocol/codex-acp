@@ -45,18 +45,18 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
   request instead of after A ends.** Researcher verdict: mixed, leaning bug fix. Options: (a) plain
   removal (calls at `CodexAcpServer.ts:670-677,697-703`, method `:2042-2062`, return `{}`); (b)
   wait-only guard keeping the response timing (wait via the reservation for Codex's next
-  `turn/started` or 1 s idle; never `turn/start`). **Ask the user: (a) or (b)?**
+  `turn/started` or 1 s idle; never `turn/start`). **Ask the user: (a) or (b)?** (User asked for a detailed explanation with concrete examples; still undecided.)
 - **J11b.** `/goal` slash-command fallback (`CodexCommands.ts:452-455`, used at
   `CodexAcpServer.ts:3644-3656`): same trigger, no goal-status check → `/goal …` on a
   budget-exhausted goal starts a real model turn. Proposed: `createGoalCommandResult(null)` →
-  `{handled: true}`. **Ask the user.**
+  `{handled: true}`. **User approved (2026-09-24): fix as proposed.**
 - **Gap G-render (pre-existing bug, v1 and v2):** on a session where no `session/prompt` has run yet,
   a goal turn Codex starts itself (`_session/goal set` right after `session/new`/`session/load`,
   resume with an active goal) is **invisible**: the baseline tracker (`startCodexTurnTracker`) only
   tracks turn state and renders no items (live: v1 got zero updates, `{}` after 7.7 s). On v2 the
   client gets `running`/`idle` with no content. Proposed owner: a new slice after J11 (baseline
-  tracker renders unowned-turn items, reusing the prompt handler's rendering); it's a v1 bug fix,
-  so confirm with the user.
+  tracker renders unowned-turn items, reusing the prompt handler's rendering). **User approved
+  (2026-09-24): schedule the bug fix.**
 
 **Next steps, in order (one programmer at a time; researchers may run in parallel):**
 1. Get the J11 / J11b / G-render decisions, then one small slice each (J11 as a separate
