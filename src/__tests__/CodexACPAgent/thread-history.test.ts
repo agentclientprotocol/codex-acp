@@ -72,7 +72,7 @@ describe("paginated thread history", () => {
         const pages = vi.spyOn(appServer, "threadTurnsList")
             .mockImplementation(turnStore([messageTurn("first"), messageTurn("second"), messageTurn("third")]));
 
-        const thread = await fixture.getCodexAcpClient().readSessionThread("history");
+        const thread = (await fixture.getCodexAppServerClient().threadReadWithHistory("history")).thread;
 
         await expect(JSON.stringify({
             reads: metadataRead.mock.calls,
@@ -158,7 +158,7 @@ describe("paginated thread history", () => {
             .mockResolvedValueOnce({thread: history as any});
         const pages = vi.spyOn(appServer, "threadTurnsList").mockRejectedValue(new Error("Method not found"));
 
-        expect(await fixture.getCodexAcpClient().readSessionThread("legacy")).toEqual(history);
+        expect((await fixture.getCodexAppServerClient().threadReadWithHistory("legacy")).thread).toEqual(history);
         expect(read.mock.calls).toEqual([
             [{threadId: "legacy"}],
             [{threadId: "legacy", includeTurns: true}],
@@ -178,7 +178,7 @@ describe("paginated thread history", () => {
             return page;
         });
 
-        const thread = await fixture.getCodexAcpClient().readSessionThread("history");
+        const thread = (await fixture.getCodexAppServerClient().threadReadWithHistory("history")).thread;
         expect(thread.turns.map(turn => turn.id)).toEqual(["first", "second"]);
         expect(stored).toHaveLength(3);
     });
@@ -204,7 +204,7 @@ describe("paginated thread history", () => {
         vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: {id: "empty", turns: []} as any});
         const pages = vi.spyOn(appServer, "threadTurnsList").mockResolvedValue({data: [], nextCursor: null, backwardsCursor: null});
 
-        expect(await fixture.getCodexAcpClient().readSessionThread("empty")).toEqual({id: "empty", turns: []});
+        expect((await fixture.getCodexAppServerClient().threadReadWithHistory("empty")).thread).toEqual({id: "empty", turns: []});
         expect(pages).toHaveBeenCalledTimes(1);
     });
 
@@ -222,7 +222,7 @@ describe("paginated thread history", () => {
             pages.mockResolvedValueOnce({data: [], nextCursor, backwardsCursor: null});
         }
 
-        await expect(fixture.getCodexAcpClient().readSessionThread("history"))
+        await expect(fixture.getCodexAppServerClient().threadReadWithHistory("history"))
             .rejects.toThrow("Codex returned a repeated thread history cursor");
         expect(pages).toHaveBeenCalledTimes(cursors.length + 1);
     });
@@ -236,6 +236,6 @@ describe("paginated thread history", () => {
             .mockResolvedValueOnce({data: [messageTurn("first")], nextCursor: "next-page", backwardsCursor: null})
             .mockRejectedValueOnce(new Error("History unavailable"));
 
-        await expect(fixture.getCodexAcpClient().readSessionThread("history")).rejects.toThrow("History unavailable");
+        await expect(fixture.getCodexAppServerClient().threadReadWithHistory("history")).rejects.toThrow("History unavailable");
     });
 });
