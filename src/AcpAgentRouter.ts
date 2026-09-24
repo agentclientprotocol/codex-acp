@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
 import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import type {AgentConnectOptions, AgentConnector, AnyWireMessage} from "@agentclientprotocol/sdk/experimental/v2";
 import {z} from "zod";
 import type {CodexAcpServer} from "./CodexAcpServer";
 import {type AcpClientConnection, AcpV2Connection} from "./ACPSessionConnection";
@@ -41,6 +42,48 @@ const asyncTaskStopParamsParser = z.object({
     sessionId: z.string().trim().min(1),
     asyncTaskId: z.string().trim().min(1),
 }).passthrough();
+
+// v2 request methods whose params are all-optional, per the v2 schema: `session/list` and
+// `auth/logout` have no required fields. SDK 1.5.0's built-in v2 parsers for these are plain
+// `z.object`s that reject an omitted `params` with -32602, even though JSON-RPC and the v2
+// schema both allow omitting it. There is no registration-layer workaround for built-in v2
+// methods (the SDK throws if you pass a parser for one), so this wraps the v2 connector's
+// inbound stream to fill in `params: {}` before the request reaches the SDK. `params: null`
+// is left untouched. v1 has the same SDK bug but is intentionally left as-is.
+const METHODS_WITH_OPTIONAL_PARAMS = new Set<string>([
+    acpV2.methods.agent.session.list,
+    acpV2.methods.agent.auth.logout,
+]);
+
+function fillOmittedParams(item: AnyWireMessage): AnyWireMessage {
+    if (Array.isArray(item)) {
+        return item.map(fillOmittedParams) as unknown as AnyWireMessage;
+    }
+    if (
+        typeof item === "object" && item !== null &&
+        "method" in item && METHODS_WITH_OPTIONAL_PARAMS.has((item as {method: unknown}).method as string) &&
+        !("params" in item)
+    ) {
+        return {...item, params: {}} as AnyWireMessage;
+    }
+    return item;
+}
+
+/** Wraps a v2 `AgentConnector` to work around the SDK's rejection of omitted `params`. */
+function withOmittedParamsWorkaround(agent: AgentConnector): AgentConnector {
+    return {
+        connect(stream, options?: AgentConnectOptions) {
+            const normalized = stream.readable.pipeThrough(
+                new TransformStream<AnyWireMessage, AnyWireMessage>({
+                    transform(item, controller) {
+                        controller.enqueue(fillOmittedParams(item));
+                    },
+                })
+            );
+            return agent.connect({readable: normalized, writable: stream.writable}, options);
+        },
+    };
+}
 
 /**
  * Builds the ACP router. It picks the v1 or v2 handler chain from the first `initialize`
@@ -107,5 +150,5 @@ export function createAcpAgentRouter(
         .onRequest(acpV2.methods.agent.auth.logout, (ctx) => getAgent().logoutV2(ctx.params))
         .onRequest(acpV2.methods.agent.session.prompt, (ctx) => getAgent().promptV2(ctx.params));
 
-    return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(v2Agent);
+    return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(withOmittedParamsWorkaround(v2Agent));
 }
