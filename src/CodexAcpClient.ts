@@ -1175,10 +1175,13 @@ export class CodexAcpClient {
 
         const preferredProvider = this.getModelProvider();
         const modelProviders = preferredProvider ? [preferredProvider] : [];
+        // The state DB answers in milliseconds. Without the flag, Codex scans and repairs every rollout file on
+        // each call, which took about 4 s per page.
         const listResponse = await this.codexClient.threadList({
             cursor: request.cursor ?? null,
             modelProviders: modelProviders,
             sourceKinds: sourceKinds,
+            useStateDbOnly: true,
         });
 
         const mapThreadToSession = (thread: Thread) => ({
@@ -1187,11 +1190,6 @@ export class CodexAcpClient {
             title: (thread.name ?? thread.preview) || null,
             updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
         });
-
-        if (listResponse.data.length === 0) {
-            const diagnostics = await this.runSessionListDiagnostics();
-            logger.log("Session list diagnostics", diagnostics);
-        }
 
         let sessions = listResponse.data.map(mapThreadToSession);
         if (requestedCwd) {
@@ -1237,29 +1235,6 @@ export class CodexAcpClient {
         } while (cursor);
 
         return models;
-    }
-
-    private async runSessionListDiagnostics(): Promise<Record<string, unknown>> {
-        const [allProviders, archivedAllProviders, customGateway] = await Promise.all([
-            this.codexClient.threadList({}),
-            this.codexClient.threadList({archived: true}),
-            this.codexClient.threadList({modelProviders: [CUSTOM_GATEWAY_PROVIDER_ID]}),
-        ]);
-
-        return {
-            allProviders: {
-                count: allProviders.data.length,
-                nextCursor: allProviders.nextCursor ?? null,
-            },
-            archivedAllProviders: {
-                count: archivedAllProviders.data.length,
-                nextCursor: archivedAllProviders.nextCursor ?? null,
-            },
-            customGateway: {
-                count: customGateway.data.length,
-                nextCursor: customGateway.nextCursor ?? null,
-            },
-        };
     }
 
 }
