@@ -353,25 +353,183 @@ describe('session/prompt over ACP v2', () => {
         await expect(dump(client.transcript, clientUserMessageId)).toMatchFileSnapshot('data/prompt-v2-not-inserted.json');
     });
 
-    it('rejects a prompt that overlaps a running one', async () => {
+    it('queues a prompt that overlaps a running one instead of rejecting it', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
         const first = client.sendPrompt([{type: "text", text: "Hello"}]);
         await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
-        const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
         client.emit(turnStarted());
-        client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
+        client.emit(itemCompleted(userMessageItem(client.turnStartParams[0]!["clientUserMessageId"] as string)));
         await first;
 
-        const error = await client.sendPrompt([{type: "text", text: "Again"}]).then(() => null, (err) => err);
-        expect(error?.code).toBe(-32600);
+        // B overlaps A: it is queued, not rejected. Nothing about it is observable yet.
+        const second = client.sendPrompt([{type: "text", text: "Again"}]);
+        await settle();
+        expect(client.turnStartParams).toHaveLength(1);
+        expect(client.transcript.filter(entry => "promptResponse" in entry || "promptError" in entry)).toHaveLength(1);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}]);
+
+        // A ends: idle(A) goes out, then B's turn starts.
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+
+        const secondClientUserMessageId = client.turnStartParams[1]!["clientUserMessageId"] as string;
+        client.emit(turnStarted("turn-2"));
+        client.emit(itemCompleted(userMessageItem(secondClientUserMessageId, "Again"), "turn-2"));
+        const {messageId} = await second;
+        expect(messageId).toBe(secondClientUserMessageId);
+
+        client.emit(turnCompleted("turn-2"));
+        await client.promptRunFinished(1);
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+        ]);
+    });
+
+    it('queues multiple overlapping prompts and runs them in FIFO order', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        const first = client.sendPrompt([{type: "text", text: "One"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        client.emit(turnStarted());
+        client.emit(itemCompleted(userMessageItem(client.turnStartParams[0]!["clientUserMessageId"] as string)));
+        await first;
+
+        const second = client.sendPrompt([{type: "text", text: "Two"}]);
+        const third = client.sendPrompt([{type: "text", text: "Three"}]);
+        await settle();
         expect(client.turnStartParams).toHaveLength(1);
 
         client.emit(turnCompleted());
         await client.promptRunFinished();
-        await expect(dump({code: error.code, message: error.message, data: error.data}))
-            .toMatchFileSnapshot('data/prompt-v2-overlap-rejected.json');
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
+        // C stays queued behind B; it must not start alongside or ahead of it.
+        await settle();
+        expect(client.turnStartParams).toHaveLength(2);
+
+        const secondClientUserMessageId = client.turnStartParams[1]!["clientUserMessageId"] as string;
+        client.emit(turnStarted("turn-2"));
+        client.emit(itemCompleted(userMessageItem(secondClientUserMessageId, "Two"), "turn-2"));
+        await second;
+        client.emit(turnCompleted("turn-2"));
+        await client.promptRunFinished(1);
+
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(3));
+        const thirdClientUserMessageId = client.turnStartParams[2]!["clientUserMessageId"] as string;
+        client.emit(turnStarted("turn-3"));
+        client.emit(itemCompleted(userMessageItem(thirdClientUserMessageId, "Three"), "turn-3"));
+        await third;
+        client.emit(turnCompleted("turn-3"));
+        await client.promptRunFinished(2);
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+        ]);
+    });
+
+    it('queues a local slash command behind a running prompt', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        const first = client.sendPrompt([{type: "text", text: "Hello"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        client.emit(turnStarted());
+        client.emit(itemCompleted(userMessageItem(client.turnStartParams[0]!["clientUserMessageId"] as string)));
+        await first;
+
+        const second = client.sendPrompt([{type: "text", text: "/plan"}]);
+        await settle();
+        expect(client.transcript.filter(entry => "promptResponse" in entry || "promptError" in entry)).toHaveLength(1);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}]);
+
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+
+        const {messageId} = await second;
+        expect(messageId).toEqual(expect.any(String));
+        await client.promptRunFinished(1);
+        await settle();
+
+        // The local command never talks to Codex's turn machinery.
+        expect(client.turnStartParams).toHaveLength(1);
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+        ]);
+    });
+
+    it('runs a queued prompt after the one ahead of it fails', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        await insertPrompt(client, 0);
+        const second = client.sendPrompt([{type: "text", text: "Again"}]);
+        await settle();
+        expect(client.turnStartParams).toHaveLength(1);
+
+        client.emit(turnError("usageLimitExceeded", "You've hit your usage limit."));
+        client.emit(turnFinished("failed"));
+        await client.promptRunFinished();
+        await settle();
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
+        const secondClientUserMessageId = client.turnStartParams[1]!["clientUserMessageId"] as string;
+        client.emit(turnStarted("turn-2"));
+        client.emit(itemCompleted(userMessageItem(secondClientUserMessageId, "Again"), "turn-2"));
+        await second;
+        client.emit(turnCompleted("turn-2"));
+        await client.promptRunFinished(1);
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+        ]);
+    });
+
+    it('takes the turn-start reservation synchronously, so two prompts sent back-to-back never race', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        // Neither request is awaited before the next is sent: this exercises the reservation
+        // being taken before either prompt's handler has had a chance to run any async work.
+        const first = client.sendPrompt([{type: "text", text: "One"}]);
+        const second = client.sendPrompt([{type: "text", text: "Two"}]);
+
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        await settle();
+        expect(client.turnStartParams).toHaveLength(1);
+
+        client.emit(turnStarted());
+        client.emit(itemCompleted(userMessageItem(client.turnStartParams[0]!["clientUserMessageId"] as string)));
+        await first;
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
+        const secondClientUserMessageId = client.turnStartParams[1]!["clientUserMessageId"] as string;
+        client.emit(turnStarted("turn-2"));
+        client.emit(itemCompleted(userMessageItem(secondClientUserMessageId, "Two"), "turn-2"));
+        await second;
+        client.emit(turnCompleted("turn-2"));
+        await client.promptRunFinished(1);
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+        ]);
     });
 
     it('keeps the turn going when a tool call cannot be rendered on v2 yet', async () => {

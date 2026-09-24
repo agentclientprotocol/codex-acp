@@ -2878,6 +2878,71 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         }));
     });
 
+    it('serializes a goal-continuation turn-start behind an in-flight v2 prompt', async () => {
+        const {mockFixture, sessionState, turnStartSpy} = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const activeTurnCompleted = deferred<TurnCompletedNotification>();
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "awaitTurnCompleted")
+            .mockReset()
+            .mockReturnValueOnce(activeTurnCompleted.promise)
+            .mockResolvedValue({
+                threadId: "session-id",
+                turn: createTurn("goal-work-turn", "completed"),
+            });
+        const goal = createThreadGoal({objective: "Finish the migration", status: "active"});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "setGoal")
+            .mockImplementation(async (_sessionId, _objective, _onTurnStarted, onGoalSet) => {
+                onGoalSet?.(goal);
+                return null;
+            });
+        vi.spyOn(mockFixture.getCodexAcpClient(), "getGoal").mockResolvedValue(goal);
+
+        // The active work is a v2 prompt this time, not v1 `prompt()`, to confirm both go through
+        // the same shared turn-start reservation.
+        const activePrompt = mockFixture.getCodexAcpAgent().promptV2({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Work already in progress"}],
+        });
+        await vi.waitFor(() => expect(turnStartSpy).toHaveBeenCalledTimes(1));
+        const clientUserMessageId = (turnStartSpy.mock.calls[0]![0] as {clientUserMessageId: string}).clientUserMessageId;
+        mockFixture.sendServerNotification({
+            method: "item/completed",
+            params: {
+                threadId: "session-id",
+                turnId: "turn-id",
+                item: {
+                    type: "userMessage",
+                    id: "item-user",
+                    clientId: clientUserMessageId,
+                    content: [{type: "text", text: "Work already in progress", text_elements: []}],
+                },
+                completedAtMs: 0,
+            },
+        });
+        await expect(activePrompt).resolves.toEqual({messageId: clientUserMessageId});
+
+        const setGoal = mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: goal.objective,
+        });
+        await flushAsyncWork();
+        // The v2 prompt already answered its request, but its turn is still running: the
+        // goal-continuation starter waits on the shared reservation instead of racing it.
+        expect(turnStartSpy).toHaveBeenCalledTimes(1);
+
+        activeTurnCompleted.resolve({
+            threadId: "session-id",
+            turn: createTurn("turn-id", "completed"),
+        });
+        await expect(setGoal).resolves.toEqual({});
+        expect(turnStartSpy).toHaveBeenCalledTimes(2);
+        expect(turnStartSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+            input: [expect.objectContaining({text: "Continue working toward the active goal."})],
+        }));
+    });
+
     it('starts goal work when resume routes no app-server turn', async () => {
         const {mockFixture, sessionState, turnStartSpy} = setupPromptFixture();
         // @ts-expect-error - registering local session state for the extension request path

@@ -343,6 +343,24 @@ interface PendingTurnStart {
     resolve: (turnId: string | null) => void;
 }
 
+/**
+ * One session's place in the shared per-session turn-start FIFO (see
+ * `CodexAcpServer.acquireTurnStartReservation`). `wait` resolves once every earlier reservation
+ * on the session has released; `release` must be called exactly once, by whoever ends up owning
+ * the turn this reservation was taken for, so the next queued starter can proceed.
+ *
+ * `needsWait` is false when there was nothing to wait for (a fresh session, or the previous
+ * holder already released). Callers should skip `await wait` in that case: awaiting an
+ * already-resolved promise still costs a microtask tick, which is enough to reorder synchronous
+ * setup (event-subscription registration, etc.) against a caller that fires a prompt without
+ * awaiting it and immediately does other synchronous work.
+ */
+interface TurnStartReservation {
+    wait: Promise<void>;
+    needsWait: boolean;
+    release: () => void;
+}
+
 interface ActivePrompt {
     completion: Promise<void>;
     closeSignal: Promise<null>;
@@ -387,6 +405,8 @@ export class CodexAcpServer {
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
     private readonly pendingTurnStarts: Map<string, PendingTurnStart>;
     private readonly activePrompts: Map<string, ActivePrompt>;
+    /** Tail of the per-session turn-start FIFO; see `acquireTurnStartReservation`. */
+    private readonly turnStartQueueTail: Map<string, {promise: Promise<void>; settled: boolean}>;
     private readonly steeringQueues: Map<string, SteeringQueue>;
     /** Sessions with a v2 prompt that has not finished yet, including before its turn starts. */
     private readonly v2PromptsInFlight = new Set<string>();
@@ -412,6 +432,7 @@ export class CodexAcpServer {
         this.pendingMcpStartupSessions = new Map();
         this.pendingTurnStarts = new Map();
         this.activePrompts = new Map();
+        this.turnStartQueueTail = new Map();
         this.steeringQueues = new Map();
         this.closingSessions = new Map();
         this.sessionGenerations = new Map();
@@ -1196,6 +1217,7 @@ export class CodexAcpServer {
                 this.pendingMcpStartupSessions.delete(params.sessionId);
                 this.pendingTurnStarts.delete(params.sessionId);
                 this.activePrompts.delete(params.sessionId);
+                this.turnStartQueueTail.delete(params.sessionId);
                 this.steeringQueues.delete(params.sessionId);
                 this.goalControlGenerations.delete(params.sessionId);
             }
@@ -1970,15 +1992,21 @@ export class CodexAcpServer {
         source: string,
         canStart: () => Promise<boolean> = async () => true,
     ): Promise<boolean> {
-        // A prompt can outlive its turn while post-turn cleanup runs. Starting a
-        // control-triggered turn during that window would run two prompts on the
-        // same session, so wait for the current prompt to drain first.
-        const previousPrompt = this.activePrompts.get(params.sessionId);
-        await previousPrompt?.completion;
+        // Takes this session's place in the shared turn-start FIFO before anything else runs, so
+        // no other starter can begin between this check and the turn actually starting. This
+        // hands the reservation to `prompt()` below rather than letting it self-acquire one, so
+        // it releases only once `prompt()` truly finishes (not when this function's own steer
+        // promise resolves early, on the "a turn was started" success path).
+        const reservation = this.acquireTurnStartReservation(params.sessionId);
+        if (reservation.needsWait) {
+            await reservation.wait;
+        }
         if (this.sessionIsClosing(params.sessionId)) {
+            reservation.release();
             throw RequestError.invalidRequest(`Session ${params.sessionId} is closing`);
         }
         if (!await canStart()) {
+            reservation.release();
             return false;
         }
 
@@ -1991,7 +2019,8 @@ export class CodexAcpServer {
                 // steer immediately ("a turn was started") and let prompt() finish the
                 // turn in the background.
                 resolve(true);
-            });
+            }, undefined, reservation);
+            void promptDone.finally(() => reservation.release());
             promptDone.then(
                 (response) => {
                     if (!turnStarted && response.stopReason === "cancelled") {
@@ -2988,6 +3017,32 @@ export class CodexAcpServer {
         return {promise, resolve};
     }
 
+    /**
+     * Takes this session's place in the shared per-session turn-start FIFO. Every codex-acp turn
+     * starter (v1 `session/prompt`, v2 `session/prompt`, the goal-continuation and steering
+     * fallbacks) calls this synchronously, before its first `await`, so no two starters can ever
+     * decide to start a turn based on the same "is something running" snapshot: whichever calls
+     * this first is queued ahead. `wait` resolves once the previous reservation on this session
+     * releases; the caller must call `release()` exactly once it is safe for the next queued
+     * starter to become visibly active (which may be later than when this starter's own request
+     * is answered).
+     */
+    private acquireTurnStartReservation(sessionId: string): TurnStartReservation {
+        const previousSlot = this.turnStartQueueTail.get(sessionId);
+        const needsWait = previousSlot !== undefined && !previousSlot.settled;
+        const wait = needsWait ? previousSlot!.promise : Promise.resolve();
+        const slot: {promise: Promise<void>; settled: boolean} = {promise: Promise.resolve(), settled: false};
+        let release: () => void = () => {};
+        slot.promise = new Promise<void>((resolve) => {
+            release = () => {
+                slot.settled = true;
+                resolve();
+            };
+        });
+        this.turnStartQueueTail.set(sessionId, slot);
+        return {wait, needsWait, release};
+    }
+
     private async interruptPromptTurn(
         turn: { threadId: string, turnId: string },
         requestName: "Cancel" | "Close",
@@ -3128,9 +3183,12 @@ export class CodexAcpServer {
         if (this.sessionIsClosing(sessionId)) {
             throw RequestError.invalidRequest(`Session ${sessionId} is closing`);
         }
-        // Overlapping prompts are rejected for now; they are to be queued behind the running one.
-        if (this.v2PromptsInFlight.has(sessionId) || this.activePrompts.has(sessionId) || this.pendingTurnStarts.has(sessionId)) {
-            throw RequestError.invalidRequest(`Session ${sessionId} is already processing a prompt`);
+        // A prompt overlapping a running one is queued behind it rather than rejected: take this
+        // session's place in the shared turn-start FIFO now (before any await), then wait. Nothing
+        // observable (response, user message, states) happens until this prompt reaches the front.
+        const reservation = this.acquireTurnStartReservation(sessionId);
+        if (reservation.needsWait) {
+            await reservation.wait;
         }
         const promptKind = this.availableCommands.classifyPrompt(request.prompt);
         const messageId = randomUUID();
@@ -3164,7 +3222,7 @@ export class CodexAcpServer {
             const run = async () => {
                 if (promptKind.kind === "localCommand") {
                     await onInserted();
-                    return await this.prompt(request);
+                    return await this.prompt(request, undefined, undefined, undefined, reservation);
                 }
                 return await this.prompt(request, undefined, undefined, {
                     clientUserMessageId: messageId,
@@ -3178,7 +3236,7 @@ export class CodexAcpServer {
                             logger.error(`Failed to send the synthetic user message for session ${sessionId}`, error);
                         }
                     },
-                });
+                }, reservation);
             };
             run().then(
                 async (response) => {
@@ -3219,11 +3277,35 @@ export class CodexAcpServer {
                     this.v2PromptsInFlight.delete(sessionId);
                     await sendState(toV2IdleState(this.failedPromptResponse(sessionId)));
                 },
-            );
+            ).finally(() => reservation.release());
         });
     }
 
     async prompt(
+        params: acp.PromptRequest,
+        signal?: AbortSignal,
+        onTurnStarted?: () => void,
+        insertion?: UserMessageInsertion,
+        reservation?: TurnStartReservation,
+    ): Promise<acp.PromptResponse> {
+        // Callers that need to gate additional checks (closing, canStart) atomically with the
+        // turn-start slot acquire their own reservation and pass it in; otherwise this call is
+        // the v1 entry point and takes the session's turn-start slot itself.
+        const ownsReservation = reservation === undefined;
+        const activeReservation = reservation ?? this.acquireTurnStartReservation(params.sessionId);
+        if (activeReservation.needsWait) {
+            await activeReservation.wait;
+        }
+        try {
+            return await this.promptAfterReservation(params, signal, onTurnStarted, insertion);
+        } finally {
+            if (ownsReservation) {
+                activeReservation.release();
+            }
+        }
+    }
+
+    private async promptAfterReservation(
         params: acp.PromptRequest,
         signal?: AbortSignal,
         onTurnStarted?: () => void,
