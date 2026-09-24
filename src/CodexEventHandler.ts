@@ -555,13 +555,17 @@ export class CodexEventHandler {
             case "error":
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
-                this.sessionState.currentTurnId = notification.params.turn.id;
+                this.sessionState.interruptTurnId = notification.params.turn.id;
+                // A review's child turn starts under its own id, while the review's items, errors and
+                // completion keep the parent id already set from the `review/start` response.
+                this.sessionState.currentTurnId ??= notification.params.turn.id;
                 await this.flushPendingErrors();
                 return null;
             case "turn/completed":
                 await this.flushPendingPlanUpdates();
                 this.clearPlanTurnState();
                 this.sessionState.currentTurnId = null;
+                this.sessionState.interruptTurnId = null;
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);

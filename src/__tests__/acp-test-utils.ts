@@ -400,6 +400,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
     const sessionId = overrides?.sessionId ?? "session-id";
     return {
         currentTurnId: null,
+        interruptTurnId: null,
         lastTokenUsage: null,
         totalTokenUsage: null,
         modelContextWindow: null,

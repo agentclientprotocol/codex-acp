@@ -183,7 +183,14 @@ export interface SessionState {
     supportedInputModalities: Array<InputModality>,
     agentMode: AgentMode,
     collaborationMode: ModeKind,
+    /** The active turn: its completion, errors and stop reason are matched against this id. */
     currentTurnId: string | null;
+    /**
+     * The id from the latest `turn/started`, which `turn/interrupt` and `turn/steer` need. It
+     * differs from `currentTurnId` only for a review: Codex reports the review's events and
+     * completion under the parent turn id, but treats the reviewer child turn as the running one.
+     */
+    interruptTurnId: string | null;
     lastTokenUsage: TokenCount | null;
     totalTokenUsage: TokenCount | null;
     modelContextWindow: number | null;
@@ -247,6 +254,16 @@ const TITLE_GENERATION_SETTLE_TIMEOUT_MS = 10_000;
  * place -- and Codex registering the turn as interruptible.
  */
 const NO_ACTIVE_TURN_RETRY_DELAYS_MS = [25, 50, 100, 200, 400];
+
+/**
+ * Maps a turn id to the id Codex accepts for `turn/interrupt` and `turn/steer`. For the session's
+ * current turn that is the latest `turn/started` id (a review's child turn), once one arrived.
+ */
+function codexRunningTurnId(sessionState: SessionState, turnId: string): string {
+    return sessionState.currentTurnId === turnId
+        ? sessionState.interruptTurnId ?? turnId
+        : turnId;
+}
 
 function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
     return clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY);
@@ -779,6 +796,7 @@ export class CodexAcpServer {
             agentMode: AgentMode.getInitialAgentMode(),
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
+            interruptTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
             modelContextWindow: null,
@@ -1741,7 +1759,8 @@ export class CodexAcpServer {
             return true;
         } catch (err) {
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-            const turnStillActive = sessionState.currentTurnId === turnId;
+            const turnStillActive = sessionState.currentTurnId !== null
+                && codexRunningTurnId(sessionState, sessionState.currentTurnId) === turnId;
             if (turnStillActive && !this.isNoActiveTurnToSteerError(err)) {
                 throw err;
             }
@@ -1866,7 +1885,7 @@ export class CodexAcpServer {
             return null;
         }
         if (sessionState.currentTurnId) {
-            return sessionState.currentTurnId;
+            return codexRunningTurnId(sessionState, sessionState.currentTurnId);
         }
 
         const pendingTurnStart = this.pendingTurnStarts.get(sessionState.sessionId);
@@ -2098,6 +2117,7 @@ export class CodexAcpServer {
             agentMode: AgentMode.getInitialAgentMode(),
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
+            interruptTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
             modelContextWindow: null,
@@ -2786,7 +2806,10 @@ export class CodexAcpServer {
             if (!turn) {
                 return;
             }
-            void this.requestTurnInterrupt(turn, "Cancel");
+            void this.requestTurnInterrupt({
+                threadId: turn.threadId,
+                turnId: codexRunningTurnId(sessionState, turn.turnId),
+            }, "Cancel");
         };
 
         if (signal.aborted) {
@@ -2894,7 +2917,10 @@ export class CodexAcpServer {
             });
         }
         try {
-            await this.requestTurnInterrupt({threadId: sessionState.sessionId, turnId}, requestName);
+            await this.requestTurnInterrupt({
+                threadId: sessionState.sessionId,
+                turnId: codexRunningTurnId(sessionState, turnId),
+            }, requestName);
         } finally {
             if (resolveInterruptedTurn) {
                 this.codexAcpClient.resolveTurnInterrupted({
@@ -3023,6 +3049,7 @@ export class CodexAcpServer {
         let promptWasCancelled = false;
         let recoverableSessionFailure = sessionState.sessionFailure;
         sessionState.currentTurnId = null;
+        sessionState.interruptTurnId = null;
         const activePrompt = this.trackActivePrompt(params.sessionId);
         let pendingTurnStart: PendingTurnStart | null = null;
         const ensurePendingTurnStart = (): PendingTurnStart => {
@@ -3328,6 +3355,7 @@ export class CodexAcpServer {
                     };
                     activePrompt.currentTurn = null;
                     sessionState.currentTurnId = null;
+                    sessionState.interruptTurnId = null;
                     const implementationPromise = this.runWithProcessCheck(
                         () => this.codexAcpClient.sendPrompt(
                             implementationRequest,
@@ -3496,6 +3524,7 @@ export class CodexAcpServer {
             await eventHandler?.dispose();
             disposePromptRequestCancellation();
             sessionState.currentTurnId = null;
+            sessionState.interruptTurnId = null;
             const registeredPendingTurnStart = this.pendingTurnStarts.get(params.sessionId);
             if (registeredPendingTurnStart !== undefined) {
                 this.pendingTurnStarts.delete(params.sessionId);
