@@ -36,7 +36,7 @@ BATCH-204/205 (omitted `params`, fixed by 2(u2)).
    -32602, v2 `session/new` no params → -32602, v1 no params → -32602) + 2 snapshots. Suite
    850 / 26. TCK v2 `-k "test_batch or test_jsonrpc"`: JSONRPC-001, BATCH-204/205 now PASS (M 5/0,
    A 5/0, I 2/0/3 skip); v1 same `-k`: no fails (baseline).
-2. **2(a2)** — split into milestones: **2(a2-i)** `/compact` + `/goal` command turns; **2(a2-ii)**
+2. **2(a2)** — split into milestones: **2(a2-i)** `/compact` + `/goal` command turns (**in flight, programmer dispatched 2026-09-24**); **2(a2-ii)**
    `/review`; **2(a2-iii)** synthetic prompts (plan-implementation, goal continuation) + overlap
    check for `startNewTurnFromExternalPrompt` + fallback title fix. — Codex command turns (`/review`, `/compact`, `/goal`) and synthetic prompts
    (plan-implementation, goal continuation) on v2. Use the two-id tracking from 2(r), with no clientId matcher
