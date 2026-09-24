@@ -30,8 +30,8 @@ topic 5a. The v2 chain currently registers: `initialize`, `session/new|list|clos
    review cancel-window research **done** (see 2(r) entry); 2(b) Q1/Q2 research **done + decided**
    (see 2(b) entry); **6(a) done** (893a4a3, 8ee7b42).
    **Queue (one programmer at a time):** ~~2(e)~~ **done** (1e20ae9, 7027ed1) → ~~6(b)~~ **done** (2d25cac, e37457a;
-   2 open questions resolved) → ~~6(c)~~ **done** (1bcd452, 317786a) → **6(d)** strip
-   shell prefix from `terminal_update.command` + end-of-topic-6 full TCK v1 & v2 (in flight) → **2(h)** v1 `/review-branch`
+   2 open questions resolved) → ~~6(c)~~ **done** (1bcd452, 317786a) → ~~6(d)~~ **done** (5aa5f0e, 3c4ffde; topic 6 **done**) → research TCK-U1/TCK-U2 (in flight, see
+   "Open questions") → **2(h)** v1 `/review-branch`
    hang fix (`fix:`) → **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
    prompts (plan-implementation, goal continuation). #4-#6 research landed; all decided.
 2. **Topic 2(a)** (`session/prompt` on v2, idle case only): mint the `messageId` UUID → pass as
@@ -185,6 +185,23 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   `startNewTurnFromExternalPrompt` → 2(a2)/2(c); non-inserted prompts still publish the
   fallback session title from prompt text (minor; revisit in 2(a2)). Note for 6(a): v1
   `createTextEvent` agent chunks already carry `messageId: itemId`.
+- **Topic 6(d)** — **Done (5aa5f0e, 3c4ffde).** `toV2TerminalUpdates` sets
+  `terminalUpdate.command = stripShellPrefix(command)`; `terminal-v2.test.ts` + 1 snapshot line.
+  Suite 840 / 26. **End-of-topic-6 full TCK** (`.agents/tck/6-full-v1-v2.md`, raw
+  `/tmp/acp-tck-reports/6d-v{1,2}.*`): v1 CONFORMANT 50/1/5 (= baseline; SCHEMA-002 advisory;
+  CLOSE-002 skipped). v2 NOT CONFORMANT, 103 tests 72 pass / 11 fail / 20 skip (997 s).
+  Expected fails: CANCEL-201/203/204/205/206/207 + INFO-CANCEL-202 → topic 3; RESUME-202 (-32603
+  replay not supported) → 5b; EXT-202 (advisory, `capabilities.providers` unknown root key in the
+  TCK's stable schema — topic 1 placement choice; also advertised before topic 10 registers the
+  methods). **Unexpected (→ research TCK-U1/U2):** **U1** `initializeV2` always pushes
+  `_auth/status_update` right after the `initialize` response (`publishFirstAuthStatusAfterResponse`)
+  → BATCH-202, JSONRPC-003 (mandatory), EXT-201 read it as a reply to a notification. **U2**
+  `{"method":"session/list"}` with no `params` → -32602 "expected object, received undefined" →
+  JSONRPC-001 (mandatory), BATCH-204/205. Skips: run-config (AUTH-203/204), n/a (AUTH-205/207,
+  PROMPTCAP-002, BATCH-206/207/208), topic 3 (CANCEL-202), TCK prompt has no tool/plan/terminal
+  (ENUM-201, PATCH-204..208), topic 4 (ENUM-203, PATCH-209, PERM-201), 5b (RESUME-204),
+  DELETE-202 (fresh session without a prompt isn't listed; Codex lists saved threads only; no v1
+  counterpart).
 - **Topic 6(c)** — **Done (1bcd452, 317786a).** `toV2Diff` in `AcpV2SessionUpdate.ts`: one v2
   `diff` per file, one `changes[]` entry: add → `{operation:"add"}`, delete → `delete`, update →
   `modify`, update+`move_path` → `{operation:"move", oldPath, path}` (edit in the patch). Git-style
@@ -342,7 +359,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
-| 6 | Tool calls, messages & terminal streaming | In progress | 6(a), 6(b), 6(c) done | 6(d) command strip + full TCK (in flight) | Milestone (a): tool-call upsert fork at `ACPSessionConnection.update()` | Depends on topic 1 |
+| 6 | Tool calls, messages & terminal streaming | **Done** | — | — | 6(a)-6(d); end-of-topic full TCK in `.agents/tck/6-full-v1-v2.md` |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
 | 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
 | 9 | Config options, modes & plans | **Done** | — | — | 9a + 9b landed |
@@ -369,6 +386,14 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   handler 150-152, `cancelV2Turn` 182-190, cancelled catch 255-268; prompt handler 108-149.
 
 ## Open questions sent to a researcher subagent
+
+- (2026-09-24) **TCK-U1** — v2 `_auth/status_update` pushed right after `initialize` fails
+  BATCH-202/JSONRPC-003/EXT-201. Is the push allowed; what exactly do those checks accept; does v1
+  push it; options (defer until first session request / accept)? →
+  `.agents/research/v2-tck-auth-status-push.md`. Status: **in flight.**
+- (2026-09-24) **TCK-U2** — v2 `session/list` with omitted `params` → -32602. Is omitted params
+  valid per ACP v2 / JSON-RPC; is the rejection ours or the SDK router's; v1 behaviour; fix point?
+  → `.agents/research/v2-tck-omitted-params.md`. Status: **in flight.**
 
 - (2026-09-24) SDK version sanity re-diff: do the v2 types and router API at the latest published
   version match the spec and SDK `origin/main`? → `.agents/research/v2-sdk-version-sanity-check.md`.
