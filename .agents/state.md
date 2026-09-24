@@ -59,8 +59,13 @@ BATCH-204/205 (omitted `params`, fixed by 2(u2)).
    `startGoalContinuationIfCurrent` → `startNewTurnFromExternalPrompt` (`_goal/control`; also used by
    steering) can start a turn with no v2 `session/prompt` in flight → no minted id, no user message,
    no states;
-   **2(a2-iv)** fallback session title fix for non-inserted prompts (**in flight, programmer
-   dispatched 2026-09-24**); **2(a2-v)** overlap check + v2 rendering for
+   **2(a2-iv)** fallback title — **Done (335e2c1)**: `publishFallbackSessionTitle` in `prompt()`'s
+   success path gated on `pendingInsertion === undefined` (always true on v1). Existing negative
+   tests in `prompt-v2.test.ts` assert no `session_info_update`; `prompt-v2-not-inserted.json` lost
+   its leaked title. Suite 860 / 26. TCK v1 `-k "test_prompt or test_session"` 24/0/3; v2 31/1
+   (RESUME-202, expected)/4. Follow-up (not scheduled, minor): a non-inserted turn that completes
+   still calls `titleGen.onTurnCompleted`, latching `generated = true` → may suppress the AI title for
+   a later prompt; **2(a2-v)** overlap check + v2 rendering for
    `startNewTurnFromExternalPrompt` turns — blocked on research Q3. — Codex command turns (`/review`, `/compact`, `/goal`) and synthetic prompts
    (plan-implementation, goal continuation) on v2. Use the two-id tracking from 2(r), with no clientId matcher
    for reviews. On `review/start` success, send the response + live-only `user_message`, then
@@ -409,7 +414,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i/ii/iii) done | 2(a2-iv), 2(a2-v) (blocked on Q3), 2(c) | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..iv) done | 2(a2-v) + 2(c) (blocked on Q3 probe + user J1-J7) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
