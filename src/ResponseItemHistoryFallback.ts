@@ -105,6 +105,7 @@ export function parseResponseItemHistoryFallback(
             case "reasoning":
                 pushUpdates(createReasoningUpdates(item));
                 break;
+            case "custom_tool_call":
             case "function_call": {
                 const toolCallId = stringValue(item["call_id"]);
                 if (toolCallId && existingToolCallIds.has(toolCallId)) {
@@ -129,6 +130,7 @@ export function parseResponseItemHistoryFallback(
                 pushUpdates([result.update]);
                 break;
             }
+            case "custom_tool_call_output":
             case "function_call_output": {
                 const toolCallId = stringValue(item["call_id"]);
                 if (toolCallId && skippedToolCallIds.has(toolCallId)) {
@@ -371,8 +373,8 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
     }
     const toolName = functionToolName(name, stringValue(item["namespace"]));
 
-    const isExecCommand = name === "exec_command";
-    const args = parseFunctionArguments(item["arguments"]);
+    const isExecCommand = name === "exec_command" || name === "exec";
+    const args = parseFunctionArguments(item["input"] ?? item["arguments"]);
     const command = isExecCommand ? commandFromFunctionArguments(args) : null;
     const cwd = isExecCommand ? cwdFromFunctionArguments(args) : "";
     const commandAction = command ? inferCommandAction(command, cwd) : null;
@@ -397,7 +399,7 @@ function createFunctionCallUpdate(item: JsonRecord): LegacyFunctionCallUpdate | 
         rawInput: rawInputForFunctionCall(name, args),
     };
 
-    if (!functionCallUsesTerminal(item)) {
+    if (!isExecCommand) {
         return { update, usesTerminal: false, isExecCommand };
     }
 
@@ -507,6 +509,7 @@ function titleForFunctionCall(name: string, args: unknown): string {
 
 function toolKindForFunctionCall(name: string): AcpToolKind {
     switch (name) {
+        case "exec":
         case "exec_command":
         case "multi_tool_use.parallel":
             return "execute";
@@ -517,10 +520,6 @@ function toolKindForFunctionCall(name: string): AcpToolKind {
         default:
             return "other";
     }
-}
-
-function functionCallUsesTerminal(item: JsonRecord): boolean {
-    return item["name"] === "exec_command";
 }
 
 function commandFromFunctionArguments(args: unknown): string | null {
