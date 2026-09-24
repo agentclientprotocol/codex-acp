@@ -13,9 +13,9 @@ J11; topics 4 and 5 part-done; topics 3 and 10 not started (2026-09-24).
 
 State as of the flush for a fresh orchestrator restart (2026-09-24, second flush): **no agents in
 flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`, last code commit
-`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`, 3(b) `8815bd5`) and in the acp-tck fork (`main`, 4
+`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`, 3(b) `8815bd5`, 3(c) `6aa86ed`) and in the acp-tck fork (`main`, 4
 local commits, **not pushed**; the user said don't push). Keep committing with explicit pathspecs.
-Suite: **900 pass / 26 skip** (after 3(b)). **Next: 3(c); Q-PERM research in flight.**
+Suite: **904 pass / 26 skip** (after 3(c)). **Next: 3(d) (Q-PERM fix), then full TCK.**
 
 **Standing user rules (2026-09-24):** preserve v1 client-visible behavior (change v1 only to fix a
 real bug, with nothing else v1-visible changing); **always assume the latest Codex** (currently the
@@ -122,7 +122,21 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
      cancel/close + `cancelRequested` flag → plan review returns `cancelled` (v1-visible: optional
      `$/cancel_request` per pending request, and the bug fix); (b) v2 only; (c) leave. Research open
      Qs: react to `serverRequest/resolved`; stray v2 `running` after idle when a late answer arrives;
-     URL elicitations; resolved-vs-completed ordering. **Awaiting user decision.**
+     URL elicitations; resolved-vs-completed ordering. **User decided (2026-09-24): (a′) on v1 and
+     v2** (bug fix + cascade; the v1 `$/cancel_request` is accepted) → slice **3(d)**. Research open Qs
+     not scheduled.
+   - **3(c)** — **Done (6aa86ed)**: `promptV2(params, signal?)` (router passes `ctx.signal`). Queued
+     → same canceller as 3(b) (only it, -32800). Started-not-inserted (`dropPendingRequest`; new
+     `UserMessageInsertion.onTurnStarted` fired in `tryHandleCommand` + `sendPrompt`): not adopted →
+     `requestTurnInterrupt` + -32800; M2-adopted → -32800 only, turn untouched. After insertion →
+     no-op. Harness: `signal` on `sendPrompt`/`request`, `turnInterruptCalls()`. +4 tests in
+     `cancel-v2.test.ts`. Suite 904 / 26. TCK v1 `-k "test_cancel or test_prompt"` no fails; v2
+     `-k "test_cancel or test_prompt or test_state"` no fails (CANCEL-204 skip).
+   - **3(d)** (next): (a′) from Q-PERM — per-prompt permission/elicitation abort controller aborted
+     synchronously by `cancel()` (before awaiting the interrupt), `requestCancel()`, `requestClose()`;
+     passed to `CodexApprovalHandler`, `CodexElicitationHandler`, `requestPlanImplementationPermission`;
+     `cancelRequested` flag → plan-review branch returns `cancelled`. `fix:` commit. Then the
+     end-of-topic-3 full TCK v1 + v2.
    - **3(c)** `$/cancel_request` / `ctx.signal` for a pending v2 `session/prompt` (queued → only it,
      -32800). Then end-of-topic full TCK v1 + v2.
    CANCEL-202 goal risk: live probe in `v2-agent-initiated-turns.md` (n=1) saw no goal turn after an
@@ -549,7 +563,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
 | 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i), J11, J11b, G-render done | — (topic 2 done apart from small follow-ups) | Long pole — start early per plan.md |
-| 3 | Cancellation semantics | In progress | 3(a), 3(b) done (Q-PERM open) | 3(c) `$/cancel_request` | Depends on topic 2's `state_update` fork existing |
+| 3 | Cancellation semantics | In progress | 3(a), 3(b), 3(c) done | 3(d) permission cascade + plan-review fix | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | In progress | 4(a) done | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
 | 6 | Tool calls, messages & terminal streaming | **Done** | — | — | 6(a)-6(d); end-of-topic full TCK in `.agents/tck/6-full-v1-v2.md` |
