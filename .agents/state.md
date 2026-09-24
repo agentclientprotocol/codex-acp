@@ -81,7 +81,9 @@ BATCH-204/205 (omitted `params`, fixed by 2(u2)).
    - v1 cancel-retry option B (recompute the id per attempt; retry "expected active turn id P but
      found Y" with Y);
    - retry `Close`-named interrupts (`interruptLateStartedTurn`, `interruptSessionTurn(…,"Close")`).
-5. **Topic 4** — permissions / `requires_action`: v2 `request_permission` and `elicitation/create`
+5. **Topic 4** — (pulled ahead while Q3 is blocked) **4(a)** v2 `session/request_permission` send path +
+   `requires_action` — **in flight, programmer dispatched 2026-09-24**; **4(b)** `elicitation/create`.
+   Original scope: permissions / `requires_action`: v2 `request_permission` and `elicitation/create`
    send paths (MCP OAuth, device-code login), plus a v2 device-code test.
 6. **Topic 5b** — resume replay `replayFrom:start`:
    - replayed ids come from `clientId ?? item.id`;
@@ -416,7 +418,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
 | 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..iv) done | 2(a2-v) + 2(c) (blocked on Q3 probe + user J1-J7) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
-| 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
+| 4 | Permission requests & approvals | In progress | 4(a) in flight | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
 | 6 | Tool calls, messages & terminal streaming | **Done** | — | — | 6(a)-6(d); end-of-topic full TCK in `.agents/tck/6-full-v1-v2.md` |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
