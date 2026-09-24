@@ -3017,7 +3017,19 @@ export class CodexAcpServer {
                     await onInserted();
                     return await this.prompt(request);
                 }
-                return await this.prompt(request, undefined, undefined, {clientUserMessageId: messageId, onInserted});
+                return await this.prompt(request, undefined, undefined, {
+                    clientUserMessageId: messageId,
+                    onInserted,
+                    onSyntheticInserted: async (syntheticId, prompt) => {
+                        try {
+                            for (const block of prompt) {
+                                await session.update(createUserMessageChunk(block, syntheticId));
+                            }
+                        } catch (error) {
+                            logger.error(`Failed to send the synthetic user message for session ${sessionId}`, error);
+                        }
+                    },
+                });
             };
             run().then(
                 async (response) => {
@@ -3101,6 +3113,16 @@ export class CodexAcpServer {
         let eventHandler: CodexEventHandler | null = null;
         let promptNotificationsActive = true;
         let pendingInsertion = insertion;
+        // Synthetic turns codex-acp starts itself inside this same prompt (the plan-implementation
+        // follow-up, a `/goal` continuation) each mint their own id and register here, so their
+        // userMessage can be told apart from the original prompt's once it lands.
+        const pendingSyntheticInsertions = new Map<string, () => Promise<void>>();
+        const registerSyntheticInsertion = (clientUserMessageId: string, prompt: acp.ContentBlock[]): void => {
+            if (insertion === undefined) {
+                return;
+            }
+            pendingSyntheticInsertions.set(clientUserMessageId, () => insertion.onSyntheticInserted(clientUserMessageId, prompt));
+        };
         const clearRecoveredSessionFailure = async (handler: CodexEventHandler): Promise<void> => {
             await handler.completeSuccessfulTurn(sessionState.currentTurnId);
             const current = sessionState.sessionFailure;
@@ -3162,6 +3184,14 @@ export class CodexAcpServer {
                     if (pendingInsertion !== undefined
                         && isInsertedUserMessage(event, params.sessionId, pendingInsertion.clientUserMessageId)) {
                         await resolvePendingInsertion();
+                    } else {
+                        for (const [clientUserMessageId, resolveSynthetic] of pendingSyntheticInsertions) {
+                            if (isInsertedUserMessage(event, params.sessionId, clientUserMessageId)) {
+                                pendingSyntheticInsertions.delete(clientUserMessageId);
+                                await resolveSynthetic();
+                                break;
+                            }
+                        }
                     }
                     await observeInteraction(event);
                     if (!promptNotificationsActive) {
@@ -3276,6 +3306,16 @@ export class CodexAcpServer {
             const effectiveParams = commandResult.prompt === undefined
                 ? params
                 : {...params, prompt: commandResult.prompt};
+            // `commandResult.prompt` means a local command (today only `/goal resume`/`/goal <objective>`
+            // when Codex reports no active turn) fell back to a synthetic continuation prompt, distinct
+            // from what the user typed. It needs its own minted id so its live user_message doesn't
+            // collide with the one already sent for the user's own prompt.
+            const turnClientUserMessageId = commandResult.prompt !== undefined && insertion !== undefined
+                ? randomUUID()
+                : insertion?.clientUserMessageId;
+            if (commandResult.prompt !== undefined && turnClientUserMessageId !== undefined && insertion !== undefined) {
+                registerSyntheticInsertion(turnClientUserMessageId, commandResult.prompt);
+            }
 
             if (this.sessionIsClosing(params.sessionId)) {
                 return cancelledPromptResponse();
@@ -3324,7 +3364,7 @@ export class CodexAcpServer {
                         onTurnStarted?.();
                     },
                     () => this.promptShouldStop(params.sessionId, activePrompt),
-                    insertion?.clientUserMessageId,
+                    turnClientUserMessageId,
                 ));
             void sendPromptPromise.catch((err) => {
                 if (this.activePrompts.get(params.sessionId) !== activePrompt) {
@@ -3405,6 +3445,12 @@ export class CodexAcpServer {
                     activePrompt.currentTurn = null;
                     sessionState.currentTurnId = null;
                     sessionState.interruptTurnId = null;
+                    // This second turn stays inside the original prompt's running…idle pair, so it
+                    // gets its own minted id rather than reusing the first turn's.
+                    const implementationClientUserMessageId = insertion !== undefined ? randomUUID() : undefined;
+                    if (implementationClientUserMessageId !== undefined) {
+                        registerSyntheticInsertion(implementationClientUserMessageId, implementationRequest.prompt);
+                    }
                     const implementationPromise = this.runWithProcessCheck(
                         () => this.codexAcpClient.sendPrompt(
                             implementationRequest,
@@ -3428,6 +3474,7 @@ export class CodexAcpServer {
                                 promptNotificationsActive = true;
                             },
                             () => this.promptShouldStop(params.sessionId, activePrompt),
+                            implementationClientUserMessageId,
                         ),
                     );
                     void implementationPromise.catch((err) => {

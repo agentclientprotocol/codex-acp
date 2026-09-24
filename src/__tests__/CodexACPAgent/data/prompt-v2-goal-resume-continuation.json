@@ -1,0 +1,111 @@
+[
+  {
+    "sessionUpdate": {
+      "messageId": "<messageId>",
+      "content": {
+        "text": "/goal resume",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "promptResponse": {
+      "messageId": "<messageId>"
+    }
+  },
+  {
+    "codexNotification": "thread/goal/updated"
+  },
+  {
+    "sessionUpdate": {
+      "_meta": {
+        "goal": {
+          "objective": "Resumed objective",
+          "status": "active",
+          "tokenBudget": null,
+          "tokensUsed": 0,
+          "timeUsedSeconds": 0,
+          "createdAt": 0,
+          "updatedAt": 0,
+          "controlMethod": "_session/goal"
+        }
+      },
+      "sessionUpdate": "session_info_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "codexRequest": "turn/start",
+    "params": {
+      "threadId": "thread-1",
+      "input": [
+        {
+          "type": "text",
+          "text": "Continue working toward the active goal.",
+          "text_elements": []
+        }
+      ],
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "auto_review",
+      "sandboxPolicy": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": false,
+        "excludeSlashTmp": false
+      },
+      "summary": "auto",
+      "effort": "medium",
+      "model": "gpt-5",
+      "serviceTier": null,
+      "clientUserMessageId": "<continuationId>"
+    }
+  },
+  {
+    "codexResponse": "turn/start"
+  },
+  {
+    "codexNotification": "turn/started"
+  },
+  {
+    "codexNotification": "item/completed"
+  },
+  {
+    "sessionUpdate": {
+      "messageId": "<continuationId>",
+      "content": {
+        "text": "Continue working toward the active goal.",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "codexNotification": "turn/completed"
+  },
+  {
+    "sessionUpdate": {
+      "title": "/goal resume",
+      "sessionUpdate": "session_info_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "stopReason": "end_turn",
+      "_meta": {
+        "quota": {
+          "token_count": null,
+          "model_usage": []
+        }
+      },
+      "state": "idle",
+      "sessionUpdate": "state_update"
+    }
+  }
+]

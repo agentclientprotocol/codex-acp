@@ -109,6 +109,8 @@ export type PromptSession = {
     appServer: CodexAppServerClient;
     emit(notification: ServerNotification): void;
     sendPrompt(prompt: acpV2.ContentBlock[]): Promise<any>;
+    /** Sends any other agent-bound request (e.g. `session/set_config_option`) on the same connection. */
+    request(method: string, params: unknown): Promise<any>;
     /** Resolves when the n-th internal prompt run (including its background turn) has finished. */
     promptRunFinished(index?: number): Promise<void>;
 };
@@ -237,6 +239,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         appServer,
         emit,
         sendPrompt,
+        request,
         promptRunFinished: async (index = 0) => {
             await vi.waitFor(() => expect(promptSpy.mock.results.length).toBeGreaterThan(index));
             await promptSpy.mock.results[index]!.value.catch(() => {});

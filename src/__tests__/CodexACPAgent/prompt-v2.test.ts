@@ -22,6 +22,7 @@ import {
 import type {ServerNotification} from '../../app-server';
 import type {CodexErrorInfo, ErrorNotification, ThreadGoal, TurnCompletedNotification} from '../../app-server/v2';
 import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
+import {CodexAcpServer} from '../../CodexAcpServer';
 
 const typedFailureCapabilities = {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}};
 
@@ -644,6 +645,95 @@ describe('session/prompt over ACP v2', () => {
 
         expect(client.turnStartParams).toEqual([]);
         await expect(dump(error)).toMatchFileSnapshot('data/prompt-v2-unsupported-content.json');
+    });
+
+    it('shows a /goal resume continuation turn as its own live user message, with its own minted id', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        const goal = createThreadGoal({objective: "Resumed objective"});
+        client.setCodexResponse("thread/goal/set", async () => ({goal}));
+
+        const response = client.sendPrompt([{type: "text", text: "/goal resume"}]);
+        const {messageId} = await response;
+        client.emit({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}});
+        // Codex reports no active runtime turn for this goal within the grace window, so codex-acp
+        // starts its own continuation turn with a freshly minted id.
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1), {timeout: 3000});
+        const continuationId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+        expect(continuationId).toEqual(expect.any(String));
+        expect(continuationId).not.toBe(messageId);
+
+        client.emit(turnStarted());
+        client.emit(itemCompleted(userMessageItem(continuationId, "Continue working toward the active goal.")));
+        await settle();
+        const userMessages = sessionUpdates(client.transcript).filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(userMessages).toEqual([
+            {sessionUpdate: "user_message_chunk", messageId, content: {type: "text", text: "/goal resume"}},
+            {
+                sessionUpdate: "user_message_chunk",
+                messageId: continuationId,
+                content: {type: "text", text: "Continue working toward the active goal."},
+            },
+        ]);
+
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        await settle();
+
+        // The continuation runs inside the original prompt's running…idle pair: no extra one.
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        await expect(dump(client.transcript, messageId).replaceAll(continuationId, "<continuationId>"))
+            .toMatchFileSnapshot('data/prompt-v2-goal-resume-continuation.json');
+    }, 10000);
+
+    it('shows the plan-implementation follow-up turn as its own live user message, with its own minted id', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        vi.spyOn(CodexAcpServer.prototype as any, "requestPlanImplementationPermission").mockResolvedValue(true);
+
+        // Switch into plan mode first; `/plan` is a local command and starts no turn.
+        await client.sendPrompt([{type: "text", text: "/plan"}]);
+        await client.promptRunFinished(0);
+        await settle();
+        expect(client.turnStartParams).toEqual([]);
+        const start = client.transcript.length;
+
+        const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+        client.emit(turnStarted());
+        client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
+        const {messageId} = await response;
+        client.emit(itemCompleted({type: "plan", id: "plan-item", text: "1. Do the change."}));
+        client.emit(turnCompleted());
+
+        // Approval is mocked, so codex-acp starts the "Implement the approved plan." turn itself,
+        // still inside this same prompt.
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
+        const implementationId = client.turnStartParams[1]!["clientUserMessageId"] as string;
+        expect(implementationId).toEqual(expect.any(String));
+        expect(implementationId).not.toBe(messageId);
+        client.emit(turnStarted("turn-2"));
+        client.emit(itemCompleted(userMessageItem(implementationId, "Implement the approved plan."), "turn-2"));
+        await settle();
+        const userMessages = sessionUpdates(client.transcript.slice(start)).filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(userMessages).toEqual([
+            {sessionUpdate: "user_message_chunk", messageId, content: {type: "text", text: "Hello"}},
+            {
+                sessionUpdate: "user_message_chunk",
+                messageId: implementationId,
+                content: {type: "text", text: "Implement the approved plan."},
+            },
+        ]);
+
+        client.emit(turnCompleted("turn-2"));
+        await client.promptRunFinished(1);
+        await settle();
+
+        // One running…idle pair for the whole exchange, despite the two turns.
+        expect(stateUpdates(client.transcript.slice(start))).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        await expect(dump(client.transcript.slice(start), messageId).replaceAll(implementationId, "<implementationId>"))
+            .toMatchFileSnapshot('data/prompt-v2-plan-implementation-turn.json');
     });
 
     it('leaves v1 session/prompt unchanged: no clientUserMessageId, answered at turn end', async () => {

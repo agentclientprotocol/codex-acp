@@ -10,6 +10,13 @@ export type UserMessageInsertion = {
     /** Sent as `clientUserMessageId` on `turn/start`; Codex echoes it as `userMessage.clientId`. */
     clientUserMessageId: string;
     onInserted: () => Promise<void>;
+    /**
+     * Shows a synthetic prompt codex-acp starts itself (the plan-implementation follow-up turn,
+     * a `/goal` continuation) as a live `user_message`, once its own minted `clientUserMessageId`
+     * is echoed back. These turns run inside the original prompt's running…idle pair, so this
+     * only emits the chunks: no response is resolved and no `state_update` is sent.
+     */
+    onSyntheticInserted: (clientUserMessageId: string, prompt: acp.ContentBlock[]) => Promise<void>;
 };
 
 /**
