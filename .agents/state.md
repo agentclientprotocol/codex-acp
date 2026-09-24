@@ -571,7 +571,9 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     remove C1 only if it fixes a bug with no v1-visible regression. The programmer was told not to do
     J11. → research `.agents/research/v2-goal-continuation-fallback-v1-impact.md` (in flight): when C1
     fires on 0.156.1, what v1 sees with/without it (esp. whether an unowned auto goal turn's output is
-    rendered on v1 at all), harm today, and a recommendation. Original 2(c)-1 scope: shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
+    rendered on v1 at all), harm today, and a recommendation.
+    **User (2026-09-24): don't consider older Codex versions; always assume the latest Codex (currently
+    the pinned 0.156.1).** This applies to all later decisions too. Original 2(c)-1 scope: shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
     until insertion + J8 (goal turn running → `turn/start` directly) + M2 adopt (J9/J10);
     **2(c)-2** `_session/steering` minted id + `user_message` on landing, steering fallback through
     the reservation (with `running`/`idle`), remove C1 goal-continuation fallback (J11). Cancel
