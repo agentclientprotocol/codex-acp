@@ -75,12 +75,11 @@ describe("command output is sent once", () => {
             sessionUpdate: "tool_call_update",
             toolCallId: "cmd-1",
             status: "completed",
-            rawOutput: {formatted_output: "a.txt\nb.txt\n", exit_code: 0},
             _meta: {terminal_exit: {exit_code: 0, signal: null, terminal_id: "cmd-1"}},
         });
     });
 
-    it("sends no output of a file read to AIR", () => {
+    it("sends the output of a file read to AIR once in rawOutput", () => {
         const update = completion(command({
             commandActions: [{type: "read", command: "cat a.txt", name: "a.txt", path: "/workspace/a.txt"}],
         }), DELTA_CLIENT);
@@ -89,10 +88,11 @@ describe("command output is sent once", () => {
             sessionUpdate: "tool_call_update",
             toolCallId: "cmd-1",
             status: "completed",
+            rawOutput: "a.txt\nb.txt\n",
         });
     });
 
-    it("sends the output of a list that did not stream once to the AIR terminal channel", () => {
+    it("sends the output of a list to AIR once in rawOutput", () => {
         const update = completion(command({
             commandActions: [{type: "listFiles", command: "ls", path: "/workspace"}],
         }), DELTA_CLIENT);
@@ -101,11 +101,11 @@ describe("command output is sent once", () => {
             sessionUpdate: "tool_call_update",
             toolCallId: "cmd-1",
             status: "completed",
-            _meta: {terminal_output_delta: {data: "a.txt\nb.txt\n", terminal_id: "cmd-1"}},
+            rawOutput: "a.txt\nb.txt\n",
         });
     });
 
-    it("sends the output of a read command to Zed in rawOutput, as before the AIR contract", () => {
+    it("sends the output of a read command to Zed once as content text, because Zed has no chunk channel for it", () => {
         const update = completion(command({
             commandActions: [{type: "read", command: "cat a.txt", name: "a.txt", path: "/workspace/a.txt"}],
         }), ZED_CLIENT);
@@ -114,7 +114,8 @@ describe("command output is sent once", () => {
             sessionUpdate: "tool_call_update",
             toolCallId: "cmd-1",
             status: "completed",
-            rawOutput: {formatted_output: "a.txt\nb.txt\n", exit_code: 0},
+            content: [{type: "content", content: {type: "text", text: "a.txt\nb.txt\n"}}],
+            rawOutput: {exit_code: 0},
         });
     });
 
@@ -147,7 +148,7 @@ describe("command output is sent once", () => {
         expect(dump).not.toContain("exit_code\": 0,\n        \"formatted");
     });
 
-    it("sends the live output of Zed as terminal_output chunks and the whole output in rawOutput", async () => {
+    it("sends the live output of Zed only as terminal_output chunks", async () => {
         const fixture = createCodexMockTestFixture();
         const sessionId = "command-once-zed";
         await setupPromptAndSendNotifications(
@@ -158,42 +159,39 @@ describe("command output is sent once", () => {
         );
 
         const dump = fixture.getAcpConnectionDump([]);
-        expect(occurrences(dump, "a.txt\nb.txt\n")).toBe(2);
+        expect(occurrences(dump, "a.txt\nb.txt\n")).toBe(1);
         expect(dump).toContain("\"terminal_output\"");
         expect(dump).toContain("terminal_exit");
-        expect(dump).toContain("formatted_output");
+        expect(dump).not.toContain("formatted_output");
         expect(dump).not.toContain("terminal_output_delta");
     });
 
-    it("sends neither the chunks nor the result of a live file read", async () => {
+    it("sends the output of a live file read to AIR once, at the end, and not as chunks", async () => {
         const fixture = createCodexMockTestFixture();
         const sessionId = "read-once";
         const read = {commandActions: [{type: "read" as const, command: "cat a.txt", name: "a.txt", path: "/workspace/a.txt"}]};
         await setupPromptAndSendNotifications(
             fixture,
             sessionId,
-            createTestSessionState({sessionId}),
+            createTestSessionState({sessionId, clientCapabilities: DELTA_CLIENT}),
             liveCommand(sessionId, read),
-        );
-
-        expect(occurrences(fixture.getAcpConnectionDump([]), "a.txt\nb.txt\n")).toBe(0);
-    });
-
-    it("streams the output of a live search once, as chunks", async () => {
-        const fixture = createCodexMockTestFixture();
-        const sessionId = "search-once";
-        const search = {commandActions: [{type: "search" as const, command: "rg a", query: "a", path: "/workspace"}]};
-        await setupPromptAndSendNotifications(
-            fixture,
-            sessionId,
-            createTestSessionState({sessionId}),
-            liveCommand(sessionId, search),
         );
 
         const dump = fixture.getAcpConnectionDump([]);
         expect(occurrences(dump, "a.txt\nb.txt\n")).toBe(1);
-        expect(dump).toContain("terminal_output_delta");
-        expect(dump).not.toContain("\"content\":[{\"type\":\"content\"");
+        expect(dump).not.toContain("terminal_output_delta");
+        expect(dump).toContain("\"rawOutput\": \"a.txt");
+    });
+
+    it("sends the output of a command that got stdin and no output chunk at the end", () => {
+        const renderer = new AcpToolCallRenderer(ZED_CLIENT);
+        const reporter = new CommandReporter();
+        reporter.started(command({status: "inProgress", aggregatedOutput: null, exitCode: null}));
+        renderer.render(reporter.terminalInput("cmd-1", "yes"));
+
+        expect(renderer.render(reporter.completed(command()))._meta).toMatchObject({
+            terminal_output: {data: "a.txt\nb.txt\n", terminal_id: "cmd-1"},
+        });
     });
 });
 

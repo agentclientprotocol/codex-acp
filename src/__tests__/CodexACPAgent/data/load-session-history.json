@@ -219,10 +219,6 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "item-cmd-1",
-        "rawOutput": {
-          "formatted_output": "Added.txt\nREADME.md\n",
-          "exit_code": 0
-        },
         "_meta": {
           "terminal_output_delta": {
             "data": "Added.txt\nREADME.md\n",

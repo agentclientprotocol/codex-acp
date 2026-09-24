@@ -74,15 +74,17 @@ export class ClientCapabilities {
     }
 
     /**
-     * The key of the output chunks of a command, or `null` when the client gets no chunks.
+     * The key of the output chunks of a command, or `null` when the client has no chunk channel for it.
      * A client that declares `terminal_output_delta` gets appends for every command.
-     * A client that declares `terminal_output` (Zed) gets `terminal_output` for a command that shows a terminal.
+     * A client that declares `terminal_output` (Zed) gets `terminal_output` for a command that shows a terminal,
+     * and no chunks for a read, search or list command.
      * Every other client that is not AIR gets `terminal_output_delta`, as before the tool call contract.
      * AIR without either capability gets no chunks.
+     * A command sends its output once: as chunks when the key is not `null`, and in `rawOutput` otherwise.
      */
     terminalOutputKey(terminal: boolean): TerminalOutputKey | null {
         if (this.terminalOutputDelta) return "terminal_output_delta";
-        if (this.terminalOutput && terminal) return "terminal_output";
+        if (this.terminalOutput) return terminal ? "terminal_output" : null;
         return this.airClient ? null : "terminal_output_delta";
     }
 

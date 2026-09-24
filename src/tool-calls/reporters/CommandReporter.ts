@@ -19,17 +19,16 @@ export type CommandPermissionParams = CommandExecutionRequestApprovalParams & {
 type CommandItem = ThreadItem & {type: "commandExecution"};
 
 /**
- * Reports a Codex command execution.
+ * Reports a Codex command execution. The output of a command goes out once.
  *
- * A shell command shows a terminal: its output streams into the terminal channel, and its end sends the exit code.
- * A read, search or list command has no terminal. For AIR, the output of a search or a list streams into the
- * terminal channel, and the output of a file read is not sent: the file text is not needed.
+ * A shell command shows a terminal, and its end sends the exit code. A read, search or list command has no terminal.
+ * AIR gets the output of a shell command as chunks, and the output of a read, search or list command in `rawOutput`
+ * at the end. A client that is not AIR gets chunks when it has a chunk channel for the command, and `content` text
+ * at the end otherwise, see `AcpToolCallRenderer`. Output that did not stream goes to the chunk channel at the end.
  */
 export class CommandReporter {
     /** Read, search and list commands of the live turn. */
     private readonly nonTerminalCommands = new Set<string>();
-    /** File read commands of the live turn. AIR gets no output of them. */
-    private readonly fileReadCommands = new Set<string>();
     /** Started commands that show a terminal. */
     private readonly terminalCommands = new Set<string>();
     /** Terminal commands that already streamed output. */
@@ -45,18 +44,16 @@ export class CommandReporter {
             this.nonTerminalCommands.add(item.id);
             this.terminalCommands.delete(item.id);
         }
-        if (isFileRead(item)) this.fileReadCommands.add(item.id);
-        else this.fileReadCommands.delete(item.id);
         this.streamedCommands.delete(item.id);
         this.standardStreamedCommands.delete(item.id);
         return startFacts(item);
     }
 
-    /** A chunk of command output. AIR gets no chunk of a file read. */
+    /** A chunk of command output. AIR gets the output of a read, search or list command at the end. */
     outputDelta(itemId: string, delta: string): ToolFacts {
         if (delta.length > 0) this.standardStreamedCommands.add(itemId);
         const standard = {commandOutput: {data: delta, terminal: this.terminalCommands.has(itemId)}};
-        if (this.fileReadCommands.has(itemId)) return {toolCallId: itemId, report: "update", standard};
+        if (this.nonTerminalCommands.has(itemId)) return {toolCallId: itemId, report: "update", standard};
         if (delta.length > 0) this.streamedCommands.add(itemId);
         return {toolCallId: itemId, report: "update", terminalOutput: delta, standard};
     }
@@ -66,7 +63,7 @@ export class CommandReporter {
      * A client that is not AIR gets it as an output chunk on its own line.
      */
     terminalInput(itemId: string, stdin: string): ToolFacts {
-        this.standardStreamedCommands.add(itemId);
+        // Stdin is not output: a command that got stdin and no output chunk still sends its output at the end.
         const standard = {commandOutput: {data: `\n${stdin}\n`, terminal: this.terminalCommands.has(itemId)}};
         if (this.nonTerminalCommands.has(itemId)) return {toolCallId: itemId, report: "update", standard};
         return {toolCallId: itemId, report: "update", terminalInput: stdin, standard};
@@ -75,7 +72,6 @@ export class CommandReporter {
     /** Pass `withName` when the completion can be the first report of the tool call. */
     completed(item: CommandItem, withName = false): ToolFacts {
         this.nonTerminalCommands.delete(item.id);
-        this.fileReadCommands.delete(item.id);
         const streamed = this.streamedCommands.delete(item.id);
         const facts = completionFacts(item, streamed, withName);
         return {
@@ -167,9 +163,6 @@ export function usesTerminal(item: CommandItem): boolean {
     return action === undefined || action.type === "unknown";
 }
 
-function isFileRead(item: CommandItem): boolean {
-    return singleAction(item.commandActions)?.type === "read";
-}
 
 function startFacts(item: CommandItem): ToolFacts {
     const name = commandToolName(item.source);
@@ -207,8 +200,8 @@ export function commandActionFacts(
 }
 
 /**
- * The end of a command for AIR. Output that did not stream goes to the terminal channel once. A search or a list
- * has no exit code, and a file read has no output.
+ * The end of a command for AIR. A shell command sends the output that did not stream to the chunk channel once.
+ * A read, search or list command sends its whole output in `rawOutput`.
  */
 function completionFacts(
     item: CommandItem,
@@ -224,7 +217,7 @@ function completionFacts(
         status: item.status === "completed" ? "completed" : "failed",
     };
     if (!usesTerminal(item)) {
-        return isFileRead(item) || streamed || output.length === 0 ? facts : {...facts, terminalOutput: output};
+        return output.length === 0 ? facts : {...facts, opaqueResult: output};
     }
     return {
         ...facts,

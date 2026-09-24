@@ -60,6 +60,8 @@ Only these differences are allowed:
   no output after a tool call ended, and a terminal status for a replayed image generation.
 - The client gets no AIR-only key.
   That is no `_meta.jetbrains.air` key and none of the earlier keys in [Removed keys](#removed-keys).
+- The output of a command arrives once, in the chunks or in `content`, as [Zed conventions](#zed-conventions) describe.
+  The adapter no longer repeats it in `rawOutput.formatted_output`.
 
 The keys of Zed, of upstream ACP, and of other JetBrains teams stay as they were.
 See [JetBrains shared keys](#jetbrains-shared-keys) and [Zed conventions](#zed-conventions).
@@ -210,31 +212,28 @@ The adapter keeps these Zed conventions for every client:
 - The end of a command sends `_meta.terminal_exit = {exit_code, signal: null, terminal_id}`.
 
 The terminal id is the tool call id.
-The output channel follows the declaration of the client:
+
+The output of a command goes to the client once. The chunk channel follows the declaration of the client:
 
 - A client that declares `terminal_output_delta` gets the output chunks of every command in `_meta.terminal_output_delta`.
 - Otherwise, a client that declares `terminal_output` gets output chunks in `_meta.terminal_output = {terminal_id, data}`
   for a command that shows a terminal. Zed declares `terminal_output: true` and `terminal-auth: true`.
-  The chunks of a read, search, or list command go to `_meta.terminal_output_delta`.
+  Zed shows `terminal_output` only in a terminal, so a read, search, or list command has no chunk channel.
 - A client that is not AIR and declares neither gets every output chunk in `_meta.terminal_output_delta`.
   This is the behavior of the adapter before the tool call contract.
 - AIR that declares neither gets no output chunks.
 
-A client that is not AIR also keeps these fields:
+A client that is not AIR gets the output of a command in one of two ways:
 
-- The end of a command carries `rawOutput = {formatted_output, exit_code}`, with the whole output.
-  A client that declares `terminal_output_delta` does not get it for a live command.
-  A replayed command always carries it.
-- Output that did not stream goes in one chunk at the end, for a command that shows a terminal.
-  A live read, search, or list command sends this chunk only to a client that declares `terminal_output_delta`.
-- The text that was written to the stdin of a command goes to the output channel as `\n<stdin>\n`.
-- The output of a read, search, or list command is in `rawOutput.formatted_output`, not in `content`.
+- With a chunk channel, the output goes only to the chunks. Output that did not stream goes in one chunk at the end,
+  also for a replayed command. The text that was written to the stdin of a command goes to the chunks as `\n<stdin>\n`.
+- Without a chunk channel, the whole output goes once to `content` as text at the end.
+- The end of a command without a terminal carries `rawOutput = {exit_code}`. A terminal command sends its exit in `terminal_exit`.
+  No client gets `rawOutput.formatted_output`: Zed shows `rawOutput` only when `content` is empty, and the chunks or `content` hold the output already.
 
-So a plain ACP client gets the output chunks in `_meta.terminal_output_delta`,
-and it sees the output of every command in `rawOutput.formatted_output` when the command ends.
-
-AIR gets no `rawOutput.formatted_output` and no `rawOutput.exit_code`.
-AIR gets stdin in `_meta.terminal_input`. It gets the output of a search or a list command in `_meta.terminal_output_delta`, and no output of a file read.
+AIR gets the output of a command that shows a terminal in `_meta.terminal_output_delta`, and stdin in `_meta.terminal_input`.
+It gets the output of a read, search, or list command once, as `rawOutput` text at the end.
+AIR stores `rawOutput` text as an output stream and moves a large one to a file.
 
 This adapter offers no `terminal-auth` authentication method.
 
@@ -248,9 +247,9 @@ see [Codex items and ACP fields](#codex-items-and-acp-fields).
 | --- | --- |
 | Tool parameters | `rawInput`, once they are complete, and again only when they change |
 | File text of an edit | the diff in `content`, a patch when `diffPatch` is negotiated, never also in `rawInput` |
-| Result to show (read text, search hits, review verdict) | `content` |
+| Result to show (review verdict, tool text) | `content` |
 | Result without a display form (MCP result and error, elicitation action) | `rawOutput` |
-| Command output | the terminal channel that the client negotiated |
+| Command output | the chunk channel of a command with a terminal. Read, search, and list output as `rawOutput` text at the end |
 | MCP progress | none, AIR does not show it |
 | Status, title, kind, locations | the field itself, only when it changes |
 
@@ -289,8 +288,8 @@ The other clients get the same fields as before the AIR extensions.
 
 | Codex item | AIR | Other clients |
 | --- | --- | --- |
-| `commandExecution` with one `read`, `search`, or `listFiles` action | `kind` `read` or `search`, a title that names the path or the query, `locations`. No terminal. The output of a `search` or a `listFiles` streams to `_meta.terminal_output_delta`, and output that did not stream goes there once at completion. A `read` sends no output: AIR does not need the file text. | The same start. The output is in `rawOutput.formatted_output` at completion. |
-| Any other `commandExecution` | `kind: execute`, `title` is the command, `rawInput = {command, cwd}`, a terminal. Output streams to `_meta.terminal_output_delta`. Stdin goes to `_meta.terminal_input`. The end sends `_meta.terminal_exit`. With `asyncTasks`, a command that keeps running gets `_meta.jetbrains.air.asyncTasks.backgrounded`. | The same start. Output and stdin follow [Zed conventions](#zed-conventions). The end also carries `rawOutput.formatted_output` and `rawOutput.exit_code`. |
+| `commandExecution` with one `read`, `search`, or `listFiles` action | `kind` `read` or `search`, a title that names the path or the query, `locations`. No terminal. The whole output is `rawOutput` text at completion, from `aggregatedOutput`. No chunks. | The same start. The output follows [Zed conventions](#zed-conventions): chunks, or `content` text at completion. |
+| Any other `commandExecution` | `kind: execute`, `title` is the command, `rawInput = {command, cwd}`, a terminal. Output streams to `_meta.terminal_output_delta`. Stdin goes to `_meta.terminal_input`. The end sends `_meta.terminal_exit`. With `asyncTasks`, a command that keeps running gets `_meta.jetbrains.air.asyncTasks.backgrounded`. | The same start. Output and stdin follow [Zed conventions](#zed-conventions). The output goes only to the chunks. |
 | `fileChange` | `kind: edit`, `title: "Editing files"`. With `diffPatch`, one `diff` block per changed file carries a Git patch. Without a patch, see [Fallback](#fallback): one block per hunk of an update, the whole text of an added or a deleted file. The block has `_meta.kind` `add`, `update`, or `delete`. | The same, without a patch. |
 | `mcpToolCall` | `kind: execute`, `title: "mcp.<server>.<tool>"`, `rawInput = {server, tool, arguments}`, `_meta.is_mcp_tool_call`. No `content`. `rawOutput = {result, error}` with the whole Codex result and error. AIR shows the text of `result` and `error.message`. No progress. | The same. The progress text goes to `_meta.mcp_output_delta`, trimmed. |
 | `dynamicToolCall` | `name`, `kind: execute`, `title` is the tool, `rawInput = {arguments}`. The content items go to `content`. | The same. |

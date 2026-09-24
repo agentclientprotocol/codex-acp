@@ -33,9 +33,13 @@ export class AcpToolCallRenderer {
         const meta = this.capabilities.airClient ? this.airMeta(facts) : this.standardMeta(facts);
         if (!this.capabilities.airClient) {
             applyStandardFields(rendered, facts.standard);
-            if (facts.standard?.commandEnd !== undefined) {
-                const rawOutput = this.commandEndRawOutput(facts.standard.commandEnd);
+            const end = facts.standard?.commandEnd;
+            if (end !== undefined) {
+                const rawOutput = this.commandEndRawOutput(end);
                 if (rawOutput !== undefined) rendered["rawOutput"] = rawOutput;
+                else delete rendered["rawOutput"];
+                const content = this.commandEndContent(end);
+                if (content !== undefined) rendered["content"] = content;
             }
         }
         // A `tool_call` requires a title.
@@ -119,21 +123,26 @@ export class AcpToolCallRenderer {
         return key === null ? {} : {[key]: {data, terminal_id: terminalId}};
     }
 
+    /**
+     * The `rawOutput` of the end of a command for a client that is not AIR: the exit code of a command without a
+     * terminal. A terminal command sends its exit in `terminal_exit`. The output goes to the chunks or to `content`.
+     */
     private commandEndRawOutput(end: CommandEnd): unknown {
-        return end.replay || !this.capabilities.terminalOutputDelta
-            ? {formatted_output: end.output, exit_code: end.exitCode}
-            : undefined;
+        return end.terminal ? undefined : {exit_code: end.exitCode};
+    }
+
+    /** The whole output of a command as `content` text, for a client without a chunk channel for the command. */
+    private commandEndContent(end: CommandEnd): acp.ToolCallContent[] | undefined {
+        if (this.capabilities.terminalOutputKey(end.terminal) !== null || end.output.length === 0) return undefined;
+        return [textContent(end.output)];
     }
 
     /**
      * The end of a command for a client that is not AIR.
-     * The output that did not stream goes to the output channel of a command that shows a terminal.
-     * A live command without a terminal sends it there only when the client declares `terminal_output_delta`.
-     * A replayed command without a terminal has only `rawOutput`.
+     * The output that did not stream goes to the chunk channel once, also for a replayed command.
      */
     private commandEndMeta(terminalId: string, end: CommandEnd): Record<string, unknown> {
-        const sendOutput = end.output.length > 0 && !end.streamed
-            && (end.terminal || (!end.replay && this.capabilities.terminalOutputDelta));
+        const sendOutput = end.output.length > 0 && !end.streamed;
         return {
             ...(sendOutput ? this.outputChunk(terminalId, end.output, end.terminal) : {}),
             ...(end.terminal ? terminalExit(terminalId, end.exitCode) : {}),
