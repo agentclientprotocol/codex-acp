@@ -430,7 +430,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..iv) done | 2(a2-v) + 2(c) (unblocked; after 4(a)) | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i) done | J11 decision (research in flight), then topic done | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | In progress | 4(a) done | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
@@ -566,8 +566,21 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     Only the main dispatch path does M2 (not the plan-impl 2nd turn / local-command callback). 4
     tests in `prompt-v2.test.ts`. Suite 885 / 26. TCK unchanged (v1 26/0/3; v2 31/1 RESUME-202/5).
     No live probe.
-    **2(c)-2** (**in flight, programmer dispatched 2026-09-24**) — milestone (i) `_session/steering`
-    on v2 only. **J11 on hold (user, 2026-09-24):** the user wants v1 client behavior preserved;
+    **2(c)-2(i)** `_session/steering` on v2 — **Done (b2b81d7)**: registered on the v2 chain (same
+    parser/handler, after `session.prompt`). `performSteeringRequest` mints one `clientUserMessageId`
+    per steer (v1 + v2; `CodexAcpClient.steerTurn` forwards it). Injected steers:
+    `pendingSteerLandings` (keyed by minted id, registered before `turnSteer`, removed on throw) +
+    `trackSteerLanding` hooked into both the baseline tracker and `prompt()`'s subscription → live
+    `user_message_chunk` via `emitLiveSteerUserMessage` (v2 only); entries dropped when the session's
+    turn completes (steer dropped by interrupt → nothing emitted). Fallback `startNewTurnFromSteering`
+    passes a `UserMessageInsertion` through the new optional `insertion` param of
+    `startNewTurnFromExternalPrompt` (`startGoalContinuationIfCurrent` unchanged); its turn gets
+    `running`/`idle` via `reportUnownedTurnState`. v1 test changes: two `turnSteerSpy` expectations in
+    `steer-events.test.ts` gained `clientUserMessageId: expect.any(String)`. `steering-v2.test.ts` (5)
+    + 2 snapshots. Suite 890 / 26. TCK v1 `-k "test_prompt or test_session or test_cancel or
+    test_extensibility"` 27/1 (SCHEMA-002, known advisory)/3; v2 `-k "... or test_state or
+    test_extensibility"` 37/2/5: RESUME-202 (5b) + EXT-202 (known advisory, `capabilities.providers`
+    placement → topic 1/10). **J11 on hold (user, 2026-09-24):** the user wants v1 client behavior preserved;
     remove C1 only if it fixes a bug with no v1-visible regression. The programmer was told not to do
     J11. → research `.agents/research/v2-goal-continuation-fallback-v1-impact.md` (in flight): when C1
     fires on 0.156.1, what v1 sees with/without it (esp. whether an unowned auto goal turn's output is
