@@ -461,6 +461,54 @@ describe("CodexACPAgent - loadSession", () => {
         expect(() => agent.getSessionState("session-1")).toThrow();
     });
 
+    it("stops the history read when the client closes the session during the load", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread: {id: "session-1", historyMode: "paginated", turns: [], cwd: "/test/project", name: null, preview: ""},
+            itemsBackwardsCursor: "item:last",
+            model: model.id,
+            modelProvider: "openai",
+            cwd: "/test/project",
+            approvalPolicy: "never",
+            sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        const message = (id: string) => ({turnId: "turn-1", item: {type: "agentMessage", id, text: id, phase: null, memoryCitation: null, delivery: null, questions: null}});
+        let closed: Promise<unknown> = Promise.resolve();
+        appServer.threadItemsList = vi.fn()
+            .mockResolvedValueOnce({data: [message("last")], nextCursor: null, backwardsCursor: null})
+            .mockResolvedValueOnce({data: [message("first")], nextCursor: "page-2", backwardsCursor: null})
+            .mockImplementationOnce(async () => {
+                closed = agent.closeSession({sessionId: "session-1"});
+                await closed;
+                return {data: [message("second")], nextCursor: "page-3", backwardsCursor: null};
+            })
+            .mockResolvedValue({data: [message("more")], nextCursor: "page-3", backwardsCursor: null});
+        const closeSpy = vi.spyOn(client, "closeSession").mockResolvedValue(undefined as never);
+
+        await agent.initialize({protocolVersion: 1});
+        await expect(agent.loadSession({sessionId: "session-1", cwd: "/test/project", mcpServers: []}))
+            .rejects.toMatchObject({code: -32600, data: "Session session-1 is closing"});
+        await closed;
+
+        // The page that the close interrupted is the last page read. The load does not close the session again.
+        expect(appServer.threadItemsList).toHaveBeenCalledTimes(3);
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+        const texts = JSON.stringify(fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0]));
+        expect(texts).toContain("first");
+        expect(texts).not.toContain("second");
+    });
+
     it("should not recover session mcp servers during loadSession when request omits them", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
