@@ -122,6 +122,68 @@ function withBugFixes(scenario: string, messages: RecordedMessage[]): RecordedMe
     });
 }
 
+const OUTPUT_CHUNK_KEYS = ["terminal_output", "terminal_output_delta"];
+
+/**
+ * The output of each command as one text, however it arrived.
+ *
+ * The adapter sends the output of a command once: as chunks when the client has a chunk channel for the command,
+ * and as `content` text otherwise. Before the tool call contract it sent `rawOutput.formatted_output` as well. The
+ * function removes the chunks, the output text and `formatted_output`, and it puts the text on the last report of the
+ * tool call in `output`.
+ * An exit code that `terminal_exit` carries is removed from `rawOutput`.
+ */
+export function withOutputOnce(messages: RecordedMessage[]): RecordedMessage[] {
+    const chunks = new Map<string, string>();
+    const formatted = new Map<string, string>();
+    const last = new Map<string, number>();
+    const result = messages.map((message, index) => {
+        const update = sessionUpdate(message);
+        if (update === undefined || typeof update["toolCallId"] !== "string") return message;
+        const key = `${String((message.params as Json)["sessionId"])} ${update["toolCallId"]}`;
+        const fixed: Json = {...update};
+        const meta = update["_meta"] as Json | undefined;
+        if (meta !== undefined) {
+            const kept: Json = {...meta};
+            for (const chunkKey of OUTPUT_CHUNK_KEYS) {
+                const chunk = kept[chunkKey] as {data?: string} | undefined;
+                if (chunk === undefined) continue;
+                chunks.set(key, (chunks.get(key) ?? "") + (chunk.data ?? ""));
+                delete kept[chunkKey];
+            }
+            if (Object.keys(kept).length > 0) fixed["_meta"] = kept;
+            else delete fixed["_meta"];
+        }
+        const rawOutput = update["rawOutput"] as Json | undefined;
+        // The end of a command carries its exit code. A client without a chunk channel gets the output as content text.
+        const content = update["content"] as Json[] | undefined;
+        const text = content?.length === 1 && content[0]!["type"] === "content"
+            ? (content[0]!["content"] as Json)["text"] : undefined;
+        if (rawOutput !== null && typeof rawOutput === "object" && "exit_code" in rawOutput && typeof text === "string") {
+            formatted.set(key, text);
+            delete fixed["content"];
+        }
+        if (rawOutput !== undefined && rawOutput !== null && typeof rawOutput === "object" && "formatted_output" in rawOutput) {
+            formatted.set(key, String(rawOutput["formatted_output"]));
+            const kept: Json = {...rawOutput};
+            delete kept["formatted_output"];
+            if (meta !== undefined && "terminal_exit" in meta) delete kept["exit_code"];
+            if (Object.keys(kept).length > 0) fixed["rawOutput"] = kept;
+            else delete fixed["rawOutput"];
+        }
+        last.set(key, index);
+        return {...message, params: {...(message.params as Json), update: fixed}};
+    });
+    for (const [key, index] of last) {
+        const text = chunks.get(key) ?? formatted.get(key);
+        if (text === undefined || text.length === 0) continue;
+        const message = result[index]!;
+        const update = sessionUpdate(message)!;
+        result[index] = {...message, params: {...(message.params as Json), update: {...update, output: text}}};
+    }
+    return result;
+}
+
 /** The baseline messages with the allowed differences applied, except the merge of the tool call reports. */
 export function expectedFromBaseline(scenario: string, baseline: RecordedMessage[]): RecordedMessage[] {
     return withBugFixes(scenario, withoutAirOnlyMessages(baseline));

@@ -5,7 +5,7 @@ import {fileURLToPath} from "node:url";
 import {beforeAll, describe, expect, it} from "vitest";
 import packageJson from "../../../package.json";
 import {schemaErrors} from "./acp-schema";
-import {airOnlyKeys, expectedFromBaseline, lines, mergedReports, metaObjects} from "./baseline";
+import {airOnlyKeys, expectedFromBaseline, lines, mergedReports, metaObjects, withOutputOnce} from "./baseline";
 import {
     AIR_CAPABILITY_NAMES,
     fromJsonLines,
@@ -83,8 +83,8 @@ describe("clients that are not AIR, compared with the baseline", () => {
         for (const each of SCENARIOS) {
             it.skipIf(RECORD_BASELINE)(`${profile}: ${each.name} gets the baseline messages with the allowed differences`, () => {
                 const baseline = fromJsonLines(fs.readFileSync(baselineFile(profile, each.name), "utf8"));
-                expect(lines(mergedReports(recording(profile, each.name))))
-                    .toEqual(lines(mergedReports(expectedFromBaseline(each.name, baseline))));
+                expect(lines(mergedReports(withOutputOnce(recording(profile, each.name)))))
+                    .toEqual(lines(mergedReports(withOutputOnce(expectedFromBaseline(each.name, baseline)))));
             });
         }
     }
@@ -213,20 +213,19 @@ describe("clients that are not AIR", () => {
                 .toEqual([{sessionUpdate: "session_info_update", title: "Go"}]);
         });
 
-        it(`${profile}: gets the output and the exit code of every command in rawOutput`, () => {
-            const ends = [
-                ...updates(profile, "command-output-stdin", "cmd-1"),
-                ...updates(profile, "read-search-list"),
-                ...updates(profile, "command-failed", "cmd-3"),
-            ].filter(update => update["status"] === "completed" || update["status"] === "failed");
-            expect(ends.map(update => update["rawOutput"])).toEqual([
-                {formatted_output: "Running tests\n1 passed\n", exit_code: 0},
-                {formatted_output: "export const a = 1;\n", exit_code: 0},
-                {formatted_output: "src/app.ts:3: // TODO\n", exit_code: 0},
-                {formatted_output: "app.ts\n", exit_code: 0},
-                {formatted_output: "cat: missing.txt: No such file\n", exit_code: 1},
-            ]);
-            expect(ends.every(update => update["content"] === undefined)).toBe(true);
+        it(`${profile}: gets the output of every command once`, () => {
+            const commands: Array<[string, string, string]> = [
+                ["command-output-stdin", "cmd-1", "1 passed\n"],
+                ["read-search-list", "read-1", "export const a = 1;\n"],
+                ["read-search-list", "search-1", "src/app.ts:3: // TODO\n"],
+                ["read-search-list", "list-1", "app.ts\n"],
+                ["command-failed", "cmd-3", "cat: missing.txt: No such file\n"],
+            ];
+            for (const [name, toolCallId, output] of commands) {
+                const sent = JSON.stringify(updates(profile, name, toolCallId));
+                expect(sent.split(JSON.stringify(output).slice(1, -1)).length - 1, `${name} ${toolCallId}`).toBe(1);
+            }
+            expect(JSON.stringify(SCENARIOS.map(each => recording(profile, each.name)))).not.toContain("formatted_output");
         });
 
         it(`${profile}: gets the full item fields of the tool kinds that AIR reports in another shape`, () => {
@@ -440,7 +439,7 @@ describe("subagents", () => {
 });
 
 describe("plain ACP client", () => {
-    it("gets terminal_output_delta chunks, the stdin on its own line, and the output in rawOutput at the end", () => {
+    it("gets terminal_output_delta chunks, the stdin on its own line, and terminal_exit at the end", () => {
         expect(updates("plain", "command-output-stdin", "cmd-1")).toEqual([
             expect.objectContaining({sessionUpdate: "tool_call", content: [{type: "terminal", terminalId: "cmd-1"}]}),
             {
@@ -462,7 +461,6 @@ describe("plain ACP client", () => {
                 sessionUpdate: "tool_call_update",
                 toolCallId: "cmd-1",
                 status: "completed",
-                rawOutput: {formatted_output: "Running tests\n1 passed\n", exit_code: 0},
                 _meta: {terminal_exit: {exit_code: 0, signal: null, terminal_id: "cmd-1"}},
             },
         ]);
@@ -475,11 +473,10 @@ describe("plain ACP client", () => {
         });
     });
 
-    it("gets a replayed command with terminal_output_delta, terminal_exit and rawOutput", () => {
+    it("gets a replayed command with terminal_output_delta and terminal_exit", () => {
         expect(updates("plain", "history-replay", "h-cmd").at(-1)).toEqual({
             sessionUpdate: "tool_call_update",
             toolCallId: "h-cmd",
-            rawOutput: {formatted_output: "1 passed\n", exit_code: 0},
             _meta: {
                 terminal_output_delta: {data: "1 passed\n", terminal_id: "h-cmd"},
                 terminal_exit: {exit_code: 0, signal: null, terminal_id: "h-cmd"},
@@ -536,11 +533,10 @@ describe("a client that declares terminal_output_delta and is not AIR", () => {
         });
     });
 
-    it("gets a replayed command with terminal_output_delta, terminal_exit and rawOutput", async () => {
+    it("gets a replayed command with terminal_output_delta and terminal_exit", async () => {
         expect((await commandUpdates("history-replay", "h-cmd")).at(-1)).toEqual({
             sessionUpdate: "tool_call_update",
             toolCallId: "h-cmd",
-            rawOutput: {formatted_output: "1 passed\n", exit_code: 0},
             _meta: {
                 terminal_output_delta: {data: "1 passed\n", terminal_id: "h-cmd"},
                 terminal_exit: {exit_code: 0, signal: null, terminal_id: "h-cmd"},
@@ -588,7 +584,6 @@ describe("Zed", () => {
                 sessionUpdate: "tool_call_update",
                 toolCallId: "cmd-1",
                 status: "completed",
-                rawOutput: {formatted_output: "Running tests\n1 passed\n", exit_code: 0},
                 _meta: {terminal_exit: {exit_code: 0, signal: null, terminal_id: "cmd-1"}},
             },
         ]);
@@ -599,7 +594,6 @@ describe("Zed", () => {
             sessionUpdate: "tool_call_update",
             toolCallId: "cmd-2",
             status: "completed",
-            rawOutput: {formatted_output: "a.txt\nb.txt\n", exit_code: 0},
             _meta: {
                 terminal_output: {data: "a.txt\nb.txt\n", terminal_id: "cmd-2"},
                 terminal_exit: {exit_code: 0, signal: null, terminal_id: "cmd-2"},
@@ -619,12 +613,13 @@ describe("Zed", () => {
         });
     });
 
-    it("gets terminal_output_delta chunks for a read command, because it shows no terminal", () => {
-        expect(updates("zed", "read-search-list", "read-1").map(update => update["_meta"])).toEqual([
-            undefined,
-            {terminal_output_delta: {data: "export const a = 1;\n", terminal_id: "read-1"}},
-            undefined,
-        ]);
+    it("gets the output of a read command once as content text, because it shows no terminal", () => {
+        const read = updates("zed", "read-search-list", "read-1");
+        expect(read.map(update => update["_meta"])).toEqual([undefined, undefined]);
+        expect(read.at(-1)).toMatchObject({
+            content: [{type: "content", content: {type: "text", text: "export const a = 1;\n"}}],
+            rawOutput: {exit_code: 0},
+        });
     });
 
     it("keeps is_mcp_tool_call and the trimmed progress text in mcp_output_delta", () => {
@@ -672,15 +667,14 @@ describe("AIR", () => {
         ]);
     });
 
-    it("gets no output of a file read, and the output of a search or a list once as a chunk", () => {
-        const all = updates("air", "read-search-list");
-        const chunks = all.flatMap(update => {
-            const chunk = (update["_meta"] as {terminal_output_delta?: {data: string}} | undefined)?.terminal_output_delta;
-            return chunk ? [[update["toolCallId"], chunk.data]] : [];
-        });
-        expect(chunks).toEqual([["search-1", "src/app.ts:3: // TODO\n"], ["list-1", "app.ts\n"]]);
-        expect(all.some(update => update["content"] !== undefined && update["status"] === "completed")).toBe(false);
-        expect(all.some(update => update["rawOutput"] !== undefined)).toBe(false);
+    it("gets the output of a read, search or list command once, as rawOutput text at the end", () => {
+        const ends = updates("air", "read-search-list").filter(update => update["status"] === "completed");
+        expect(ends.map(update => [update["toolCallId"], update["rawOutput"], update["content"], update["_meta"]])).toEqual([
+            ["read-1", "export const a = 1;\n", undefined, undefined],
+            ["search-1", "src/app.ts:3: // TODO\n", undefined, undefined],
+            ["list-1", "app.ts\n", undefined, undefined],
+        ]);
+        expect(JSON.stringify(updates("air", "read-search-list"))).not.toContain("terminal_output_delta");
     });
 
     it("gets the AIR keys in _meta.jetbrains.air", () => {

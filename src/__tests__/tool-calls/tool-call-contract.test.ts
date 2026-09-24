@@ -116,12 +116,13 @@ describe("ACP tool call contract", () => {
         expect(render(ZED)).not.toContain("jetbrains");
     });
 
-    it("keeps the Zed terminal conventions and the command output in rawOutput", () => {
+    it("keeps the Zed terminal conventions and sends the command output once", () => {
         const text = render(ZED);
         expect(text).toContain("terminal_info");
         expect(text).toContain("\"terminal_output\"");
         expect(text).toContain("terminal_exit");
-        expect(text).toContain("formatted_output");
+        // The terminal carries the output, so rawOutput does not repeat it.
+        expect(text).not.toContain("formatted_output");
         expect(text).not.toContain("\"terminal_input\"");
         expect(text).not.toContain("terminal_output_delta");
     });
@@ -183,7 +184,8 @@ describe("ClientCapabilities", () => {
         expect(AIR.terminalOutputKey(true)).toBe("terminal_output_delta");
         expect(AIR.terminalOutputKey(false)).toBe("terminal_output_delta");
         expect(ZED.terminalOutputKey(true)).toBe("terminal_output");
-        expect(ZED.terminalOutputKey(false)).toBe("terminal_output_delta");
+        // Zed shows terminal_output only in a terminal, so a command without a terminal has no chunk channel.
+        expect(ZED.terminalOutputKey(false)).toBeNull();
         expect(ClientCapabilities.from(null).terminalOutputKey(true)).toBe("terminal_output_delta");
         expect(ClientCapabilities.from(null).terminalOutputKey(false)).toBe("terminal_output_delta");
         expect(ClientCapabilities.from({_meta: {terminal_output_delta: true}}).terminalOutputKey(false))

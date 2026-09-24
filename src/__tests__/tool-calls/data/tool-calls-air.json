@@ -72,7 +72,8 @@
     {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "read",
-      "status": "completed"
+      "status": "completed",
+      "rawOutput": "ok\n"
     }
   ],
   "mcp": [

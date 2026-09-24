@@ -47,10 +47,6 @@
       "sessionUpdate": "tool_call_update",
       "toolCallId": "cmd",
       "status": "completed",
-      "rawOutput": {
-        "formatted_output": "ok\n",
-        "exit_code": 0
-      },
       "_meta": {
         "terminal_exit": {
           "exit_code": 0,
@@ -78,9 +74,17 @@
       "toolCallId": "read",
       "status": "completed",
       "rawOutput": {
-        "formatted_output": "ok\n",
         "exit_code": 0
-      }
+      },
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "ok\n"
+          }
+        }
+      ]
     }
   ],
   "mcp": [
