@@ -67,8 +67,20 @@ sent); nothing to fix. **Adjacent (open):** normal `session/resume` likely drops
 
 **User decisions (2026-09-25) on Q4:** apply fix 1 (tracker reinstall before re-resume) on **v1 and
 v2**, plus fix 2 (v2-only `idle`/`cancelled` close-out) and 3 → new slice **10(f) provider-restart
-tracking** (after 10(e)). Normal-resume timing gap: check **now** → researcher in flight →
-`.agents/research/v2-resume-goal-turn-timing.md`; if real, fix together with 10(f).
+tracking** (after 10(e)). Normal-resume timing gap: **confirmed live**
+(`.agents/research/v2-resume-goal-turn-timing.md`): the tracker is installed in `installSessionState`
+(`CodexAcpServer.ts:912` resume, `:2412` load) after `thread/resume` + `model/list` + `account/read`
+(+ history read); `notify` drops unhandled thread events; the goal turn starts ~6-8 ms after resume.
+Unmodified local runs won 4/4; with +30 ms after `model/list`, v1 and v2 lost `turn/started` and v2
+got a lone `idle`. Affects v2 resume (±replay), v1 resume, v1 load; also stale `codexReportedRunningTurnId`
+(no `requires_action`, no M2). Load paths: live frames can interleave with the history replay. Fix
+sketch: `startCodexTurnTracker(sessionId, ready: Promise<SessionState|null>)`, called before
+`resumeSession`/`loadSession`; `installSessionState` resolves it (after `streamThreadHistory` on
+load); always settle `null` on failure/stale paths (per-session queue would block). v1-visible
+(no lost opening items; live after replay) → **user (2026-09-25): v1 + v2, in the 10(f) group** —
+split as 10(f1) early-subscribe tracker on resume/load (`ready` promise), 10(f2) provider-restart
+reinstall (reuses f1) + v2 `idle`/`cancelled` close-out. Vitest repro: resume a
+second thread id, emit `turn/started` + delta from a `model/list` override.
 
 **5b-2b done (f9d477b)** → **topic 5 done.** v2-only filter in `streamThreadHistory` also drops
 fallback `agent_message_chunk`/`agent_thought_chunk` (identity check against
