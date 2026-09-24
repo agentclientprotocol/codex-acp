@@ -52,8 +52,18 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
                 undefined,
                 "'current_mode_update' session update does not exist in ACP v2",
             );
-        // Topic 6: v2 message chunks require `messageId`.
-        case "user_message_chunk":
+        // v2 message chunks require `messageId`.
+        case "user_message_chunk": {
+            const {messageId} = update;
+            if (messageId == null) {
+                throw acp.RequestError.internalError(
+                    undefined,
+                    "'user_message_chunk' session update without a messageId is not supported on an ACP v2 connection",
+                );
+            }
+            return {...update, messageId};
+        }
+        // Topic 6: agent message chunks have no `messageId` yet.
         case "agent_message_chunk":
         case "agent_thought_chunk":
         // Topic 6: v2 merges `tool_call` into `tool_call_update` and reshapes diff/terminal content.

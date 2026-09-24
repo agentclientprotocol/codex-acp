@@ -995,6 +995,7 @@ export class CodexAcpClient {
         additionalDirectories: string[],
         onTurnStarted?: (turnId: string) => void,
         shouldCancel?: () => boolean,
+        clientUserMessageId?: string,
     ): Promise<TurnCompletedNotification | null> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
@@ -1012,6 +1013,7 @@ export class CodexAcpClient {
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,
+            ...(clientUserMessageId !== undefined ? {clientUserMessageId} : {}),
         }, onTurnStarted);
     }
 

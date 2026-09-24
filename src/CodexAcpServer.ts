@@ -32,6 +32,7 @@ import {
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
 import {toV1ClientCapabilitiesView} from "./AcpV2ClientCapabilities";
 import {toV1SetSessionConfigOptionRequest, toV2ConfigOptions} from "./AcpV2ConfigOptions";
+import {isInsertedUserMessage, toV1PromptRequest, type UserMessageInsertion} from "./AcpV2Prompt";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
 import type {
     Account,
@@ -315,6 +316,8 @@ export class CodexAcpServer {
     private readonly pendingTurnStarts: Map<string, PendingTurnStart>;
     private readonly activePrompts: Map<string, ActivePrompt>;
     private readonly steeringQueues: Map<string, SteeringQueue>;
+    /** Sessions with a v2 prompt that has not finished yet, including before its turn starts. */
+    private readonly v2PromptsInFlight = new Set<string>();
     private readonly closingSessions: Map<string, number>;
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
@@ -2928,10 +2931,78 @@ export class CodexAcpServer {
         return turnId;
     }
 
+    /**
+     * v2 `session/prompt`: answers `{messageId}` once the user message is inserted and lets the
+     * turn run on in the background. A Codex prompt is inserted when Codex records its user
+     * message; a locally handled command has no Codex turn, so it is inserted right away.
+     */
+    async promptV2(params: acpV2.PromptRequest): Promise<acpV2.PromptResponse> {
+        const sessionId = params.sessionId;
+        const request = toV1PromptRequest(params);
+        this.getSessionState(sessionId);
+        if (this.sessionIsClosing(sessionId)) {
+            throw RequestError.invalidRequest(`Session ${sessionId} is closing`);
+        }
+        // Overlapping prompts are rejected for now; they are to be queued behind the running one.
+        if (this.v2PromptsInFlight.has(sessionId) || this.activePrompts.has(sessionId) || this.pendingTurnStarts.has(sessionId)) {
+            throw RequestError.invalidRequest(`Session ${sessionId} is already processing a prompt`);
+        }
+        const promptKind = this.availableCommands.classifyPrompt(request.prompt);
+        if (promptKind.kind === "codexTurnCommand") {
+            throw RequestError.internalError(
+                undefined,
+                `'/${promptKind.name}' is not supported on an ACP v2 connection yet`,
+            );
+        }
+
+        const messageId = randomUUID();
+        const session = new ACPSessionConnection(this.connection, sessionId);
+        this.v2PromptsInFlight.add(sessionId);
+        return await new Promise<acpV2.PromptResponse>((resolve, reject) => {
+            let inserted = false;
+            const onInserted = async () => {
+                inserted = true;
+                try {
+                    for (const block of request.prompt) {
+                        await session.update(createUserMessageChunk(block, messageId));
+                    }
+                } catch (error) {
+                    logger.error(`Failed to send the user message for session ${sessionId}`, error);
+                }
+                resolve({messageId});
+            };
+            const run = async () => {
+                if (promptKind.kind === "localCommand") {
+                    await onInserted();
+                    return await this.prompt(request);
+                }
+                return await this.prompt(request, undefined, undefined, {clientUserMessageId: messageId, onInserted});
+            };
+            run().then(
+                () => {
+                    if (!inserted) {
+                        reject(RequestError.internalError(
+                            undefined,
+                            "The prompt ended before Codex recorded the user message",
+                        ));
+                    }
+                },
+                (error: unknown) => {
+                    if (inserted) {
+                        logger.error(`Prompt for session ${sessionId} failed after it was inserted`, error);
+                    } else {
+                        reject(error);
+                    }
+                },
+            ).finally(() => this.v2PromptsInFlight.delete(sessionId));
+        });
+    }
+
     async prompt(
         params: acp.PromptRequest,
         signal?: AbortSignal,
         onTurnStarted?: () => void,
+        insertion?: UserMessageInsertion,
     ): Promise<acp.PromptResponse> {
         if (this.providerUpdate !== null) {
             await this.providerUpdate;
@@ -2964,6 +3035,7 @@ export class CodexAcpServer {
         const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
         let eventHandler: CodexEventHandler | null = null;
         let promptNotificationsActive = true;
+        let pendingInsertion = insertion;
         const clearRecoveredSessionFailure = async (handler: CodexEventHandler): Promise<void> => {
             await handler.completeSuccessfulTurn(sessionState.currentTurnId);
             const current = sessionState.sessionFailure;
@@ -3014,6 +3086,12 @@ export class CodexAcpServer {
             };
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
+                    if (pendingInsertion !== undefined
+                        && isInsertedUserMessage(event, params.sessionId, pendingInsertion.clientUserMessageId)) {
+                        const {onInserted} = pendingInsertion;
+                        pendingInsertion = undefined;
+                        await onInserted();
+                    }
                     await observeInteraction(event);
                     if (!promptNotificationsActive) {
                         await promptEventHandler.handleSessionScopedNotification(event);
@@ -3170,6 +3248,7 @@ export class CodexAcpServer {
                         onTurnStarted?.();
                     },
                     () => this.promptShouldStop(params.sessionId, activePrompt),
+                    insertion?.clientUserMessageId,
                 ));
             void sendPromptPromise.catch((err) => {
                 if (this.activePrompts.get(params.sessionId) !== activePrompt) {

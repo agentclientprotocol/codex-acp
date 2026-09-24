@@ -23,6 +23,11 @@ export type CommandHandleResult =
     | { handled: false, prompt?: acp.ContentBlock[] }
     | { handled: true, turnCompleted?: TurnCompletedNotification };
 
+export type PromptKind =
+    | { kind: "prompt" }
+    | { kind: "localCommand" }
+    | { kind: "codexTurnCommand", name: string };
+
 export const GOAL_CONTINUATION_PROMPT: acp.ContentBlock[] = [{
     type: "text",
     text: "Continue working toward the active goal.",
@@ -200,6 +205,42 @@ export class CodexCommands {
             name: name.toLowerCase(),
             rest: commandText.slice(name.length).trim(),
         };
+    }
+
+    /**
+     * Tells ahead of time how `tryHandleCommand` will handle a prompt: as a regular prompt, as a
+     * command handled locally without a Codex turn, or as a command that runs a Codex turn.
+     * Keep in sync with `tryHandleCommand`.
+     */
+    classifyPrompt(prompt: acp.ContentBlock[]): PromptKind {
+        const command = this.parseCommand(prompt);
+        if (command === null || command.name.startsWith("$")) return {kind: "prompt"};
+        switch (command.name) {
+            case "plan":
+            case "status":
+            case "rename":
+            case "logout":
+            case "skills":
+            case "mcp":
+                return {kind: "localCommand"};
+            case "compact":
+            case "review":
+                return {kind: "codexTurnCommand", name: command.name};
+            case "review-branch":
+            case "review-commit":
+                return command.rest.length === 0
+                    ? {kind: "localCommand"}
+                    : {kind: "codexTurnCommand", name: command.name};
+            case "goal": {
+                const argument = command.rest.trim().toLowerCase();
+                if (argument.length === 0 || argument === "pause" || argument === "clear" || argument.length > 4000) {
+                    return {kind: "localCommand"};
+                }
+                return {kind: "codexTurnCommand", name: command.name};
+            }
+            default:
+                return {kind: "prompt"};
+        }
     }
 
     async tryHandleCommand(

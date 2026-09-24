@@ -1,0 +1,17 @@
+[
+  {
+    "sessionUpdate": {
+      "messageId": "<messageId>",
+      "content": {
+        "text": "/skills",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "promptResponse": {
+      "messageId": "<messageId>"
+    }
+  }
+]

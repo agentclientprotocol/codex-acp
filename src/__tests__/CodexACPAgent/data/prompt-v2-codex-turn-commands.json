@@ -1,0 +1,27 @@
+[
+  {
+    "text": "/compact",
+    "code": -32603,
+    "message": "Internal error: '/compact' is not supported on an ACP v2 connection yet"
+  },
+  {
+    "text": "/review",
+    "code": -32603,
+    "message": "Internal error: '/review' is not supported on an ACP v2 connection yet"
+  },
+  {
+    "text": "/review-branch main",
+    "code": -32603,
+    "message": "Internal error: '/review-branch' is not supported on an ACP v2 connection yet"
+  },
+  {
+    "text": "/goal ship it",
+    "code": -32603,
+    "message": "Internal error: '/goal' is not supported on an ACP v2 connection yet"
+  },
+  {
+    "text": "/goal resume",
+    "code": -32603,
+    "message": "Internal error: '/goal' is not supported on an ACP v2 connection yet"
+  }
+]

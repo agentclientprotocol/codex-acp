@@ -1,0 +1,38 @@
+[
+  {
+    "codexRequest": "turn/start",
+    "params": {
+      "threadId": "thread-1",
+      "input": [
+        {
+          "type": "text",
+          "text": "Hello",
+          "text_elements": []
+        }
+      ],
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "auto_review",
+      "sandboxPolicy": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": false,
+        "excludeSlashTmp": false
+      },
+      "summary": "auto",
+      "effort": "medium",
+      "model": "gpt-5",
+      "serviceTier": null,
+      "clientUserMessageId": "<messageId>"
+    }
+  },
+  {
+    "promptError": {
+      "code": -32603,
+      "message": "Internal error",
+      "data": {
+        "details": "thread not found: thread-1"
+      }
+    }
+  }
+]

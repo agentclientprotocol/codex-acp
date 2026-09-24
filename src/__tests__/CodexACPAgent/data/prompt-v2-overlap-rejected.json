@@ -1,0 +1,5 @@
+{
+  "code": -32600,
+  "message": "Invalid request",
+  "data": "Session thread-1 is already processing a prompt"
+}

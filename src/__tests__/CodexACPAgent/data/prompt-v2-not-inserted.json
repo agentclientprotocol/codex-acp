@@ -1,0 +1,50 @@
+[
+  {
+    "codexRequest": "turn/start",
+    "params": {
+      "threadId": "thread-1",
+      "input": [
+        {
+          "type": "text",
+          "text": "Hello",
+          "text_elements": []
+        }
+      ],
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "auto_review",
+      "sandboxPolicy": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": false,
+        "excludeSlashTmp": false
+      },
+      "summary": "auto",
+      "effort": "medium",
+      "model": "gpt-5",
+      "serviceTier": null,
+      "clientUserMessageId": "<messageId>"
+    }
+  },
+  {
+    "codexResponse": "turn/start"
+  },
+  {
+    "codexNotification": "turn/started"
+  },
+  {
+    "codexNotification": "turn/completed"
+  },
+  {
+    "sessionUpdate": {
+      "title": "Hello",
+      "sessionUpdate": "session_info_update"
+    }
+  },
+  {
+    "promptError": {
+      "code": -32603,
+      "message": "Internal error: The prompt ended before Codex recorded the user message"
+    }
+  }
+]
