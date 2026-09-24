@@ -390,7 +390,15 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 - (2026-09-24) **TCK-U1** — v2 `_auth/status_update` pushed right after `initialize` fails
   BATCH-202/JSONRPC-003/EXT-201. Is the push allowed; what exactly do those checks accept; does v1
   push it; options (defer until first session request / accept)? →
-  `.agents/research/v2-tck-auth-status-push.md`. Status: **in flight.**
+  `.agents/research/v2-tck-auth-status-push.md`. Status: **resolved — TCK false positive.**
+  BATCH-202/JSONRPC-003 (shared marker, `test_batch.py:66-78`) and EXT-201
+  (`test_extensibility.py:117-135`) raw-read 2 s and fail on *any* line; spec + JSON-RPC forbid only
+  replies to notifications (TCK's own BATCH-201 and single JSONRPC-003 ignore notifications). v1
+  pushes identically (`CodexAcpServer.ts:418`, v2 `:478`); v1 rows pass only because v1 lacks those
+  checks. Push is the only v2 identity source (pull not registered), pinned by
+  `initialize-v2.test.ts:72-93`. Recommended (c): keep; patch TCK fork to ignore `method` lines;
+  alternatives (a) defer to first session open, (a′) push before the first request's response —
+  both change the documented contract. → user decision.
 - (2026-09-24) **TCK-U2** — v2 `session/list` with omitted `params` → -32602. Is omitted params
   valid per ACP v2 / JSON-RPC; is the rejection ours or the SDK router's; v1 behaviour; fix point?
   → `.agents/research/v2-tck-omitted-params.md`. Status: **in flight.**
