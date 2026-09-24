@@ -96,6 +96,38 @@ describe("Codex background terminal tasks", () => {
         expect(fixture.updates).toEqual([]);
     });
 
+    it("lists the background terminals only while a command of the thread runs", async () => {
+        const fixture = createFixture();
+        fixture.list.mockResolvedValue(page([]));
+        const reasoning = started({type: "reasoning", id: "reasoning-1", summary: [], content: []});
+        const item = command();
+
+        await fixture.tasks.handleNotification(reasoning, "thread-1");
+        await vi.waitFor(() => expect(fixture.list).not.toHaveBeenCalled());
+
+        await fixture.tasks.handleNotification(started(item), "thread-1");
+        await fixture.tasks.handleNotification(reasoning, "thread-1");
+        await vi.waitFor(() => expect(fixture.list).toHaveBeenCalledTimes(1));
+
+        await fixture.tasks.handleNotification(completed({...item, status: "completed", exitCode: 0}), "thread-1");
+        fixture.list.mockClear();
+        await fixture.tasks.handleNotification(reasoning, "thread-1");
+        expect(fixture.list).not.toHaveBeenCalled();
+    });
+
+    it("does not bring back an ended task from a list that still names it", async () => {
+        const fixture = createFixture();
+        const item = command();
+        await fixture.tasks.handleNotification(started(item), "thread-1");
+        await fixture.tasks.handleNotification(completed({...item, status: "completed", exitCode: 0}), "thread-1");
+
+        // A list that started before the command ended still names its process.
+        fixture.list.mockResolvedValue(page([terminal()]));
+        await fixture.tasks.sync();
+
+        expect(fixture.updates).toEqual([]);
+    });
+
     it("publishes the terminal state after a background command exits", async () => {
         const fixture = createFixture();
         fixture.list.mockResolvedValue(page([terminal()]));
