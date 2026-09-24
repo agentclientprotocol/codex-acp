@@ -542,7 +542,19 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     SDK client attributes any `idle` to a pending prompt (`acp.ts:2845-2851`), so a queued B's
     `readText()` ends at `idle(A)`/`idle(X)` — client limitation (no prompt id on `state_update`),
     mention in the AIR contract docs;
-    **2(c)-1** (**in flight, programmer dispatched 2026-09-24**) shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
+    **2(c)-1(i)** — **Done (ec550eb)**: `acquireTurnStartReservation(sessionId)` →
+    `TurnStartReservation {wait, needsWait, release}` over `turnStartQueueTail` (per-session promise
+    chain; `needsWait` from the previous slot's synchronous `settled` flag, so no extra tick without
+    contention — needed by `approval-events`/`elicitation-events` tests). v1 `prompt()` is now a
+    wrapper (self-acquires if no reservation passed) around `promptAfterReservation` (old body).
+    `startNewTurnFromExternalPrompt` releases on `prompt()` settle (not on steer acceptance —
+    deadlock otherwise). `promptV2` takes it before any side effect; releases after its idle.
+    -32600 overlap rejection removed (closing check kept). Tests: 5 in `prompt-v2.test.ts`
+    (FIFO, 3 queued, local command, A fails, same-tick G1) + 1 in `CodexAcpClient.test.ts` (goal
+    continuation serialized behind a v2 prompt); `prompt-v2-overlap-rejected.json` deleted. Suite
+    881 / 26. TCK v1 `-k "test_prompt or test_session or test_cancel"` 26/0/3; v2 31/1 (RESUME-202,
+    confirmed pre-existing)/5.
+    **2(c)-1(ii)** J8 + M2 adopt (**in flight, programmer dispatched 2026-09-24**). Original 2(c)-1 scope: shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
     until insertion + J8 (goal turn running → `turn/start` directly) + M2 adopt (J9/J10);
     **2(c)-2** `_session/steering` minted id + `user_message` on landing, steering fallback through
     the reservation (with `running`/`idle`), remove C1 goal-continuation fallback (J11). Cancel
