@@ -2452,9 +2452,13 @@ export class CodexAcpServer {
             sessionState.terminalOutputMode,
         );
 
+        // Hiding the `/review` reviewer prompt is a v2-only change (user decision): v1 keeps
+        // showing it, as it always has.
+        const hiddenItemIds = this.protocolVersion === 2 ? hiddenReviewerPromptItemIds(thread) : null;
         const threadUpdates: UpdateSessionEvent[] = [];
         for (const turn of thread.turns) {
             for (const item of turn.items) {
+                if (item.type === "userMessage" && hiddenItemIds?.has(item.id)) continue;
                 const updates = await this.createHistoryUpdates(item, sessionState);
                 threadUpdates.push(...updates);
             }
@@ -2515,8 +2519,12 @@ export class CodexAcpServer {
     ): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
         const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean}>();
+        // Both v2-only (this path also serves v1's native replay, unchanged there).
+        const hiddenItemIds = this.protocolVersion === 2 ? hiddenReviewerPromptItemIds(thread) : null;
+        const startedReplayMessages = new Set<string>();
         for (const turn of thread.turns) {
             for (const item of turn.items) {
+                if (item.type === "userMessage" && hiddenItemIds?.has(item.id)) continue;
                 if (item.type === "subAgentActivity") {
                     const activityKind = item.kind as string;
                     if (activityKind === "started") {
@@ -2599,6 +2607,9 @@ export class CodexAcpServer {
                 }
                 if (item.type === "collabAgentToolCall") continue;
                 for (const update of await this.createHistoryUpdates(item, sessionState)) {
+                    if (this.protocolVersion === 2) {
+                        await this.sendReplayMessageStart(session, update, startedReplayMessages);
+                    }
                     await session.update(update);
                 }
             }
@@ -2817,6 +2828,9 @@ export class CodexAcpServer {
     ): UpdateSessionEvent {
         return {
             sessionUpdate: "agent_message_chunk",
+            // v2 requires a replayed message to carry a stable id; use the persisted item id.
+            // v1 keeps no id here, to stay byte-identical with existing clients.
+            ...(this.protocolVersion === 2 ? {messageId: item.id} : {}),
             content: {
                 type: "text",
                 text: `${entered ? "Entered" : "Exited"} review mode: ${item.review}`,
@@ -4263,6 +4277,37 @@ export class CodexAcpServer {
         // After turnInterrupt(), Codex will send turn/completed, which naturally completes awaitTurnCompleted().
         await this.interruptSessionTurn(sessionState, "Cancel", false);
     }
+}
+
+/**
+ * A `/review` run persists its reviewer prompt as the first item of its own turn T, which Codex
+ * lists just before the review turn P (P's first item is `enteredReviewMode`). T is never shown
+ * live, and there is no way to distinguish it from an ordinary preceding turn except that T is
+ * minted *after* P: its UUIDv7 turn id sorts higher. Returns the ids of reviewer-prompt
+ * userMessage items to hide from v2 replay (user decision: v2 only, v1 keeps showing them).
+ */
+function hiddenReviewerPromptItemIds(thread: Thread): Set<string> {
+    const hidden = new Set<string>();
+    const turns = thread.turns;
+    for (let i = 0; i + 1 < turns.length; i++) {
+        const t = turns[i]!;
+        const p = turns[i + 1]!;
+        const firstT = t.items[0];
+        const firstP = p.items[0];
+        if (!firstT || firstT.type !== "userMessage" || firstT.clientId !== null) continue;
+        if (!firstP || firstP.type !== "enteredReviewMode") continue;
+        if (!isUuidV7(t.id) || !isUuidV7(p.id) || !(t.id > p.id)) continue;
+        const hasOtherContent = t.items.some((item, index) => (
+            index > 0 && (item.type === "agentMessage" || item.type === "userMessage")
+        ));
+        if (hasOtherContent) continue;
+        hidden.add(firstT.id);
+    }
+    return hidden;
+}
+
+function isUuidV7(id: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
 
 function mergeHistoryUpdates(

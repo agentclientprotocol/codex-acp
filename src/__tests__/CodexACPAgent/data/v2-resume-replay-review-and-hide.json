@@ -1,0 +1,165 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "reviewer-reasoning",
+      "content": [],
+      "sessionUpdate": "agent_thought"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "reviewer-reasoning",
+      "content": {
+        "text": "Reviewing the diff",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_thought_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review-entered",
+      "content": [],
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review-entered",
+      "content": {
+        "text": "Entered review mode: Review the diff",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review-exited",
+      "content": [],
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review-exited",
+      "content": {
+        "text": "Exited review mode: Looks good",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review-summary",
+      "content": [],
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review-summary",
+      "content": {
+        "text": "Review complete.",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "ordinary-prompt",
+      "content": {
+        "text": "Reply with just OK.",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "ordinary-reply",
+      "content": [],
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "ordinary-reply",
+      "content": {
+        "text": "OK",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review2-entered",
+      "content": [],
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review2-entered",
+      "content": {
+        "text": "Entered review mode: Second review",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review2-exited",
+      "content": [],
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review2-exited",
+      "content": {
+        "text": "Exited review mode: All good",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review2-summary",
+      "content": [],
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "review2-summary",
+      "content": {
+        "text": "Second review complete.",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  }
+]
