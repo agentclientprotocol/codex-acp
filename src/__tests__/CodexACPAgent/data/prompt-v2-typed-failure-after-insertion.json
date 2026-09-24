@@ -36,12 +36,6 @@
     "codexNotification": "item/completed"
   },
   {
-    "codexNotification": "item/started"
-  },
-  {
-    "codexNotification": "item/completed"
-  },
-  {
     "sessionUpdate": {
       "messageId": "<messageId>",
       "content": {
@@ -57,6 +51,9 @@
     }
   },
   {
+    "codexNotification": "error"
+  },
+  {
     "codexNotification": "turn/completed"
   },
   {
@@ -67,17 +64,24 @@
   },
   {
     "sessionUpdate": {
-      "title": "Hello",
-      "sessionUpdate": "session_info_update"
-    }
-  },
-  {
-    "sessionUpdate": {
       "stopReason": "end_turn",
       "_meta": {
         "quota": {
           "token_count": null,
           "model_usage": []
+        },
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "sessionFailure": {
+              "id": "turn-1:error",
+              "revision": 1,
+              "category": "limit",
+              "severity": "error",
+              "title": "You've hit your usage limit.",
+              "actions": []
+            }
+          }
         }
       },
       "state": "idle",

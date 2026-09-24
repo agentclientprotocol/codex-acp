@@ -1,6 +1,6 @@
 [
   {
-    "status": "failed",
+    "typed": false,
     "transcript": [
       {
         "codexRequest": "turn/start",
@@ -54,9 +54,6 @@
         }
       },
       {
-        "codexNotification": "turn/completed"
-      },
-      {
         "sessionUpdate": {
           "state": "running",
           "sessionUpdate": "state_update"
@@ -64,8 +61,12 @@
       },
       {
         "sessionUpdate": {
-          "title": "Hello",
-          "sessionUpdate": "session_info_update"
+          "messageId": "<agentMessageId>",
+          "content": {
+            "text": "Codex process has exited with code 1",
+            "type": "text"
+          },
+          "sessionUpdate": "agent_message_chunk"
         }
       },
       {
@@ -84,7 +85,7 @@
     ]
   },
   {
-    "status": "interrupted",
+    "typed": true,
     "transcript": [
       {
         "codexRequest": "turn/start",
@@ -138,9 +139,6 @@
         }
       },
       {
-        "codexNotification": "turn/completed"
-      },
-      {
         "sessionUpdate": {
           "state": "running",
           "sessionUpdate": "state_update"
@@ -148,11 +146,27 @@
       },
       {
         "sessionUpdate": {
-          "stopReason": "cancelled",
+          "stopReason": "end_turn",
           "_meta": {
             "quota": {
               "token_count": null,
               "model_usage": []
+            },
+            "jetbrains": {
+              "air": {
+                "version": 1,
+                "sessionFailure": {
+                  "id": "turn-1:error",
+                  "revision": 1,
+                  "category": "connection",
+                  "severity": "error",
+                  "title": "Connection to Codex was lost.",
+                  "actions": [
+                    "retry",
+                    "new_session"
+                  ]
+                }
+              }
             }
           },
           "state": "idle",

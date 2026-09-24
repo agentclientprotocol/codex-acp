@@ -43,3 +43,29 @@ export function toV1PromptRequest(params: acpV2.PromptRequest): acp.PromptReques
     }
     return params as acp.PromptRequest;
 }
+
+/**
+ * The `idle` state that ends a v2 turn carries what v1 answers the prompt with: the stop reason,
+ * the token usage and the `_meta` (quota, and a typed session failure for clients that
+ * negotiated it).
+ */
+export function toV2IdleState(response: acp.PromptResponse): acpV2.StateUpdate {
+    return {
+        state: "idle",
+        stopReason: response.stopReason,
+        ...(response.usage != null ? {usage: response.usage} : {}),
+        ...(response._meta != null ? {_meta: response._meta} : {}),
+    };
+}
+
+/**
+ * The agent message that tells a v2 client why its prompt failed after it was inserted, when
+ * there is no longer a request to answer with an error.
+ */
+export function postInsertionFailureText(error: unknown, commandName?: string): string {
+    const message = error instanceof Error && error.message.length > 0 ? error.message : null;
+    if (commandName !== undefined) {
+        return message === null ? `The '/${commandName}' command failed.` : `The '/${commandName}' command failed: ${message}`;
+    }
+    return message ?? "The prompt failed.";
+}

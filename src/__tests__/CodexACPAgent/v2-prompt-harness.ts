@@ -104,6 +104,9 @@ export type PromptSession = {
     setupUpdates: acpV2.SessionUpdate[];
     turnStartParams: Array<Record<string, unknown>>;
     setTurnStart(handler: (params: Record<string, unknown>) => Promise<unknown>): void;
+    /** Overrides the canned Codex response for a request method other than `turn/start`. */
+    setCodexResponse(method: string, handler: (params: unknown) => Promise<unknown>): void;
+    appServer: CodexAppServerClient;
     emit(notification: ServerNotification): void;
     sendPrompt(prompt: acpV2.ContentBlock[]): Promise<any>;
     /** Resolves when the n-th internal prompt run (including its background turn) has finished. */
@@ -114,10 +117,15 @@ export type PromptSession = {
 export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     mcpServers?: acpV2.McpServer[],
     mcpStartup?: McpStartupResult,
+    /** Sent on `initialize` (v2 only). */
+    clientCapabilities?: acpV2.ClientCapabilities,
+    /** The Codex process exit code the agent sees (`null` = still running). */
+    exitCode?: () => number | null,
 } = {}): Promise<PromptSession> {
     const mocks = createMockConnections();
     const transcript: TranscriptEntry[] = [];
     const turnStartParams: Array<Record<string, unknown>> = [];
+    const codexResponseOverrides = new Map<string, (params: unknown) => Promise<unknown>>();
     let turnStart: (params: Record<string, unknown>) => Promise<unknown> = async () => ({
         turn: createTurn("inProgress", `turn-${turnStartParams.length}`),
     });
@@ -130,7 +138,8 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             return {turn: createTurn("inProgress", "title-turn")};
         }
         if (method !== "turn/start") {
-            return codexResponse(method);
+            const override = codexResponseOverrides.get(method);
+            return override ? await override(params) : codexResponse(method);
         }
         turnStartParams.push(params as Record<string, unknown>);
         transcript.push({codexRequest: method, params});
@@ -138,14 +147,15 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         transcript.push({codexResponse: method});
         return response;
     });
-    const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
+    const appServer = new CodexAppServerClient(mocks.mockCodexConnection as any);
+    const codexAcpClient = new CodexAcpClient(appServer);
     vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
     vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
     vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
     vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockResolvedValue(options.mcpStartup ?? {ready: [], failed: [], cancelled: []});
     let agent: CodexAcpServer | null = null;
     const router = createAcpAgentRouter((connection) => {
-        agent = new CodexAcpServer(connection, codexAcpClient);
+        agent = new CodexAcpServer(connection, codexAcpClient, undefined, options.exitCode);
         return agent;
     });
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
@@ -174,6 +184,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         await v2Connection.agent.request(acpV2.methods.agent.initialize, {
             protocolVersion: 2,
             info: {name: "test-client", version: "1.0.0"},
+            ...(options.clientCapabilities ? {capabilities: options.clientCapabilities} : {}),
         });
         await v2Connection.agent.request(acpV2.methods.agent.session.new, {cwd, ...(options.mcpServers ? {mcpServers: options.mcpServers} : {})});
         connection = v2Connection;
@@ -220,6 +231,10 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         setTurnStart: (handler: typeof turnStart) => {
             turnStart = handler;
         },
+        setCodexResponse: (method, handler) => {
+            codexResponseOverrides.set(method, handler);
+        },
+        appServer,
         emit,
         sendPrompt,
         promptRunFinished: async (index = 0) => {

@@ -137,7 +137,7 @@ describe('tool calls and messages over ACP v2', () => {
         // Only the read tool call reaches the client; the turn goes on to its `idle`.
         expect(updatesTagged(client, "tool_call", "tool_call_update").map(update => [update.sessionUpdate, (update as {toolCallId?: string}).toolCallId]))
             .toEqual([["tool_call_update", "item-read"]]);
-        expect(client.transcript.at(-1)).toEqual({sessionUpdate: {sessionUpdate: "state_update", state: "idle", stopReason: "end_turn"}});
+        expect(client.transcript.at(-1)).toMatchObject({sessionUpdate: {sessionUpdate: "state_update", state: "idle", stopReason: "end_turn"}});
     });
 
     it('reports MCP server startup failures as tool_call_update upserts', async () => {

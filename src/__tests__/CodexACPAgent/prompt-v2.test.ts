@@ -15,8 +15,52 @@ import {
     isState,
     turnFinished,
     dump,
+    type PromptSession,
+    type TranscriptEntry,
 } from './v2-prompt-harness';
+import type {ServerNotification} from '../../app-server';
+import type {CodexErrorInfo, TurnCompletedNotification} from '../../app-server/v2';
 import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
+
+const typedFailureCapabilities = {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}};
+
+/** Sends a prompt and lets Codex record its user message; resolves once the prompt is answered. */
+async function insertPrompt(client: PromptSession, index: number, id = turnId) {
+    const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+    await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(index + 1));
+    const clientUserMessageId = client.turnStartParams[index]!["clientUserMessageId"] as string;
+    client.emit(turnStarted(id));
+    client.emit(itemCompleted(userMessageItem(clientUserMessageId), id));
+    const {messageId} = await response;
+    return messageId as string;
+}
+
+function turnError(codexErrorInfo: CodexErrorInfo, message: string, id = turnId): ServerNotification {
+    return {
+        method: "error",
+        params: {
+            threadId: sessionId,
+            turnId: id,
+            willRetry: false,
+            error: {message, codexErrorInfo, additionalDetails: null, misalignment: null},
+        },
+    };
+}
+
+function sessionUpdates(transcript: TranscriptEntry[]) {
+    return transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : []);
+}
+
+/** The transcript with the prompt's and the minted agent messages' ids replaced by placeholders. */
+function stableTranscript(transcript: TranscriptEntry[], messageId: string): unknown {
+    let json = dump(transcript, messageId);
+    sessionUpdates(transcript).forEach(update => {
+        if (update.sessionUpdate === "agent_message_chunk") {
+            json = json.replaceAll(update.messageId as string, "<agentMessageId>");
+        }
+    });
+    return JSON.parse(json);
+}
 
 describe('session/prompt over ACP v2', () => {
     let closeClient: (() => void) | null = null;
@@ -89,6 +133,164 @@ describe('session/prompt over ACP v2', () => {
         }
 
         await expect(dump(results)).toMatchFileSnapshot('data/prompt-v2-turn-failed-or-interrupted.json');
+    });
+
+    it('shows a usage-limit or auth error after insertion as agent text, then one idle/end_turn', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        const results = [];
+        for (const [index, [info, message]] of ([
+            ["usageLimitExceeded", "You've hit your usage limit."],
+            ["unauthorized", "Your access token could not be refreshed."],
+        ] as const).entries()) {
+            const id = `turn-${index + 1}`;
+            const start = client.transcript.length;
+            const messageId = await insertPrompt(client, index, id);
+            client.emit(turnError(info, message, id));
+            client.emit(turnFinished("failed", id));
+            await client.promptRunFinished(index);
+            await settle();
+
+            const transcript = client.transcript.slice(start);
+            // v1 fails this prompt with a JSON-RPC error; v2 has answered it already, so the
+            // error text the turn sent is all the client gets, and the turn still ends.
+            expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+            const agentMessages = sessionUpdates(transcript).filter(update => update.sessionUpdate === "agent_message_chunk");
+            expect(agentMessages).toEqual([expect.objectContaining({content: {type: "text", text: `${message}\n\n`}})]);
+            const text = indexOf(transcript, entry => "sessionUpdate" in entry
+                && entry.sessionUpdate.sessionUpdate === "agent_message_chunk");
+            expect(indexOf(transcript, isState("running"))).toBeLessThan(text);
+            expect(text).toBeLessThan(indexOf(transcript, isState("idle")));
+            results.push({info, transcript: stableTranscript(transcript, messageId)});
+        }
+
+        await expect(dump(results)).toMatchFileSnapshot('data/prompt-v2-turn-error-after-insertion.json');
+    });
+
+    it('puts a typed terminal failure on the idle _meta, not in a session update', async () => {
+        const client = await connectSession(2, {clientCapabilities: typedFailureCapabilities});
+        closeClient = () => client.connection.close();
+
+        const start = client.transcript.length;
+        const messageId = await insertPrompt(client, 0);
+        client.emit(turnError("usageLimitExceeded", "You've hit your usage limit."));
+        client.emit(turnFinished("failed"));
+        await client.promptRunFinished();
+        await settle();
+
+        const transcript = client.transcript.slice(start);
+        expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        // Reported once, as v1 reports it once on the prompt response.
+        expect(sessionUpdates(transcript).map(update => update.sessionUpdate))
+            .not.toEqual(expect.arrayContaining(["agent_message_chunk"]));
+        expect(sessionUpdates(transcript).map(update => update.sessionUpdate))
+            .not.toEqual(expect.arrayContaining(["session_info_update"]));
+        const idle = sessionUpdates(transcript).at(-1) as {_meta?: Record<string, any>};
+        expect(idle._meta?.["jetbrains"]?.air?.sessionFailure).toMatchObject({severity: "error"});
+        expect(idle._meta?.["quota"]).toBeDefined();
+        await expect(dump(stableTranscript(transcript, messageId)))
+            .toMatchFileSnapshot('data/prompt-v2-typed-failure-after-insertion.json');
+
+        // The session takes the next prompt.
+        await insertPrompt(client, 1, "turn-2");
+        client.emit(turnCompleted("turn-2"));
+        await client.promptRunFinished(1);
+    });
+
+    it('ends the turn with one idle when the Codex process exits after insertion', async () => {
+        const results = [];
+        for (const typed of [false, true]) {
+            let exitCode: number | null = null;
+            const client = await connectSession(2, {
+                exitCode: () => exitCode,
+                ...(typed ? {clientCapabilities: typedFailureCapabilities} : {}),
+            });
+            closeClient = () => client.connection.close();
+            let loseTransport: (error: Error) => void = () => {};
+            vi.spyOn(client.appServer, "awaitTurnCompleted").mockImplementation(() =>
+                new Promise<TurnCompletedNotification>((_, reject) => {
+                    loseTransport = reject;
+                }));
+
+            const start = client.transcript.length;
+            const messageId = await insertPrompt(client, 0);
+            exitCode = 1;
+            loseTransport(new Error("connection closed"));
+            await client.promptRunFinished();
+            await settle();
+
+            const transcript = client.transcript.slice(start);
+            expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+            const agentMessages = sessionUpdates(transcript).filter(update => update.sessionUpdate === "agent_message_chunk");
+            const idle = sessionUpdates(transcript).at(-1) as {_meta?: Record<string, any>};
+            if (typed) {
+                // Typed-failure clients get the synthetic `transport_lost` failure, as on v1.
+                expect(agentMessages).toEqual([]);
+                expect(idle._meta?.["jetbrains"]?.air?.sessionFailure).toMatchObject({category: "connection"});
+            } else {
+                expect(agentMessages).toEqual([expect.objectContaining({
+                    content: {type: "text", text: "Codex process has exited with code 1"},
+                })]);
+                expect(idle._meta?.["jetbrains"]).toBeUndefined();
+            }
+            results.push({typed, transcript: stableTranscript(transcript, messageId)});
+            client.connection.close();
+            closeClient = null;
+            expectConformingV2SessionUpdates();
+        }
+
+        await expect(dump(results)).toMatchFileSnapshot('data/prompt-v2-process-exit-after-insertion.json');
+    });
+
+    it('ends a failing local command with its error as agent text and one idle', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        client.setCodexResponse("thread/name/set", async () => {
+            throw new ResponseError(-32603, "thread name could not be saved");
+        });
+
+        const {messageId} = await client.sendPrompt([{type: "text", text: "/rename New name"}]);
+        await client.promptRunFinished();
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        const agentMessages = sessionUpdates(client.transcript).filter(update => update.sessionUpdate === "agent_message_chunk");
+        expect(agentMessages).toEqual([expect.objectContaining({
+            content: {type: "text", text: "The '/rename' command failed: thread name could not be saved"},
+        })]);
+        await expect(dump(stableTranscript(client.transcript, messageId)))
+            .toMatchFileSnapshot('data/prompt-v2-local-command-failed.json');
+
+        const second = client.sendPrompt([{type: "text", text: "/plan"}]);
+        await expect(second).resolves.toEqual({messageId: expect.any(String)});
+        await client.promptRunFinished(1);
+    });
+
+    it('carries the v1 usage and quota on the idle that ends a turn', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        await insertPrompt(client, 0);
+        const breakdown = {
+            totalTokens: 1200,
+            inputTokens: 1000,
+            cachedInputTokens: 400,
+            cacheWriteInputTokens: 0,
+            outputTokens: 200,
+            reasoningOutputTokens: 50,
+        };
+        client.emit({
+            method: "thread/tokenUsage/updated",
+            params: {threadId: sessionId, turnId, tokenUsage: {total: breakdown, last: breakdown, modelContextWindow: 200000}},
+        });
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        const idle = sessionUpdates(client.transcript).at(-1);
+        await expect(dump(idle)).toMatchFileSnapshot('data/prompt-v2-idle-usage-and-quota.json');
     });
 
     it('fails the prompt when turn/start is rejected', async () => {

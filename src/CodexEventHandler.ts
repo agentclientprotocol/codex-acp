@@ -197,6 +197,14 @@ const STRUCTURED_CODEX_ERROR_CATEGORIES = {
     activeTurnNotSteerable: "provider_error",
 } satisfies Record<StructuredCodexErrorKind, CodexFailureKind>;
 
+/** Prompt failures whose text the client has already received as an agent message. */
+const failuresShownAsMessages = new WeakSet<RequestError>();
+
+/** Whether a prompt failure's text has already been sent to the client as an agent message. */
+export function failureWasShownAsMessage(error: unknown): boolean {
+    return error instanceof RequestError && failuresShownAsMessages.has(error);
+}
+
 export class CodexEventHandler {
 
     private static readonly PLAN_UPDATE_INTERVAL_MS = 150;
@@ -1236,6 +1244,9 @@ export class CodexEventHandler {
             this.failure = this.sessionState.authConfigured
                 ? RequestError.internalError(this.createTurnErrorData(params.error))
                 : RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message);
+        }
+        if (this.failure !== null) {
+            failuresShownAsMessages.add(this.failure);
         }
         return createAgentTextMessageChunk(`${params.error.message}\n\n`);
     }

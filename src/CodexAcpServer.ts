@@ -1,6 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
-import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
+import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
 import {
@@ -32,7 +32,13 @@ import {
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
 import {toV1ClientCapabilitiesView} from "./AcpV2ClientCapabilities";
 import {toV1SetSessionConfigOptionRequest, toV2ConfigOptions} from "./AcpV2ConfigOptions";
-import {isInsertedUserMessage, toV1PromptRequest, type UserMessageInsertion} from "./AcpV2Prompt";
+import {
+    isInsertedUserMessage,
+    postInsertionFailureText,
+    toV1PromptRequest,
+    toV2IdleState,
+    type UserMessageInsertion,
+} from "./AcpV2Prompt";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
 import type {
     Account,
@@ -3029,16 +3035,31 @@ export class CodexAcpServer {
                     await running;
                     // The session takes the next prompt before `idle` goes out, so a client that
                     // prompts again as soon as it sees `idle` is not rejected as overlapping.
-                    // The stop reason v1 would have answered with ends the v2 turn.
-                    await sendState({state: "idle", stopReason: response.stopReason});
+                    // What v1 would have answered with ends the v2 turn.
+                    await sendState(toV2IdleState(response));
                 },
-                (error: unknown) => {
-                    this.v2PromptsInFlight.delete(sessionId);
-                    if (running !== null) {
-                        logger.error(`Prompt for session ${sessionId} failed after it was inserted`, error);
-                    } else {
+                async (error: unknown) => {
+                    if (running === null) {
+                        this.v2PromptsInFlight.delete(sessionId);
                         reject(error);
+                        return;
                     }
+                    // Past insertion the request is answered, so the failure is told as agent
+                    // text (unless the turn already sent it) and the turn still ends with `idle`.
+                    logger.error(`Prompt for session ${sessionId} failed after it was inserted`, error);
+                    await running;
+                    if (!failureWasShownAsMessage(error)) {
+                        try {
+                            await session.update(createAgentTextMessageChunk(postInsertionFailureText(
+                                error,
+                                promptKind.kind === "localCommand" ? promptKind.name : undefined,
+                            )));
+                        } catch (sendError) {
+                            logger.error(`Failed to send the prompt failure for session ${sessionId}`, sendError);
+                        }
+                    }
+                    this.v2PromptsInFlight.delete(sessionId);
+                    await sendState(toV2IdleState(this.failedPromptResponse(sessionId)));
                 },
             );
         });
@@ -3588,6 +3609,19 @@ export class CodexAcpServer {
     private cancelledPromptResponse(sessionState: SessionState): acp.PromptResponse {
         return {
             stopReason: "cancelled",
+            usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+            _meta: this.buildQuotaMeta(sessionState),
+        };
+    }
+
+    /** The v1-shaped result of a prompt that failed after insertion, for its v2 `idle`. */
+    private failedPromptResponse(sessionId: string): acp.PromptResponse {
+        const sessionState = this.sessions.get(sessionId);
+        if (sessionState === undefined) {
+            return {stopReason: "end_turn"};
+        }
+        return {
+            stopReason: "end_turn",
             usage: this.buildPromptUsage(sessionState.lastTokenUsage),
             _meta: this.buildQuotaMeta(sessionState),
         };

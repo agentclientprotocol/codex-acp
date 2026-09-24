@@ -25,7 +25,7 @@ export type CommandHandleResult =
 
 export type PromptKind =
     | { kind: "prompt" }
-    | { kind: "localCommand" }
+    | { kind: "localCommand", name: string }
     | { kind: "codexTurnCommand", name: string };
 
 export const GOAL_CONTINUATION_PROMPT: acp.ContentBlock[] = [{
@@ -222,19 +222,19 @@ export class CodexCommands {
             case "logout":
             case "skills":
             case "mcp":
-                return {kind: "localCommand"};
+                return {kind: "localCommand", name: command.name};
             case "compact":
             case "review":
                 return {kind: "codexTurnCommand", name: command.name};
             case "review-branch":
             case "review-commit":
                 return command.rest.length === 0
-                    ? {kind: "localCommand"}
+                    ? {kind: "localCommand", name: command.name}
                     : {kind: "codexTurnCommand", name: command.name};
             case "goal": {
                 const argument = command.rest.trim().toLowerCase();
                 if (argument.length === 0 || argument === "pause" || argument === "clear" || argument.length > 4000) {
-                    return {kind: "localCommand"};
+                    return {kind: "localCommand", name: command.name};
                 }
                 return {kind: "codexTurnCommand", name: command.name};
             }

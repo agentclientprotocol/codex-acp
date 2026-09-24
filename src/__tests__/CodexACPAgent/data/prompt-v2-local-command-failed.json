@@ -3,7 +3,7 @@
     "sessionUpdate": {
       "messageId": "<messageId>",
       "content": {
-        "text": "/skills",
+        "text": "/rename New name",
         "type": "text"
       },
       "sessionUpdate": "user_message_chunk"
@@ -22,9 +22,9 @@
   },
   {
     "sessionUpdate": {
-      "messageId": "<replyMessageId>",
+      "messageId": "<agentMessageId>",
       "content": {
-        "text": "No skills configured.",
+        "text": "The '/rename' command failed: thread name could not be saved",
         "type": "text"
       },
       "sessionUpdate": "agent_message_chunk"
