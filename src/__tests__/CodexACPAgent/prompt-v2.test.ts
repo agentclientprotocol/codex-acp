@@ -1,264 +1,22 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
 import {ResponseError} from 'vscode-jsonrpc';
-import {createAcpAgentRouter} from '../../AcpAgentRouter';
-import {CodexAcpServer} from '../../CodexAcpServer';
-import {CodexAcpClient} from '../../CodexAcpClient';
-import {CodexAppServerClient} from '../../CodexAppServerClient';
-import type {ServerNotification} from '../../app-server';
-import type {Thread, ThreadItem, Turn, TurnStatus} from '../../app-server/v2';
-import {createTestModel} from '../acp-test-utils';
-import {createMockConnections} from './test-utils';
-
-const sessionId = "thread-1";
-const turnId = "turn-1";
-const cwd = "/workspace";
-const titleThreadId = "title-thread";
-
-function createThread(): Thread {
-    return {
-        id: sessionId,
-        sessionId,
-        parentThreadId: null,
-        threadSource: null,
-        originator: null,
-        forkedFromId: null,
-        preview: "",
-        ephemeral: false,
-        modelProvider: "openai",
-        model: null,
-        reasoningEffort: null,
-        createdAt: 100,
-        updatedAt: 200,
-        recencyAt: null,
-        status: {type: "idle"},
-        path: null,
-        cwd,
-        cliVersion: "0.0.0",
-        section: null,
-        sectionEnteredAt: null,
-        projectId: null,
-        historyMode: "legacy",
-        source: "cli",
-        agentNickname: null,
-        agentRole: null,
-        gitInfo: null,
-        name: null,
-        turns: [],
-    };
-}
-
-function createTurn(status: TurnStatus, id = turnId): Turn {
-    return {
-        id,
-        items: [],
-        itemsView: "notLoaded",
-        status,
-        error: null,
-        startedAt: null,
-        completedAt: null,
-        durationMs: null,
-    };
-}
-
-/** Canned Codex app-server responses, keyed by method. */
-function codexResponse(method: string): unknown {
-    switch (method) {
-        case "thread/start":
-            return {
-                thread: createThread(),
-                model: "gpt-5",
-                modelProvider: "openai",
-                reasoningEffort: "medium",
-                serviceTier: null,
-                turnsBackwardsCursor: null,
-            };
-        case "model/list":
-            return {data: [createTestModel({id: "gpt-5"})], nextCursor: null};
-        case "skills/list":
-            return {data: []};
-        case "config/read":
-            return {config: {}, origins: {}, layers: []};
-        case "thread/goal/get":
-            return {goal: null};
-        default:
-            return {};
-    }
-}
-
-/** The client-visible transcript of a prompt, in wire order. */
-type TranscriptEntry =
-    | {codexRequest: string, params: unknown}
-    | {codexResponse: string}
-    | {codexNotification: string}
-    | {sessionUpdate: acpV2.SessionUpdate}
-    | {promptResponse: unknown}
-    | {promptError: unknown};
-
-/** Connects a client (v2 by default) to the agent through the router, over a mocked Codex app-server, and opens a session. */
-async function connectSession(protocolVersion: 1 | 2 = 2) {
-    const mocks = createMockConnections();
-    const transcript: TranscriptEntry[] = [];
-    const turnStartParams: Array<Record<string, unknown>> = [];
-    let turnStart: (params: Record<string, unknown>) => Promise<unknown> = async () => ({
-        turn: createTurn("inProgress", `turn-${turnStartParams.length}`),
-    });
-    mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params?: any) => {
-        // The session title is generated on a separate ephemeral thread; keep it out of the way.
-        if (method === "thread/start" && params?.ephemeral) {
-            return {thread: {...createThread(), id: titleThreadId, ephemeral: true}};
-        }
-        if (method === "turn/start" && params?.threadId === titleThreadId) {
-            return {turn: createTurn("inProgress", "title-turn")};
-        }
-        if (method !== "turn/start") {
-            return codexResponse(method);
-        }
-        turnStartParams.push(params as Record<string, unknown>);
-        transcript.push({codexRequest: method, params});
-        const response = await turnStart(params as Record<string, unknown>);
-        transcript.push({codexResponse: method});
-        return response;
-    });
-    const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
-    vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
-    vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
-    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
-    vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockResolvedValue({ready: [], failed: [], cancelled: []});
-    let agent: CodexAcpServer | null = null;
-    const router = createAcpAgentRouter((connection) => {
-        agent = new CodexAcpServer(connection, codexAcpClient);
-        return agent;
-    });
-    const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
-    const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
-    router.connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
-
-    let recordUpdates = false;
-    const setupUpdates: string[] = [];
-    const onUpdate = (update: acpV2.SessionUpdate | acp.SessionUpdate) => {
-        if (recordUpdates) {
-            transcript.push({sessionUpdate: update as acpV2.SessionUpdate});
-        } else {
-            setupUpdates.push(update.sessionUpdate);
-        }
-    };
-    const clientStream = acp.ndJsonStream(clientToAgent.writable, agentToClient.readable);
-    let connection: {close(): void};
-    let request: (method: string, params: unknown) => Promise<any>;
-    if (protocolVersion === 2) {
-        const v2Connection = acpV2.client({name: "test-client"})
-            .onNotification(acpV2.methods.client.session.update, (ctx) => onUpdate(ctx.params.update))
-            .connect(clientStream);
-        await v2Connection.agent.request(acpV2.methods.agent.initialize, {
-            protocolVersion: 2,
-            info: {name: "test-client", version: "1.0.0"},
-        });
-        await v2Connection.agent.request(acpV2.methods.agent.session.new, {cwd});
-        connection = v2Connection;
-        request = (method, params) => v2Connection.agent.request(method as typeof acpV2.methods.agent.session.prompt, params as acpV2.PromptRequest);
-    } else {
-        const v1Connection = acp.client({name: "test-client"})
-            .onNotification(acp.methods.client.session.update, (ctx) => onUpdate(ctx.params.update))
-            .connect(clientStream);
-        await v1Connection.agent.request(acp.methods.agent.initialize, {protocolVersion: acp.PROTOCOL_VERSION});
-        await v1Connection.agent.request(acp.methods.agent.session.new, {cwd, mcpServers: []});
-        connection = v1Connection;
-        request = (method, params) => v1Connection.agent.request(method as typeof acp.methods.agent.session.prompt, params as acp.PromptRequest);
-    }
-    const promptSpy = vi.spyOn(agent!, "prompt");
-    // Session setup publishes updates of its own; wait for them before recording the prompt.
-    await vi.waitFor(() => expect(setupUpdates).toContain("available_commands_update"));
-    recordUpdates = true;
-
-    const emit = (notification: ServerNotification) => {
-        transcript.push({codexNotification: notification.method});
-        mocks.getUnhandledNotificationHandler()!(notification);
-    };
-
-    const sendPrompt = (prompt: acpV2.ContentBlock[]) => {
-        const response = request("session/prompt", {sessionId, prompt}).then(
-            (result) => {
-                transcript.push({promptResponse: result});
-                return result;
-            },
-            (error) => {
-                transcript.push({promptError: {code: error.code, message: error.message, data: error.data}});
-                throw error;
-            },
-        );
-        response.catch(() => {});
-        return response;
-    };
-
-    return {
-        connection,
-        transcript,
-        turnStartParams,
-        setTurnStart: (handler: typeof turnStart) => {
-            turnStart = handler;
-        },
-        emit,
-        sendPrompt,
-        /** Resolves when the n-th internal prompt run (including its background turn) has finished. */
-        promptRunFinished: async (index = 0) => {
-            await vi.waitFor(() => expect(promptSpy.mock.results.length).toBeGreaterThan(index));
-            await promptSpy.mock.results[index]!.value.catch(() => {});
-        },
-    };
-}
-
-function userMessageItem(clientId: string | null, text = "Hello"): ThreadItem {
-    return {type: "userMessage", id: "item-user", clientId, content: [{type: "text", text, text_elements: []}]};
-}
-
-function itemStarted(item: ThreadItem, id = turnId): ServerNotification {
-    return {method: "item/started", params: {threadId: sessionId, turnId: id, item, startedAtMs: 0}};
-}
-
-function itemCompleted(item: ThreadItem, id = turnId): ServerNotification {
-    return {method: "item/completed", params: {threadId: sessionId, turnId: id, item, completedAtMs: 0}};
-}
-
-function turnStarted(id = turnId): ServerNotification {
-    return {method: "turn/started", params: {threadId: sessionId, turn: createTurn("inProgress", id)}};
-}
-
-function turnCompleted(id = turnId): ServerNotification {
-    return {method: "turn/completed", params: {threadId: sessionId, turn: createTurn("completed", id)}};
-}
-
-/** Lets queued notifications and wire messages settle. */
-async function settle() {
-    await new Promise(resolve => setTimeout(resolve, 20));
-}
-
-/** The `state_update`s in the transcript, in wire order. */
-function stateUpdates(transcript: TranscriptEntry[]): Array<{state: string, stopReason?: unknown}> {
-    return transcript.flatMap(entry => "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "state_update"
-        ? [{...entry.sessionUpdate} as {state: string, stopReason?: unknown}]
-        : [])
-        .map(({state, stopReason}) => stopReason === undefined ? {state} : {state, stopReason});
-}
-
-/** Index of the first transcript entry matching the predicate. */
-function indexOf(transcript: TranscriptEntry[], predicate: (entry: TranscriptEntry) => boolean): number {
-    return transcript.findIndex(predicate);
-}
-
-const isState = (state: string) => (entry: TranscriptEntry) =>
-    "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "state_update"
-    && (entry.sessionUpdate as {state: string}).state === state;
-
-function turnFinished(status: TurnStatus, id = turnId): ServerNotification {
-    return {method: "turn/completed", params: {threadId: sessionId, turn: createTurn(status, id)}};
-}
-
-function dump(value: unknown, messageId?: string): string {
-    const json = `${JSON.stringify(value, null, 2)}\n`;
-    return messageId ? json.replaceAll(messageId, "<messageId>") : json;
-}
+import {
+    sessionId,
+    turnId,
+    connectSession,
+    userMessageItem,
+    itemStarted,
+    itemCompleted,
+    turnStarted,
+    turnCompleted,
+    settle,
+    stateUpdates,
+    indexOf,
+    isState,
+    turnFinished,
+    dump,
+} from './v2-prompt-harness';
+import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 describe('session/prompt over ACP v2', () => {
     let closeClient: (() => void) | null = null;
@@ -267,6 +25,7 @@ describe('session/prompt over ACP v2', () => {
         closeClient?.();
         closeClient = null;
         vi.clearAllMocks();
+        expectConformingV2SessionUpdates();
     });
 
     it('answers with the messageId only once Codex records the user message', async () => {
@@ -391,7 +150,7 @@ describe('session/prompt over ACP v2', () => {
             .toMatchFileSnapshot('data/prompt-v2-overlap-rejected.json');
     });
 
-    it('keeps the turn going when an agent message cannot be rendered on v2 yet', async () => {
+    it('keeps the turn going when a tool call cannot be rendered on v2 yet', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
@@ -401,10 +160,13 @@ describe('session/prompt over ACP v2', () => {
         client.emit(turnStarted());
         client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
         await first;
-        client.emit({
-            method: "item/agentMessage/delta",
-            params: {threadId: sessionId, turnId, itemId: "item-agent", delta: "Hi"},
-        });
+        // A file edit: its diff content has no v2 rendering yet.
+        client.emit(itemStarted({
+            type: "fileChange",
+            id: "item-edit",
+            status: "inProgress",
+            changes: [{path: "/workspace/new.ts", kind: {type: "add"}, diff: "export {};\n"}],
+        }));
         client.emit(turnCompleted());
         await client.promptRunFinished();
 
@@ -447,7 +209,7 @@ describe('session/prompt over ACP v2', () => {
         await client.promptRunFinished(1);
     });
 
-    it('stays usable after a local command whose reply cannot be rendered on v2 yet', async () => {
+    it('sends a local command reply as its own agent message', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
@@ -455,10 +217,13 @@ describe('session/prompt over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
-        // The reply fails after insertion. What a v2 client should see then is not decided yet, so
-        // this known gap sends no `idle`.
-        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}]);
-        await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-local-command-reply.json');
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        const reply = client.transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
+            .find(update => update.sessionUpdate === "agent_message_chunk") as {messageId: string} | undefined;
+        expect(reply?.messageId).toEqual(expect.any(String));
+        expect(reply?.messageId).not.toBe(messageId);
+        await expect(dump(client.transcript, messageId).replaceAll(reply!.messageId, "<replyMessageId>"))
+            .toMatchFileSnapshot('data/prompt-v2-local-command-reply.json');
         const second = client.sendPrompt([{type: "text", text: "/plan"}]);
         await expect(second).resolves.toEqual({messageId: expect.any(String)});
         await client.promptRunFinished(1);

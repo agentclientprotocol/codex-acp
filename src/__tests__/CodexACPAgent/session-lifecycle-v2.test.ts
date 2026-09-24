@@ -8,6 +8,7 @@ import {CodexAppServerClient} from '../../CodexAppServerClient';
 import type {Thread} from '../../app-server/v2';
 import {createTestModel} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
+import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 const sessionId = "thread-1";
 const cwd = "/workspace";
@@ -110,6 +111,7 @@ async function connectV2Client() {
     const updates: acpV2.UpdateSessionNotification[] = [];
     const connection = acpV2.client({name: "test-client"})
         .onNotification(acpV2.methods.client.session.update, (ctx) => {
+            checkV2SessionUpdate(ctx.params.update);
             updates.push(ctx.params);
         })
         .connect(acp.ndJsonStream(clientToAgent.writable, agentToClient.readable));
@@ -143,6 +145,7 @@ describe('Session lifecycle over ACP v2', () => {
         closeClient?.();
         closeClient = null;
         vi.clearAllMocks();
+        expectConformingV2SessionUpdates();
     });
 
     it('creates a session without mcpServers and answers with sessionId and configOptions only', async () => {

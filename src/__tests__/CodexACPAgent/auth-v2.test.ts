@@ -8,6 +8,7 @@ import {CodexAppServerClient} from '../../CodexAppServerClient';
 import type {Thread} from '../../app-server/v2';
 import {createTestModel} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
+import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 const sessionId = "thread-1";
 const cwd = "/workspace";
@@ -118,7 +119,7 @@ async function connectV2Client(options: {loginSucceeds?: boolean} = {}) {
     router.connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
 
     const connection = acpV2.client({name: "test-client"})
-        .onNotification(acpV2.methods.client.session.update, () => {})
+        .onNotification(acpV2.methods.client.session.update, (ctx) => checkV2SessionUpdate(ctx.params.update))
         .connect(acp.ndJsonStream(clientToAgent.writable, agentToClient.readable));
     await connection.agent.request(acpV2.methods.agent.initialize, {
         protocolVersion: 2,
@@ -147,6 +148,7 @@ describe('Auth over ACP v2', () => {
         closeClient?.();
         closeClient = null;
         vi.clearAllMocks();
+        expectConformingV2SessionUpdates();
     });
 
     it('requires auth for session/new, then creates the session after auth/login', async () => {

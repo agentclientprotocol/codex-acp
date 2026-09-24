@@ -1,0 +1,34 @@
+[
+  {
+    "toolCallId": "mcp_startup.docs",
+    "title": "mcp__docs__startup",
+    "kind": "other",
+    "status": "failed",
+    "content": [
+      {
+        "content": {
+          "text": "[codex-acp forwarded startup error] MCP server `docs` failed to start: exit code 1",
+          "type": "text"
+        },
+        "type": "content"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "mcp_startup.slow",
+    "title": "mcp__slow__startup",
+    "kind": "other",
+    "status": "failed",
+    "content": [
+      {
+        "content": {
+          "text": "[codex-acp forwarded startup error] MCP server `slow` startup was cancelled.",
+          "type": "text"
+        },
+        "type": "content"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  }
+]

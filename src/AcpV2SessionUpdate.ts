@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import {randomUUID} from "node:crypto";
 import type {AcpSessionUpdate} from "./AcpSessionExtensions";
 import {toV2ConfigOptions} from "./AcpV2ConfigOptions";
 
@@ -52,7 +53,8 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
                 undefined,
                 "'current_mode_update' session update does not exist in ACP v2",
             );
-        // v2 message chunks require `messageId`.
+        // v2 message chunks require `messageId`. A user message without one would not match the
+        // `messageId` of its prompt response, so it is rejected rather than given a fresh id.
         case "user_message_chunk": {
             const {messageId} = update;
             if (messageId == null) {
@@ -63,12 +65,22 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
             }
             return {...update, messageId};
         }
-        // Topic 6: agent message chunks have no `messageId` yet.
+        // Agent chunks without an id are one-off notices sent as a single chunk (warnings, errors,
+        // slash-command replies), so each gets a fresh id and starts its own message. Replayed
+        // history must carry its own ids instead, since they have to be the same on every replay.
         case "agent_message_chunk":
         case "agent_thought_chunk":
-        // Topic 6: v2 merges `tool_call` into `tool_call_update` and reshapes diff/terminal content.
+            return {...update, messageId: update.messageId || randomUUID()};
+        // v2 has no separate create: the first `tool_call_update` for an id creates the tool call.
         case "tool_call":
-        case "tool_call_update":
+        case "tool_call_update": {
+            const {content, ...rest} = update;
+            return {
+                ...rest,
+                sessionUpdate: "tool_call_update",
+                ...(content !== undefined ? {content: content && content.map(toV2ToolCallContent)} : {}),
+            };
+        }
         // Extension updates have no v2 shape yet.
         case "subagent_spawned":
         case "subagent_state_update":
@@ -78,6 +90,21 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
             throw acp.RequestError.internalError(
                 undefined,
                 `'${update.sessionUpdate}' session update is not supported on an ACP v2 connection yet`,
+            );
+    }
+}
+
+function toV2ToolCallContent(content: acp.ToolCallContent): acpV2.ToolCallContent {
+    switch (content.type) {
+        case "content":
+            return content;
+        // v2 diffs carry `changes[]` + `patch` instead of `oldText`/`newText`.
+        case "diff":
+        // v2 terminal output is agent-streamed via `terminal_update`, which is not sent yet.
+        case "terminal":
+            throw acp.RequestError.internalError(
+                undefined,
+                `'${content.type}' tool call content is not supported on an ACP v2 connection yet`,
             );
     }
 }

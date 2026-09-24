@@ -1,0 +1,49 @@
+[
+  {
+    "sessionId": "session-1",
+    "update": {
+      "toolCallId": "call-1",
+      "title": "Run tests",
+      "kind": "execute",
+      "status": "pending",
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "toolCallId": "call-1",
+      "status": "completed",
+      "content": [
+        {
+          "content": {
+            "text": "ok",
+            "type": "text"
+          },
+          "type": "content"
+        }
+      ],
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "toolCallId": "call-1",
+      "content": null,
+      "locations": null,
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "messageId": "item-1",
+      "content": {
+        "text": "hi",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  }
+]

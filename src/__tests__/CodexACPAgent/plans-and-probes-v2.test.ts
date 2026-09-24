@@ -11,6 +11,7 @@ import type {ServerNotification} from '../../app-server';
 import type {Turn} from '../../app-server/v2';
 import {createTestSessionState} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
+import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 const sessionId = "session-1";
 const turnId = "turn-1";
@@ -55,6 +56,7 @@ async function connectV2Client() {
     const updates: acpV2.UpdateSessionNotification[] = [];
     const connection = acpV2.client({name: "test-client"})
         .onNotification(acpV2.methods.client.session.update, (ctx) => {
+            checkV2SessionUpdate(ctx.params.update);
             updates.push(ctx.params);
         })
         .connect(acp.ndJsonStream(clientToAgent.writable, agentToClient.readable));
@@ -98,6 +100,7 @@ describe('Plans, compaction, notices and commands over ACP v2', () => {
         closeClient?.();
         closeClient = null;
         vi.clearAllMocks();
+        expectConformingV2SessionUpdates();
     });
 
     it('sends the structured plan as an items plan_update with a stable planId', async () => {

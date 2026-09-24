@@ -7,6 +7,7 @@ import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
 import {createMockConnections} from './test-utils';
+import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 const usageUpdate: acp.SessionUpdate = {
     sessionUpdate: "usage_update",
@@ -51,6 +52,7 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         closeClient?.();
         closeClient = null;
         vi.clearAllMocks();
+        expectConformingV2SessionUpdates();
     });
 
     async function connectV2Client() {
@@ -58,6 +60,7 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         const received: unknown[] = [];
         const connection = acpV2.client({name: "test-client"})
             .onNotification(acpV2.methods.client.session.update, (ctx) => {
+                checkV2SessionUpdate(ctx.params.update);
                 received.push(ctx.params);
             })
             .connect(clientStream);
@@ -86,6 +89,24 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         await expect(dump(received)).toMatchFileSnapshot('data/session-update-v2-pass-through.json');
     });
 
+    it('renders tool calls and agent chunks in the v2 shape', async () => {
+        const {received, view} = await connectV2Client();
+        const session = new ACPSessionConnection(view, "session-1");
+
+        await session.update({sessionUpdate: "tool_call", toolCallId: "call-1", title: "Run tests", kind: "execute", status: "pending"});
+        await session.update({
+            sessionUpdate: "tool_call_update",
+            toolCallId: "call-1",
+            status: "completed",
+            content: [{type: "content", content: {type: "text", text: "ok"}}],
+        });
+        await session.update({sessionUpdate: "tool_call_update", toolCallId: "call-1", content: null, locations: null});
+        await session.update({sessionUpdate: "agent_message_chunk", messageId: "item-1", content: {type: "text", text: "hi"}});
+
+        await vi.waitFor(() => expect(received).toHaveLength(4));
+        await expect(dump(received)).toMatchFileSnapshot('data/session-update-v2-tool-calls-and-chunks.json');
+    });
+
     it('fails loudly for updates whose v2 shape belongs to a later topic', async () => {
         const {received, view} = await connectV2Client();
         const session = new ACPSessionConnection(view, "session-1");
@@ -93,12 +114,17 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         await expect(session.update({
             sessionUpdate: "tool_call",
             toolCallId: "call-1",
-            title: "Run tests",
-        })).rejects.toThrow("'tool_call' session update is not supported on an ACP v2 connection yet");
+            title: "Edit a.ts",
+            content: [{type: "diff", path: "/workspace/a.ts", oldText: "a", newText: "b"}],
+        })).rejects.toThrow("'diff' tool call content is not supported on an ACP v2 connection yet");
         await expect(view.notify(acp.methods.client.session.update, {
             sessionId: "session-1",
-            update: {sessionUpdate: "agent_message_chunk", content: {type: "text", text: "hi"}},
-        })).rejects.toThrow("'agent_message_chunk' session update is not supported on an ACP v2 connection yet");
+            update: {sessionUpdate: "tool_call_update", toolCallId: "call-2", content: [{type: "terminal", terminalId: "call-2"}]},
+        })).rejects.toThrow("'terminal' tool call content is not supported on an ACP v2 connection yet");
+        await expect(session.update({
+            sessionUpdate: "user_message_chunk",
+            content: {type: "text", text: "hi"},
+        })).rejects.toThrow("'user_message_chunk' session update without a messageId is not supported on an ACP v2 connection");
 
         // A later pass-through update is the first one the client sees.
         await session.update(usageUpdate);
