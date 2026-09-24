@@ -1,7 +1,7 @@
 [
   {
     "terminalId": "item-shell",
-    "command": "/bin/zsh -lc 'npm test'",
+    "command": "npm test",
     "cwd": "/workspace",
     "sessionUpdate": "terminal_update"
   },

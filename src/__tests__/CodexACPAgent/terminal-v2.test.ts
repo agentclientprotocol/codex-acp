@@ -131,6 +131,8 @@ describe('agent-owned terminals over ACP v2', () => {
         // A generic shell command's first update creates the tool call with its title.
         expect(updates.find(update => update.sessionUpdate === "tool_call_update"))
             .toMatchObject({toolCallId: "item-shell", title: "npm test", content: [{type: "terminal", terminalId: "item-shell"}]});
+        // The terminal shows the same text as the title; the raw input keeps the shell wrapper.
+        expect(updates[0]).toMatchObject({sessionUpdate: "terminal_update", command: "npm test"});
         await expect(dumpDecoded(updates)).toMatchFileSnapshot('data/terminal-v2-snapshot.json');
     });
 

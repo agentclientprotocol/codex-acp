@@ -5,6 +5,7 @@ import {randomUUID} from "node:crypto";
 import * as path from "node:path";
 import type {AcpSessionUpdate} from "./AcpSessionExtensions";
 import {toV2ConfigOptions} from "./AcpV2ConfigOptions";
+import {stripShellPrefix} from "./CommandUtils";
 
 /**
  * `planId` of the structured (tool-driven) plan on v2. A session has at most one such plan and
@@ -204,7 +205,7 @@ type TerminalMetaRecord = {
 
 /**
  * `terminal_info` announces the terminal (its `cwd`; the command is the tool call's
- * `rawInput.command`), `terminal_output`/`terminal_output_delta` carry output to append, and
+ * `rawInput.command` without the shell wrapper, the same text as the tool call title), `terminal_output`/`terminal_output_delta` carry output to append, and
  * `terminal_exit` marks completion. Output sent together with the exit is the command's whole
  * output (it is only sent when none was streamed), so it becomes the final snapshot.
  */
@@ -218,7 +219,7 @@ function toV2TerminalUpdates(meta: TerminalMeta, rawInput: unknown): acpV2.Sessi
     if (info) {
         const command = (rawInput as {command?: unknown} | null | undefined)?.command;
         if (typeof command === "string") {
-            terminalUpdate.command = command;
+            terminalUpdate.command = stripShellPrefix(command);
         }
         // v2 requires an absolute `cwd`; history fallbacks may not know it.
         if (typeof info.cwd === "string" && path.isAbsolute(info.cwd)) {
