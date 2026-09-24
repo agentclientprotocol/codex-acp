@@ -29,8 +29,9 @@ topic 5a. The v2 chain currently registers: `initialize`, `session/new|list|clos
    then **2(b)** (`state_update`) — **done** (9da450e, 7645580);
    review cancel-window research **done** (see 2(r) entry); 2(b) Q1/Q2 research **done + decided**
    (see 2(b) entry); **6(a) done** (893a4a3, 8ee7b42).
-   **Queue (one programmer at a time):** **2(e)** post-insertion error + idle `_meta`/`usage`
-   (in flight) → **6(b)** terminal streaming → **6(c)** diffs → **2(h)** v1 `/review-branch`
+   **Queue (one programmer at a time):** ~~2(e)~~ **done** (1e20ae9, 7027ed1) → ~~6(b)~~ **done** (2d25cac, e37457a;
+   2 open questions resolved) → ~~6(c)~~ **done** (1bcd452, 317786a) → **6(d)** strip
+   shell prefix from `terminal_update.command` + end-of-topic-6 full TCK v1 & v2 (in flight) → **2(h)** v1 `/review-branch`
    hang fix (`fix:`) → **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
    prompts (plan-implementation, goal continuation). #4-#6 research landed; all decided.
 2. **Topic 2(a)** (`session/prompt` on v2, idle case only): mint the `messageId` UUID → pass as
@@ -184,6 +185,63 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   `startNewTurnFromExternalPrompt` → 2(a2)/2(c); non-inserted prompts still publish the
   fallback session title from prompt text (minor; revisit in 2(a2)). Note for 6(a): v1
   `createTextEvent` agent chunks already carry `messageId: itemId`.
+- **Topic 6(c)** — **Done (1bcd452, 317786a).** `toV2Diff` in `AcpV2SessionUpdate.ts`: one v2
+  `diff` per file, one `changes[]` entry: add → `{operation:"add"}`, delete → `delete`, update →
+  `modify`, update+`move_path` → `{operation:"move", oldPath, path}` (edit in the patch). Git-style
+  patch generated from v1 `oldText`/`newText` with the existing `diff` dep (`structuredPatch`,
+  context 3, `formatPatch`); bare absolute paths (no `a/`/`b/`); add/delete synthesized per user
+  decision. Codex's own update diffs lack headers, so regenerated. v1 diff `_meta` (`kind`,
+  `jetbrains.air.diffStats`) kept on v2. Move old path: `createFileChangeUpdate(item,
+  protocolVersion)` adds private `_meta.diff_old_path` (`DIFF_OLD_PATH_META_KEY`) on v2 only,
+  stripped by the renderer; call sites in `CodexEventHandler.ts` (live) and
+  `CodexAcpServer.createHistoryUpdates` (replay) pass the version. Fail-loud: unknown/missing
+  `kind`, non-string `diff_old_path`. Permission file-change prompts carry no diff content. Pure
+  rename without edit dropped on both versions (pre-existing). Tests `diff-v2.test.ts` (6) + 6
+  snapshots; guard catches leaked `diff_old_path`/relative paths. Suite 840 / 26. TCK unchanged;
+  real-Codex scratch probe clean (move verified by unit tests only).
+- **Topic 6(b)** — **Done (2d25cac, e37457a).** Design (a): render in the fork. New
+  `toV2SessionUpdates(update): acpV2.SessionUpdate[]` (`AcpV2SessionUpdate.ts`) turns the private
+  `_meta` keys on `tool_call`/`tool_call_update` into v2 updates, strips them (other `_meta` kept),
+  emits terminal updates first, then the tool call update (dropped if nothing left).
+  `AcpV2Connection.updateSession` renders all before sending any. Mapping: `terminal_info` →
+  `terminal_update{terminalId, command (rawInput.command if string), cwd (only if absolute; create
+  only)}`; `terminal_output`/`_delta` without exit → `terminal_output_chunk{data: base64}`;
+  `terminal_exit` → `terminal_update{exitStatus:{exitCode|null, signal:null}}` (+ `output` snapshot if
+  output in the same update). Malformed private meta → fail-loud. `terminal` content passes
+  through. `initializeV2` fixes `terminalOutputMode="terminal_output_delta"`,
+  `terminalOutputDeltaSupported=false` (v1 `_meta` probe ignored on v2);
+  `createCommandOutputDeltaEvent` returns `null` on v2 for commands not in `terminalCommandIds`.
+  Covers `ResponseItemHistoryFallback` replay too. Guard extended (private terminal keys, relative
+  cwd, non-base64 data). Tests `terminal-v2.test.ts` (5) + 4 snapshots; no existing snapshots
+  changed. Suite 835 / 26. TCK unchanged (PATCH-206/207 still skip: TCK prompt runs no command);
+  scratch client vs real Codex clean; title-less tool call gone.
+  **Resolved (`v2-terminal-snapshot-and-command.md`; user decisions 2026-09-24):** keep no
+  snapshot after streaming (spec mandates nothing; `output` omitted = unchanged; snapshot would
+  replace streamed bytes; Codex caps live deltas at 10,000 frames/command and `aggregatedOutput` is
+  a 1 MiB head+tail buffer without the stdin echo — neither source is complete; accepted, same as
+  v1; the architecture "always snapshot" line was advice, not spec). `command` →
+  `stripShellPrefix(rawInput.command)` (→ slice 6(d)). Noted, not scheduled: mid-command joiners
+  never get a snapshot; `stripShellPrefix` ignores PowerShell and leaves quote-escaping residue.
+  **Original deviation:** after streamed deltas, completion carries only `exitStatus`, no
+  `output` snapshot (v1 parity; avoids duplicate bytes, keeps stdin echo). Contradicts
+  architecture/research "always send output at completion". Open Q2: `command` may include a shell
+  wrapper (`/bin/zsh -lc '…'`) when Codex reports no command action — `stripShellPrefix`?
+- **Topic 2(e)** — **Done (1e20ae9, 7027ed1).** In `promptV2`: every inserted prompt gets
+  `running` then exactly one `idle` whether `prompt()` returns or throws. Returned response →
+  `toV2IdleState(response)` (`src/AcpV2Prompt.ts`): `stopReason` + v1 `usage` (omitted if null) +
+  v1 `_meta` unchanged (`quota`, `jetbrains.air.sessionFailure` for typed clients — usage-limit
+  `limit`, `transport_lost` `connection`, `internal_error`). Throw path (untyped clients):
+  usage-limit/auth text already sent by `createErrorEvent` is not re-sent (module-level WeakSet,
+  `failureWasShownAsMessage()`); process exit → v1's "Codex process has exited with code N[: stderr]"
+  as agent text; failing local command → "The '/<name>' command failed: <message>"
+  (`PromptKind.localCommand` now carries `name`); other → message or "The prompt failed.". Then
+  `idle/end_turn`. **Accepted deviation:** throw-path idle also carries session-state `usage` +
+  `_meta.quota` (never `sessionFailure`; one-line revert in `failedPromptResponse`). Tests:
+  `prompt-v2.test.ts` 16; harness gained `clientCapabilities`, `exitCode`, `setCodexResponse`.
+  Suite 830 / 26 skip. TCK unchanged (v1 prompt baseline; v2 12/9/0). **TODO (Phase 4 docs):**
+  document the AIR v2 contract (read `sessionFailure`/`quota` from idle `_meta`; subagent/async
+  renames) in `readme-dev.md`/docs. Unverified live: usage-limit/auth errors always arrive after the
+  userMessage item.
 - **Topic 6(a)** — **Done (893a4a3, 8ee7b42).** All in `toV2SessionUpdate`; no change to
   `ContentChunks.ts` or call sites. Agent/thought chunks keep existing ids (item ids); id-less ones
   (turn error text, config/warning/compaction fallbacks, exited-review text, `/status`, `/skills`,
@@ -284,7 +342,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
-| 6 | Tool calls, messages & terminal streaming | In progress | 6(a) done | 6(b) terminal streaming, then 6(c) | Milestone (a): tool-call upsert fork at `ACPSessionConnection.update()` | Depends on topic 1 |
+| 6 | Tool calls, messages & terminal streaming | In progress | 6(a), 6(b), 6(c) done | 6(d) command strip + full TCK (in flight) | Milestone (a): tool-call upsert fork at `ACPSessionConnection.update()` | Depends on topic 1 |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
 | 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
 | 9 | Config options, modes & plans | **Done** | — | — | 9a + 9b landed |
