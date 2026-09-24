@@ -830,7 +830,16 @@ export class CodexAcpServer {
             history,
         } = await this.getOrCreateSessionWithHistory(params);
 
-        await this.streamThreadHistory(sessionId, thread, history);
+        try {
+            await this.streamThreadHistory(sessionId, thread, history);
+        } catch (err) {
+            // The history pages are read after the session is installed, so a failed read closes the
+            // session again. The client never gets a half-open session.
+            await this.closeSession({sessionId}).catch(closeError => {
+                logger.error(`Failed to close session ${sessionId} after a failed history read`, closeError);
+            });
+            throw err;
+        }
         await this.getSessionState(sessionId).asyncTasks.reconcile();
         // A load response means "the replay is complete"; a late rename echo
         // from a still-running title generation would arrive after it.
@@ -2109,13 +2118,20 @@ export class CodexAcpServer {
                             }
                             if (childItems) {
                                 const commandIds = new Set<string>();
-                                await this.streamNativeThreadHistory(
-                                    childSessionId,
-                                    withCommandIds(childItems, commandIds),
-                                    sessionState,
-                                    new Set([...ancestry, item.agentThreadId]),
-                                    unreadableChildren,
-                                );
+                                try {
+                                    await this.streamNativeThreadHistory(
+                                        childSessionId,
+                                        withCommandIds(childItems, commandIds),
+                                        sessionState,
+                                        new Set([...ancestry, item.agentThreadId]),
+                                        unreadableChildren,
+                                    );
+                                }
+                                catch (error) {
+                                    // The child pages are read lazily. A child that fails midway keeps what it sent.
+                                    unreadableChildren.add(item.agentThreadId);
+                                    logger.error(`Failed to read subagent history ${item.agentThreadId}`, error);
+                                }
                                 try {
                                     await sessionState.asyncTasks.recover(
                                         item.agentThreadId,

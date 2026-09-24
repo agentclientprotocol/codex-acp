@@ -426,6 +426,41 @@ describe("CodexACPAgent - loadSession", () => {
         );
     });
 
+    it("closes the session again when a history page fails after the replay started", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread: {id: "session-1", historyMode: "paginated", turns: [], cwd: "/test/project", name: null, preview: ""},
+            itemsBackwardsCursor: "item:last",
+            model: model.id,
+            modelProvider: "openai",
+            cwd: "/test/project",
+            approvalPolicy: "never",
+            sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        const message = (id: string) => ({turnId: "turn-1", item: {type: "agentMessage", id, text: id, phase: null, memoryCitation: null, delivery: null, questions: null}});
+        appServer.threadItemsList = vi.fn()
+            .mockResolvedValueOnce({data: [message("last")], nextCursor: null, backwardsCursor: null})
+            .mockResolvedValueOnce({data: [message("first")], nextCursor: "page-2", backwardsCursor: null})
+            .mockRejectedValueOnce(new Error("History unavailable"));
+        const closeSpy = vi.spyOn(client, "closeSession").mockResolvedValue(undefined as never);
+
+        await agent.initialize({protocolVersion: 1});
+        await expect(agent.loadSession({sessionId: "session-1", cwd: "/test/project", mcpServers: []}))
+            .rejects.toThrow("History unavailable");
+
+        expect(closeSpy).toHaveBeenCalledWith("session-1");
+        expect(() => agent.getSessionState("session-1")).toThrow();
+    });
+
     it("should not recover session mcp servers during loadSession when request omits them", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
