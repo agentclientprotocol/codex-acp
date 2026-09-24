@@ -520,7 +520,19 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     prompt arriving during a goal turn goes straight to `turn/start` (steer) instead of the queue.
     **All Q3 decisions made; 2(a2-v)/2(c) unblocked.** Milestones:
     **2(a2-v)-1** v2 session-level Codex turn tracking (J5) + `running`/one `idle` for turns no v2
-    prompt owns (Codex goal auto turns, J1-J3) (**in flight, programmer dispatched 2026-09-24**);
+    prompt owns (J1-J3) — **Done (65514c1)**: `SessionState.codexReportedRunningTurnId`;
+    `startCodexTurnTracker` (baseline `subscribeToSessionEvents` at `installSessionState`, all
+    versions, `DENY_ALL_*` handlers); `isCodexTurnRunning(sessionId)`; `trackCodexTurnStart/
+    Completion` (also called from `prompt()`'s handler); `reportUnownedTurnState` (no-op if
+    `v2PromptsInFlight.has` at that event, or v1); `stopReasonForUnownedTurn` (interrupted →
+    cancelled, else end_turn); `AcpV2Connection.setTurnRunningCheck`. Tests
+    `agent-initiated-turns-v2.test.ts` (4). Suite 871 / 26. TCK v1 24/0/3; v2 31/1 (RESUME-202)/5.
+    **Orchestrator review found:** (1) bug — the permission `running` check ignores
+    `v2PromptsInFlight`, so the plan-implementation permission (between turns) leaves the client in
+    `requires_action` until idle; 4 permission snapshots lost `running` because the harness sends no
+    `turn/started`; (2) unverified claim that the baseline tracker's `DENY_ALL_*` handlers match the
+    old no-subscriber reply (runs on v1 too). → **fix slice 2(a2-v)-1f in flight** (programmer
+    dispatched 2026-09-24);
     **2(c)-1** shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
     until insertion + J8 (goal turn running → `turn/start` directly) + M2 adopt (J9/J10);
     **2(c)-2** `_session/steering` minted id + `user_message` on landing, steering fallback through
