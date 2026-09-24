@@ -3544,10 +3544,14 @@ export class CodexAcpServer {
                 sessionState.titleGen.onTurnCompleted(promptText);
             }
 
-            await this.publishFallbackSessionTitle(
-                sessionState,
-                this.createPromptFallbackTitle(params.prompt),
-            );
+            // On v2, a prompt whose user message was never recorded (`pendingInsertion` still set)
+            // never happened from the client's view, so it must not leave a title behind either.
+            if (pendingInsertion === undefined) {
+                await this.publishFallbackSessionTitle(
+                    sessionState,
+                    this.createPromptFallbackTitle(params.prompt),
+                );
+            }
 
             return {
                 stopReason: "end_turn",

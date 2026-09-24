@@ -322,6 +322,9 @@ describe('session/prompt over ACP v2', () => {
         expect(error).not.toBeNull();
         // Never inserted, so the session never left idle.
         expect(stateUpdates(client.transcript)).toEqual([]);
+        // Not inserted: the prompt never happened from the client's view, so no title either.
+        expect(sessionUpdates(client.transcript).map(update => update.sessionUpdate))
+            .not.toEqual(expect.arrayContaining(["session_info_update"]));
         const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
         await expect(dump(client.transcript, clientUserMessageId))
             .toMatchFileSnapshot('data/prompt-v2-turn-start-rejected.json');
@@ -343,6 +346,9 @@ describe('session/prompt over ACP v2', () => {
         expect(client.transcript.some(entry => "sessionUpdate" in entry
             && entry.sessionUpdate.sessionUpdate === "user_message_chunk")).toBe(false);
         expect(stateUpdates(client.transcript)).toEqual([]);
+        // Not inserted: the fallback title from the prompt text must not be published either.
+        expect(sessionUpdates(client.transcript).map(update => update.sessionUpdate))
+            .not.toEqual(expect.arrayContaining(["session_info_update"]));
         const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
         await expect(dump(client.transcript, clientUserMessageId)).toMatchFileSnapshot('data/prompt-v2-not-inserted.json');
     });

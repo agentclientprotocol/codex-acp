@@ -36,12 +36,6 @@
     "codexNotification": "turn/completed"
   },
   {
-    "sessionUpdate": {
-      "title": "Hello",
-      "sessionUpdate": "session_info_update"
-    }
-  },
-  {
     "promptError": {
       "code": -32603,
       "message": "Internal error: The prompt ended before Codex recorded the user message"
