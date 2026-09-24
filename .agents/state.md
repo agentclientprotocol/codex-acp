@@ -31,8 +31,8 @@ topic 5a. The v2 chain currently registers: `initialize`, `session/new|list|clos
    (see 2(b) entry); **6(a) done** (893a4a3, 8ee7b42).
    **Queue (one programmer at a time):** ~~2(e)~~ **done** (1e20ae9, 7027ed1) → ~~6(b)~~ **done** (2d25cac, e37457a;
    2 open questions resolved) → ~~6(c)~~ **done** (1bcd452, 317786a) → ~~6(d)~~ **done** (5aa5f0e, 3c4ffde; topic 6 **done**) → research TCK-U1/TCK-U2 (in flight, see
-   "Open questions"; fix slice to follow) ∥ **2(h)** v1 `/review-branch`
-   hang fix (`fix:`, **in flight**; TCK note `.agents/tck/2h-targeted.md`) → **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
+   "Open questions"; fix slice to follow) ∥ ~~2(h)~~ **done** (76ad33e, bafd17a) → **BLOCKED on acp-tck fix (U1) + user go-ahead** → 2(u2)
+   omitted-params wrapper → **2(a2)** → **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
    prompts (plan-implementation, goal continuation). #4-#6 research landed; all decided.
 2. **Topic 2(a)** (`session/prompt` on v2, idle case only): mint the `messageId` UUID → pass as
    `clientUserMessageId`; resolve the RPC with `{messageId}` + live `user_message` at the matching
@@ -185,6 +185,16 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   `startNewTurnFromExternalPrompt` → 2(a2)/2(c); non-inserted prompts still publish the
   fallback session title from prompt text (minor; revisit in 2(a2)). Note for 6(a): v1
   `createTextEvent` agent chunks already carry `messageId: itemId`.
+- **Topic 2(h)** — **Done (76ad33e, bafd17a).** All in `src/CodexAppServerClient.ts`:
+  `runReview` tracks turn ids with an `enteredReviewMode` item; an `error{willRetry:false}` for P
+  before that ends the wait with a synthesized `turn/completed{P, failed, error}` → existing failed
+  `/review` path (agent text + `end_turn`; typed clients `sessionFailure`). `dropLeakedReviewError`:
+  Codex 0.156.1 reports the *next* turn's `turn/completed` as `failed` with the stale error and no
+  `error` notification (one turn only) → rewritten to `completed` when message + `codexErrorInfo`
+  match and no fatal error came for that turn. Heuristic; shared, so v2 inherits it. Tests
+  `review-turn-ids.test.ts` 12 (+5 snapshots). Suite 844 / 26. TCK v1 `-k "test_prompt or
+  test_cancel"` 8/0/1 (baseline); v2 12 pass, cancel rows fail (topic 3), CANCEL-202 skip→fail and
+  INFO-CANCEL-202 fail→pass are timing-only.
 - **Topic 6(d)** — **Done (5aa5f0e, 3c4ffde).** `toV2TerminalUpdates` sets
   `terminalUpdate.command = stripShellPrefix(command)`; `terminal-v2.test.ts` + 1 snapshot line.
   Suite 840 / 26. **End-of-topic-6 full TCK** (`.agents/tck/6-full-v1-v2.md`, raw
@@ -398,10 +408,21 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   checks. Push is the only v2 identity source (pull not registered), pinned by
   `initialize-v2.test.ts:72-93`. Recommended (c): keep; patch TCK fork to ignore `method` lines;
   alternatives (a) defer to first session open, (a′) push before the first request's response —
-  both change the documented contract. → user decision.
+  both change the documented contract. **User (2026-09-24): proper fix in the acp-tck fork**
+  (`/Users/eugene/Documents/JetBrains/projects/acp-tck`, current branch, no worktree, no push,
+  follow its AGENTS.md). **Blocking:** no codex-acp work until the TCK fix is verified and the user
+  confirms continuing. TCK programmer in flight.
 - (2026-09-24) **TCK-U2** — v2 `session/list` with omitted `params` → -32602. Is omitted params
   valid per ACP v2 / JSON-RPC; is the rejection ours or the SDK router's; v1 behaviour; fix point?
-  → `.agents/research/v2-tck-omitted-params.md`. Status: **in flight.**
+  → `.agents/research/v2-tck-omitted-params.md`. Status: **resolved — real bug, SDK side, v1 too.**
+  JSON-RPC §4 + v2 schema allow omitted `params`; affects registered v2 `session/list` and
+  `auth/logout` (all-optional). SDK 1.5.0 passes `undefined` into a plain `z.object` → -32602
+  (`jsonrpc.ts:595-614`); no fix on origin/main. v1 has the identical bug (live probe; v1 TCK always
+  sends `{}`). Parser override for built-in v2 methods throws in the SDK. Recommended fix: an
+  `AgentConnector` wrapper in `AcpAgentRouter.ts` whose stream `TransformStream` adds `params: {}`
+  to `session/list`/`auth/logout` requests lacking params (incl. batch entries), + upstream SDK
+  issue. Open: apply to v1 too? normalize `null`? who files upstream? → ask user after the TCK
+  fix. Fix slice **2(u2)** queued.
 
 - (2026-09-24) SDK version sanity re-diff: do the v2 types and router API at the latest published
   version match the spec and SDK `origin/main`? → `.agents/research/v2-sdk-version-sanity-check.md`.
