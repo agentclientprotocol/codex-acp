@@ -97,7 +97,9 @@ export type TranscriptEntry =
     | {sessionUpdate: acpV2.SessionUpdate}
     | {promptResponse: unknown}
     | {promptError: unknown}
-    | {permissionRequest: acpV2.RequestPermissionRequest};
+    | {permissionRequest: acpV2.RequestPermissionRequest}
+    | {elicitationRequest: acpV2.CreateElicitationRequest}
+    | {elicitationComplete: acpV2.CompleteElicitationNotification};
 
 export type PromptSession = {
     connection: {close(): void};
@@ -138,6 +140,8 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     exitCode?: () => number | null,
     /** Answers `session/request_permission` (v2 only). Required by tests that trigger one. */
     onRequestPermission?: (request: acpV2.RequestPermissionRequest, signal: AbortSignal) => acpV2.RequestPermissionResponse | Promise<acpV2.RequestPermissionResponse>,
+    /** Answers `elicitation/create` (v2 only). Required by tests that trigger one. */
+    onElicitation?: (request: acpV2.CreateElicitationRequest, signal: AbortSignal) => acpV2.CreateElicitationResponse | Promise<acpV2.CreateElicitationResponse>,
 } = {}): Promise<PromptSession> {
     const mocks = createMockConnections();
     const transcript: TranscriptEntry[] = [];
@@ -204,6 +208,16 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
                     throw new Error("Received a permission request with no onRequestPermission handler configured");
                 }
                 return await options.onRequestPermission(ctx.params, ctx.signal);
+            })
+            .onRequest(acpV2.methods.client.elicitation.create, async (ctx) => {
+                transcript.push({elicitationRequest: ctx.params});
+                if (!options.onElicitation) {
+                    throw new Error("Received an elicitation request with no onElicitation handler configured");
+                }
+                return await options.onElicitation(ctx.params, ctx.signal);
+            })
+            .onNotification(acpV2.methods.client.elicitation.complete, (ctx) => {
+                transcript.push({elicitationComplete: ctx.params});
             })
             .connect(clientStream);
         await v2Connection.agent.request(acpV2.methods.agent.initialize, {

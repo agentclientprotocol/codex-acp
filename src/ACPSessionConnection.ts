@@ -6,6 +6,7 @@ import {
 } from "./AcpSessionExtensions";
 import {toV2SessionUpdates} from "./AcpV2SessionUpdate";
 import {toV1RequestPermissionResponse, toV2RequestPermissionRequest} from "./AcpV2Permissions";
+import {elicitationSessionId, toV1CreateElicitationResponse, toV2CreateElicitationRequest} from "./AcpV2Elicitation";
 import {logger} from "./Logger";
 
 export type AcpClientConnection = Pick<acp.AgentContext, "notify" | "request">;
@@ -88,10 +89,50 @@ export class AcpV2Connection {
     }
 
     /**
+     * Sends `elicitation/create` (wire-identical request/response between versions, per
+     * `AcpV2Elicitation`). Brackets it with `requires_action`/`running` `state_update`s like
+     * `requestPermission()`, but only when the elicitation is session-scoped: a request-scoped
+     * elicitation (e.g. device-code login, sent before any session exists) has no session to
+     * attach a state update to.
+     */
+    async createElicitation(
+        request: acp.CreateElicitationRequest,
+        options?: acp.SendRequestOptions,
+    ): Promise<acp.CreateElicitationResponse> {
+        const sessionId = elicitationSessionId(request);
+        if (sessionId === undefined) {
+            const response = await this.client.request(
+                acpV2.methods.client.elicitation.create,
+                toV2CreateElicitationRequest(request),
+                options,
+            );
+            return toV1CreateElicitationResponse(response);
+        }
+        await this.sendState(sessionId, {state: "requires_action"});
+        try {
+            const response = await this.client.request(
+                acpV2.methods.client.elicitation.create,
+                toV2CreateElicitationRequest(request),
+                options,
+            );
+            return toV1CreateElicitationResponse(response);
+        } finally {
+            if (this.isTurnRunning(sessionId)) {
+                await this.sendState(sessionId, {state: "running"});
+            }
+        }
+    }
+
+    /** Sends `elicitation/complete`, wire-identical between versions. */
+    async completeElicitation(notification: acp.CompleteElicitationNotification): Promise<void> {
+        await this.client.notify(acpV2.methods.client.elicitation.complete, notification);
+    }
+
+    /**
      * A v1-typed view for code that has no v2 send path yet. `_`-prefixed extension methods
-     * are forwarded as-is: their payloads are the same on both versions. `session/update` and
-     * `session/request_permission` are rendered in the v2 shape. Other standard methods are
-     * rejected rather than sent in the v1 wire shape.
+     * are forwarded as-is: their payloads are the same on both versions. `session/update`,
+     * `session/request_permission` and the elicitation methods are rendered in the v2 shape.
+     * Other standard methods are rejected rather than sent in the v1 wire shape.
      */
     extensionOnlyV1View(): AcpClientConnection {
         const view = {
@@ -103,6 +144,9 @@ export class AcpV2Connection {
                     const notification = params as acp.SessionNotification;
                     return this.updateSession(notification.sessionId, notification.update);
                 }
+                if (method === acp.methods.client.elicitation.complete) {
+                    return this.completeElicitation(params as acp.CompleteElicitationNotification);
+                }
                 return rejectStandardMethod(method);
             },
             request: (method: string, params?: unknown, options?: acp.SendRequestOptions) => {
@@ -111,6 +155,9 @@ export class AcpV2Connection {
                 }
                 if (method === acp.methods.client.session.requestPermission) {
                     return this.requestPermission(params as acp.RequestPermissionRequest, options);
+                }
+                if (method === acp.methods.client.elicitation.create) {
+                    return this.createElicitation(params as acp.CreateElicitationRequest, options);
                 }
                 return rejectStandardMethod(method);
             },
