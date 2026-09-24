@@ -81,8 +81,22 @@ BATCH-204/205 (omitted `params`, fixed by 2(u2)).
    - v1 cancel-retry option B (recompute the id per attempt; retry "expected active turn id P but
      found Y" with Y);
    - retry `Close`-named interrupts (`interruptLateStartedTurn`, `interruptSessionTurn(…,"Close")`).
-5. **Topic 4** — (pulled ahead while Q3 is blocked) **4(a)** v2 `session/request_permission` send path +
-   `requires_action` — **in flight, programmer dispatched 2026-09-24**; **4(b)** `elicitation/create`.
+5. **Topic 4** — (pulled ahead while Q3 was blocked) **4(a)** — **Done (4c4e7a6)**: new
+   `src/AcpV2Permissions.ts` (single conversion point `toV2RequestPermissionRequest` /
+   `toV1RequestPermissionResponse`): v2 `title` = `_meta.permission.title` ?? `toolCall.title` (none →
+   internalError), `description` = `_meta.permission.description` (new `readPermissionMeta()`),
+   `subject: {type:"tool_call", toolCall}` with content via exported `toV2ToolCallContent`, `options` /
+   `_meta` unchanged. `AcpV2Connection.requestPermission()` sends `requires_action` before, `running`
+   in `finally` (single-flight; `RequiresActionStateUpdate` has no id). `extensionOnlyV1View().request()`
+   routes `session/request_permission` there. **Deviation (touches v1 code, same v1 behavior for valid
+   outcomes):** `CodexApprovalHandler.ts`/`permissions/mcp.ts` response readers now check
+   `outcome === "selected"` instead of `!== "cancelled"` (ENUM-203 open union). Tests
+   `permissions-v2.test.ts` (7, incl. real plan-implementation permission) + 4 snapshots;
+   `initialize-v2`/`session-update-v2` rejection tests now use `fs/read_text_file`. Suite 867 / 26.
+   TCK v1 `-k test_prompt` 6/1; v2 `-k "test_prompt or test_permission or test_enums or test_patches"`
+   12 pass / 10 skip / 0 fail; PERM-201/ENUM-203/PATCH-209 still skip (TCK "hi" prompt triggers no
+   approval). Check in 2(a2-v): the unconditional `running` after a permission is only right while
+   a turn is running. **4(b)** `elicitation/create` — next after 2(a2-v)/2(c).
    Original scope: permissions / `requires_action`: v2 `request_permission` and `elicitation/create`
    send paths (MCP OAuth, device-code login), plus a v2 device-code test.
 6. **Topic 5b** — resume replay `replayFrom:start`:
@@ -418,7 +432,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
 | 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..iv) done | 2(a2-v) + 2(c) (unblocked; after 4(a)) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
-| 4 | Permission requests & approvals | In progress | 4(a) in flight | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
+| 4 | Permission requests & approvals | In progress | 4(a) done | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
 | 6 | Tool calls, messages & terminal streaming | **Done** | — | — | 6(a)-6(d); end-of-topic full TCK in `.agents/tck/6-full-v1-v2.md` |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
@@ -504,7 +518,14 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     dropped (turn interrupted before the next model call) B never lands → fail B with a JSON-RPC
     error (decision #1). Same path after `session/resume` with an active goal. With J8 = steer, a
     prompt arriving during a goal turn goes straight to `turn/start` (steer) instead of the queue.
-    **All Q3 decisions made; 2(a2-v)/2(c) unblocked** (dispatch after 4(a)).
+    **All Q3 decisions made; 2(a2-v)/2(c) unblocked.** Milestones:
+    **2(a2-v)-1** v2 session-level Codex turn tracking (J5) + `running`/one `idle` for turns no v2
+    prompt owns (Codex goal auto turns, J1-J3) (**in flight, programmer dispatched 2026-09-24**);
+    **2(c)-1** shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
+    until insertion + J8 (goal turn running → `turn/start` directly) + M2 adopt (J9/J10);
+    **2(c)-2** `_session/steering` minted id + `user_message` on landing, steering fallback through
+    the reservation (with `running`/`idle`), remove C1 goal-continuation fallback (J11). Cancel
+    interactions (drop queued prompts with -32800) → topic 3.
   - Pre-existing (v1 too): codex-acp's own goal continuation may collide with Codex's auto one;
     `prompt()` clearing `currentTurnId` (`:3101`) can hide a running Codex turn from cancel/steering.
 
