@@ -5,6 +5,8 @@ import {
     asSdkSessionNotification,
 } from "./AcpSessionExtensions";
 import {toV2SessionUpdates} from "./AcpV2SessionUpdate";
+import {toV1RequestPermissionResponse, toV2RequestPermissionRequest} from "./AcpV2Permissions";
+import {logger} from "./Logger";
 
 export type AcpClientConnection = Pick<acp.AgentContext, "notify" | "request">;
 
@@ -38,11 +40,43 @@ export class AcpV2Connection {
         });
     }
 
+    /** `updateState`, with send failures caught and logged instead of propagated. */
+    private async sendState(sessionId: string, state: acpV2.StateUpdate): Promise<void> {
+        try {
+            await this.updateState(sessionId, state);
+        } catch (error) {
+            logger.error(`Failed to send the '${state.state}' state for session ${sessionId}`, error);
+        }
+    }
+
+    /**
+     * Sends `session/request_permission`, rendered in the v2 wire shape by
+     * `toV2RequestPermissionRequest`. Per the spec, brackets the request with `requires_action`/
+     * `running` `state_update`s: `requires_action` while the request is pending, `running` again
+     * once it settles (granted, denied, cancelled, or errored all count as resumed).
+     */
+    async requestPermission(
+        request: acp.RequestPermissionRequest,
+        options?: acp.SendRequestOptions,
+    ): Promise<acp.RequestPermissionResponse> {
+        await this.sendState(request.sessionId, {state: "requires_action"});
+        try {
+            const response = await this.client.request(
+                acpV2.methods.client.session.requestPermission,
+                toV2RequestPermissionRequest(request),
+                options,
+            );
+            return toV1RequestPermissionResponse(response);
+        } finally {
+            await this.sendState(request.sessionId, {state: "running"});
+        }
+    }
+
     /**
      * A v1-typed view for code that has no v2 send path yet. `_`-prefixed extension methods
-     * are forwarded as-is: their payloads are the same on both versions. `session/update` is
-     * rendered in the v2 shape. Other standard methods are rejected rather than sent in the
-     * v1 wire shape.
+     * are forwarded as-is: their payloads are the same on both versions. `session/update` and
+     * `session/request_permission` are rendered in the v2 shape. Other standard methods are
+     * rejected rather than sent in the v1 wire shape.
      */
     extensionOnlyV1View(): AcpClientConnection {
         const view = {
@@ -56,9 +90,15 @@ export class AcpV2Connection {
                 }
                 return rejectStandardMethod(method);
             },
-            request: (method: string, params?: unknown, options?: acp.SendRequestOptions) => method.startsWith("_")
-                ? this.client.request(method as `_${string}`, params, options)
-                : rejectStandardMethod(method),
+            request: (method: string, params?: unknown, options?: acp.SendRequestOptions) => {
+                if (method.startsWith("_")) {
+                    return this.client.request(method as `_${string}`, params, options);
+                }
+                if (method === acp.methods.client.session.requestPermission) {
+                    return this.requestPermission(params as acp.RequestPermissionRequest, options);
+                }
+                return rejectStandardMethod(method);
+            },
         } as AcpClientConnection;
         v2ConnectionsByView.set(view, this);
         return view;

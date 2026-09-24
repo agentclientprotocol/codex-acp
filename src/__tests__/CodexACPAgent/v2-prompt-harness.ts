@@ -95,7 +95,8 @@ export type TranscriptEntry =
     | {codexNotification: string}
     | {sessionUpdate: acpV2.SessionUpdate}
     | {promptResponse: unknown}
-    | {promptError: unknown};
+    | {promptError: unknown}
+    | {permissionRequest: acpV2.RequestPermissionRequest};
 
 export type PromptSession = {
     connection: {close(): void};
@@ -113,6 +114,12 @@ export type PromptSession = {
     request(method: string, params: unknown): Promise<any>;
     /** Resolves when the n-th internal prompt run (including its background turn) has finished. */
     promptRunFinished(index?: number): Promise<void>;
+    /**
+     * Simulates the app-server calling back for a command/file-change/permissions approval, by
+     * invoking the handler `CodexAppServerClient` registered for it (e.g.
+     * `CommandExecutionApprovalRequest.method`).
+     */
+    triggerApproval(method: string, params: unknown): Promise<unknown>;
 };
 
 /** Connects a client (v2 by default) to the agent through the router, over a mocked Codex app-server, and opens a session. */
@@ -123,6 +130,8 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     clientCapabilities?: acpV2.ClientCapabilities,
     /** The Codex process exit code the agent sees (`null` = still running). */
     exitCode?: () => number | null,
+    /** Answers `session/request_permission` (v2 only). Required by tests that trigger one. */
+    onRequestPermission?: (request: acpV2.RequestPermissionRequest) => acpV2.RequestPermissionResponse | Promise<acpV2.RequestPermissionResponse>,
 } = {}): Promise<PromptSession> {
     const mocks = createMockConnections();
     const transcript: TranscriptEntry[] = [];
@@ -182,6 +191,13 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     if (protocolVersion === 2) {
         const v2Connection = acpV2.client({name: "test-client"})
             .onNotification(acpV2.methods.client.session.update, (ctx) => onUpdate(ctx.params.update))
+            .onRequest(acpV2.methods.client.session.requestPermission, async (ctx) => {
+                transcript.push({permissionRequest: ctx.params});
+                if (!options.onRequestPermission) {
+                    throw new Error("Received a permission request with no onRequestPermission handler configured");
+                }
+                return await options.onRequestPermission(ctx.params);
+            })
             .connect(clientStream);
         await v2Connection.agent.request(acpV2.methods.agent.initialize, {
             protocolVersion: 2,
@@ -243,6 +259,13 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         promptRunFinished: async (index = 0) => {
             await vi.waitFor(() => expect(promptSpy.mock.results.length).toBeGreaterThan(index));
             await promptSpy.mock.results[index]!.value.catch(() => {});
+        },
+        triggerApproval: async (method, params) => {
+            const handler = mocks.getRequestHandler(method);
+            if (!handler) {
+                throw new Error(`No handler registered for '${method}'`);
+            }
+            return await handler(params);
         },
     };
 }

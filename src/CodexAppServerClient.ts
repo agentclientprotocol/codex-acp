@@ -117,19 +117,19 @@ export type McpStartupResult = {
     cancelled: Array<string>;
 };
 
-const CommandExecutionApprovalRequest = new RequestType<
+export const CommandExecutionApprovalRequest = new RequestType<
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
     void
 >('item/commandExecution/requestApproval');
 
-const FileChangeApprovalRequest = new RequestType<
+export const FileChangeApprovalRequest = new RequestType<
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
     void
 >('item/fileChange/requestApproval');
 
-const PermissionsApprovalRequest = new RequestType<
+export const PermissionsApprovalRequest = new RequestType<
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
     void

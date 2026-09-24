@@ -147,17 +147,18 @@ describe('ACP v2 client capability normalization', () => {
     });
 });
 
-describe('ACP v2 connection before the v2 send path exists', () => {
-    it('forwards extension methods and rejects v1-shaped standard methods', async () => {
+describe('ACP v2 connection before the v2 send path exists for other standard methods', () => {
+    it('forwards extension methods and rejects v1-shaped standard methods without a v2 send path', async () => {
         const client = {notify: vi.fn().mockResolvedValue(undefined), request: vi.fn().mockResolvedValue({})};
         const view = new AcpV2Connection(client as any).extensionOnlyV1View();
 
         await view.notify("_auth/status_update", {authStatus: {kind: "none"}});
-        await expect(view.request(acp.methods.client.session.requestPermission, {
+        // `session/request_permission` now has a v2 send path (see permissions-v2.test.ts);
+        // other standard methods without one yet still reject.
+        await expect(view.request(acp.methods.client.fs.readTextFile, {
             sessionId: "session",
-            toolCall: {toolCallId: "call-1"},
-            options: [],
-        })).rejects.toThrow("'session/request_permission' is not supported on an ACP v2 connection yet");
+            path: "/workspace/a.ts",
+        })).rejects.toThrow("'fs/read_text_file' is not supported on an ACP v2 connection yet");
 
         expect(client.notify.mock.calls).toEqual([["_auth/status_update", {authStatus: {kind: "none"}}]]);
     });

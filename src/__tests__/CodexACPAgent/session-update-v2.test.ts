@@ -132,14 +132,14 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         expect(received).toEqual([{sessionId: "session-1", update: usageUpdate}]);
     });
 
-    it('keeps rejecting other standard methods on v2', async () => {
+    it('keeps rejecting standard methods with no v2 send path yet', async () => {
         const {view} = await connectV2Client();
 
-        await expect(view.request(acp.methods.client.session.requestPermission, {
+        // `session/request_permission` now has a v2 send path (see permissions-v2.test.ts).
+        await expect(view.request(acp.methods.client.fs.readTextFile, {
             sessionId: "session-1",
-            toolCall: {toolCallId: "call-1"},
-            options: [],
-        })).rejects.toThrow("'session/request_permission' is not supported on an ACP v2 connection yet");
+            path: "/workspace/a.ts",
+        })).rejects.toThrow("'fs/read_text_file' is not supported on an ACP v2 connection yet");
     });
 
     it('sends v1 updates unchanged over a v1 connection', async () => {

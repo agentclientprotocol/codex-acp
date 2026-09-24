@@ -1,0 +1,61 @@
+[
+  {
+    "sessionUpdate": {
+      "state": "requires_action",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "permissionRequest": {
+      "sessionId": "thread-1",
+      "title": "Run command?",
+      "subject": {
+        "toolCall": {
+          "toolCallId": "cmd-item-1",
+          "title": "Run command",
+          "kind": "execute",
+          "status": "pending",
+          "rawInput": {
+            "command": "ls -la",
+            "cwd": "/workspace"
+          }
+        },
+        "type": "tool_call"
+      },
+      "options": [
+        {
+          "optionId": "allow_once",
+          "name": "Yes, proceed",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "allow_for_session",
+          "name": "Yes, and don't ask again for this command in this session",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "decline",
+          "name": "No, continue without running it",
+          "kind": "reject_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "No, and tell Codex what to do differently",
+          "kind": "reject_once"
+        }
+      ],
+      "_meta": {
+        "permission": {
+          "version": 1,
+          "title": "Run command?"
+        }
+      }
+    }
+  },
+  {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  }
+]

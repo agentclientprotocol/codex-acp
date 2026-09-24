@@ -29,6 +29,20 @@ export function requestPermissionMeta(
     return {permission};
 }
 
+/**
+ * Reads the `title`/`description` `requestPermissionMeta` sets, if present. On ACP v2 these
+ * become the request's top-level `title`/`description` fields (`AcpV2Permissions.ts`).
+ */
+export function readPermissionMeta(
+    meta: acp.RequestPermissionRequest["_meta"],
+): RequestPermissionMetadata | undefined {
+    const permission = meta?.["permission"];
+    if (typeof permission !== "object" || permission === null) return undefined;
+    const {title, description} = permission as Partial<RequestPermissionMetadata>;
+    if (typeof title !== "string") return undefined;
+    return {version: 1, title, ...(typeof description === "string" ? {description} : {})};
+}
+
 export function optionPermissionMeta(
     description?: string | null,
 ): acp.PermissionOption["_meta"] | undefined {

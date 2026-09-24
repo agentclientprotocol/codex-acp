@@ -1,0 +1,52 @@
+[
+  {
+    "sessionUpdate": {
+      "state": "requires_action",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "permissionRequest": {
+      "sessionId": "thread-1",
+      "title": "Make edits?",
+      "subject": {
+        "toolCall": {
+          "toolCallId": "edit-item-1",
+          "title": "Edit files",
+          "kind": "edit",
+          "status": "pending"
+        },
+        "type": "tool_call"
+      },
+      "options": [
+        {
+          "optionId": "allow_once",
+          "name": "Yes, proceed",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "allow_for_session",
+          "name": "Yes, and don't ask again for these files",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "cancel",
+          "name": "No, and tell Codex what to do differently",
+          "kind": "reject_once"
+        }
+      ],
+      "_meta": {
+        "permission": {
+          "version": 1,
+          "title": "Make edits?"
+        }
+      }
+    }
+  },
+  {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  }
+]

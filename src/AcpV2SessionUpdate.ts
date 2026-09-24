@@ -128,7 +128,8 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
     }
 }
 
-function toV2ToolCallContent(content: acp.ToolCallContent): acpV2.ToolCallContent {
+/** Renders a v1 tool call content item in the ACP v2 shape. Shared with permission requests. */
+export function toV2ToolCallContent(content: acp.ToolCallContent): acpV2.ToolCallContent {
     switch (content.type) {
         case "content":
             return content;
