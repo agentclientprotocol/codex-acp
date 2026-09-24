@@ -76,6 +76,8 @@ type ResumedThread = {
     serviceTier: string | null;
     itemsBackwardsCursor: string | null;
     materialized: boolean;
+    /** The mode that the resume response reports. Null when the thread has no rollout yet. */
+    collaborationMode: ModeKind | null;
 };
 
 /**
@@ -556,6 +558,7 @@ export class CodexAcpClient {
                 serviceTier: response.serviceTier,
                 itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
                 materialized: true,
+                collaborationMode: response.collaborationMode?.mode ?? null,
             };
         } catch (err) {
             if (!isMissingRolloutError(err)) throw err;
@@ -579,6 +582,7 @@ export class CodexAcpClient {
                 // yet"), and there is nothing to list either way.
                 itemsBackwardsCursor: null,
                 materialized: false,
+                collaborationMode: null,
             };
         }
     }
@@ -601,7 +605,8 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
-            collaborationMode: this.getCollaborationMode(response.thread.id),
+            // Codex sends no thread/settings/updated on a resume. The response holds the mode.
+            collaborationMode: response.collaborationMode ?? this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
@@ -655,7 +660,8 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
-            collaborationMode: this.getCollaborationMode(response.thread.id),
+            // Codex sends no thread/settings/updated on a resume. The response holds the mode.
+            collaborationMode: response.collaborationMode ?? this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             thread,

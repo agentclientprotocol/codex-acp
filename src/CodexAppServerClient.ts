@@ -298,6 +298,7 @@ export class CodexAppServerClient {
         this.notificationHandlers.delete(threadId);
         this.approvalHandlers.delete(threadId);
         this.elicitationHandlers.delete(threadId);
+        this.threadSettings.delete(threadId);
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
