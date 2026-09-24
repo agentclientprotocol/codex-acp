@@ -13,9 +13,9 @@ part-done; topic 10 not started (2026-09-24).
 
 State as of the flush for a fresh orchestrator restart (2026-09-24, second flush): **no agents in
 flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`, last code commit
-`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`, 3(b) `8815bd5`, 3(c) `6aa86ed`, 3(d) `17d8a62`, 3-full `30cc414`, 4(b) `f901d30`, 5b-1 `bcab7b7`) and in the acp-tck fork (`main`, 4
+`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`, 3(b) `8815bd5`, 3(c) `6aa86ed`, 3(d) `17d8a62`, 3-full `30cc414`, 4(b) `f901d30`, 5b-1 `bcab7b7`, 4(c) `ad03c16`) and in the acp-tck fork (`main`, 4
 local commits, **not pushed**; the user said don't push). Keep committing with explicit pathspecs.
-Suite: **915 pass / 26 skip** (after 5b-1). **Next: 4(c), then 5b-2 (Q-5B decisions; Q1 pending).**
+Suite: **918 pass / 26 skip** (after 4(c)). **Next: 5b-2 (Q-5B decisions; Q1 pending with the user).**
 
 **Standing user rules (2026-09-24):** preserve v1 client-visible behavior (change v1 only to fix a
 real bug, with nothing else v1-visible changing); **always assume the latest Codex** (currently the
@@ -178,7 +178,13 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
    `isTurnRunning` once before sending; not busy → no `requires_action` and no trailing `running`;
    busy → `running` in `finally` only if still busy. Slice **4(c)**, after 5b-1 lands. Also fix the
    wrong "only ever fires mid-turn" comment in `elicitation-v2.test.ts` and add tests for both idle
-   paths. Routed: subagent child sessions (`isSessionBusy(child)` always false → with (a) no
+   paths. **4(c) — Done (ad03c16)**: private `withStateBracket(sessionId, sendRequest)` in
+   `AcpV2Connection` (checks `isTurnRunning` once; idle → no states; busy → `requires_action` +
+   `running` in `finally` if still busy), used by `requestPermission()` + session-scoped
+   `createElicitation()`. Harness: `connectSession({codexResponses})`. +3 tests in
+   `elicitation-v2.test.ts` (OAuth at session open; idle `turnId:null` MCP elicitation; its
+   permission fallback), comment fixed. Suite 918 / 26. TCK v2 `-k "test_permission or test_state
+   or test_prompt"` 9/0/2. **Topic 4 done.** Routed: subagent child sessions (`isSessionBusy(child)` always false → with (a) no
    `requires_action` for child-session permissions) → topic 10; idle-time requests use the finished
    prompt's `interactionSignal` so `session/cancel` can't abort them (unscheduled); OAuth elicitation
    may precede the `session/new` response (unscheduled).
@@ -631,7 +637,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
 | 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i), J11, J11b, G-render done | — (topic 2 done apart from small follow-ups) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | **Done** | — | — | Depends on topic 2's `state_update` fork existing |
-| 4 | Permission requests & approvals | In progress | 4(a), 4(b) done | 4(c) no `requires_action` when idle | Depends on topic 2's `state_update` fork existing |
+| 4 | Permission requests & approvals | **Done** | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a, 5b-1 done | 5b-2 (Q-5B decisions) | Depends on topics 1, 9 |
 | 6 | Tool calls, messages & terminal streaming | **Done** | — | — | 6(a)-6(d); end-of-topic full TCK in `.agents/tck/6-full-v1-v2.md` |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
