@@ -36,7 +36,14 @@ BATCH-204/205 (omitted `params`, fixed by 2(u2)).
    -32602, v2 `session/new` no params → -32602, v1 no params → -32602) + 2 snapshots. Suite
    850 / 26. TCK v2 `-k "test_batch or test_jsonrpc"`: JSONRPC-001, BATCH-204/205 now PASS (M 5/0,
    A 5/0, I 2/0/3 skip); v1 same `-k`: no fails (baseline).
-2. **2(a2)** — split into milestones: **2(a2-i)** `/compact` + `/goal` command turns (**in flight, programmer dispatched 2026-09-24**); **2(a2-ii)**
+2. **2(a2)** — split into milestones: **2(a2-i)** `/compact` + `/goal` command turns — **Done (427cdf8)**: `promptV2` rejects only
+   `/review*` now; insertion = successful `thread/compact/start` / `thread/goal/set` response (research
+   summary table) via new `onCommandAccepted` in `CommandHandleOptions` → `resolvePendingInsertion()`
+   in `prompt()` (only when `insertion` is given; v1 call shapes unchanged); `runCompact`/`runGoalSet`
+   gained `onAccepted`. 5 new tests in `prompt-v2.test.ts` + 6 snapshots. Suite 855 / 26. TCK v1/v2
+   `-k test_prompt` baseline. Note for 2(a2-iii): `/goal resume` falling back to
+   `GOAL_CONTINUATION_PROMPT` reuses the already-resolved insertion (no new minted id; untested) —
+   that continuation needs its own minted `clientUserMessageId` + live `user_message`; **2(a2-ii)**
    `/review`; **2(a2-iii)** synthetic prompts (plan-implementation, goal continuation) + overlap
    check for `startNewTurnFromExternalPrompt` + fallback title fix. — Codex command turns (`/review`, `/compact`, `/goal`) and synthetic prompts
    (plan-implementation, goal continuation) on v2. Use the two-id tracking from 2(r), with no clientId matcher
@@ -386,7 +393,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2) done | 2(a2-i), then 2(a2-ii/iii), 2(c) | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i) done | 2(a2-ii), 2(a2-iii), 2(c) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
