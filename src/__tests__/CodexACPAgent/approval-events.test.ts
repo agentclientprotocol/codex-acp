@@ -16,6 +16,14 @@ type CommandParams = CommandExecutionRequestApprovalParams & {
     availableDecisions?: unknown;
 };
 
+function deferred<T>(): {promise: Promise<T>; resolve: (value: T) => void} {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((innerResolve) => {
+        resolve = innerResolve;
+    });
+    return {promise, resolve};
+}
+
 describe("Approval Events", () => {
     let fixture: CodexMockTestFixture;
     const sessionId = "test-session-id";
@@ -568,6 +576,66 @@ describe("Approval Events", () => {
             expect(JSON.stringify(requests)).not.toContain("approval-a");
             expect(JSON.stringify(requests)).not.toContain("approval-b");
             await finish(prompt);
+        });
+
+        it("aborts a pending approval's cancellation signal on session/cancel and ends the prompt cancelled", async () => {
+            let resolveTurnCompleted!: (value: {
+                threadId: string;
+                turn: {id: string; items: never[]; status: string; error: null};
+            }) => void;
+            const turnCompletedPromise = new Promise<{
+                threadId: string;
+                turn: {id: string; items: never[]; status: string; error: null};
+            }>(resolve => {
+                resolveTurnCompleted = resolve;
+            });
+            fixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
+                turn: {id: "turn-1", items: [], status: "inProgress", error: null},
+            });
+            fixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockReturnValue(turnCompletedPromise);
+            const sessionState: SessionState = createTestSessionState({
+                sessionId,
+                currentModelId: "model-id[effort]",
+                agentMode: AgentMode.DEFAULT_AGENT_MODE,
+            });
+            vi.spyOn(fixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
+            // `cancel()` looks the session up in the live `sessions` map, not through the
+            // `getSessionState` mock other tests in this file rely on.
+            // @ts-expect-error - registering local session state for the cancel path
+            fixture.getCodexAcpAgent().sessions.set(sessionId, sessionState);
+            const promptPromise = fixture.getCodexAcpAgent().prompt({
+                sessionId,
+                prompt: [{type: "text", text: "Test prompt"}],
+            });
+
+            const turnInterrupt = vi.spyOn(fixture.getCodexAcpClient(), "turnInterrupt")
+                .mockImplementation(async () => {
+                    resolveTurnCompleted({
+                        threadId: sessionId,
+                        turn: {id: "turn-1", items: [], status: "interrupted", error: null},
+                    });
+                });
+            const permission = deferred<{outcome: {outcome: string; optionId?: string}}>();
+            fixture.setPermissionResponse(permission.promise as any);
+
+            const approvalPromise = fixture.sendServerRequest<{decision: unknown}>(
+                "item/commandExecution/requestApproval",
+                commandParams(["accept", "decline", "cancel"]),
+            );
+            await vi.waitFor(() => expect(permissionRequest()).toBeDefined());
+            await vi.waitFor(() => expect(sessionState.currentTurnId).toBe("turn-1"));
+
+            await fixture.getCodexAcpAgent().cancel({sessionId});
+
+            expect(turnInterrupt).toHaveBeenCalledWith({threadId: sessionId, turnId: "turn-1"});
+            const requestOptions = fixture.getAcpRequestOptions("session/request_permission");
+            expect(requestOptions.length).toBeGreaterThan(0);
+            expect(requestOptions[0]?.cancellationSignal?.aborted).toBe(true);
+
+            // A conforming client answers `cancelled` once it has seen `session/cancel`, per the ACP spec.
+            permission.resolve({outcome: {outcome: "cancelled"}});
+            expect(await approvalPromise).toEqual({decision: "cancel"});
+            await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
         });
     });
 

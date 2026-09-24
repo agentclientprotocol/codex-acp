@@ -244,6 +244,35 @@ describe("CodexACPAgent - plan review", () => {
         expect(sessionState.collaborationMode).toBe(PLAN_COLLABORATION_MODE);
     });
 
+    it("ends the prompt as cancelled, not end_turn, when session/cancel arrives during the plan review", async () => {
+        const permission = deferred<acp.RequestPermissionResponse>();
+        const {promptPromise, sessionState, turnStart} = await startPlanPrompt(null, {
+            permissionResponse: permission.promise,
+        });
+        await vi.waitFor(() => {
+            expect(fixture.getAcpConnectionEvents([])).toContainEqual({
+                method: "requestPermission",
+                args: [expect.objectContaining({sessionId})],
+            });
+        });
+
+        // `cancel()` looks the session up in the live `sessions` map, not through the
+        // `getSessionState` mock `startPlanPrompt` relies on.
+        // @ts-expect-error - registering local session state for the cancel path
+        fixture.getCodexAcpAgent().sessions.set(sessionId, sessionState);
+        // The plan turn has already completed, so Codex rejects `turn/interrupt` for its stale
+        // turn id; codex-acp must still end the prompt as cancelled via `cancelRequested`.
+        const turnInterrupt = vi.spyOn(fixture.getCodexAcpClient(), "turnInterrupt")
+            .mockRejectedValue(new Error("no such turn"));
+
+        await fixture.getCodexAcpAgent().cancel({sessionId});
+        expect(turnInterrupt).toHaveBeenCalledWith({threadId: sessionId, turnId: "plan-turn"});
+
+        permission.resolve({outcome: {outcome: "cancelled"}});
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+        expect(turnStart).toHaveBeenCalledTimes(1);
+    });
+
     it("routes a terminal error during plan approval as a session-scoped failure", async () => {
         const permission = deferred<acp.RequestPermissionResponse>();
         const {promptPromise, sessionState, turnStart} = await startPlanPrompt(null, {

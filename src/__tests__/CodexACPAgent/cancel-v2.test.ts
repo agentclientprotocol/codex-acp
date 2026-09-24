@@ -1,16 +1,57 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import {CommandExecutionApprovalRequest} from '../../CodexAppServerClient';
+import type {CommandExecutionRequestApprovalParams} from '../../app-server/v2';
 import {
     connectSession,
     createTurn,
     userMessageItem,
     itemCompleted,
     turnStarted,
+    turnCompleted,
     turnFinished,
     settle,
     stateUpdates,
     dump,
+    sessionId,
+    turnId,
+    cwd,
+    type PromptSession,
 } from './v2-prompt-harness';
 import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
+
+function deferred<T>(): {promise: Promise<T>; resolve: (value: T) => void} {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((innerResolve) => {
+        resolve = innerResolve;
+    });
+    return {promise, resolve};
+}
+
+function commandApprovalParams(): CommandExecutionRequestApprovalParams {
+    return {
+        kind: "command",
+        threadId: sessionId,
+        turnId,
+        itemId: "cmd-item-1",
+        startedAtMs: 0,
+        environmentId: null,
+        command: "ls -la",
+        cwd,
+    };
+}
+
+/** Starts a prompt and lets its turn actually start, without inserting its user message yet. */
+async function startRunningPrompt(client: PromptSession) {
+    client.setTurnStart(async () => ({
+        turn: createTurn("inProgress"),
+    }));
+    const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+    await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+    const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+    client.emit(turnStarted());
+    return {response, clientUserMessageId};
+}
 
 describe('session/cancel and session/close over ACP v2', () => {
     let closeClient: (() => void) | null = null;
@@ -281,5 +322,95 @@ describe('session/cancel and session/close over ACP v2', () => {
         await settle();
 
         expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+    });
+
+    it('aborts a pending command approval on session/cancel and ends with exactly one idle/cancelled', async () => {
+        const permission = deferred<acpV2.RequestPermissionResponse>();
+        let capturedSignal: AbortSignal | undefined;
+        const client = await connectSession(2, {
+            onRequestPermission: async (_request, signal) => {
+                capturedSignal = signal;
+                return permission.promise;
+            },
+        });
+        closeClient = () => client.connection.close();
+
+        const {response, clientUserMessageId} = await startRunningPrompt(client);
+        const start = client.transcript.length;
+
+        const approvalPromise = client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams());
+        await vi.waitFor(() => expect(capturedSignal).toBeDefined());
+        expect(capturedSignal!.aborted).toBe(false);
+
+        await client.cancel();
+        await vi.waitFor(() => expect(capturedSignal!.aborted).toBe(true));
+
+        // A conforming client answers `cancelled` once it has seen `session/cancel`.
+        permission.resolve({outcome: {outcome: "cancelled"}});
+        expect(await approvalPromise).toEqual({decision: "cancel"});
+
+        client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
+        client.emit(turnFinished("interrupted"));
+        await response;
+        await client.promptRunFinished();
+        await settle();
+
+        // The trailing extra `running` (before settling to `idle`) reflects a late permission
+        // answer arriving after cancellation; scoping that transition is a separate concern.
+        const transcript = client.transcript.slice(start);
+        expect(stateUpdates(transcript)).toEqual([
+            {state: "requires_action"},
+            {state: "running"},
+            {state: "running"},
+            {state: "idle", stopReason: "cancelled"},
+        ]);
+    });
+
+    it('ends the plan-implementation review as idle/cancelled, not idle/end_turn, on session/cancel', async () => {
+        const permission = deferred<acpV2.RequestPermissionResponse>();
+        let capturedSignal: AbortSignal | undefined;
+        const client = await connectSession(2, {
+            onRequestPermission: async (_request, signal) => {
+                capturedSignal = signal;
+                return permission.promise;
+            },
+        });
+        closeClient = () => client.connection.close();
+
+        // Switch into plan mode first; `/plan` is a local command and starts no turn.
+        await client.sendPrompt([{type: "text", text: "/plan"}]);
+        await client.promptRunFinished(0);
+        await settle();
+
+        const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+        client.emit(turnStarted());
+        client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
+        await response;
+        client.emit(itemCompleted({type: "plan", id: "plan-item", text: "1. Do the change."}));
+        client.emit(turnCompleted());
+
+        await vi.waitFor(() => expect(capturedSignal).toBeDefined());
+        const start = client.transcript.length;
+
+        // The plan turn has already completed, so `turn/interrupt` targets its stale turn id and
+        // has no real effect; codex-acp must still end the prompt as cancelled via `cancelRequested`.
+        await client.cancel();
+        await vi.waitFor(() => expect(capturedSignal!.aborted).toBe(true));
+
+        permission.resolve({outcome: {outcome: "cancelled"}});
+        await client.promptRunFinished(1);
+        await settle();
+
+        // No implementation turn is started once the review is cancelled.
+        expect(client.turnStartParams).toHaveLength(1);
+        // The leading `running` (before settling to `idle`) reflects a late permission answer
+        // arriving after cancellation; scoping that transition is a separate concern.
+        const transcript = client.transcript.slice(start);
+        expect(stateUpdates(transcript)).toEqual([
+            {state: "running"},
+            {state: "idle", stopReason: "cancelled"},
+        ]);
     });
 });

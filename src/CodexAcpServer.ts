@@ -366,9 +366,19 @@ interface ActivePrompt {
     closeSignal: Promise<null>;
     cancelSignal: Promise<null>;
     signal: AbortSignal;
+    /**
+     * Aborted for outbound permission/elicitation requests only (plain `session/cancel`,
+     * `requestCancel`, `requestClose`). Kept separate from `signal`, which also drives pre-turn
+     * prompt flow (`cancelBeforeTurnStarted`, local commands, native-subagent waits,
+     * `interruptLateStartedTurn`) and must keep its current behavior on plain `session/cancel`.
+     */
+    interactionSignal: AbortSignal;
+    /** Set by plain `session/cancel` so the plan-review branch can detect cancellation without `signal` being aborted. */
+    cancelRequested: boolean;
     currentTurn: { threadId: string, turnId: string } | null;
     requestCancel: () => void;
     requestClose: () => void;
+    abortInteractions: () => void;
     complete: () => void;
 }
 
@@ -2973,6 +2983,7 @@ export class CodexAcpServer {
             resolveCancelSignal = resolve;
         });
         const abortController = new AbortController();
+        const interactionAbortController = new AbortController();
 
         let completed = false;
         let closeRequested = false;
@@ -2981,8 +2992,11 @@ export class CodexAcpServer {
             closeSignal,
             cancelSignal,
             signal: abortController.signal,
+            interactionSignal: interactionAbortController.signal,
+            cancelRequested: false,
             currentTurn: null,
             requestCancel: () => {
+                activePrompt.abortInteractions();
                 if (abortController.signal.aborted) {
                     return;
                 }
@@ -2996,6 +3010,9 @@ export class CodexAcpServer {
                 closeRequested = true;
                 activePrompt.requestCancel();
                 resolveCloseSignal(null);
+            },
+            abortInteractions: () => {
+                interactionAbortController.abort();
             },
             complete: () => {
                 if (completed) {
@@ -3562,13 +3579,13 @@ export class CodexAcpServer {
             const approvalHandler = new CodexApprovalHandler(
                 this.connection,
                 permissionContext,
-                activePrompt.signal,
+                activePrompt.interactionSignal,
             );
             const elicitationHandler = new CodexElicitationHandler(
                 this.connection,
                 permissionContext,
                 this.clientCapabilities,
-                activePrompt.signal,
+                activePrompt.interactionSignal,
             );
             const observeInteraction = async (event: ServerNotification): Promise<void> => {
                 permissionContext.handleNotification(event);
@@ -3830,9 +3847,12 @@ export class CodexAcpServer {
                 const approved = await this.requestPlanImplementationPermission(
                     sessionState,
                     completedPlan,
-                    activePrompt.signal,
+                    activePrompt.interactionSignal,
                 );
-                if (this.promptShouldStop(params.sessionId, activePrompt)) {
+                // `cancelRequested` catches plain `session/cancel`, which doesn't abort `signal`
+                // (that would also change pre-turn prompt flow); without it this branch would
+                // fall through to `end_turn` instead of `cancelled`.
+                if (this.promptShouldStop(params.sessionId, activePrompt) || activePrompt.cancelRequested) {
                     return cancelledPromptResponse();
                 }
                 if (approved && !this.promptShouldStop(params.sessionId, activePrompt)) {
@@ -4171,6 +4191,15 @@ export class CodexAcpServer {
         if (!sessionState) {
             logger.log("Cancel request rejected: session not found", {sessionId: params.sessionId});
             return;
+        }
+
+        // Abort outbound permission/elicitation requests synchronously, before awaiting the turn
+        // interrupt below (which can itself wait on a pending turn start). Mark cancelRequested so
+        // the plan-review branch can detect this cancellation even though it doesn't abort `signal`.
+        const activePrompt = this.activePrompts.get(params.sessionId);
+        if (activePrompt) {
+            activePrompt.cancelRequested = true;
+            activePrompt.abortInteractions();
         }
 
         // Drop every v2 prompt still queued (not yet inserted) before interrupting the running
