@@ -25,8 +25,11 @@ topic 5a. The v2 chain currently registers: `initialize`, `session/new|list|clos
 1. ~~Resolve insertion open questions~~ #1-#3 decided by user (see "Codex insertion signal").
    #4-#6 → researcher in flight (`v2-codex-insertion-followups.md`). Topic 8 **done**.
    2(a) is split: **2(a1)** = plain prompts + locally handled slash commands — **done** (99f13e7,
-   0e38d35); then **2(r)** (v1 `/review` two-id fix, see Q5 below) — **programmer in flight**;
-   then **2(b)** (`state_update`; unblocks v2 TCK prompt rows); then **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
+   0e38d35); then **2(r)** (v1 `/review` two-id fix) — **done** (1c46656, 3a1a93a);
+   then **2(b)** (`state_update`) — **done** (9da450e, 7645580);
+   review cancel-window research **done** (see 2(r) entry); researcher in flight on 2(b) Q1/Q2 (post-insertion throw;
+   idle `_meta`/`usage`) → `v2-post-insertion-errors-and-idle-meta.md`; **6(a) programmer in
+   flight**; then the 2(b) Q1 fix, then **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
    prompts (plan-implementation, goal continuation). #4-#6 research landed; all decided.
 2. **Topic 2(a)** (`session/prompt` on v2, idle case only): mint the `messageId` UUID → pass as
    `clientUserMessageId`; resolve the RPC with `{messageId}` + live `user_message` at the matching
@@ -179,6 +182,53 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   `startNewTurnFromExternalPrompt` → 2(a2)/2(c); non-inserted prompts still publish the
   fallback session title from prompt text (minor; revisit in 2(a2)). Note for 6(a): v1
   `createTextEvent` agent chunks already carry `messageId: itemId`.
+- **Topic 2(b)** — **Done (9da450e, 7645580)**, one open gap. All states sent from
+  `CodexAcpServer.promptV2`; `prompt()` unchanged. `running`: inside `onInserted`, after user chunks
+  + `resolve({messageId})` and one `setTimeout(0)` (SDK reference agent does the same), awaited so
+  later updates can't overtake. `idle`: once, when the background `prompt()` returns and the prompt
+  was inserted; `v2PromptsInFlight` cleared just before it. `idle.stopReason` =
+  internal v1 `PromptResponse.stopReason` (end_turn for completion/failed turn/typed failure/local
+  commands; cancelled for interrupted/abort/close). v1 `_meta`/`usage` not copied (Q2). Send path:
+  new `AcpV2Connection.updateState(sessionId, state)` + `ACPSessionConnection.updateState(state)`
+  via the v2 `session/update` handle, bypassing `toV2SessionUpdate` (no v1 form; keeps v1 code
+  from sending it); throws on v1; failed sends caught/logged. Pre-insertion failures: JSON-RPC error
+  only, no states. No initial `idle` on `session/new`/`resume` (spec has none). Plan-impl 2nd turn
+  stays inside the one running…idle pair (its permission → `requires_action`, topic 4).
+  **Open gap (Q1):** `prompt()` throwing after insertion (usage-limit/auth for non-typed clients,
+  process exit, local command reply that can't render, e.g. `/skills`) → `running` and no `idle`.
+  Q2: should idle carry v1 `_meta` (quota, AIR typed terminal failure — v2 typed-failure clients
+  currently never see it) and `usage`? Both → researcher, then user.
+  Tests: `prompt-v2.test.ts` now 11; 3 snapshots updated (intended). TCK v1 `-k test_prompt`
+  6/1 skip (baseline); **v2 `-k test_prompt` 9 pass / 1 skip** (PROMPTCAP-002 audio).
+  PROMPT-205 passes only because unrendered agent chunks are dropped → recheck after 6(a).
+- **Topic 2(r)** — **Done (1c46656, 3a1a93a).** Intentional v1 fix. `SessionState.currentTurnId`
+  = **completion id** (set from `turn/start`/`review/start` response callbacks; `turn/started`
+  sets it only if still `null` — general rule now, no longer overwrites). New
+  `SessionState.interruptTurnId` = **interrupt id** (set by every `turn/started`, cleared on
+  `turn/completed` and wherever `prompt()` clears `currentTurnId`). Helper
+  `codexRunningTurnId(sessionState, turnId)` (`CodexAcpServer.ts`) → `interruptTurnId ?? turnId`
+  for the current turn; used by `interruptSessionTurn` (cancel/close),
+  `observePromptRequestCancellation` (previously sent P → -32600), `getSteerableTurnId`/steering
+  `turnStillActive`. Fixes B1, B2, plus B3 (review retry warning never cleared), B4 (close marked
+  child id stale). Pre-`turn/started` window keeps today's behavior (interrupt with P; test-pinned);
+  2(a2) reads both ids directly.
+  **Cancel-window research (`v2-review-cancel-window.md`, done):** S0 (~1-9 ms after response):
+  any id → -32600 "no active turn" (already retried); S1 (~60-70 ms until `turn/started(C)`): **P
+  accepted**, review aborted, one `turn/completed{P, interrupted}`, no `turn/started`; S2: P →
+  -32600 "expected active turn id P but found C". Child can legitimately never start (resolve
+  failure, abort in S1, reviewer sub-session failure) → don't defer until `turn/started`.
+  **Recommended option B** (small v1 fix, not yet scheduled): recompute
+  `codexRunningTurnId` on every retry attempt, and also retry "expected active turn id <P> but
+  found <Y>" with Y when P is the current completion id, the prompt is active and Y is non-empty.
+  v2 reuses it unchanged. Also found (v1, not yet scheduled): (1) **hang** — `/review-branch` in
+  a non-git cwd: Codex sends `error{turnId:P, willRetry:false}` and then nothing; `runReview`
+  waits forever and cancel can't help (discriminator: that error before any
+  `enteredReviewMode(P)`), plus the stale error leaks into the next turn; (2) `Close`-named
+  interrupts (`interruptLateStartedTurn`, `interruptSessionTurn(…,"Close")`) are never retried →
+  general S0 race for plain `turn/start` too → **topic 3**; (3) replay of an interrupted review
+  (empty interrupted C turn before P) → **5b**.
+  Tests: `review-turn-ids.test.ts` (8) + 3 snapshots; no existing snapshots changed. TCK v1
+  `-k "test_prompt or test_cancel"` 8 pass / 1 skip (baseline).
 - **Topic 8** — **Done (11a1969, 5f9335b).** v2 chain registers `auth/login` →
   `CodexAcpServer.authenticateV2`, `auth/logout` → `logoutV2` (thin delegates; request shapes
   identical). `authentication/status|logout` not on v2 (pinned -32601 by test). Tests:
@@ -198,11 +248,11 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1) done; 2(r) in flight | 2(b), then 2(a2) | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b) done (Q1 gap open) | 2(b) Q1 fix, 2(a2) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
-| 6 | Tool calls, messages & terminal streaming | Not started | — | Milestone (a): tool-call upsert fork at `ACPSessionConnection.update()` | Depends on topic 1 |
+| 6 | Tool calls, messages & terminal streaming | In progress | 6(a) in flight | Milestone (a): tool-call upsert fork at `ACPSessionConnection.update()` | Depends on topic 1 |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
 | 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
 | 9 | Config options, modes & plans | **Done** | — | — | 9a + 9b landed |
