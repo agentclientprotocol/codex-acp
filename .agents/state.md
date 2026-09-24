@@ -33,7 +33,7 @@ test_session or test_permission or test_state or test_extensibility"` 37 / 2 / 5
 EXT-202 (known advisory, `capabilities.providers` placement → topic 1/10). Expected v2 full-run
 fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
 
-**Pending user decisions (ask first thing; research `.agents/research/v2-goal-continuation-fallback-v1-impact.md`):**
+**Decisions made on the J11 research (`.agents/research/v2-goal-continuation-fallback-v1-impact.md`); all three are ready to implement:**
 - **J11 (C1 removal).** On 0.156.1 C1 fires when `_session/goal set|resume` lands during a busy
   turn that goes quiet >1 s (`runGoalSet`'s 1000 ms wait, `CodexAppServerClient.ts:150,424-431,
   509-570`; reproduced 3/3), and on `budgetLimited` (then its `getGoal` check starts nothing). Harm:
@@ -45,7 +45,7 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
   request instead of after A ends.** Researcher verdict: mixed, leaning bug fix. Options: (a) plain
   removal (calls at `CodexAcpServer.ts:670-677,697-703`, method `:2042-2062`, return `{}`); (b)
   wait-only guard keeping the response timing (wait via the reservation for Codex's next
-  `turn/started` or 1 s idle; never `turn/start`). **Ask the user: (a) or (b)?** (User asked for a detailed explanation with concrete examples; still undecided.)
+  `turn/started` or 1 s idle; never `turn/start`). **User decided (2026-09-24): (a) plain removal** (after a concrete walkthrough: the only v1-visible change is the earlier `{}` in the quiet-busy case; accepted).
 - **J11b.** `/goal` slash-command fallback (`CodexCommands.ts:452-455`, used at
   `CodexAcpServer.ts:3644-3656`): same trigger, no goal-status check → `/goal …` on a
   budget-exhausted goal starts a real model turn. Proposed: `createGoalCommandResult(null)` →
@@ -59,8 +59,15 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
   (2026-09-24): schedule the bug fix.**
 
 **Next steps, in order (one programmer at a time; researchers may run in parallel):**
-1. Get the J11 / J11b / G-render decisions, then one small slice each (J11 as a separate
-   `fix:` commit; update the v1 tests the research lists).
+1. Three small slices, one programmer each, in this order:
+   - **J11**: remove C1 (option (a)): `fix:` commit whose message explains the phantom message; update the v1 tests
+     the research lists (e.g. `CodexAcpClient.test.ts` "waits for an active turn before starting
+     goal work" and the 2(c)-1(i) goal-continuation serialization test; the latter may need to
+     switch to the steering fallback to keep covering the shared reservation).
+   - **J11b**: `createGoalCommandResult(null)` → `{handled: true}` (`fix:` commit).
+   - **G-render**: the baseline tracker renders items of turns no `prompt()` has rendered (v1 + v2).
+     Reuse the prompt handler's rendering (`CodexEventHandler`); `fix:` commit. Test: a goal turn right
+     after `session/new` and after resume is visible on v1 and v2.
 2. **Topic 3**, cancellation: `ctx.signal` / `$/cancel_request` (incl. a queued prompt → only it is
    dropped with -32800) and v2 `session/cancel` (drops all queued not-yet-inserted prompts with
    -32800, one `idle`/`cancelled` for the running turn; `session/close` acts like cancel; the queue
