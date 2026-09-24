@@ -13,7 +13,7 @@ J11; topics 4 and 5 part-done; topics 3 and 10 not started (2026-09-24).
 
 State as of the flush for a fresh orchestrator restart (2026-09-24, second flush): **no agents in
 flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`, last code commit
-`b2b81d7`; since then J11 `64d1201`) and in the acp-tck fork (`main`, 4 local commits, **not
+`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`) and in the acp-tck fork (`main`, 4 local commits, **not
 pushed**; the user said don't push). Keep committing with explicit pathspecs. Suite: **889 pass /
 26 skip** (after J11).
 
@@ -69,7 +69,12 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
      "starts only the latest goal replacement" deleted (mechanism gone). J11b's test "starts a goal
      work turn when app server starts no continuation turn" left as is. Suite 889 / 26. TCK v1 25/1
      (SCHEMA-002)/3; v2 37/2 (RESUME-202, EXT-202)/4.
-   - **J11b**: `createGoalCommandResult(null)` → `{handled: true}` (`fix:` commit).
+   - **J11b** — **Done (e92e366)**: `createGoalCommandResult(null)` → `{handled: true}`;
+     `GOAL_CONTINUATION_PROMPT` and `CommandHandleResult`'s `handled:false.prompt` removed; dead
+     `effectiveParams`/`turnClientUserMessageId`/goal `registerSyntheticInsertion` code in `prompt()`
+     removed (plan-impl synthetic insertion kept). Tests retargeted in `CodexAcpClient.test.ts` and
+     `prompt-v2.test.ts` (snapshot `prompt-v2-goal-resume-continuation.json` →
+     `…-no-continuation.json`). Suite 889 / 26. TCK v1 24/0/3; v2 31/1 (RESUME-202)/4.
    - **G-render**: the baseline tracker renders items of turns no `prompt()` has rendered (v1 + v2).
      Reuse the prompt handler's rendering (`CodexEventHandler`); `fix:` commit. Test: a goal turn right
      after `session/new` and after resume is visible on v1 and v2.
@@ -495,7 +500,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i), J11 done | J11b, then G-render (see Resume here) | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i), J11, J11b done | G-render (see Resume here) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | In progress | 4(a) done | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
