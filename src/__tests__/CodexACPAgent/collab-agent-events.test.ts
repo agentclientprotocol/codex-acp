@@ -1596,6 +1596,34 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         expect((buffered[0]!.params as {itemId: string}).itemId).toBe("buffered-0");
     });
 
+    it("replays a buffer that is larger than the argument limit of a spread", async () => {
+        const router = new CodexSubagentEventRouter(
+            sessionId,
+            true,
+            new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+        );
+        const spawn = (item: Record<string, unknown>) => router.handle({
+            method: "item/started",
+            params: {threadId: sessionId, turnId: "root-turn", startedAtMs: 0, item},
+        } as never);
+        await spawn({
+            type: "collabAgentToolCall", id: "large-spawn", tool: "spawnAgent", status: "inProgress",
+            senderThreadId: sessionId, receiverThreadIds: ["large-child"], prompt: "Large task",
+            model: null, reasoningEffort: null, agentsStates: {"large-child": {status: "running", message: null}},
+        });
+        // Each delta has its own item, so the buffer merges none of them.
+        const count = 200_000;
+        for (let index = 0; index < count; index++) {
+            await router.handle({
+                method: "item/agentMessage/delta",
+                params: {threadId: "large-child", turnId: "t", itemId: `i${index}`, delta: "x"},
+            });
+        }
+        await spawn({type: "subAgentActivity", id: "large-activity", kind: "started", agentThreadId: "large-child", agentPath: "/root/large"});
+
+        expect(router.takeBufferedNotifications()).toHaveLength(count);
+    });
+
     it("publishes a terminal child state exactly once under concurrent completion", async () => {
         const router = new CodexSubagentEventRouter(
             sessionId,

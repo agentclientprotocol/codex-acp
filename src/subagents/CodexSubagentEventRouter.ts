@@ -27,6 +27,12 @@ type PendingSubagent = {
     buffered: PendingNotificationBuffer;
 };
 
+/** A spawn that ended before it materialized. It keeps only what a reopen needs, not the buffered updates. */
+type EndedSpawn = {
+    parentThreadId: string;
+    task: string;
+};
+
 export type ClosingChildSession = {
     threadId: string;
     sessionId: string;
@@ -39,7 +45,7 @@ export class CodexSubagentEventRouter {
 
     private readonly children = new Map<string, NativeSubagent>();
     private readonly pendingSpawns = new Map<string, PendingSubagent>();
-    private readonly terminalPendingSpawns = new Map<string, PendingSubagent>();
+    private readonly terminalPendingSpawns = new Map<string, EndedSpawn>();
     private readonly waiters = new Set<() => void>();
     private readonly materializationWaiters = new Map<string, Set<(sessionId: string | null) => void>>();
     private readonly replayQueue: ServerNotification[] = [];
@@ -327,7 +333,8 @@ export class CodexSubagentEventRouter {
             generation: 1,
         });
         this.pendingSpawns.delete(childSessionId);
-        this.replayQueue.push(...(pending?.buffered.take() ?? []));
+        // A loop, not push(...): a spread of a large buffer exceeds the argument limit and throws.
+        for (const notification of pending?.buffered.take() ?? []) this.replayQueue.push(notification);
         this.resolveMaterialization(childSessionId, childSessionId);
     }
 
@@ -335,7 +342,9 @@ export class CodexSubagentEventRouter {
         const pending = this.pendingSpawns.get(childSessionId);
         if (!pending) return;
         this.pendingSpawns.delete(childSessionId);
-        this.terminalPendingSpawns.set(childSessionId, pending);
+        // The child ended before Codex reported its activity, so it is not shown. The record keeps no buffer,
+        // so its buffered updates are dropped.
+        this.terminalPendingSpawns.set(childSessionId, {parentThreadId: pending.parentThreadId, task: pending.task});
         this.onChildSessionEnded(childSessionId);
         this.resolveMaterialization(childSessionId, null);
         this.notifyWaiters();
