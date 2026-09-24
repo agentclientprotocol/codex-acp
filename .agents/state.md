@@ -15,7 +15,7 @@ State as of the flush for a fresh orchestrator restart (2026-09-24, second flush
 flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`, last code commit
 `b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`, 3(b) `8815bd5`, 3(c) `6aa86ed`, 3(d) `17d8a62`, 3-full `30cc414`, 4(b) `f901d30`, 5b-1 `bcab7b7`, 4(c) `ad03c16`) and in the acp-tck fork (`main`, 4
 local commits, **not pushed**; the user said don't push). Keep committing with explicit pathspecs.
-Suite: **918 pass / 26 skip** (after 4(c)). **Next: 5b-2 (Q-5B decisions; Q1 pending with the user).**
+Suite: **918 pass / 26 skip** (after 4(c)). **In flight: 5b-2a. Next: 5b-2b (Q1 option A), then topic 10.**
 
 **Standing user rules (2026-09-24):** preserve v1 client-visible behavior (change v1 only to fix a
 real bug, with nothing else v1-visible changing); **always assume the latest Codex** (currently the
@@ -202,8 +202,11 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
    DELETE-202 skip.
    **User decisions (2026-09-24) on Q-5B:** Q2 hide the reviewer prompt on **v2 only**; Q4 **accept**
    the subagent fail-loud until topic 10; Q5 **skip the fallback when a rollout has
-   `thread_rolled_back`** (v1 + v2 bug fix). Q1 (fallback agent/thought ids: A never emit on v2 vs
-   B `fallback:<line>`) — user asked to clarify; pending.
+   `thread_rolled_back`** (v1 + v2 bug fix). **Q1 → option A** (user, 2026-09-24, after
+   clarification): on v2 the fallback contributes only its recovered tool calls; all fallback
+   user/agent/thought chunks are merge anchors only, never sent. v1 unchanged.
+   **5b-2a** (in flight): review-mode ids, reviewer-prompt hiding (v2), rolled-back skip (v1+v2
+   `fix:`), native-path primers, replay-twice determinism test. **5b-2b** (next): Q1 option A.
    **Q-5B research done** (`.agents/research/v2-resume-replay-open-questions.md`, HEAD 7e2ec21):
    - Q1 ids: spec needs unique ids + RESUME-204 prompt ids only; stability is a judgment call.
      agentMessage/reasoning/review-mode items already stable (item ids). Review-mode chunks: set
