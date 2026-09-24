@@ -23,6 +23,7 @@ export const AIR_CAPABILITY_NAMES = [
     "diffPatch",
     "sessionFailure",
     "agentFileChangeReport",
+    "customInstructions",
     "nativeSubagentSessions",
     "asyncTasks",
     "recommendedValue",
