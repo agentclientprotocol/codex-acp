@@ -13,9 +13,9 @@ J11; topics 4 and 5 part-done; topics 3 and 10 not started (2026-09-24).
 
 State as of the flush for a fresh orchestrator restart (2026-09-24, second flush): **no agents in
 flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`, last code commit
-`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`) and in the acp-tck fork (`main`, 4
+`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`, 3(b) `8815bd5`) and in the acp-tck fork (`main`, 4
 local commits, **not pushed**; the user said don't push). Keep committing with explicit pathspecs.
-Suite: **896 pass / 26 skip** (after 3(a)). **Next: topic 3 slice 3(b).**
+Suite: **900 pass / 26 skip** (after 3(b)). **Next: 3(c); Q-PERM research in flight.**
 
 **Standing user rules (2026-09-24):** preserve v1 client-visible behavior (change v1 only to fix a
 real bug, with nothing else v1-visible changing); **always assume the latest Codex** (currently the
@@ -96,8 +96,23 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
      the same way as a cancel" (old test pinned the bug). No snapshot changed. Suite 896 / 26. TCK v1
      `-k "test_cancel or test_session or test_prompt"` 26/0/3. Note: retries are gated on an active
      prompt, so closing during an unowned (Codex self-started) turn gets no retry — pre-existing.
-   - **3(b)** v2 `session/cancel` registered; drops all queued not-inserted prompts (-32800, no
-     updates), one `idle`/`cancelled` for the running turn; `session/close` drops the queue too.
+   - **3(b)** — **Done (8815bd5)**, one open question (Q-PERM below). `session/cancel` on the v2
+     chain → shared `cancel()`. `queuedV2PromptCancellers` + `registerQueuedV2PromptCanceller`/
+     `cancelQueuedV2Prompts` (called by `cancel()` before `interruptSessionTurn`, and at the top of
+     `closeSession()`; v1 no-op). `promptV2` races `reservation.wait` against its canceller → -32800
+     at once, but releases its FIFO slot only after `reservation.wait` resolves. `!inserted` +
+     `stopReason === "cancelled"` → -32800 (was -32603; M2 adopted-not-landed; one `prompt-v2` test
+     expectation updated). Harness: `PromptSession.cancel()`, `onRequestPermission` gets `ctx.signal`.
+     `cancel-v2.test.ts` (4) + 1 snapshot. Suite 900 / 26. TCK v1 26/0/3; v2 `-k "test_cancel or
+     test_prompt or test_session or test_state"` 39/1 (RESUME-202)/5: CANCEL-201/202/203/205/206/
+     207/208 + INFO-CANCEL-201/202 PASS, CANCEL-204 SKIP (unobservable). Missing: the "cancel during
+     a permission request" test (blocked on Q-PERM).
+     **Q-PERM (researcher dispatched):** plain `session/cancel` never aborts `activePrompt.signal`
+     (only `closeSession` via `requestClose()` and v1 `$/cancel_request` via
+     `observePromptRequestCancellation` do), so the outbound `session/request_permission` is not
+     `$/cancel_request`ed on cancel (v1 or v2); only `turn/interrupt` is sent. Does ACP v1/v2 require
+     the agent to cancel it; what does Codex do with the pending approval on `turn/interrupt`
+     (`serverRequest/resolved`?); v1 impact of adding the cascade.
    - **3(c)** `$/cancel_request` / `ctx.signal` for a pending v2 `session/prompt` (queued → only it,
      -32800). Then end-of-topic full TCK v1 + v2.
    CANCEL-202 goal risk: live probe in `v2-agent-initiated-turns.md` (n=1) saw no goal turn after an
@@ -524,7 +539,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
 | 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i), J11, J11b, G-render done | — (topic 2 done apart from small follow-ups) | Long pole — start early per plan.md |
-| 3 | Cancellation semantics | In progress | 3(a) done | 3(b) v2 `session/cancel` | Depends on topic 2's `state_update` fork existing |
+| 3 | Cancellation semantics | In progress | 3(a), 3(b) done (Q-PERM open) | 3(c) `$/cancel_request` | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | In progress | 4(a) done | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
 | 6 | Tool calls, messages & terminal streaming | **Done** | — | — | 6(a)-6(d); end-of-topic full TCK in `.agents/tck/6-full-v1-v2.md` |
