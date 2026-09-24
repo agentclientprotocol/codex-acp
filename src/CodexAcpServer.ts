@@ -77,7 +77,7 @@ import {
 } from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
 import {toPromptUsage} from "./TokenCount";
-import {CodexCommands, GOAL_CONTINUATION_PROMPT} from "./CodexCommands";
+import {CodexCommands} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
@@ -421,7 +421,6 @@ export class CodexAcpServer {
     private readonly closingSessions: Map<string, number>;
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
-    private readonly goalControlGenerations: Map<string, number>;
     private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
     private readonly codexProcessState: CodexProcessState | null;
     private codexProcessGeneration = 0;
@@ -446,7 +445,6 @@ export class CodexAcpServer {
         this.closingSessions = new Map();
         this.sessionGenerations = new Map();
         this.sessionOpenGenerations = new Map();
-        this.goalControlGenerations = new Map();
         this.permissionLifecycleContexts = new WeakMap();
         if (connection instanceof AcpV2Connection) {
             this.protocolVersion = 2;
@@ -655,26 +653,9 @@ export class CodexAcpServer {
                     throw RequestError.invalidParams(undefined, `Unknown session: ${methodRequest.params.sessionId}`);
                 }
                 const sessionGeneration = this.getSessionGeneration(sessionState.sessionId);
-                const goalControlGeneration = this.bumpGoalControlGeneration(sessionState.sessionId);
                 if (methodRequest.params.action === "set") {
                     const objective = methodRequest.params.objective;
-                    let updatedGoal: ThreadGoal | null = null;
-                    const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.setGoal(
-                        sessionState.sessionId,
-                        objective,
-                        undefined,
-                        (goal) => {
-                            updatedGoal = goal;
-                        },
-                    ));
-                    if (turnCompleted === null && updatedGoal !== null) {
-                        await this.startGoalContinuationIfCurrent(
-                            sessionState,
-                            sessionGeneration,
-                            goalControlGeneration,
-                            updatedGoal,
-                        );
-                    }
+                    await this.runWithProcessCheck(() => this.codexAcpClient.setGoal(sessionState.sessionId, objective));
                 } else if (methodRequest.params.action === "pause") {
                     const goal = await this.runWithProcessCheck(() => this.codexAcpClient.setGoalStatus(sessionState.sessionId, "paused"));
                     if (this.sessionPublishIsCurrent(sessionState, sessionGeneration)) {
@@ -682,7 +663,7 @@ export class CodexAcpServer {
                     }
                 } else if (methodRequest.params.action === "resume") {
                     let updatedGoal: ThreadGoal | null = null;
-                    const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.resumeGoal(
+                    await this.runWithProcessCheck(() => this.codexAcpClient.resumeGoal(
                         sessionState.sessionId,
                         undefined,
                         (goal) => {
@@ -691,14 +672,6 @@ export class CodexAcpServer {
                     ));
                     if (updatedGoal !== null && this.sessionPublishIsCurrent(sessionState, sessionGeneration)) {
                         await this.publishGoalSnapshot(sessionState, toThreadGoalSnapshot(updatedGoal), false);
-                    }
-                    if (turnCompleted === null && updatedGoal !== null) {
-                        await this.startGoalContinuationIfCurrent(
-                            sessionState,
-                            sessionGeneration,
-                            goalControlGeneration,
-                            updatedGoal,
-                        );
                     }
                 } else if (methodRequest.params.action === "clear") {
                     await this.runWithProcessCheck(() => this.codexAcpClient.clearGoal(sessionState.sessionId));
@@ -807,12 +780,6 @@ export class CodexAcpServer {
 
     private getSessionGeneration(sessionId: string): number {
         return this.sessionGenerations.get(sessionId) ?? 0;
-    }
-
-    private bumpGoalControlGeneration(sessionId: string): number {
-        const generation = (this.goalControlGenerations.get(sessionId) ?? 0) + 1;
-        this.goalControlGenerations.set(sessionId, generation);
-        return generation;
     }
 
     private bumpSessionGeneration(sessionId: string): number {
@@ -1273,7 +1240,6 @@ export class CodexAcpServer {
                 this.activePrompts.delete(params.sessionId);
                 this.turnStartQueueTail.delete(params.sessionId);
                 this.steeringQueues.delete(params.sessionId);
-                this.goalControlGenerations.delete(params.sessionId);
             }
             this.endSessionCloseFence(params.sessionId);
         }
@@ -2037,28 +2003,6 @@ export class CodexAcpServer {
             onSyntheticInserted: async () => {},
         });
         return {outcome: "startedNewTurn"};
-    }
-
-    private async startGoalContinuationIfCurrent(
-        sessionState: SessionState,
-        sessionGeneration: number,
-        goalControlGeneration: number,
-        expectedGoal: ThreadGoal,
-    ): Promise<void> {
-        await this.startNewTurnFromExternalPrompt({
-            sessionId: sessionState.sessionId,
-            prompt: GOAL_CONTINUATION_PROMPT,
-        }, "Goal continuation", async () => {
-            if (!this.sessionPublishIsCurrent(sessionState, sessionGeneration)
-                || this.goalControlGenerations.get(sessionState.sessionId) !== goalControlGeneration) {
-                return false;
-            }
-            const currentGoal = await this.runWithProcessCheck(() => this.codexAcpClient.getGoal(sessionState.sessionId));
-            return currentGoal?.status === "active"
-                && currentGoal.objective === expectedGoal.objective
-                && currentGoal.createdAt === expectedGoal.createdAt
-                && this.goalControlGenerations.get(sessionState.sessionId) === goalControlGeneration;
-        });
     }
 
     private async startNewTurnFromExternalPrompt(
