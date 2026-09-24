@@ -531,9 +531,18 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     `v2PromptsInFlight`, so the plan-implementation permission (between turns) leaves the client in
     `requires_action` until idle; 4 permission snapshots lost `running` because the harness sends no
     `turn/started`; (2) unverified claim that the baseline tracker's `DENY_ALL_*` handlers match the
-    old no-subscriber reply (runs on v1 too). → **fix slice 2(a2-v)-1f in flight** (programmer
-    dispatched 2026-09-24);
-    **2(c)-1** shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
+    old no-subscriber reply (runs on v1 too). → **fix slice 2(a2-v)-1f — Done (cb5f543,
+    c073e63)**: `isSessionBusy(sessionId)` = `isCodexTurnRunning || v2PromptsInFlight.has`, now
+    behind `setTurnRunningCheck` (reuse it in 2(c)); permission tests use `startRunningPrompt` (sends
+    `turn/started`); 4 snapshots regain trailing `running`; plan-impl = running, requires_action,
+    running, idle. `DENY_ALL_*` verified identical to the old no-handler defaults in
+    `CodexAppServerClient.onRequest`; a second `subscribe()` only swaps `session.current` (baseline
+    registration is a superset). New `pre-prompt-approvals-v1.test.ts` (5) pins v1 pre-prompt
+    replies. Suite 876 / 26. TCK unchanged (v1 24/0/3; v2 31/1 RESUME-202/5). **Phase 4 docs:** the
+    SDK client attributes any `idle` to a pending prompt (`acp.ts:2845-2851`), so a queued B's
+    `readText()` ends at `idle(A)`/`idle(X)` — client limitation (no prompt id on `state_update`),
+    mention in the AIR contract docs;
+    **2(c)-1** (**in flight, programmer dispatched 2026-09-24**) shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
     until insertion + J8 (goal turn running → `turn/start` directly) + M2 adopt (J9/J10);
     **2(c)-2** `_session/steering` minted id + `user_message` on landing, steering fallback through
     the reservation (with `running`/`idle`), remove C1 goal-continuation fallback (J11). Cancel
