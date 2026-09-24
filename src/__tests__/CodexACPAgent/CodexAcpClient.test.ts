@@ -3215,7 +3215,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         }
     });
 
-    it('starts a goal work turn when app server starts no continuation turn', async () => {
+    it('completes the /goal command without a continuation turn when app server starts no turn', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture();
         const goalRunSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "runGoalSet")
             .mockResolvedValue(null);
@@ -3231,13 +3231,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             objective: "Ship the migration and keep tests green",
             status: "active",
         }, expect.any(Function));
-        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
-            input: [{
-                type: "text",
-                text: "Continue working toward the active goal.",
-                text_elements: [],
-            }],
-        }));
+        expect(turnStartSpy).not.toHaveBeenCalled();
     });
 
     it('reports missing goal slash command input', async () => {

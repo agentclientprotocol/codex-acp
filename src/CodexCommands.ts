@@ -20,18 +20,13 @@ type ParsedSlashCommand = {
 };
 
 export type CommandHandleResult =
-    | { handled: false, prompt?: acp.ContentBlock[] }
+    | { handled: false }
     | { handled: true, turnCompleted?: TurnCompletedNotification };
 
 export type PromptKind =
     | { kind: "prompt" }
     | { kind: "localCommand", name: string }
     | { kind: "codexTurnCommand", name: string };
-
-export const GOAL_CONTINUATION_PROMPT: acp.ContentBlock[] = [{
-    type: "text",
-    text: "Continue working toward the active goal.",
-}];
 
 export type CommandHandleOptions = {
     onTurnStartPending?: () => void;
@@ -450,8 +445,11 @@ export class CodexCommands {
     }
 
     private createGoalCommandResult(turnCompleted: TurnCompletedNotification | null): CommandHandleResult {
+        // No matching turn observed within `runGoalSet`'s 1 s grace window. Codex auto-continues
+        // active goals itself; don't start a synthetic continuation turn here (that also skipped
+        // the goal-status check, so it fired even when the goal had stopped, e.g. budgetLimited).
         if (turnCompleted === null) {
-            return { handled: false, prompt: GOAL_CONTINUATION_PROMPT };
+            return { handled: true };
         }
         return {
             handled: true,

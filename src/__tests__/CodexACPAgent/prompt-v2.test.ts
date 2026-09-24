@@ -811,7 +811,7 @@ describe('session/prompt over ACP v2', () => {
         await expect(dump(error)).toMatchFileSnapshot('data/prompt-v2-unsupported-content.json');
     });
 
-    it('shows a /goal resume continuation turn as its own live user message, with its own minted id', async () => {
+    it('completes /goal resume with no continuation turn when no runtime turn is observed', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
         const goal = createThreadGoal({objective: "Resumed objective"});
@@ -820,34 +820,14 @@ describe('session/prompt over ACP v2', () => {
         const response = client.sendPrompt([{type: "text", text: "/goal resume"}]);
         const {messageId} = await response;
         client.emit({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}});
-        // Codex reports no active runtime turn for this goal within the grace window, so codex-acp
-        // starts its own continuation turn with a freshly minted id.
-        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1), {timeout: 3000});
-        const continuationId = client.turnStartParams[0]!["clientUserMessageId"] as string;
-        expect(continuationId).toEqual(expect.any(String));
-        expect(continuationId).not.toBe(messageId);
-
-        client.emit(turnStarted());
-        client.emit(itemCompleted(userMessageItem(continuationId, "Continue working toward the active goal.")));
-        await settle();
-        const userMessages = sessionUpdates(client.transcript).filter(update => update.sessionUpdate === "user_message_chunk");
-        expect(userMessages).toEqual([
-            {sessionUpdate: "user_message_chunk", messageId, content: {type: "text", text: "/goal resume"}},
-            {
-                sessionUpdate: "user_message_chunk",
-                messageId: continuationId,
-                content: {type: "text", text: "Continue working toward the active goal."},
-            },
-        ]);
-
-        client.emit(turnCompleted());
+        // Codex reports no active runtime turn for this goal within the grace window. Codex
+        // auto-continues active goals itself, so codex-acp starts no turn of its own here.
         await client.promptRunFinished();
         await settle();
 
-        // The continuation runs inside the original prompt's running…idle pair: no extra one.
+        expect(client.turnStartParams).toEqual([]);
         expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
-        await expect(dump(client.transcript, messageId).replaceAll(continuationId, "<continuationId>"))
-            .toMatchFileSnapshot('data/prompt-v2-goal-resume-continuation.json');
+        await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-goal-resume-no-continuation.json');
     }, 10000);
 
     it('shows the plan-implementation follow-up turn as its own live user message, with its own minted id', async () => {

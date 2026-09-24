@@ -3585,20 +3585,6 @@ export class CodexAcpServer {
                 };
             }
 
-            const effectiveParams = commandResult.prompt === undefined
-                ? params
-                : {...params, prompt: commandResult.prompt};
-            // `commandResult.prompt` means a local command (today only `/goal resume`/`/goal <objective>`
-            // when Codex reports no active turn) fell back to a synthetic continuation prompt, distinct
-            // from what the user typed. It needs its own minted id so its live user_message doesn't
-            // collide with the one already sent for the user's own prompt.
-            const turnClientUserMessageId = commandResult.prompt !== undefined && insertion !== undefined
-                ? randomUUID()
-                : insertion?.clientUserMessageId;
-            if (commandResult.prompt !== undefined && turnClientUserMessageId !== undefined && insertion !== undefined) {
-                registerSyntheticInsertion(turnClientUserMessageId, commandResult.prompt);
-            }
-
             if (this.sessionIsClosing(params.sessionId)) {
                 return cancelledPromptResponse();
             }
@@ -3615,7 +3601,7 @@ export class CodexAcpServer {
                 });
             }
 
-            if (!sessionState.supportedInputModalities.includes("image") && effectiveParams.prompt.some(b => b.type === "image")) {
+            if (!sessionState.supportedInputModalities.includes("image") && params.prompt.some(b => b.type === "image")) {
                 throw RequestError.invalidRequest("The current model does not support image input");
             }
             const agentMode = sessionState.agentMode;
@@ -3631,7 +3617,7 @@ export class CodexAcpServer {
             const priorRunningTurnId = sessionState.codexReportedRunningTurnId;
             const sendPromptPromise = this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(
-                    effectiveParams,
+                    params,
                     agentMode,
                     modelId,
                     serviceTier,
@@ -3653,7 +3639,7 @@ export class CodexAcpServer {
                         onTurnStarted?.();
                     },
                     () => this.promptShouldStop(params.sessionId, activePrompt),
-                    turnClientUserMessageId,
+                    insertion?.clientUserMessageId,
                 ));
             void sendPromptPromise.catch((err) => {
                 if (this.activePrompts.get(params.sessionId) !== activePrompt) {
