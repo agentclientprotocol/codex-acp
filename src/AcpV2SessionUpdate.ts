@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import {formatPatch, structuredPatch, type StructuredPatch} from "diff";
 import {randomUUID} from "node:crypto";
 import * as path from "node:path";
 import type {AcpSessionUpdate} from "./AcpSessionExtensions";
@@ -133,13 +134,59 @@ function toV2ToolCallContent(content: acp.ToolCallContent): acpV2.ToolCallConten
         // Same shape on v2; the terminal itself is sent by `toV2SessionUpdates`.
         case "terminal":
             return content;
-        // v2 diffs carry `changes[]` + `patch` instead of `oldText`/`newText`.
         case "diff":
-            throw acp.RequestError.internalError(
-                undefined,
-                `'${content.type}' tool call content is not supported on an ACP v2 connection yet`,
-            );
+            return {type: "diff", ...toV2Diff(content)};
     }
+}
+
+/** Private diff `_meta` key with the source path of a moved file (v1 only names the destination). */
+export const DIFF_OLD_PATH_META_KEY = "diff_old_path";
+
+/**
+ * v2 diffs describe the change in `changes[]` and carry a git patch instead of whole-file
+ * `oldText`/`newText`. The patch is generated from the v1 texts, so it is correct whatever form
+ * Codex reported the change in (added and deleted files come as raw content, not as a diff).
+ */
+function toV2Diff(content: acp.Diff): acpV2.Diff {
+    const {[DIFF_OLD_PATH_META_KEY]: oldPathMeta, ...meta} = content._meta ?? {};
+    if (oldPathMeta !== undefined && typeof oldPathMeta !== "string") {
+        throw acp.RequestError.internalError(undefined, `Malformed '${DIFF_OLD_PATH_META_KEY}' diff metadata`);
+    }
+    const kind = meta["kind"];
+    const newPath = content.path;
+    const oldPath = oldPathMeta ?? newPath;
+    let change: acpV2.DiffChange;
+    const patch: StructuredPatch = {
+        ...structuredPatch(oldPath, newPath, content.oldText ?? "", content.newText, undefined, undefined, {context: 3}),
+        isGit: true,
+    };
+    switch (kind) {
+        case "add":
+            change = {operation: "add", path: newPath};
+            patch.oldFileName = "/dev/null";
+            patch.isCreate = true;
+            break;
+        case "delete":
+            change = {operation: "delete", path: newPath};
+            patch.newFileName = "/dev/null";
+            patch.isDelete = true;
+            break;
+        case "update":
+            if (oldPath === newPath) {
+                change = {operation: "modify", path: newPath};
+            } else {
+                change = {operation: "move", oldPath, path: newPath};
+                patch.isRename = true;
+            }
+            break;
+        default:
+            throw acp.RequestError.internalError(undefined, `Diff content without a known 'kind': ${String(kind)}`);
+    }
+    return {
+        changes: [change],
+        patch: {format: "git_patch", text: formatPatch(patch)},
+        ...(Object.keys(meta).length > 0 ? {_meta: meta} : {}),
+    };
 }
 
 /** Private v1 `_meta` keys that carry agent-owned command output on a tool call update. */

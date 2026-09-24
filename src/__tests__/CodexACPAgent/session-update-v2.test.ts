@@ -116,7 +116,7 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
             toolCallId: "call-1",
             title: "Edit a.ts",
             content: [{type: "diff", path: "/workspace/a.ts", oldText: "a", newText: "b"}],
-        })).rejects.toThrow("'diff' tool call content is not supported on an ACP v2 connection yet");
+        })).rejects.toThrow("Diff content without a known 'kind': undefined");
         await expect(view.notify(acp.methods.client.session.update, {
             sessionId: "session-1",
             update: {sessionUpdate: "tool_call_update", toolCallId: "call-2", _meta: {terminal_exit: {exit_code: 0}}},

@@ -1,0 +1,43 @@
+[
+  {
+    "toolCallId": "item-move",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "changes": [
+          {
+            "oldPath": "<root>/old-name.ts",
+            "path": "<root>/new-name.ts",
+            "operation": "move"
+          }
+        ],
+        "patch": {
+          "format": "git_patch",
+          "text": "diff --git <root>/old-name.ts <root>/new-name.ts\nrename from <root>/old-name.ts\nrename to <root>/new-name.ts\n--- <root>/old-name.ts\n+++ <root>/new-name.ts\n@@ -1,1 +1,1 @@\n-old code line\n+new code line\n"
+        },
+        "_meta": {
+          "kind": "update",
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "diffStats": {
+                "version": 1,
+                "added": 1,
+                "removed": 1
+              }
+            }
+          }
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "item-move",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]

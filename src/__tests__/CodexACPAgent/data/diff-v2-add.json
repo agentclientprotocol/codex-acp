@@ -1,0 +1,42 @@
+[
+  {
+    "toolCallId": "item-add",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "changes": [
+          {
+            "path": "<root>/added.ts",
+            "operation": "add"
+          }
+        ],
+        "patch": {
+          "format": "git_patch",
+          "text": "diff --git <root>/added.ts <root>/added.ts\nnew file mode 100644\n--- /dev/null\n+++ <root>/added.ts\n@@ -0,0 +1,2 @@\n+export const a = 1;\n+export const b = 2;\n"
+        },
+        "_meta": {
+          "kind": "add",
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "diffStats": {
+                "version": 1,
+                "added": 2,
+                "removed": 0
+              }
+            }
+          }
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "item-add",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]

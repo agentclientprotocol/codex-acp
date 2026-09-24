@@ -828,7 +828,7 @@ export class CodexEventHandler {
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                return await createFileChangeUpdate(event.item);
+                return await createFileChangeUpdate(event.item, this.session.protocolVersion);
             case "commandExecution": {
                 if (commandExecutionUsesTerminalOutput(event.item)) {
                     this.terminalCommandIds.add(event.item.id);

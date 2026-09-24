@@ -36,6 +36,7 @@ import {
 } from "./TerminalOutputMode";
 import {createContextCompactionMeta} from "./ContextCompactionMeta";
 import {commandToolName, functionToolName} from "./ToolCallName";
+import {DIFF_OLD_PATH_META_KEY} from "./AcpV2SessionUpdate";
 
 type CodexItemStatus = CommandExecutionStatus | PatchApplyStatus | McpToolCallStatus | DynamicToolCallStatus | CollabAgentToolCallStatus;
 type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -66,13 +67,15 @@ function toAcpStatus(status: CodexItemStatus): AcpToolCallStatus {
 }
 
 export async function createFileChangeUpdate(
-    item: ThreadItem & { type: "fileChange" }
+    item: ThreadItem & { type: "fileChange" },
+    protocolVersion: 1 | 2 = 1,
 ): Promise<UpdateSessionEvent> {
     const patches: ToolCallContent[] = [];
     for (const change of item.changes) {
         const content = await createPatchContent(change);
-        if (content) patches.push(content);
         // ignore unparseable diffs
+        if (!content) continue;
+        patches.push(protocolVersion === 2 ? withDiffOldPath(content, change) : content);
     }
     return {
         sessionUpdate: "tool_call",
@@ -908,6 +911,17 @@ async function createDeleteFileContent(change: FileUpdateChange): Promise<ToolCa
         path: change.path,
         _meta: withAirMeta({ kind: "delete" }, AIR_DIFF_STATS_KEY, DIFF_STATS.deletedFile(change.diff))
     }
+}
+
+/**
+ * v1 diffs only name the path after the change, but v2 reports a move with both paths. On v2 the
+ * source path travels in a private `_meta` key that the v2 renderer turns into `oldPath`.
+ */
+function withDiffOldPath(content: ToolCallContent, change: FileUpdateChange): ToolCallContent {
+    if (content.type !== "diff" || change.kind.type !== "update" || change.kind.move_path == null) {
+        return content;
+    }
+    return {...content, _meta: {...content._meta, [DIFF_OLD_PATH_META_KEY]: change.path}};
 }
 
 async function readFileContent(filePath: string): Promise<string | null> {

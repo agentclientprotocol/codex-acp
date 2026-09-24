@@ -1,0 +1,54 @@
+[
+  {
+    "toolCallId": "item-v1",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "path": "<root>/v1-new-name.ts",
+        "oldText": "old code line\n",
+        "newText": "new code line\n",
+        "_meta": {
+          "kind": "update",
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "diffStats": {
+                "version": 1,
+                "added": 1,
+                "removed": 1
+              }
+            }
+          }
+        },
+        "type": "diff"
+      },
+      {
+        "path": "<root>/v1-added.ts",
+        "oldText": null,
+        "newText": "new\n",
+        "_meta": {
+          "kind": "add",
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "diffStats": {
+                "version": 1,
+                "added": 1,
+                "removed": 0
+              }
+            }
+          }
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call"
+  },
+  {
+    "toolCallId": "item-v1",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]

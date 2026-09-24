@@ -2453,7 +2453,7 @@ export class CodexAcpServer {
             case "reasoning":
                 return this.createReasoningUpdates(item);
             case "fileChange":
-                return [await createFileChangeUpdate(item)];
+                return [await createFileChangeUpdate(item, this.protocolVersion)];
             case "commandExecution": {
                 const updates = [await createCommandExecutionUpdate(item)];
                 const completeUpdate = createCommandExecutionCompleteUpdate(item, sessionState.terminalOutputMode);

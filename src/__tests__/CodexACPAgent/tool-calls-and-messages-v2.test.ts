@@ -118,26 +118,6 @@ describe('tool calls and messages over ACP v2', () => {
         await expect(dump(updates)).toMatchFileSnapshot('data/tool-calls-and-messages-v2-tool-call-upsert.json');
     });
 
-    it('still drops tool calls with diff content on v2', async () => {
-        const client = await connectSession();
-        closeClient = () => client.connection.close();
-        await startTurn(client);
-
-        client.emit(itemStarted({
-            type: "fileChange",
-            id: "item-edit",
-            status: "inProgress",
-            changes: [{path: "/workspace/new.ts", kind: {type: "add"}, diff: "export {};\n"}],
-        }));
-        client.emit(itemStarted(commandItem("item-read", [readAction])));
-        await finishTurn(client);
-
-        // Only the read tool call reaches the client; the turn goes on to its `idle`.
-        expect(updatesTagged(client, "tool_call", "tool_call_update").map(update => [update.sessionUpdate, (update as {toolCallId?: string}).toolCallId]))
-            .toEqual([["tool_call_update", "item-read"]]);
-        expect(client.transcript.at(-1)).toMatchObject({sessionUpdate: {sessionUpdate: "state_update", state: "idle", stopReason: "end_turn"}});
-    });
-
     it('reports MCP server startup failures as tool_call_update upserts', async () => {
         const client = await connectSession(2, {
             mcpServers: [

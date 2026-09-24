@@ -1,0 +1,42 @@
+[
+  {
+    "toolCallId": "item-delete",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "changes": [
+          {
+            "path": "<root>/deleted.ts",
+            "operation": "delete"
+          }
+        ],
+        "patch": {
+          "format": "git_patch",
+          "text": "diff --git <root>/deleted.ts <root>/deleted.ts\ndeleted file mode 100644\n--- <root>/deleted.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-export const gone = true;\n\\ No newline at end of file\n"
+        },
+        "_meta": {
+          "kind": "delete",
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "diffStats": {
+                "version": 1,
+                "added": 0,
+                "removed": 1
+              }
+            }
+          }
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "item-delete",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]

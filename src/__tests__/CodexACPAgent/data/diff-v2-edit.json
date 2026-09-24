@@ -1,0 +1,42 @@
+[
+  {
+    "toolCallId": "item-edit",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "changes": [
+          {
+            "path": "<root>/edit.ts",
+            "operation": "modify"
+          }
+        ],
+        "patch": {
+          "format": "git_patch",
+          "text": "diff --git <root>/edit.ts <root>/edit.ts\n--- <root>/edit.ts\n+++ <root>/edit.ts\n@@ -1,4 +1,4 @@\n one\n-two\n+TWO\n three\n four\n"
+        },
+        "_meta": {
+          "kind": "update",
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "diffStats": {
+                "version": 1,
+                "added": 1,
+                "removed": 1
+              }
+            }
+          }
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "item-edit",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]

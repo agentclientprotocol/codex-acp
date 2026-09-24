@@ -25,8 +25,8 @@ const messageTags = new Set([
  *
  * Neither the SDK nor the TS types stop a v1-only tag (e.g. `tool_call`) or a custom unprefixed
  * tag from reaching a v2 client, so tests check the frames themselves: custom tags must start with
- * `_`, and standard ones must match their v2 schema. Terminal bytes must be base64, `cwd` absolute,
- * and v1's private terminal `_meta` keys must not reach the client.
+ * `_`, and standard ones must match their v2 schema. Terminal bytes must be base64, `cwd` and diff
+ * paths absolute, and v1's private terminal and diff `_meta` keys must not reach the client.
  */
 export function v2SessionUpdateViolation(update: acpV2.SessionUpdate): string | null {
     const tag: unknown = update.sessionUpdate;
@@ -47,6 +47,18 @@ export function v2SessionUpdateViolation(update: acpV2.SessionUpdate): string | 
         const leaked = privateTerminalMetaKeys.filter(key => meta != null && key in meta);
         if (leaked.length > 0) {
             return `'${tag}' carries private terminal _meta keys: ${leaked.join(", ")}`;
+        }
+        for (const content of (update as acpV2.ToolCallUpdate).content ?? []) {
+            if (content.type !== "diff") continue;
+            const diff = content as acpV2.Diff;
+            if (diff._meta != null && "diff_old_path" in diff._meta) {
+                return `'${tag}' diff carries the private 'diff_old_path' _meta key`;
+            }
+            const relative = diff.changes.flatMap(change => [change.path, (change as {oldPath?: unknown}).oldPath])
+                .filter(changePath => changePath !== undefined && !String(changePath).startsWith("/"));
+            if (relative.length > 0) {
+                return `'${tag}' diff has relative paths: ${relative.join(", ")}`;
+            }
         }
     }
     if (tag === "terminal_update") {
