@@ -126,6 +126,16 @@ describe("ResponseItemHistoryFallback", () => {
         ]);
     });
 
+    it("skips the fallback entirely when the rollout records a rollback (fix: old rollouts resurrected rolled-back tool calls)", () => {
+        const updates = parseResponseItemHistoryFallback(jsonl([
+            functionCall("call-rolled-back", "rm -rf rolled-back"),
+            { type: "event_msg", payload: { type: "thread_rolled_back", turnId: "turn-1" } },
+            functionCallOutput("call-rolled-back", "Chunk ID: rolled-back\nProcess exited with code 0\nOutput:\ndone\n"),
+        ]), "terminal_output");
+
+        expect(updates).toBeNull();
+    });
+
     it("marks exec command outputs without exit footers completed when they do not report errors", () => {
         const updates = parseResponseItemHistoryFallback(jsonl([
             functionCall("call-read-ok", "cat existing.txt"),

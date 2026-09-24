@@ -62,6 +62,16 @@ export function parseResponseItemHistoryFallback(
     terminalOutputMode: TerminalOutputMode,
     existingToolCallIds: Set<string> = new Set(),
 ): UpdateSessionEvent[] | null {
+    const lines = contents.split(/\r?\n/);
+    // A rollout with a `thread/rollback` marker (old Codex clients only) has its rolled-back
+    // turns dropped by Codex's own history builder, but this fallback parses raw lines with no
+    // rollback handling: a rolled-back turn's `function_call` looks exactly like a "missing" call
+    // and gets resurrected, along with unmatched assistant/reasoning text. Skip the fallback
+    // entirely for such rollouts rather than getting the content wrong.
+    if (lines.some((line) => isThreadRolledBackRecord(parseJsonRecord(line)))) {
+        return null;
+    }
+
     const updates: UpdateSessionEvent[] = [];
     const terminalToolCallIds = new Set<string>();
     const execToolCallIds = new Set<string>();
@@ -81,7 +91,7 @@ export function parseResponseItemHistoryFallback(
         }
     };
 
-    for (const line of contents.split(/\r?\n/)) {
+    for (const line of lines) {
         const record = parseJsonRecord(line);
         if (!record) {
             continue;
@@ -241,6 +251,14 @@ function createMessageUpdates(item: JsonRecord): UpdateSessionEvent[] {
     return contentBlocksFromResponseContent(item["content"]).map((content) => (
         createAgentMessageChunk(content, undefined, createCodexMessagePhaseMeta(phase))
     ));
+}
+
+function isThreadRolledBackRecord(record: JsonRecord | null): boolean {
+    if (!record || record["type"] !== "event_msg") {
+        return false;
+    }
+    const payload = asRecord(record["payload"]);
+    return payload?.["type"] === "thread_rolled_back";
 }
 
 function createEventMsgUpdates(record: JsonRecord): UpdateSessionEvent[] | null {
