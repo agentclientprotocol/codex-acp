@@ -7,6 +7,13 @@ const knownVariantGuards: Guard[] = Object.entries(acpV2.SessionUpdate)
     .filter(([name]) => name !== "isCustom")
     .map(([, guard]) => guard as Guard);
 
+/** Private v1 tool call `_meta` keys for command output; v2 sends standard terminal updates instead. */
+const privateTerminalMetaKeys = ["terminal_info", "terminal_output", "terminal_output_delta", "terminal_exit"];
+
+function isBase64(data: unknown): boolean {
+    return typeof data === "string" && data.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(data);
+}
+
 const messageTags = new Set([
     "user_message_chunk", "user_message",
     "agent_message_chunk", "agent_message",
@@ -18,7 +25,8 @@ const messageTags = new Set([
  *
  * Neither the SDK nor the TS types stop a v1-only tag (e.g. `tool_call`) or a custom unprefixed
  * tag from reaching a v2 client, so tests check the frames themselves: custom tags must start with
- * `_`, and standard ones must match their v2 schema.
+ * `_`, and standard ones must match their v2 schema. Terminal bytes must be base64, `cwd` absolute,
+ * and v1's private terminal `_meta` keys must not reach the client.
  */
 export function v2SessionUpdateViolation(update: acpV2.SessionUpdate): string | null {
     const tag: unknown = update.sessionUpdate;
@@ -33,6 +41,25 @@ export function v2SessionUpdateViolation(update: acpV2.SessionUpdate): string | 
     }
     if (messageTags.has(tag) && (update as {messageId?: unknown}).messageId === "") {
         return `'${tag}' has an empty messageId`;
+    }
+    if (tag === "tool_call_update") {
+        const meta = (update as acpV2.ToolCallUpdate)._meta;
+        const leaked = privateTerminalMetaKeys.filter(key => meta != null && key in meta);
+        if (leaked.length > 0) {
+            return `'${tag}' carries private terminal _meta keys: ${leaked.join(", ")}`;
+        }
+    }
+    if (tag === "terminal_update") {
+        const {cwd, output} = update as acpV2.TerminalUpdate;
+        if (cwd != null && !cwd.startsWith("/")) {
+            return `'${tag}' has a relative cwd: ${cwd}`;
+        }
+        if (output != null && !isBase64(output.data)) {
+            return `'${tag}' output is not base64: ${output.data}`;
+        }
+    }
+    if (tag === "terminal_output_chunk" && !isBase64((update as acpV2.TerminalOutputChunk).data)) {
+        return `'${tag}' data is not base64: ${(update as acpV2.TerminalOutputChunk).data}`;
     }
     return null;
 }

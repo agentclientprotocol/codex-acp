@@ -118,7 +118,7 @@ describe('tool calls and messages over ACP v2', () => {
         await expect(dump(updates)).toMatchFileSnapshot('data/tool-calls-and-messages-v2-tool-call-upsert.json');
     });
 
-    it('still drops tool calls with diff or terminal content on v2', async () => {
+    it('still drops tool calls with diff content on v2', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
         await startTurn(client);
@@ -129,8 +129,6 @@ describe('tool calls and messages over ACP v2', () => {
             status: "inProgress",
             changes: [{path: "/workspace/new.ts", kind: {type: "add"}, diff: "export {};\n"}],
         }));
-        // No recognized command action: v1 reports this as a terminal.
-        client.emit(itemStarted(commandItem("item-shell", [])));
         client.emit(itemStarted(commandItem("item-read", [readAction])));
         await finishTurn(client);
 
@@ -168,6 +166,10 @@ describe('tool calls and messages over ACP v2', () => {
             {sessionUpdate: "agent_message_chunk", messageId: "", content: {type: "text", text: "empty id"}},
             {sessionUpdate: "agent_message_chunk", messageId: "m-1", content: {type: "text", text: "ok"}},
             {sessionUpdate: "tool_call_update", toolCallId: "call-1", status: "completed"},
+            {sessionUpdate: "tool_call_update", toolCallId: "call-1", _meta: {terminal_exit: {exit_code: 0}}},
+            {sessionUpdate: "terminal_update", terminalId: "call-1", cwd: "workspace"},
+            {sessionUpdate: "terminal_update", terminalId: "call-1", output: {data: "not base64!"}},
+            {sessionUpdate: "terminal_output_chunk", terminalId: "call-1", data: "aGk="},
         ].map(update => [update.sessionUpdate, v2SessionUpdateViolation(update as acpV2.SessionUpdate)]);
 
         expect(violations).toEqual([
@@ -178,6 +180,10 @@ describe('tool calls and messages over ACP v2', () => {
             ["agent_message_chunk", "'agent_message_chunk' has an empty messageId"],
             ["agent_message_chunk", null],
             ["tool_call_update", null],
+            ["tool_call_update", "'tool_call_update' carries private terminal _meta keys: terminal_exit"],
+            ["terminal_update", "'terminal_update' has a relative cwd: workspace"],
+            ["terminal_update", "'terminal_update' output is not base64: not base64!"],
+            ["terminal_output_chunk", null],
         ]);
     });
 });

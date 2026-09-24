@@ -1,0 +1,60 @@
+[
+  {
+    "terminalId": "item-shell",
+    "command": "npm test",
+    "cwd": "/workspace",
+    "sessionUpdate": "terminal_update"
+  },
+  {
+    "toolCallId": "item-shell",
+    "title": "npm test",
+    "kind": "execute",
+    "status": "in_progress",
+    "content": [
+      {
+        "terminalId": "item-shell",
+        "type": "terminal"
+      }
+    ],
+    "rawInput": {
+      "command": "npm test",
+      "cwd": "/workspace"
+    },
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "terminalId": "item-shell",
+    "data": "UEFTUyBhLnRlc3QudHMK",
+    "sessionUpdate": "terminal_output_chunk",
+    "decoded": "PASS a.test.ts\n"
+  },
+  {
+    "terminalId": "item-shell",
+    "data": "VGVzdHM6IDEgcGFzc2VkIOKckwo=",
+    "sessionUpdate": "terminal_output_chunk",
+    "decoded": "Tests: 1 passed ✓\n"
+  },
+  {
+    "terminalId": "item-shell",
+    "data": "CnEK",
+    "sessionUpdate": "terminal_output_chunk",
+    "decoded": "\nq\n"
+  },
+  {
+    "terminalId": "item-shell",
+    "exitStatus": {
+      "exitCode": 0,
+      "signal": null
+    },
+    "sessionUpdate": "terminal_update"
+  },
+  {
+    "toolCallId": "item-shell",
+    "status": "completed",
+    "rawOutput": {
+      "formatted_output": "PASS a.test.ts\nTests: 1 passed ✓\n",
+      "exit_code": 0
+    },
+    "sessionUpdate": "tool_call_update"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "toolCallId": "item-read",
+    "title": "Read file '/workspace/src/a.ts'",
+    "kind": "read",
+    "status": "in_progress",
+    "locations": [
+      {
+        "path": "/workspace/src/a.ts"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "item-read",
+    "status": "completed",
+    "rawOutput": {
+      "formatted_output": "export {};\n",
+      "exit_code": 0
+    },
+    "sessionUpdate": "tool_call_update"
+  }
+]

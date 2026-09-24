@@ -1055,7 +1055,12 @@ export class CodexEventHandler {
         );
     }
 
-    private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent {
+    private createCommandOutputDeltaEvent(event: CommandExecutionOutputDeltaNotification): UpdateSessionEvent | null {
+        // v2 streams output only into terminals the client can show. Other commands report
+        // their output in the completed tool call's `rawOutput`.
+        if (this.session.protocolVersion === 2 && !this.terminalCommandIds.has(event.itemId)) {
+            return null;
+        }
         if (event.delta.length > 0) {
             this.commandOutputIds.add(event.itemId);
         }
@@ -1074,7 +1079,7 @@ export class CodexEventHandler {
         }
     }
 
-    private createTerminalInteractionEvent(event: TerminalInteractionNotification): UpdateSessionEvent {
+    private createTerminalInteractionEvent(event: TerminalInteractionNotification): UpdateSessionEvent | null {
         return this.createCommandOutputDeltaEvent({
             threadId: event.threadId,
             turnId: event.turnId,

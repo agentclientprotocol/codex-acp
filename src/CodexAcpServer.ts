@@ -470,6 +470,10 @@ export class CodexAcpServer {
         this.initializeRequest = {clientInfo: params.info};
         // Boolean config options are baseline on v2, so there is nothing to probe.
         this.booleanConfigOptionsSupported = true;
+        // v2 has standard terminal updates, so the private v1 terminal output negotiation doesn't
+        // apply: command output is always sent in the form rendered to `terminal_*` updates.
+        this.terminalOutputMode = "terminal_output_delta";
+        this.terminalOutputDeltaSupported = false;
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize({clientInfo: params.info}));
         this.publishFirstAuthStatusAfterResponse();
         return {

@@ -4,7 +4,7 @@ import {
     type AcpSessionUpdate,
     asSdkSessionNotification,
 } from "./AcpSessionExtensions";
-import {toV2SessionUpdate} from "./AcpV2SessionUpdate";
+import {toV2SessionUpdates} from "./AcpV2SessionUpdate";
 
 export type AcpClientConnection = Pick<acp.AgentContext, "notify" | "request">;
 
@@ -20,12 +20,14 @@ export class AcpV2Connection {
         this.client = client;
     }
 
-    /** Sends a session update, rendered in the v2 wire shape, through the v2 `session/update` binding. */
+    /**
+     * Sends a session update, rendered in the v2 wire shape, through the v2 `session/update`
+     * binding. One update can render to several v2 updates (or none), sent in order.
+     */
     async updateSession(sessionId: string, update: AcpSessionUpdate): Promise<void> {
-        await this.client.notify(acpV2.methods.client.session.update, {
-            sessionId,
-            update: toV2SessionUpdate(update),
-        });
+        for (const v2Update of toV2SessionUpdates(update)) {
+            await this.client.notify(acpV2.methods.client.session.update, {sessionId, update: v2Update});
+        }
     }
 
     /** Sends a `state_update`, which only exists on v2 and so needs no rendering. */
@@ -78,7 +80,7 @@ function rejectStandardMethod(method: string): Promise<never> {
 
 /**
  * The single send point for `session/update`. Callers build v1-shaped updates; on a v2
- * connection they are rendered in the v2 wire shape by `toV2SessionUpdate`.
+ * connection they are rendered in the v2 wire shape by `toV2SessionUpdates`.
  */
 export class ACPSessionConnection {
     private readonly connection: AcpClientConnection;

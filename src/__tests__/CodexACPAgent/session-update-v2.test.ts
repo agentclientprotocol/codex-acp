@@ -119,8 +119,8 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         })).rejects.toThrow("'diff' tool call content is not supported on an ACP v2 connection yet");
         await expect(view.notify(acp.methods.client.session.update, {
             sessionId: "session-1",
-            update: {sessionUpdate: "tool_call_update", toolCallId: "call-2", content: [{type: "terminal", terminalId: "call-2"}]},
-        })).rejects.toThrow("'terminal' tool call content is not supported on an ACP v2 connection yet");
+            update: {sessionUpdate: "tool_call_update", toolCallId: "call-2", _meta: {terminal_exit: {exit_code: 0}}},
+        })).rejects.toThrow("Malformed 'terminal_exit' tool call metadata");
         await expect(session.update({
             sessionUpdate: "user_message_chunk",
             content: {type: "text", text: "hi"},
