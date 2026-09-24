@@ -962,17 +962,36 @@ export class CodexAcpServer {
     /**
      * Installs a baseline session-scoped subscription at session creation, so a Codex-initiated
      * turn starting before any `session/prompt` has run (right after `session/new`/
-     * `session/resume`) still updates `codexReportedRunningTurnId` and gets its `running`/`idle`
-     * states (J5). `prompt()`'s own subscribe call takes over dispatch once a prompt runs; this
-     * baseline handler answers approval/elicitation requests exactly like app-server's own
-     * default for a thread with no handler registered, so no real prompt has yet run to answer.
+     * `session/resume`) still updates `codexReportedRunningTurnId`, gets its `running`/`idle`
+     * states (J5), and renders its items. `prompt()`'s own `subscribeToSessionEvents` call
+     * permanently replaces this dispatch (`CodexSubagentSubscriptions.subscribe` keeps a single
+     * `current` subscription per session) the first time a prompt runs, and that subscription's
+     * own leftover-rendering path takes over from then on; this baseline handler only ever
+     * dispatches for a session no prompt has subscribed to yet, so it cannot double-render. It
+     * answers approval/elicitation requests exactly like app-server's own default for a thread
+     * with no handler registered, so no real prompt has yet run to answer.
      */
     private startCodexTurnTracker(sessionState: SessionState): void {
+        const baselineEventHandler = new CodexEventHandler(
+            this.connection,
+            sessionState,
+            clientSupportsPlanUpdates(this.clientCapabilities),
+            clientSupportsTypedSessionFailures(this.clientCapabilities),
+            this.sessionFailureEpoch,
+            sessionState.subagents,
+            (accountUpdated) => this.handleAccountUpdated(accountUpdated),
+            false,
+            clientSupportsCompaction(this.clientCapabilities),
+            clientSupportsNotices(this.clientCapabilities),
+        );
         void this.codexAcpClient.subscribeToSessionEvents(
             sessionState.sessionId,
             async (event) => {
                 await this.trackCodexTurnStart(sessionState, event);
                 await this.trackSteerLanding(sessionState, event);
+                // Codex-started turns carry no `userMessage` item; `handleSessionScopedNotification`
+                // already drops that item type, so nothing is synthesized here.
+                await baselineEventHandler.handleSessionScopedNotification(event);
                 await this.trackCodexTurnCompletion(sessionState, event);
             },
             DENY_ALL_APPROVALS,

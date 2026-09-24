@@ -67,6 +67,7 @@ export function createTurn(status: TurnStatus, id = turnId): Turn {
 export function codexResponse(method: string): unknown {
     switch (method) {
         case "thread/start":
+        case "thread/resume":
             return {
                 thread: createThread(),
                 model: "gpt-5",
@@ -280,6 +281,10 @@ export function itemStarted(item: ThreadItem, id = turnId): ServerNotification {
 
 export function itemCompleted(item: ThreadItem, id = turnId): ServerNotification {
     return {method: "item/completed", params: {threadId: sessionId, turnId: id, item, completedAtMs: 0}};
+}
+
+export function agentMessageDelta(delta: string, id = turnId, itemId = "item-1"): ServerNotification {
+    return {method: "item/agentMessage/delta", params: {threadId: sessionId, turnId: id, itemId, delta}};
 }
 
 export function turnStarted(id = turnId): ServerNotification {

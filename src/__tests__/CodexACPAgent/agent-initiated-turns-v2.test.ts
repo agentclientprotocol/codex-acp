@@ -10,6 +10,7 @@ import {
     itemCompleted,
     turnStarted,
     turnCompleted,
+    agentMessageDelta,
     settle,
     stateUpdates,
     type PromptSession,
@@ -19,6 +20,11 @@ import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
 function userMessageChunks(transcript: PromptSession['transcript']) {
     return transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
         .filter(update => update.sessionUpdate === "user_message_chunk");
+}
+
+function agentMessageChunks(transcript: PromptSession['transcript']) {
+    return transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
+        .filter(update => update.sessionUpdate === "agent_message_chunk");
 }
 
 function commandApprovalParams(overrides: Partial<CommandExecutionRequestApprovalParams> = {}): CommandExecutionRequestApprovalParams {
@@ -58,12 +64,14 @@ describe('agent-initiated Codex turns over ACP v2', () => {
         expectConformingV2SessionUpdates();
     });
 
-    it('sends running/idle for a Codex turn that starts right after session/new, before any prompt has run', async () => {
+    it('sends running/idle and renders items for a Codex turn that starts right after session/new, before any prompt has run', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
         const start = client.transcript.length;
 
         client.emit(turnStarted());
+        await settle();
+        client.emit(agentMessageDelta("Working on the goal"));
         await settle();
         client.emit(turnCompleted());
         await settle();
@@ -71,6 +79,51 @@ describe('agent-initiated Codex turns over ACP v2', () => {
         const transcript = client.transcript.slice(start);
         expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
         expect(userMessageChunks(transcript)).toEqual([]);
+        expect(agentMessageChunks(transcript)).toEqual([
+            expect.objectContaining({sessionUpdate: "agent_message_chunk"}),
+        ]);
+    });
+
+    it('sends running/idle and renders items for a Codex turn that starts right after session/resume, before any prompt has run', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        await client.request("session/resume", {sessionId, cwd});
+        const start = client.transcript.length;
+
+        client.emit(turnStarted());
+        await settle();
+        client.emit(agentMessageDelta("Working on the goal"));
+        await settle();
+        client.emit(turnCompleted());
+        await settle();
+
+        const transcript = client.transcript.slice(start);
+        expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        expect(userMessageChunks(transcript)).toEqual([]);
+        expect(agentMessageChunks(transcript)).toEqual([
+            expect.objectContaining({sessionUpdate: "agent_message_chunk"}),
+        ]);
+    });
+
+    it('does not double-render items for a turn a session/prompt owns', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+        client.emit(turnStarted());
+        client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
+        await response;
+        client.emit(agentMessageDelta("Hi there"));
+        await settle();
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        await settle();
+
+        expect(agentMessageChunks(client.transcript)).toEqual([
+            expect.objectContaining({sessionUpdate: "agent_message_chunk"}),
+        ]);
     });
 
     it('sends running/idle, without a user_message, for a Codex turn that continues after a prompt\'s own idle', async () => {
