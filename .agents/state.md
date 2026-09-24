@@ -492,7 +492,12 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     **J9** relax 2(c) to "never knowingly" + M2; **J10** prompts right after resume with an active
     goal; **J11** keep or remove codex-acp's own goal-continuation fallback (C1; redundant on
     0.156.1).
-    **Awaiting user decisions J1-J11.**
+    **User decisions (2026-09-24, partial):** J1-J3 → foreground as recommended (`running` at turn
+    start, one `idle`; minted id + `user_message` on landing for codex-acp-started turns; none for
+    Codex self-started goal turns). **J8 → (b) steer B into the running goal turn** (not M1 pause).
+    J4/J5/J7 as recommended. **J6 → shared reservation on v1 too** (scheduling only, no wire change).
+    **J11 → remove codex-acp's C1 goal-continuation fallback.** **J9/J10: user wants to clarify —
+    pending.**
   - Pre-existing (v1 too): codex-acp's own goal continuation may collide with Codex's auto one;
     `prompt()` clearing `currentTurnId` (`:3101`) can hide a running Codex turn from cancel/steering.
 
