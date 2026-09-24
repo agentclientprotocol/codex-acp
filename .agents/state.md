@@ -416,7 +416,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..iv) done | 2(a2-v) + 2(c) (blocked on Q3 probe + user J1-J7) | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..iv) done | 2(a2-v) + 2(c) (unblocked; after 4(a)) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | In progress | 4(a) in flight | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
@@ -453,7 +453,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   when no v2 `session/prompt` is in flight. What `state_update`/`user_message` sequence does ACP v2
   allow/require for a turn the client didn't request; how should they interact with a v2 prompt that
   arrives meanwhile (overlap check / 2(c) queue)? → `.agents/research/v2-agent-initiated-turns.md`.
-  Status: **research + live probe done; user decisions J1-J11 pending.** Findings:
+  Status: **resolved (2026-09-24)** — decisions below. Findings:
   - Callers: goal continuation (`_session/goal` set/resume when `runGoalSet` returns `null`,
     `CodexAcpServer.ts:586,611`) and steering fallback (`:1717-1734,1793`). The pending request is the
     extension request, not a `session/prompt`. Neither method is on the v2 chain yet (topic 10), so
@@ -496,8 +496,15 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     start, one `idle`; minted id + `user_message` on landing for codex-acp-started turns; none for
     Codex self-started goal turns). **J8 → (b) steer B into the running goal turn** (not M1 pause).
     J4/J5/J7 as recommended. **J6 → shared reservation on v1 too** (scheduling only, no wire change).
-    **J11 → remove codex-acp's C1 goal-continuation fallback.** **J9/J10: user wants to clarify —
-    pending.**
+    **J11 → remove codex-acp's C1 goal-continuation fallback.** **J9/J10 → relax + adopt (M2)**, no extra
+    workarounds (user: keep logic simple; no pause-before-resume tricks): never *knowingly*
+    `turn/start` on a busy thread; if the `turn/start` response returns a turn id codex-acp didn't
+    start, treat B as steered — B's request stays pending until its userMessage lands (response +
+    `user_message`), no second `running`, one `idle` at that turn's end; if the steered input is
+    dropped (turn interrupted before the next model call) B never lands → fail B with a JSON-RPC
+    error (decision #1). Same path after `session/resume` with an active goal. With J8 = steer, a
+    prompt arriving during a goal turn goes straight to `turn/start` (steer) instead of the queue.
+    **All Q3 decisions made; 2(a2-v)/2(c) unblocked** (dispatch after 4(a)).
   - Pre-existing (v1 too): codex-acp's own goal continuation may collide with Codex's auto one;
     `prompt()` clearing `currentTurnId` (`:3101`) can hide a running Codex turn from cancel/steering.
 
