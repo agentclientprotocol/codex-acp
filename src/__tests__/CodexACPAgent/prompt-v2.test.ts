@@ -19,10 +19,24 @@ import {
     type TranscriptEntry,
 } from './v2-prompt-harness';
 import type {ServerNotification} from '../../app-server';
-import type {CodexErrorInfo, TurnCompletedNotification} from '../../app-server/v2';
+import type {CodexErrorInfo, ThreadGoal, TurnCompletedNotification} from '../../app-server/v2';
 import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 const typedFailureCapabilities = {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}};
+
+function createThreadGoal(overrides?: Partial<ThreadGoal>): ThreadGoal {
+    return {
+        threadId: sessionId,
+        objective: "Ship it",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: 0,
+        timeUsedSeconds: 0,
+        createdAt: 0,
+        updatedAt: 0,
+        ...overrides,
+    };
+}
 
 /** Sends a prompt and lets Codex record its user message; resolves once the prompt is answered. */
 async function insertPrompt(client: PromptSession, index: number, id = turnId) {
@@ -431,12 +445,97 @@ describe('session/prompt over ACP v2', () => {
         await client.promptRunFinished(1);
     });
 
-    it('rejects commands that run a Codex turn until they are supported on v2', async () => {
+    it('runs /compact as a Codex command turn, inserting a live-only user message', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        const response = client.sendPrompt([{type: "text", text: "/compact"}]);
+        const {messageId} = await response;
+        client.emit(turnStarted());
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        await settle();
+
+        expect(client.turnStartParams).toEqual([]);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-compact-command.json');
+    });
+
+    it('runs /goal <objective> as a Codex command turn, inserting a live-only user message', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        const goal = createThreadGoal();
+        client.setCodexResponse("thread/goal/set", async () => ({goal}));
+
+        const response = client.sendPrompt([{type: "text", text: "/goal Ship it"}]);
+        const {messageId} = await response;
+        client.emit({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}});
+        client.emit(turnStarted());
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        await settle();
+
+        expect(client.turnStartParams).toEqual([]);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-goal-command.json');
+    });
+
+    it('runs /goal resume as a Codex command turn, inserting a live-only user message', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        const goal = createThreadGoal({objective: "Resumed objective"});
+        client.setCodexResponse("thread/goal/set", async () => ({goal}));
+
+        const response = client.sendPrompt([{type: "text", text: "/goal resume"}]);
+        const {messageId} = await response;
+        client.emit({method: "thread/goal/updated", params: {threadId: sessionId, turnId: null, goal}});
+        client.emit(turnStarted());
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        await settle();
+
+        expect(client.turnStartParams).toEqual([]);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-goal-resume-command.json');
+    });
+
+    it('fails the prompt when a Codex command turn is rejected before it starts', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        client.setCodexResponse("thread/compact/start", async () => {
+            throw new ResponseError(-32600, "Cannot compact now");
+        });
+
+        const error = await client.sendPrompt([{type: "text", text: "/compact"}]).then(() => null, (err) => err);
+        await client.promptRunFinished();
+
+        expect(error).not.toBeNull();
+        // Never inserted, so the session never left idle.
+        expect(stateUpdates(client.transcript)).toEqual([]);
+        await expect(dump(client.transcript)).toMatchFileSnapshot('data/prompt-v2-compact-turn-start-rejected.json');
+    });
+
+    it('ends a /compact turn that fails after insertion with one idle', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        const response = client.sendPrompt([{type: "text", text: "/compact"}]);
+        const {messageId} = await response;
+        client.emit(turnStarted());
+        client.emit(turnFinished("failed"));
+        await client.promptRunFinished();
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-compact-failed-after-insertion.json');
+    });
+
+    it('rejects /review commands until they are supported on v2', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
         const errors = [];
-        for (const text of ["/compact", "/review", "/review-branch main", "/goal ship it", "/goal resume"]) {
+        for (const text of ["/review", "/review-branch main", "/review-commit abc123"]) {
             errors.push(await client.sendPrompt([{type: "text", text}]).then(
                 () => null,
                 (err) => ({text, code: err.code, message: err.message, data: err.data}),

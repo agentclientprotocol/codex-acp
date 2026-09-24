@@ -391,6 +391,7 @@ export class CodexAppServerClient {
         onTurnStarted?: (turnId: string) => void,
         runtimeEffectsGraceMs = GOAL_RUNTIME_EFFECTS_GRACE_MS,
         onGoalSet?: (goal: ThreadGoal) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification | null> {
         let goalTurnId: string | null = null;
         const capturedCompletions: Array<TurnCompletedNotification> = [];
@@ -441,6 +442,10 @@ export class CodexAppServerClient {
 
         try {
             const goalSetResponse = await this.threadGoalSet(params);
+            // `/goal` records no user message, live or in history, so this response is the
+            // earliest signal that Codex accepted the command, whether or not a runtime turn
+            // ends up running.
+            onAccepted?.();
             expectedGoal = goalSetResponse.goal;
             onGoalSet?.(expectedGoal);
             if (capturedGoalUpdates.some(event => goalsMatch(event.goal, expectedGoal!))) {
@@ -570,6 +575,7 @@ export class CodexAppServerClient {
     async runCompact(
         params: ThreadCompactStartParams,
         onTurnStarted?: (turnId: string) => void,
+        onAccepted?: () => void,
     ): Promise<CompactionCompletedNotification | Extract<ServerNotification, {method: "turn/completed"}>> {
         type Result = CompactionCompletedNotification | Extract<ServerNotification, {method: "turn/completed"}>;
         let compactTurnId: string | null = null;
@@ -602,6 +608,9 @@ export class CodexAppServerClient {
         });
         try {
             await this.threadCompactStart(params);
+            // Compaction records no user message, so this is the earliest signal that Codex
+            // accepted the command.
+            onAccepted?.();
             return await completed;
         } finally {
             releaseTurnCapture();

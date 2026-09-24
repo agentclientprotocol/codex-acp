@@ -737,8 +737,9 @@ export class CodexAcpClient {
     async runCompact(
         sessionId: string,
         onTurnStarted?: (turnId: string) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification | undefined> {
-        const completed = await this.codexClient.runCompact({threadId: sessionId}, onTurnStarted);
+        const completed = await this.codexClient.runCompact({threadId: sessionId}, onTurnStarted, onAccepted);
         return completed.method === "turn/completed" ? completed.params : undefined;
     }
 
@@ -752,16 +753,17 @@ export class CodexAcpClient {
         objective: string,
         onTurnStarted?: (turnId: string) => void,
         onGoalSet?: (goal: ThreadGoal) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification | null> {
         const params = {
             threadId: sessionId,
             objective,
             status: "active",
         } as const;
-        if (onGoalSet === undefined) {
+        if (onGoalSet === undefined && onAccepted === undefined) {
             return await this.codexClient.runGoalSet(params, onTurnStarted);
         }
-        return await this.codexClient.runGoalSet(params, onTurnStarted, undefined, onGoalSet);
+        return await this.codexClient.runGoalSet(params, onTurnStarted, undefined, onGoalSet, onAccepted);
     }
 
     async setGoalStatus(sessionId: string, status: ThreadGoalStatus): Promise<ThreadGoal> {
@@ -782,15 +784,16 @@ export class CodexAcpClient {
         sessionId: string,
         onTurnStarted?: (turnId: string) => void,
         onGoalSet?: (goal: ThreadGoal) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification | null> {
         const params = {
             threadId: sessionId,
             status: "active",
         } as const;
-        if (onGoalSet === undefined) {
+        if (onGoalSet === undefined && onAccepted === undefined) {
             return await this.codexClient.runGoalSet(params, onTurnStarted);
         }
-        return await this.codexClient.runGoalSet(params, onTurnStarted, undefined, onGoalSet);
+        return await this.codexClient.runGoalSet(params, onTurnStarted, undefined, onGoalSet, onAccepted);
     }
 
     async clearGoal(sessionId: string): Promise<void> {

@@ -2984,7 +2984,8 @@ export class CodexAcpServer {
             throw RequestError.invalidRequest(`Session ${sessionId} is already processing a prompt`);
         }
         const promptKind = this.availableCommands.classifyPrompt(request.prompt);
-        if (promptKind.kind === "codexTurnCommand") {
+        // `/review*` still needs two-turn-id tracking (parent/child ids); not supported yet.
+        if (promptKind.kind === "codexTurnCommand" && promptKind.name.startsWith("review")) {
             throw RequestError.internalError(
                 undefined,
                 `'/${promptKind.name}' is not supported on an ACP v2 connection yet`,
@@ -3156,13 +3157,19 @@ export class CodexAcpServer {
                 permissionContext.handleNotification(event);
                 await elicitationHandler.handleNotification(event);
             };
+            const resolvePendingInsertion = async (): Promise<void> => {
+                if (pendingInsertion === undefined) {
+                    return;
+                }
+                const {onInserted} = pendingInsertion;
+                pendingInsertion = undefined;
+                await onInserted();
+            };
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
                     if (pendingInsertion !== undefined
                         && isInsertedUserMessage(event, params.sessionId, pendingInsertion.clientUserMessageId)) {
-                        const {onInserted} = pendingInsertion;
-                        pendingInsertion = undefined;
-                        await onInserted();
+                        await resolvePendingInsertion();
                     }
                     await observeInteraction(event);
                     if (!promptNotificationsActive) {
@@ -3205,6 +3212,11 @@ export class CodexAcpServer {
                     pendingTurnStart?.resolve(turnId);
                     onTurnStarted?.();
                 },
+                ...(insertion === undefined ? {} : {
+                    onCommandAccepted: () => {
+                        void resolvePendingInsertion();
+                    },
+                }),
                 setConfigOption: async (configId, value) => {
                     await this.applySessionConfigOption(sessionState, {
                         sessionId: sessionState.sessionId,

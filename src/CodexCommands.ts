@@ -36,6 +36,11 @@ export const GOAL_CONTINUATION_PROMPT: acp.ContentBlock[] = [{
 export type CommandHandleOptions = {
     onTurnStartPending?: () => void;
     onTurnStarted?: (turnId: string, threadId: string) => void;
+    /**
+     * Fired once Codex accepts a command that runs a turn but records no user message
+     * (`/compact`, `/goal`), so a v2 caller can insert its own live-only one right away.
+     */
+    onCommandAccepted?: () => void;
     setConfigOption?: (configId: string, value: string) => Promise<void>;
 };
 
@@ -271,6 +276,7 @@ export class CodexCommands {
                 const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.runCompact(
                     sessionId,
                     (turnId) => options.onTurnStarted?.(turnId, sessionId),
+                    options.onCommandAccepted,
                 ));
                 return { handled: true, ...(turnCompleted === undefined ? {} : {turnCompleted}) };
             }
@@ -403,6 +409,8 @@ export class CodexCommands {
                     (turnId) => {
                         this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
                     },
+                    undefined,
+                    options.onCommandAccepted,
                 )));
             case "clear":
                 await this.runWithProcessCheck(() => this.codexAcpClient.clearGoal(sessionId));
@@ -422,6 +430,8 @@ export class CodexCommands {
             (turnId) => {
                 this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
             },
+            undefined,
+            options.onCommandAccepted,
         )));
     }
 
