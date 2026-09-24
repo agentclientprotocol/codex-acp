@@ -23,6 +23,22 @@ describe("createJSONRPCReader", () => {
         expect(messages).toEqual([{jsonrpc: "2.0", method: "m", params: {text: "я"}}]);
     });
 
+    it("keeps a message whose string holds U+2028 or U+2029 in one line", async () => {
+        // JSON allows these characters unescaped. readline ended a line at them and lost the message.
+        const messages = await read([Buffer.from(JSON.stringify({id: 1, result: {text: "a\u2028b\u2029c"}}) + "\n")]);
+
+        expect(messages).toEqual([{jsonrpc: "2.0", id: 1, result: {text: "a\u2028b\u2029c"}}]);
+    });
+
+    it("reads a last line without a line break at the end of the stream", async () => {
+        const messages = await read([Buffer.from('{"id":1,"result":{}}\n{"id":2,"result":{}}')]);
+
+        expect(messages).toEqual([
+            {jsonrpc: "2.0", id: 1, result: {}},
+            {jsonrpc: "2.0", id: 2, result: {}},
+        ]);
+    });
+
     it("reads several messages of one chunk and skips blank and malformed lines", async () => {
         const messages = await read([Buffer.from('{"id":1,"result":{}}\n\n{bad\n{"id":2,"result":{}}\r\n')]);
 
