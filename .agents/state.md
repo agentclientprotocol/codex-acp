@@ -44,7 +44,7 @@ BATCH-204/205 (omitted `params`, fixed by 2(u2)).
    `-k test_prompt` baseline. Note for 2(a2-iii): `/goal resume` falling back to
    `GOAL_CONTINUATION_PROMPT` reuses the already-resolved insertion (no new minted id; untested) —
    that continuation needs its own minted `clientUserMessageId` + live `user_message`; **2(a2-ii)**
-   `/review`; **2(a2-iii)** synthetic prompts (plan-implementation, goal continuation) + overlap
+   `/review` (**in flight, programmer dispatched 2026-09-24**); **2(a2-iii)** synthetic prompts (plan-implementation, goal continuation) + overlap
    check for `startNewTurnFromExternalPrompt` + fallback title fix. — Codex command turns (`/review`, `/compact`, `/goal`) and synthetic prompts
    (plan-implementation, goal continuation) on v2. Use the two-id tracking from 2(r), with no clientId matcher
    for reviews. On `review/start` success, send the response + live-only `user_message`, then
