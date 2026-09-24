@@ -833,6 +833,10 @@ export class CodexAcpServer {
         try {
             await this.streamThreadHistory(sessionId, thread, history);
         } catch (err) {
+            // A close during the load already closed the session.
+            if (err instanceof SessionClosedDuringLoadError) {
+                throw RequestError.invalidRequest(`Session ${sessionId} is closing`);
+            }
             // The history pages are read after the session is installed, so a failed read closes the
             // session again. The client never gets a half-open session.
             await this.closeSession({sessionId}).catch(closeError => {
@@ -2051,12 +2055,14 @@ export class CodexAcpServer {
     private async streamThreadHistory(sessionId: string, thread: Thread, history: AsyncIterable<ThreadItem[]>): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
         const sessionState = this.getSessionState(sessionId);
+        const generation = this.getSessionGeneration(sessionId);
+        const isOpen = () => this.getSessionGeneration(sessionId) === generation;
         const pages = history[Symbol.asyncIterator]();
         const first = await pages.next();
         const firstPage = first.done ? [] : first.value;
         // The first user message of the first page names the session.
         await this.publishThreadHistoryTitle(session, sessionState, thread, firstPage);
-        const itemPages = pagesStartingWith(firstPage, pages);
+        const itemPages = untilSessionClose(pagesStartingWith(firstPage, pages), isOpen);
         if (clientSupportsSubagents(this.clientCapabilities)) {
             await this.streamNativeThreadHistory(
                 sessionId,
@@ -2064,11 +2070,13 @@ export class CodexAcpServer {
                 sessionState,
                 new Set([sessionId]),
                 new Set(),
+                isOpen,
             );
             return;
         }
         for await (const items of itemPages) {
             for (const item of items) {
+                if (!isOpen()) throw new SessionClosedDuringLoadError();
                 for (const update of await this.createHistoryUpdates(item, sessionState)) {
                     await session.update(update);
                 }
@@ -2082,11 +2090,13 @@ export class CodexAcpServer {
         sessionState: SessionState,
         ancestry: Set<string>,
         unreadableChildren: Set<string>,
+        isOpen: () => boolean,
     ): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
         const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean}>();
         for await (const items of itemPages) {
             for (const item of items) {
+                if (!isOpen()) throw new SessionClosedDuringLoadError();
                 if (item.type === "subAgentActivity") {
                     const activityKind = item.kind as string;
                     if (activityKind === "started") {
@@ -2121,13 +2131,15 @@ export class CodexAcpServer {
                                 try {
                                     await this.streamNativeThreadHistory(
                                         childSessionId,
-                                        withCommandIds(childItems, commandIds),
+                                        withCommandIds(untilSessionClose(childItems, isOpen), commandIds),
                                         sessionState,
                                         new Set([...ancestry, item.agentThreadId]),
                                         unreadableChildren,
+                                        isOpen,
                                     );
                                 }
                                 catch (error) {
+                                    if (error instanceof SessionClosedDuringLoadError) throw error;
                                     // The child pages are read lazily. A child that fails midway keeps what it sent.
                                     unreadableChildren.add(item.agentThreadId);
                                     logger.error(`Failed to read subagent history ${item.agentThreadId}`, error);
@@ -3431,6 +3443,21 @@ export class CodexAcpServer {
 
 function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
     return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(server.name))));
+}
+
+/** A close of the session stopped the read of its history during `session/load`. */
+class SessionClosedDuringLoadError extends Error {
+    constructor() {
+        super("The session closed during the history load");
+    }
+}
+
+/** The pages of `pages` while `isOpen` is true. A close of the session stops the read at the next page. */
+async function* untilSessionClose<T>(pages: AsyncIterable<T[]>, isOpen: () => boolean): AsyncGenerator<T[]> {
+    for await (const page of pages) {
+        if (!isOpen()) throw new SessionClosedDuringLoadError();
+        yield page;
+    }
 }
 
 /** The page `first`, then the pages of `rest`. */
