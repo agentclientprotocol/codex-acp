@@ -24,6 +24,11 @@ export type UserMessageInsertion = {
      * one `idle` if the steered input never lands.
      */
     onTurnAdopted?: () => void;
+    /**
+     * Fired synchronously each time a turn starts (or restarts) for this prompt, with the turn's
+     * ids. Lets a pending `$/cancel_request` interrupt the right turn before insertion.
+     */
+    onTurnStarted?: (turn: {threadId: string, turnId: string}) => void;
 };
 
 /**

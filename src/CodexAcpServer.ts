@@ -3261,10 +3261,10 @@ export class CodexAcpServer {
      * turn run on in the background. A Codex prompt is inserted when Codex records its user
      * message; a locally handled command has no Codex turn, so it is inserted right away.
      */
-    async promptV2(params: acpV2.PromptRequest): Promise<acpV2.PromptResponse> {
+    async promptV2(params: acpV2.PromptRequest, signal?: AbortSignal): Promise<acpV2.PromptResponse> {
         const sessionId = params.sessionId;
         const request = toV1PromptRequest(params);
-        this.getSessionState(sessionId);
+        const sessionState = this.getSessionState(sessionId);
         if (this.sessionIsClosing(sessionId)) {
             throw RequestError.invalidRequest(`Session ${sessionId} is closing`);
         }
@@ -3275,15 +3275,26 @@ export class CodexAcpServer {
         if (reservation.needsWait) {
             // `session/cancel`/`session/close` drop this prompt while it waits here: race the
             // FIFO wait against a cancellation signal so the client sees `-32800` right away,
-            // instead of only once the running turn ahead of it actually finishes.
+            // instead of only once the running turn ahead of it actually finishes. A
+            // `$/cancel_request` for this specific request goes through the same canceller, so it
+            // only drops this prompt and leaves the rest of the queue untouched.
             let cancelled = false;
             let markCancelled: () => void = () => { cancelled = true; };
             const cancelSignal = new Promise<void>((resolve) => {
                 markCancelled = () => { cancelled = true; resolve(); };
             });
             const unregister = this.registerQueuedV2PromptCanceller(sessionId, markCancelled);
+            const onRequestCancelled = () => markCancelled();
+            if (signal) {
+                if (signal.aborted) {
+                    onRequestCancelled();
+                } else {
+                    signal.addEventListener("abort", onRequestCancelled, {once: true});
+                }
+            }
             await Promise.race([reservation.wait, cancelSignal]);
             unregister();
+            signal?.removeEventListener("abort", onRequestCancelled);
             if (cancelled) {
                 // Still release in the FIFO's own order once it is actually this prompt's turn,
                 // so anything queued behind it does not start while the current turn is still
@@ -3310,6 +3321,31 @@ export class CodexAcpServer {
             // already running unowned (M2): that turn's `running` already went out before this
             // prompt existed, so this prompt must not send a second one.
             let turnWasAdopted = false;
+            let startedTurn: {threadId: string, turnId: string} | null = null;
+            let requestCancelHandled = false;
+            // A `$/cancel_request` for a prompt whose `turn/start` was sent but has not landed
+            // yet still has a pending request to answer: interrupt the turn it started (like
+            // v1's `observePromptRequestCancellation`) and drop it with `-32800`. A turn this
+            // prompt only adopted (M2) belongs to someone else (e.g. a Codex goal turn) and must
+            // keep running -- only this request is dropped, still with `-32800`; whatever that
+            // turn actually finishes with is reported normally once `run()` settles below.
+            const dropPendingRequest = () => {
+                if (inserted || requestCancelHandled) {
+                    return;
+                }
+                requestCancelHandled = true;
+                if (!turnWasAdopted && startedTurn !== null) {
+                    void this.requestTurnInterrupt(sessionState, startedTurn.threadId, startedTurn.turnId, "Cancel");
+                }
+                reject(RequestError.requestCancelled(undefined, "The prompt request was cancelled before it was inserted"));
+            };
+            if (signal) {
+                if (signal.aborted) {
+                    dropPendingRequest();
+                } else {
+                    signal.addEventListener("abort", dropPendingRequest, {once: true});
+                }
+            }
             const onInserted = async () => {
                 inserted = true;
                 try {
@@ -3349,6 +3385,9 @@ export class CodexAcpServer {
                     },
                     onTurnAdopted: () => {
                         turnWasAdopted = true;
+                    },
+                    onTurnStarted: (turn) => {
+                        startedTurn = turn;
                     },
                 }, reservation);
             };
@@ -3407,7 +3446,10 @@ export class CodexAcpServer {
                     this.v2PromptsInFlight.delete(sessionId);
                     await sendState(toV2IdleState(this.failedPromptResponse(sessionId)));
                 },
-            ).finally(() => reservation.release());
+            ).finally(() => {
+                signal?.removeEventListener("abort", dropPendingRequest);
+                reservation.release();
+            });
         });
     }
 
@@ -3594,6 +3636,7 @@ export class CodexAcpServer {
                 onTurnStarted: (turnId, threadId) => {
                     const turn = {threadId, turnId};
                     activePrompt.currentTurn = turn;
+                    insertion?.onTurnStarted?.(turn);
                     if (this.promptShouldStop(params.sessionId, activePrompt)) {
                         this.interruptLateStartedTurn(sessionState, turn);
                         return;
@@ -3713,6 +3756,7 @@ export class CodexAcpServer {
                     (turnId) => {
                         const turn = {threadId: params.sessionId, turnId};
                         activePrompt.currentTurn = turn;
+                        insertion?.onTurnStarted?.(turn);
                         if (this.promptShouldStop(params.sessionId, activePrompt)) {
                             this.interruptLateStartedTurn(sessionState, turn);
                             return;

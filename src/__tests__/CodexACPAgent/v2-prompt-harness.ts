@@ -110,9 +110,10 @@ export type PromptSession = {
     setCodexResponse(method: string, handler: (params: unknown) => Promise<unknown>): void;
     appServer: CodexAppServerClient;
     emit(notification: ServerNotification): void;
-    sendPrompt(prompt: acpV2.ContentBlock[]): Promise<any>;
+    /** `signal`, if given, sends `$/cancel_request` for this specific `session/prompt` on abort. */
+    sendPrompt(prompt: acpV2.ContentBlock[], signal?: AbortSignal): Promise<any>;
     /** Sends any other agent-bound request (e.g. `session/set_config_option`) on the same connection. */
-    request(method: string, params: unknown): Promise<any>;
+    request(method: string, params: unknown, signal?: AbortSignal): Promise<any>;
     /** Sends `session/cancel` (a notification, not a request) for this session. */
     cancel(): Promise<void>;
     /** Resolves when the n-th internal prompt run (including its background turn) has finished. */
@@ -123,6 +124,8 @@ export type PromptSession = {
      * `CommandExecutionApprovalRequest.method`).
      */
     triggerApproval(method: string, params: unknown): Promise<unknown>;
+    /** The `{threadId, turnId}` params of every `turn/interrupt` sent to Codex so far, in order. */
+    turnInterruptCalls(): Array<{threadId: string, turnId: string}>;
 };
 
 /** Connects a client (v2 by default) to the agent through the router, over a mocked Codex app-server, and opens a session. */
@@ -190,7 +193,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     };
     const clientStream = acp.ndJsonStream(clientToAgent.writable, agentToClient.readable);
     let connection: {close(): void};
-    let request: (method: string, params: unknown) => Promise<any>;
+    let request: (method: string, params: unknown, signal?: AbortSignal) => Promise<any>;
     let notifyCancel: () => Promise<void>;
     if (protocolVersion === 2) {
         const v2Connection = acpV2.client({name: "test-client"})
@@ -210,7 +213,11 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         });
         await v2Connection.agent.request(acpV2.methods.agent.session.new, {cwd, ...(options.mcpServers ? {mcpServers: options.mcpServers} : {})});
         connection = v2Connection;
-        request = (method, params) => v2Connection.agent.request(method as typeof acpV2.methods.agent.session.prompt, params as acpV2.PromptRequest);
+        request = (method, params, signal) => v2Connection.agent.request(
+            method as typeof acpV2.methods.agent.session.prompt,
+            params as acpV2.PromptRequest,
+            signal ? {cancellationSignal: signal} : undefined,
+        );
         notifyCancel = () => v2Connection.agent.notify(acpV2.methods.agent.session.cancel, {sessionId});
     } else {
         const v1Connection = acp.client({name: "test-client"})
@@ -219,7 +226,11 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         await v1Connection.agent.request(acp.methods.agent.initialize, {protocolVersion: acp.PROTOCOL_VERSION});
         await v1Connection.agent.request(acp.methods.agent.session.new, {cwd, mcpServers: []});
         connection = v1Connection;
-        request = (method, params) => v1Connection.agent.request(method as typeof acp.methods.agent.session.prompt, params as acp.PromptRequest);
+        request = (method, params, signal) => v1Connection.agent.request(
+            method as typeof acp.methods.agent.session.prompt,
+            params as acp.PromptRequest,
+            signal ? {cancellationSignal: signal} : undefined,
+        );
         notifyCancel = () => v1Connection.agent.notify(acp.methods.agent.session.cancel, {sessionId});
     }
     const promptSpy = vi.spyOn(agent!, "prompt");
@@ -232,8 +243,8 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         mocks.getUnhandledNotificationHandler()!(notification);
     };
 
-    const sendPrompt = (prompt: acpV2.ContentBlock[]) => {
-        const response = request("session/prompt", {sessionId, prompt}).then(
+    const sendPrompt = (prompt: acpV2.ContentBlock[], signal?: AbortSignal) => {
+        const response = request("session/prompt", {sessionId, prompt}, signal).then(
             (result) => {
                 transcript.push({promptResponse: result});
                 return result;
@@ -274,6 +285,9 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             }
             return await handler(params);
         },
+        turnInterruptCalls: () => mocks.mockCodexConnection.sendRequest.mock.calls
+            .filter(([method]: [string]) => method === "turn/interrupt")
+            .map(([, params]: [string, {threadId: string, turnId: string}]) => params),
     };
 }
 
