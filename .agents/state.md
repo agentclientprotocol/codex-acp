@@ -110,9 +110,19 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
      **Q-PERM (researcher dispatched):** plain `session/cancel` never aborts `activePrompt.signal`
      (only `closeSession` via `requestClose()` and v1 `$/cancel_request` via
      `observePromptRequestCancellation` do), so the outbound `session/request_permission` is not
-     `$/cancel_request`ed on cancel (v1 or v2); only `turn/interrupt` is sent. Does ACP v1/v2 require
-     the agent to cancel it; what does Codex do with the pending approval on `turn/interrupt`
-     (`serverRequest/resolved`?); v1 impact of adding the cascade.
+     `$/cancel_request`ed on cancel (v1 or v2); only `turn/interrupt` is sent. **Research done**
+     (`.agents/research/v2-cancel-pending-permission.md`): the client MUST answer pending permissions
+     `cancelled` (v1+v2); agent `$/cancel_request` is only MAY (INFO-CANCEL-202 informational).
+     Codex on interrupt aborts its pending approval (`serverRequest/resolved`, later answers dropped);
+     codex-acp ignores that. Today no hang: v1 `cancelled`, v2 one `idle/cancelled`. **Real bug (v1+v2):**
+     cancel during the plan-implementation review (no turn to interrupt, signal never aborted) → the
+     client's `cancelled` answer makes the prompt end `end_turn` (breaks CANCEL-203; untested). Options:
+     (a) `cancel()` calls `activePrompt.requestCancel()` (too broad: changes pre-turn flow);
+     (a′, researcher's pick, v1+v2) separate per-prompt permission/elicitation abort controller fired by
+     cancel/close + `cancelRequested` flag → plan review returns `cancelled` (v1-visible: optional
+     `$/cancel_request` per pending request, and the bug fix); (b) v2 only; (c) leave. Research open
+     Qs: react to `serverRequest/resolved`; stray v2 `running` after idle when a late answer arrives;
+     URL elicitations; resolved-vs-completed ordering. **Awaiting user decision.**
    - **3(c)** `$/cancel_request` / `ctx.signal` for a pending v2 `session/prompt` (queued → only it,
      -32800). Then end-of-topic full TCK v1 + v2.
    CANCEL-202 goal risk: live probe in `v2-agent-initiated-turns.md` (n=1) saw no goal turn after an
