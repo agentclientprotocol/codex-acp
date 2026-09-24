@@ -119,6 +119,22 @@ describe("paginated thread history", () => {
         expect(pages).toHaveBeenCalledTimes(pageCalls);
     });
 
+    it("fails a history page that Codex does not answer instead of waiting forever", async () => {
+        vi.useFakeTimers();
+        try {
+            const fixture = createCodexMockTestFixture();
+            const appServer = fixture.getCodexAppServerClient();
+            vi.spyOn(appServer, "threadItemsList").mockReturnValue(new Promise(() => {}));
+
+            const pages = appServer.threadItemPages("history")[Symbol.asyncIterator]();
+            const next = expect(pages.next()).rejects.toThrow("Codex did not answer thread/items/list for thread history within 60 s");
+            await vi.advanceTimersByTimeAsync(60_000);
+            await next;
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("pages the items of one large turn", async () => {
         const fixture = createCodexMockTestFixture();
         const appServer = fixture.getCodexAppServerClient();

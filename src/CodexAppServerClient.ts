@@ -161,6 +161,12 @@ const HISTORY_PAGE_TURNS = 5;
 /** The number of items in one page of a history replay. */
 const HISTORY_PAGE_ITEMS = 100;
 
+/**
+ * The longest wait for one page of history. A page takes milliseconds, so a page that takes this long is lost:
+ * the load fails and the session closes instead of waiting forever.
+ */
+const HISTORY_PAGE_TIMEOUT_MS = 60_000;
+
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
@@ -648,25 +654,25 @@ export class CodexAppServerClient {
         options: {lastItemCursor?: string | null; turnId?: string} = {},
     ): AsyncGenerator<ThreadItem[]> {
         const turnId = options.turnId ?? null;
-        const last = await this.threadItemsList({
+        const last = await withHistoryTimeout(this.threadItemsList({
             threadId,
             turnId,
             cursor: options.lastItemCursor ?? null,
             limit: 1,
             sortDirection: "desc",
-        });
+        }), "thread/items/list", threadId);
         const lastItemId = last.data[0]?.item.id;
         if (lastItemId === undefined) return;
         const seenCursors = new Set<string>();
         let cursor: string | null = null;
         do {
-            const page = await this.threadItemsList({
+            const page: ThreadItemsListResponse = await withHistoryTimeout(this.threadItemsList({
                 threadId,
                 turnId,
                 cursor,
                 limit: HISTORY_PAGE_ITEMS,
                 sortDirection: "asc",
-            });
+            }), "thread/items/list", threadId);
             const items = page.data.map(entry => entry.item);
             const lastIndex = items.findIndex(item => item.id === lastItemId);
             if (lastIndex >= 0) {
@@ -1323,4 +1329,19 @@ function extractTurnRouting(notification: ServerNotification): { threadId: strin
         return {threadId, turnId: params.turn.id};
     }
     return {threadId, turnId: null};
+}
+
+/** The page, or an error when Codex does not answer within {@link HISTORY_PAGE_TIMEOUT_MS}. */
+async function withHistoryTimeout<T>(page: Promise<T>, method: string, threadId: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(
+            `Codex did not answer ${method} for thread ${threadId} within ${HISTORY_PAGE_TIMEOUT_MS / 1000} s`,
+        )), HISTORY_PAGE_TIMEOUT_MS);
+    });
+    try {
+        return await Promise.race([page, timeout]);
+    } finally {
+        clearTimeout(timer);
+    }
 }
