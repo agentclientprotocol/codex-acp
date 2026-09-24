@@ -453,7 +453,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   when no v2 `session/prompt` is in flight. What `state_update`/`user_message` sequence does ACP v2
   allow/require for a turn the client didn't request; how should they interact with a v2 prompt that
   arrives meanwhile (overlap check / 2(c) queue)? → `.agents/research/v2-agent-initiated-turns.md`.
-  Status: **research done; live probe in flight; user decisions J1-J7 pending.** Findings:
+  Status: **research + live probe done; user decisions J1-J11 pending.** Findings:
   - Callers: goal continuation (`_session/goal` set/resume when `runGoalSet` returns `null`,
     `CodexAcpServer.ts:586,611`) and steering fallback (`:1717-1734,1793`). The pending request is the
     extension request, not a `session/prompt`. Neither method is on the v2 chain yet (topic 10), so
@@ -477,9 +477,22 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     session-level turn subscription independent of `prompt()` (sees auto turns, incl. after resume) ·
     **J6** whether v1 also uses the shared reservation (scheduling only) · **J7** mint the
     goal-continuation id on v2 only.
-  - **Possible 2(c) blocker:** a queued B's `turn/start` right after `turn/completed` can race
-    Codex's auto goal turn and get silently steered into it. → live probe (appending
-    "Live verification" to the same file), in flight.
+  - **2(c) blocker — confirmed live** ("Live verification (Codex 0.156.1)" section of the same
+    file; probe `/tmp/goalrace/probe.mjs`). Auto goal turns start 6–25 ms after `turn/completed`,
+    `thread/goal/set`, or `thread/resume`, with no userMessage. B's `turn/start` sent ≤12 ms after
+    `turn/completed` gets its own turn (6/6); ≥16 ms → silently steered (4/4; response returns the
+    goal turn id, `inProgress`). No non-steering `turn/start` option. Only early signal:
+    `thread/goal/updated{status:"active", turnId}` 2–3 ms before each `turn/completed`. Working
+    mitigation **M1**: pause goal while A runs → `turn/start` B after A completes → set active once B
+    starts (2/2; costs: visible paused→active churn, goal token accounting stops during pause, a
+    crash leaves it paused). **M2** detect-and-adopt (response turn id ≠ ours → treat B as steered,
+    resolve on userMessage landing, one `idle` at that turn's end) needed regardless. With an active
+    goal the thread is never idle beyond ~20 ms gaps → strict queue-until-idle starves B.
+    New judgment calls: **J8** queued prompt during active goal (a) M1 / (b) steer / (c) hold;
+    **J9** relax 2(c) to "never knowingly" + M2; **J10** prompts right after resume with an active
+    goal; **J11** keep or remove codex-acp's own goal-continuation fallback (C1; redundant on
+    0.156.1).
+    **Awaiting user decisions J1-J11.**
   - Pre-existing (v1 too): codex-acp's own goal continuation may collide with Codex's auto one;
     `prompt()` clearing `currentTurnId` (`:3101`) can hide a running Codex turn from cancel/steering.
 
