@@ -566,7 +566,12 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     Only the main dispatch path does M2 (not the plan-impl 2nd turn / local-command callback). 4
     tests in `prompt-v2.test.ts`. Suite 885 / 26. TCK unchanged (v1 26/0/3; v2 31/1 RESUME-202/5).
     No live probe.
-    **2(c)-2** (**in flight, programmer dispatched 2026-09-24**). Original 2(c)-1 scope: shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
+    **2(c)-2** (**in flight, programmer dispatched 2026-09-24**) — milestone (i) `_session/steering`
+    on v2 only. **J11 on hold (user, 2026-09-24):** the user wants v1 client behavior preserved;
+    remove C1 only if it fixes a bug with no v1-visible regression. The programmer was told not to do
+    J11. → research `.agents/research/v2-goal-continuation-fallback-v1-impact.md` (in flight): when C1
+    fires on 0.156.1, what v1 sees with/without it (esp. whether an unowned auto goal turn's output is
+    rendered on v1 at all), harm today, and a recommendation. Original 2(c)-1 scope: shared per-session turn-start reservation (J4, J6 v1 too) + v2 queued prompts pending
     until insertion + J8 (goal turn running → `turn/start` directly) + M2 adopt (J9/J10);
     **2(c)-2** `_session/steering` minted id + `user_message` on landing, steering fallback through
     the reservation (with `running`/`idle`), remove C1 goal-continuation fallback (J11). Cancel
