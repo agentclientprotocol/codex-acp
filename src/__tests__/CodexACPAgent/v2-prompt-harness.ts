@@ -142,11 +142,19 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     onRequestPermission?: (request: acpV2.RequestPermissionRequest, signal: AbortSignal) => acpV2.RequestPermissionResponse | Promise<acpV2.RequestPermissionResponse>,
     /** Answers `elicitation/create` (v2 only). Required by tests that trigger one. */
     onElicitation?: (request: acpV2.CreateElicitationRequest, signal: AbortSignal) => acpV2.CreateElicitationResponse | Promise<acpV2.CreateElicitationResponse>,
+    /**
+     * Overrides canned Codex responses from the start, unlike `setCodexResponse` (only available
+     * once `connectSession` has returned). Needed for responses a fire-and-forget background task
+     * (e.g. MCP OAuth re-auth) sends before the caller gets a chance to call `setCodexResponse`.
+     */
+    codexResponses?: Record<string, (params: unknown) => Promise<unknown>>,
 } = {}): Promise<PromptSession> {
     const mocks = createMockConnections();
     const transcript: TranscriptEntry[] = [];
     const turnStartParams: Array<Record<string, unknown>> = [];
-    const codexResponseOverrides = new Map<string, (params: unknown) => Promise<unknown>>();
+    const codexResponseOverrides = new Map<string, (params: unknown) => Promise<unknown>>(
+        Object.entries(options.codexResponses ?? {}),
+    );
     let turnStart: (params: Record<string, unknown>) => Promise<unknown> = async () => ({
         turn: createTurn("inProgress", `turn-${turnStartParams.length}`),
     });

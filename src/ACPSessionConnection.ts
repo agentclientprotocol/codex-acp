@@ -25,13 +25,38 @@ export class AcpV2Connection {
     }
 
     /**
-     * Lets the owning server report whether a turn is still running for a session, so
-     * `requestPermission()`'s trailing `running` (below) is only sent when one genuinely is:
-     * a permission request that outlives its turn must not undo the `idle` already sent for it.
+     * Lets the owning server report whether a turn is still running for a session, so the
+     * `requires_action`/`running` bracket below is only applied around requests that actually
+     * interrupt foreground work: a request sent while idle must not send `requires_action` (there
+     * is no foreground work to block), and a request that outlives its turn must not resurrect
+     * `running` after the turn already went `idle` on its own.
      * Defaults to always running, so callers that never wire this up keep the old behavior.
      */
     setTurnRunningCheck(check: (sessionId: string) => boolean): void {
         this.isTurnRunning = check;
+    }
+
+    /**
+     * Runs `sendRequest`, bracketed with `requires_action`/`running` `state_update`s only if a
+     * turn is running for `sessionId` at the moment the request is about to be sent. If idle,
+     * `sendRequest` runs unbracketed: sending `requires_action` while there is no foreground work
+     * to block would contradict the state's definition, and the client is already correctly idle.
+     * If busy, `requires_action` is sent first, and `running` follows in `finally` only if a turn
+     * is still running by then -- a turn that went `idle` on its own while the request was pending
+     * must not have that `idle` undone.
+     */
+    private async withStateBracket<T>(sessionId: string, sendRequest: () => Promise<T>): Promise<T> {
+        if (!this.isTurnRunning(sessionId)) {
+            return sendRequest();
+        }
+        await this.sendState(sessionId, {state: "requires_action"});
+        try {
+            return await sendRequest();
+        } finally {
+            if (this.isTurnRunning(sessionId)) {
+                await this.sendState(sessionId, {state: "running"});
+            }
+        }
     }
 
     /**
@@ -77,63 +102,48 @@ export class AcpV2Connection {
     /**
      * Sends `session/request_permission`, rendered in the v2 wire shape by
      * `toV2RequestPermissionRequest`. Per the spec, brackets the request with `requires_action`/
-     * `running` `state_update`s: `requires_action` while the request is pending, `running` again
-     * once it settles (granted, denied, cancelled, or errored all count as resumed) -- but only
-     * if a turn is still running by then; otherwise the turn already went `idle` on its own and
-     * this must not resurrect `running` after it.
+     * `running` `state_update`s -- but only while a turn is actually running (see
+     * `withStateBracket`); a permission request while idle (e.g. an out-of-turn MCP elicitation's
+     * fallback) is sent with no state update at all.
      */
     async requestPermission(
         request: acp.RequestPermissionRequest,
         options?: acp.SendRequestOptions,
     ): Promise<acp.RequestPermissionResponse> {
-        await this.sendState(request.sessionId, {state: "requires_action"});
-        try {
+        return this.withStateBracket(request.sessionId, async () => {
             const response = await this.client.request(
                 acpV2.methods.client.session.requestPermission,
                 toV2RequestPermissionRequest(request),
                 options,
             );
             return toV1RequestPermissionResponse(response);
-        } finally {
-            if (this.isTurnRunning(request.sessionId)) {
-                await this.sendState(request.sessionId, {state: "running"});
-            }
-        }
+        });
     }
 
     /**
      * Sends `elicitation/create` (wire-identical request/response between versions, per
      * `AcpV2Elicitation`). Brackets it with `requires_action`/`running` `state_update`s like
-     * `requestPermission()`, but only when the elicitation is session-scoped: a request-scoped
-     * elicitation (e.g. device-code login, sent before any session exists) has no session to
-     * attach a state update to.
+     * `requestPermission()` (see `withStateBracket`), but only when the elicitation is
+     * session-scoped: a request-scoped elicitation (e.g. device-code login, sent before any
+     * session exists) has no session to attach a state update to, so it is sent unbracketed.
      */
     async createElicitation(
         request: acp.CreateElicitationRequest,
         options?: acp.SendRequestOptions,
     ): Promise<acp.CreateElicitationResponse> {
+        const sendRequest = async () => {
+            const response = await this.client.request(
+                acpV2.methods.client.elicitation.create,
+                toV2CreateElicitationRequest(request),
+                options,
+            );
+            return toV1CreateElicitationResponse(response);
+        };
         const sessionId = elicitationSessionId(request);
         if (sessionId === undefined) {
-            const response = await this.client.request(
-                acpV2.methods.client.elicitation.create,
-                toV2CreateElicitationRequest(request),
-                options,
-            );
-            return toV1CreateElicitationResponse(response);
+            return sendRequest();
         }
-        await this.sendState(sessionId, {state: "requires_action"});
-        try {
-            const response = await this.client.request(
-                acpV2.methods.client.elicitation.create,
-                toV2CreateElicitationRequest(request),
-                options,
-            );
-            return toV1CreateElicitationResponse(response);
-        } finally {
-            if (this.isTurnRunning(sessionId)) {
-                await this.sendState(sessionId, {state: "running"});
-            }
-        }
+        return this.withStateBracket(sessionId, sendRequest);
     }
 
     /** Sends `elicitation/complete`, wire-identical between versions. */

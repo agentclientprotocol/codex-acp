@@ -34,8 +34,9 @@ function deferred<T>(): {promise: Promise<T>; resolve: (value: T) => void} {
 
 /**
  * Starts a prompt and lets its turn actually start (`turn/started` emitted) before returning, so
- * an MCP elicitation triggered against it finds a real turn running -- matching how the MCP OAuth
- * re-auth flow only ever fires mid-turn -- and its trailing `running` fires once it settles.
+ * an MCP elicitation triggered against it finds a real turn running, and its trailing `running`
+ * fires once it settles. codex-acp's own MCP OAuth re-auth fires at session open, outside any
+ * turn; this helper is for the in-turn `mcpServer/elicitation/request` tests below.
  */
 async function startRunningPrompt(client: PromptSession) {
     client.setTurnStart(async () => ({
@@ -161,6 +162,68 @@ describe('elicitation/create over ACP v2', () => {
         expect(transcript.some(entry => "permissionRequest" in entry)).toBe(true);
 
         await finishTurn();
+    });
+
+    it('sends the MCP OAuth re-auth elicitation at session open with no turn running, and no state_update', async () => {
+        const client = await connectSession(2, {
+            clientCapabilities: {elicitation: {url: {}}},
+            mcpServers: [{type: "stdio", name: "docs", command: "/usr/bin/docs-mcp"}],
+            mcpStartup: {ready: [], failed: [{server: "docs", error: "unauthorized", failureReason: "reauthenticationRequired"}], cancelled: []},
+            onElicitation: async () => ({action: "accept", content: null, _meta: null}),
+            codexResponses: {
+                "mcpServer/oauth/login": async () => ({authorizationUrl: "https://example.com/oauth/authorize"}),
+            },
+        });
+        closeClient = () => client.connection.close();
+
+        await vi.waitFor(() => expect(client.transcript.some(entry => "elicitationRequest" in entry)).toBe(true));
+
+        const elicitationRequests = client.transcript.flatMap(entry => "elicitationRequest" in entry ? [entry.elicitationRequest] : []);
+        expect(elicitationRequests).toEqual([expect.objectContaining({sessionId, mode: "url"})]);
+        // No turn (and no v2 prompt) is running at session open, so the client must stay `idle`
+        // rather than being told `requires_action` for foreground work that does not exist.
+        // `state_update`s sent before `available_commands_update` land in `setupUpdates`.
+        const allUpdates: TranscriptEntry[] = client.setupUpdates.map(update => ({sessionUpdate: update}));
+        allUpdates.push(...client.transcript);
+        expect(stateUpdates(allUpdates)).toEqual([]);
+    });
+
+    it('sends an idle-time Codex MCP elicitation (turnId: null) after a prompt has finished, with no state_update', async () => {
+        const client = await connectSession(2, {
+            clientCapabilities: {elicitation: {url: {}}},
+            onElicitation: async () => ({action: "accept", content: null, _meta: {source: "client"}}),
+        });
+        closeClient = () => client.connection.close();
+        const {finishTurn} = await startRunningPrompt(client);
+        await finishTurn();
+        await settle();
+        const start = client.transcript.length;
+
+        const response = await client.triggerApproval('mcpServer/elicitation/request', oauthReauthParams({turnId: null}));
+
+        expect(response).toEqual({action: "accept", content: null, _meta: {source: "client"}});
+        const transcript = client.transcript.slice(start);
+        expect(transcript.some(entry => "elicitationRequest" in entry)).toBe(true);
+        // The session is idle (the prompt already finished), so this must send no state_update.
+        expect(stateUpdates(transcript)).toEqual([]);
+    });
+
+    it('falls back to session/request_permission for an idle-time Codex MCP elicitation (turnId: null), with no state_update', async () => {
+        const client = await connectSession(2, {
+            onRequestPermission: async () => ({outcome: {outcome: "selected", optionId: "accept"}}),
+        });
+        closeClient = () => client.connection.close();
+        const {finishTurn} = await startRunningPrompt(client);
+        await finishTurn();
+        await settle();
+        const start = client.transcript.length;
+
+        const response = await client.triggerApproval('mcpServer/elicitation/request', oauthReauthParams({turnId: null}));
+
+        expect(response).toEqual({action: "accept", content: null, _meta: null});
+        const transcript = client.transcript.slice(start);
+        expect(transcript.some(entry => "permissionRequest" in entry)).toBe(true);
+        expect(stateUpdates(transcript)).toEqual([]);
     });
 
     it('aborts a pending MCP elicitation on session/cancel', async () => {
