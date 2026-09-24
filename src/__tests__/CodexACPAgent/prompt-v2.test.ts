@@ -931,7 +931,7 @@ describe('session/prompt over ACP v2', () => {
         expect(userMessages).toEqual([{sessionUpdate: "user_message_chunk", messageId, content: {type: "text", text: "Hello"}}]);
     });
 
-    it('fails with a JSON-RPC error, and still sends exactly one idle, when the adopted turn ends before the steered input lands (M2)', async () => {
+    it('fails with a -32800 JSON-RPC error, and still sends exactly one idle, when the adopted turn ends before the steered input lands (M2)', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
@@ -949,8 +949,10 @@ describe('session/prompt over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
+        // Never inserted, and the turn ended cancelled: same `-32800` a dropped queued prompt gets.
         await expect(response).rejects.toMatchObject({
-            message: "Internal error: The prompt ended before Codex recorded the user message",
+            code: -32800,
+            message: "Request cancelled: The prompt ended before Codex recorded the user message",
         });
         const transcript = client.transcript.slice(start);
         expect(transcript.some(entry => "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "user_message_chunk"))

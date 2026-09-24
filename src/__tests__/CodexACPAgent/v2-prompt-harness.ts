@@ -113,6 +113,8 @@ export type PromptSession = {
     sendPrompt(prompt: acpV2.ContentBlock[]): Promise<any>;
     /** Sends any other agent-bound request (e.g. `session/set_config_option`) on the same connection. */
     request(method: string, params: unknown): Promise<any>;
+    /** Sends `session/cancel` (a notification, not a request) for this session. */
+    cancel(): Promise<void>;
     /** Resolves when the n-th internal prompt run (including its background turn) has finished. */
     promptRunFinished(index?: number): Promise<void>;
     /**
@@ -132,7 +134,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     /** The Codex process exit code the agent sees (`null` = still running). */
     exitCode?: () => number | null,
     /** Answers `session/request_permission` (v2 only). Required by tests that trigger one. */
-    onRequestPermission?: (request: acpV2.RequestPermissionRequest) => acpV2.RequestPermissionResponse | Promise<acpV2.RequestPermissionResponse>,
+    onRequestPermission?: (request: acpV2.RequestPermissionRequest, signal: AbortSignal) => acpV2.RequestPermissionResponse | Promise<acpV2.RequestPermissionResponse>,
 } = {}): Promise<PromptSession> {
     const mocks = createMockConnections();
     const transcript: TranscriptEntry[] = [];
@@ -189,6 +191,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     const clientStream = acp.ndJsonStream(clientToAgent.writable, agentToClient.readable);
     let connection: {close(): void};
     let request: (method: string, params: unknown) => Promise<any>;
+    let notifyCancel: () => Promise<void>;
     if (protocolVersion === 2) {
         const v2Connection = acpV2.client({name: "test-client"})
             .onNotification(acpV2.methods.client.session.update, (ctx) => onUpdate(ctx.params.update))
@@ -197,7 +200,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
                 if (!options.onRequestPermission) {
                     throw new Error("Received a permission request with no onRequestPermission handler configured");
                 }
-                return await options.onRequestPermission(ctx.params);
+                return await options.onRequestPermission(ctx.params, ctx.signal);
             })
             .connect(clientStream);
         await v2Connection.agent.request(acpV2.methods.agent.initialize, {
@@ -208,6 +211,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         await v2Connection.agent.request(acpV2.methods.agent.session.new, {cwd, ...(options.mcpServers ? {mcpServers: options.mcpServers} : {})});
         connection = v2Connection;
         request = (method, params) => v2Connection.agent.request(method as typeof acpV2.methods.agent.session.prompt, params as acpV2.PromptRequest);
+        notifyCancel = () => v2Connection.agent.notify(acpV2.methods.agent.session.cancel, {sessionId});
     } else {
         const v1Connection = acp.client({name: "test-client"})
             .onNotification(acp.methods.client.session.update, (ctx) => onUpdate(ctx.params.update))
@@ -216,6 +220,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         await v1Connection.agent.request(acp.methods.agent.session.new, {cwd, mcpServers: []});
         connection = v1Connection;
         request = (method, params) => v1Connection.agent.request(method as typeof acp.methods.agent.session.prompt, params as acp.PromptRequest);
+        notifyCancel = () => v1Connection.agent.notify(acp.methods.agent.session.cancel, {sessionId});
     }
     const promptSpy = vi.spyOn(agent!, "prompt");
     // Session setup publishes updates of its own; wait for them before recording the prompt.
@@ -257,6 +262,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         emit,
         sendPrompt,
         request,
+        cancel: () => notifyCancel(),
         promptRunFinished: async (index = 0) => {
             await vi.waitFor(() => expect(promptSpy.mock.results.length).toBeGreaterThan(index));
             await promptSpy.mock.results[index]!.value.catch(() => {});
