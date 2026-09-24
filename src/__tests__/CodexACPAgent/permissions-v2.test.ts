@@ -23,24 +23,23 @@ import {
 } from './v2-prompt-harness';
 import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
-/** Starts a prompt and leaves `turn/start` pending, so the approval handler is registered but no turn is running. */
-async function startPromptWithPendingTurn(client: PromptSession) {
-    let releaseTurnStart!: () => void;
-    const turnStartGate = new Promise<void>((resolve) => {
-        releaseTurnStart = resolve;
-    });
-    client.setTurnStart(async () => {
-        await turnStartGate;
-        return {turn: {id: turnId, items: [], itemsView: "notLoaded" as const, status: "inProgress" as const, error: null, startedAt: null, completedAt: null, durationMs: null}};
-    });
+/**
+ * Starts a prompt and lets its turn actually start (`turn/started` emitted) before returning, so
+ * a permission request triggered against it finds a real turn running -- matching how command/
+ * file-change approvals are only ever raised mid-turn -- and its trailing `running` fires once
+ * the request settles.
+ */
+async function startRunningPrompt(client: PromptSession) {
+    client.setTurnStart(async () => ({
+        turn: {id: turnId, items: [], itemsView: "notLoaded" as const, status: "inProgress" as const, error: null, startedAt: null, completedAt: null, durationMs: null},
+    }));
     const response = client.sendPrompt([{type: "text", text: "Hello"}]);
     await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+    const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+    client.emit(turnStarted());
     return {
         response,
         finishTurn: async () => {
-            releaseTurnStart();
-            const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
-            client.emit(turnStarted());
             client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
             await response;
             client.emit(turnCompleted());
@@ -88,17 +87,16 @@ describe('session/request_permission over ACP v2', () => {
             onRequestPermission: async () => ({outcome: {outcome: "selected", optionId: "allow_once"}}),
         });
         closeClient = () => client.connection.close();
-        const {finishTurn} = await startPromptWithPendingTurn(client);
+        const {finishTurn} = await startRunningPrompt(client);
         const start = client.transcript.length;
 
         const response = await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams());
 
         expect(response).toEqual({decision: "accept"});
         const transcript = client.transcript.slice(start);
-        // No turn is running yet (`startPromptWithPendingTurn` leaves `turn/start` pending), so
-        // the trailing `running` that would otherwise close the `requires_action` bracket is
-        // suppressed: sending it would resurrect `running` for a turn that never started.
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
+        // The turn is running when the approval fires, so its trailing `running` closes the
+        // `requires_action` bracket once the client answers.
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
         const requiresAction = indexOf(transcript, isState("requires_action"));
         const permission = indexOf(transcript, entry => "permissionRequest" in entry);
         expect(requiresAction).toBeLessThan(permission);
@@ -112,15 +110,15 @@ describe('session/request_permission over ACP v2', () => {
             onRequestPermission: async () => ({outcome: {outcome: "selected", optionId: "decline"}}),
         });
         closeClient = () => client.connection.close();
-        const {finishTurn} = await startPromptWithPendingTurn(client);
+        const {finishTurn} = await startRunningPrompt(client);
         const start = client.transcript.length;
 
         const response = await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams());
 
         expect(response).toEqual({decision: "decline"});
         const transcript = client.transcript.slice(start);
-        // No turn is running yet, so the trailing `running` is suppressed (see the allowed test).
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
+        // The turn is running when the approval fires (see the allowed test).
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
         await expect(dump(transcript)).toMatchFileSnapshot('data/permissions-v2-command-rejected.json');
 
         await finishTurn();
@@ -131,15 +129,15 @@ describe('session/request_permission over ACP v2', () => {
             onRequestPermission: async () => ({outcome: {outcome: "selected", optionId: "allow_once"}}),
         });
         closeClient = () => client.connection.close();
-        const {finishTurn} = await startPromptWithPendingTurn(client);
+        const {finishTurn} = await startRunningPrompt(client);
         const start = client.transcript.length;
 
         const response = await client.triggerApproval(FileChangeApprovalRequest.method, fileChangeApprovalParams());
 
         expect(response).toEqual({decision: "accept"});
         const transcript = client.transcript.slice(start);
-        // No turn is running yet, so the trailing `running` is suppressed (see the allowed test).
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
+        // The turn is running when the approval fires (see the allowed test).
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
         await expect(dump(transcript)).toMatchFileSnapshot('data/permissions-v2-file-change-allowed.json');
 
         await finishTurn();
@@ -150,16 +148,16 @@ describe('session/request_permission over ACP v2', () => {
             onRequestPermission: async () => ({outcome: {outcome: "cancelled"}}),
         });
         closeClient = () => client.connection.close();
-        const {finishTurn} = await startPromptWithPendingTurn(client);
+        const {finishTurn} = await startRunningPrompt(client);
         const start = client.transcript.length;
 
         const response = await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams());
 
         expect(response).toEqual({decision: "cancel"});
         const transcript = client.transcript.slice(start);
-        // No turn is running yet, so the trailing `running` is suppressed even though the
-        // request was cancelled (see the allowed test).
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
+        // The turn is running when the approval fires, even though the request was cancelled
+        // (see the allowed test).
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
 
         await finishTurn();
     });
@@ -169,7 +167,7 @@ describe('session/request_permission over ACP v2', () => {
             onRequestPermission: async () => ({outcome: {outcome: "some_future_outcome"} as unknown as acpV2.RequestPermissionOutcome}),
         });
         closeClient = () => client.connection.close();
-        const {finishTurn} = await startPromptWithPendingTurn(client);
+        const {finishTurn} = await startRunningPrompt(client);
 
         const response = await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams());
 
@@ -184,15 +182,15 @@ describe('session/request_permission over ACP v2', () => {
             },
         });
         closeClient = () => client.connection.close();
-        const {finishTurn} = await startPromptWithPendingTurn(client);
+        const {finishTurn} = await startRunningPrompt(client);
         const start = client.transcript.length;
 
         const response = await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams());
 
         expect(response).toEqual({decision: "cancel"});
-        // No turn is running yet, so the trailing `running` is suppressed even though the
+        // The turn is running when the approval fires, so `running` resumes even though the
         // request itself failed (see the allowed test).
-        expect(stateUpdates(client.transcript.slice(start))).toEqual([{state: "requires_action"}]);
+        expect(stateUpdates(client.transcript.slice(start))).toEqual([{state: "requires_action"}, {state: "running"}]);
 
         await finishTurn();
     });
@@ -245,11 +243,13 @@ describe('session/request_permission over ACP v2', () => {
         })]);
         // The prompt's own `running` (from insertion) brackets the whole exchange. The plan
         // permission request fires after the proposal's turn already completed and before the
-        // implementation turn starts, so no turn is running while it's pending: the trailing
-        // `running` that would otherwise close its own `requires_action` bracket is suppressed.
+        // implementation turn starts, so no Codex turn is running while it's pending -- but the
+        // v2 prompt itself is still in flight, so the session is still busy and the trailing
+        // `running` still closes the `requires_action` bracket once the client approves.
         expect(stateUpdates(transcript)).toEqual([
             {state: "running"},
             {state: "requires_action"},
+            {state: "running"},
             {state: "idle", stopReason: "end_turn"},
         ]);
         await expect(dump(transcript, messageId).replaceAll(implementationId, "<implementationId>"))

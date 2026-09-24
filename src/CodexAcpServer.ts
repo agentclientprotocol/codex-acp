@@ -423,8 +423,11 @@ export class CodexAcpServer {
             this.v2Connection = connection.client;
             this.connection = connection.extensionOnlyV1View();
             // A permission request that outlives its turn must not undo the `idle` already sent
-            // for it (4(a)): only send `running` back if a turn is actually still running.
-            connection.setTurnRunningCheck((sessionId) => this.isCodexTurnRunning(sessionId));
+            // for it (4(a)): only send `running` back if the session is actually still busy --
+            // either a Codex turn is running, or a v2 prompt is in flight between two Codex
+            // turns of the same prompt (e.g. the plan/implementation approval gap), where no
+            // `codexReportedRunningTurnId` is set yet but the client is still mid-`requires_action`.
+            connection.setTurnRunningCheck((sessionId) => this.isSessionBusy(sessionId));
         } else {
             this.protocolVersion = 1;
             this.v2Connection = null;
@@ -988,6 +991,16 @@ export class CodexAcpServer {
      */
     private isCodexTurnRunning(sessionId: string): boolean {
         return this.sessions.get(sessionId)?.codexReportedRunningTurnId != null;
+    }
+
+    /**
+     * Whether the session is busy enough that a settled permission request should resume
+     * `running` rather than leave the client at `requires_action`: either a Codex turn is
+     * running, or a v2 prompt is in flight (covers the gap between two Codex turns of the same
+     * prompt, e.g. the plan/implementation approval, where no turn has started yet).
+     */
+    private isSessionBusy(sessionId: string): boolean {
+        return this.isCodexTurnRunning(sessionId) || this.v2PromptsInFlight.has(sessionId);
     }
 
     /**
