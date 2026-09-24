@@ -11,45 +11,63 @@ Phase: **Phase 2 — in progress.** Prerequisite and Phase 1 (topic 1) done; top
 
 ### Resume here (for a fresh orchestrator)
 
-State as of the graceful flush (2026-09-24): **no agents in flight; all source work is committed**
-(latest slice commits 9d22983, d4b64f3). Uncommitted, on disk only: `.agents/state.md`,
-`.agents/prompt.md` (the TCK `-k` note), and 6 new research files under `.agents/research/`. The
-user's `.agents/agents/*.md` edits were committed by the user in b2678b1, so there's no pre-staged
-index content to avoid anymore (keep committing with explicit pathspecs anyway).
+State as of the flush for a fresh orchestrator restart (2026-09-24): **no agents in flight; everything
+is committed** in codex-acp (branch `eugenethedev/acp-v2`) and in the acp-tck fork (`main`, 4 local
+commits, **not pushed** — the user said don't push). Keep committing with explicit pathspecs.
 
-Done: prerequisite (SDK `~1.5.0`), topic 1 (1a, 1b; 1c dropped), topic 9 (9a, 9b), topic 7,
-topic 5a. The v2 chain currently registers: `initialize`, `session/new|list|close|delete|resume`
-(no replay), `session/set_config_option`.
+Done: prerequisite (SDK `~1.5.0`); topic 1 (1a, 1b; 1c dropped); topics 6, 7, 8, 9; topic 5a;
+topic 2 slices 2(a1), 2(r), 2(b), 2(e), 2(h). The v2 chain registers: `initialize`,
+`session/new|list|close|delete|resume` (no replay), `session/set_config_option`, `auth/login`,
+`auth/logout`, `session/prompt`.
 
-**Next steps, in order:**
-1. ~~Resolve insertion open questions~~ #1-#3 decided by user (see "Codex insertion signal").
-   #4-#6 → researcher in flight (`v2-codex-insertion-followups.md`). Topic 8 **done**.
-   2(a) is split: **2(a1)** = plain prompts + locally handled slash commands — **done** (99f13e7,
-   0e38d35); then **2(r)** (v1 `/review` two-id fix) — **done** (1c46656, 3a1a93a);
-   then **2(b)** (`state_update`) — **done** (9da450e, 7645580);
-   review cancel-window research **done** (see 2(r) entry); 2(b) Q1/Q2 research **done + decided**
-   (see 2(b) entry); **6(a) done** (893a4a3, 8ee7b42).
-   **Queue (one programmer at a time):** ~~2(e)~~ **done** (1e20ae9, 7027ed1) → ~~6(b)~~ **done** (2d25cac, e37457a;
-   2 open questions resolved) → ~~6(c)~~ **done** (1bcd452, 317786a) → ~~6(d)~~ **done** (5aa5f0e, 3c4ffde; topic 6 **done**) → research TCK-U1/TCK-U2 (in flight, see
-   "Open questions"; fix slice to follow) ∥ ~~2(h)~~ **done** (76ad33e, bafd17a) → **BLOCKED on acp-tck fix (U1) + user go-ahead** → 2(u2)
-   omitted-params wrapper → **2(a2)** → **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
-   prompts (plan-implementation, goal continuation). #4-#6 research landed; all decided.
-2. **Topic 2(a)** (`session/prompt` on v2, idle case only): mint the `messageId` UUID → pass as
-   `clientUserMessageId`; resolve the RPC with `{messageId}` + live `user_message` at the matching
-   `userMessage` `item/started|completed` (not at `onTurnStarted`); keep turn execution in the
-   background. Precedent: `startNewTurnFromExternalPrompt`. Include locally handled slash commands
-   (adapter-inserted live-only `user_message`). Overlapping prompts can be rejected temporarily until
-   2(c). Sources: `v2-prompt-lifecycle-and-turn-state-machine.md` (minus §7.4 option 1),
-   `v2-queued-prompt-contract.md`, `v2-codex-prompt-insertion-signal.md`.
-   - Can run in parallel as the next programmer slice if 2(a) is blocked on user answers:
-     **topic 8** (auth: register `auth/login`/`auth/logout` on v2; `getCodexAuthMethodsV2`
-     already exists from 1a) — tiny and unblocked.
-3. Then 2(b) (`state_update` running/idle), 6(a) (message chunk `messageId` + `tool_call` re-tag,
-   incl. MCP-startup `tool_call`s; add the "no unknown unprefixed sessionUpdate on v2" test
-   guard), 5b, 10, 2(c) (queue), 3, 4 (incl. v2 `request_permission` + `elicitation/create` send
-   paths), 6(b), 6(c). Phase 4: full TCK v1 + v2 from one process.
-4. Run a **full** v1 TCK at the end of each topic (last full v1 run: slice 1a).
+**acp-tck fork fixes (user-requested, done, `/Users/eugene/Documents/JetBrains/projects/acp-tck`):**
+`1997552`, `473a1b5` (quiet-period checks only fail on replies), `b7cb958`, `e644ee7`
+(reply-waiting checks skip agent-initiated lines). See "Open questions" TCK-U1 and
+`.agents/tck/tck-fix-quiet-period.md`. With the fixed TCK, v2 BATCH-202, JSONRPC-003, EXT-201 pass;
+v1 full is still 50/1/5 CONFORMANT. The expected v2 full-run fails are now: cancel rows (topic 3),
+RESUME-202 (5b), EXT-202 (`capabilities.providers` placement; topic 1/10), and JSONRPC-001 +
+BATCH-204/205 (omitted `params`, fixed by 2(u2)).
 
+**Next steps, in order (one programmer at a time; researchers may run in parallel):**
+1. **2(u2)** — v2-only omitted-`params` fix. See TCK-U2 in "Open questions" and
+   `.agents/research/v2-tck-omitted-params.md`. Implement an `AgentConnector` wrapper passed to `withV2(...)`
+   in `src/AcpAgentRouter.ts`; its `TransformStream` adds `params: {}` to `session/list` and
+   `auth/logout` requests that have **no** `params` (including entries in batch arrays). Leave `null` alone.
+   v1 unchanged. No upstream issue; add a short code comment naming the SDK bug. Verify with v2
+   `-k "test_batch or test_jsonrpc"` (JSONRPC-001 and BATCH-204/205 should pass) and v1 at baseline.
+2. **2(a2)** — Codex command turns (`/review`, `/compact`, `/goal`) and synthetic prompts
+   (plan-implementation, goal continuation) on v2. Use the two-id tracking from 2(r), with no clientId matcher
+   for reviews. On `review/start` success, send the response + live-only `user_message`, then
+   `running`, then exactly one `idle`. Synthetic prompts get a minted `clientUserMessageId`. Also:
+   fix the overlap check that misses goal-continuation/steering turns started via
+   `startNewTurnFromExternalPrompt`, and fix the fallback title published for non-inserted prompts.
+   Research: `v2-codex-insertion-followups.md`, `v2-review-cancel-window.md`; user decisions in
+   "User decisions for later topics". It may need splitting into milestones.
+3. **2(c)** — queue overlapping v2 prompts FIFO (`v2-queued-prompt-contract.md`).
+   `_session/steering` passes a minted `clientUserMessageId` and emits `user_message` on landing.
+4. **Topic 3** — cancellation:
+   - `ctx.signal` / `$/cancel_request` and v2 `session/cancel`;
+   - v1 cancel-retry option B (recompute the id per attempt; retry "expected active turn id P but
+     found Y" with Y);
+   - retry `Close`-named interrupts (`interruptLateStartedTurn`, `interruptSessionTurn(…,"Close")`).
+5. **Topic 4** — permissions / `requires_action`: v2 `request_permission` and `elicitation/create`
+   send paths (MCP OAuth, device-code login), plus a v2 device-code test.
+6. **Topic 5b** — resume replay `replayFrom:start`:
+   - replayed ids come from `clientId ?? item.id`;
+   - the fallback's user chunks are never emitted;
+   - deterministic ids for fallback agent chunks and review-mode history;
+   - hide the reviewer prompt;
+   - replay of interrupted reviews;
+   - subagent replay.
+7. **Topic 10** — unstable/extension methods (`session/fork`, providers, `_session/goal`,
+   `_session/async_task/stop`; `_auth/status_update` push stays as is — user kept it and fixed the
+   TCK instead) plus the subagent/async-task renderer cases.
+8. **Phase 4** — full TCK v1 + v2 from one process. Document the AIR v2 contract in `readme-dev.md`
+   and the docs: `sessionFailure` and quota on idle `_meta`, the subagent and async renames.
+   Opportunistically fix stale v2 test doc comments.
+- Run a **full** v1 + v2 TCK at the end of each topic, and targeted `-k` runs per slice. `-k`
+  matches module or function names, not requirement IDs. How to run: `.agents/tck/HOW-TO-RUN.md`.
+  `bundle:all` needs `PATH=/tmp/bunshim:$PATH`.
 
 Topic 1 slice plan:
 - **1a** — **Done (852f102, 6f2e88e).** Router + v2 chain (`initialize` only) + `initializeV2` +
@@ -365,7 +383,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b) done (Q1 gap open) | 2(b) Q1 fix, 2(a2) | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h) done | 2(u2), then 2(a2), 2(c) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
@@ -411,7 +429,18 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   both change the documented contract. **User (2026-09-24): proper fix in the acp-tck fork**
   (`/Users/eugene/Documents/JetBrains/projects/acp-tck`, current branch, no worktree, no push,
   follow its AGENTS.md). **Blocking:** no codex-acp work until the TCK fix is verified and the user
-  confirms continuing. TCK programmer in flight.
+  confirms continuing. **Done part 1:** acp-tck `1997552` + `473a1b5` on `main` (not pushed):
+  shared `is_response_line`/`first_response_within` in v1+v2 `conformance/_helpers.py`; only a
+  method-less object is a reply; agent requests skipped unanswered; req text of BATCH-202,
+  JSONRPC-003, EXT-201 clarified; fixtures `pushes_status_notifications*.py` + cli self-tests.
+  codex-acp v2: BATCH-202, JSONRPC-003, EXT-201 now PASS; v1 full 50/1/5 CONFORMANT. Note
+  `.agents/tck/tck-fix-quiet-period.md`. **User: also fix now** the batch reply collectors
+  (BATCH-203 `_collect_flattened_responses`, BATCH-204/205 take first line as reply) — same
+  skip-`method` rule — **done** `b7cb958` + `e644ee7`: `is_agent_initiated` / `next_reply_line`
+  helpers (v1+v2); an array is agent-initiated only if non-empty and every element has `method`
+  (mixed arrays are judged as replies); BATCH-201/203/204/205, INFO-BATCH/PARSE/INVALIDREQ use it;
+  new split-reply fixture + `tests/v2/test_helpers.py`; acp-tck suite 284 pass. codex-acp results
+  unchanged vs part 1. **Resolved; user approved the flush and resuming codex-acp.**
 - (2026-09-24) **TCK-U2** — v2 `session/list` with omitted `params` → -32602. Is omitted params
   valid per ACP v2 / JSON-RPC; is the rejection ours or the SDK router's; v1 behaviour; fix point?
   → `.agents/research/v2-tck-omitted-params.md`. Status: **resolved — real bug, SDK side, v1 too.**
@@ -421,8 +450,8 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   sends `{}`). Parser override for built-in v2 methods throws in the SDK. Recommended fix: an
   `AgentConnector` wrapper in `AcpAgentRouter.ts` whose stream `TransformStream` adds `params: {}`
   to `session/list`/`auth/logout` requests lacking params (incl. batch entries), + upstream SDK
-  issue. Open: apply to v1 too? normalize `null`? who files upstream? → ask user after the TCK
-  fix. Fix slice **2(u2)** queued.
+  issue. **User (2026-09-24):** v2 only; missing `params` only (not `null`); no upstream issue (add a
+  code comment noting the SDK bug). Fix slice **2(u2)** queued.
 
 - (2026-09-24) SDK version sanity re-diff: do the v2 types and router API at the latest published
   version match the spec and SDK `origin/main`? → `.agents/research/v2-sdk-version-sanity-check.md`.
