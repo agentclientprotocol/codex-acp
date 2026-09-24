@@ -22,10 +22,12 @@ topic 5a. The v2 chain currently registers: `initialize`, `session/new|list|clos
 (no replay), `session/set_config_option`.
 
 **Next steps, in order:**
-1. **Before briefing 2(a):** resolve the 6 open questions under "Codex insertion signal" (Open
-   questions section). #1-#3 are product calls: ask the user. #4-#6 can go to a researcher or be
-   answered by the 2(a) programmer's investigation if they're mechanical. Recommend asking the user
-   #1-#3 in one `AskUserQuestion` batch.
+1. ~~Resolve insertion open questions~~ #1-#3 decided by user (see "Codex insertion signal").
+   #4-#6 → researcher in flight (`v2-codex-insertion-followups.md`). Topic 8 **done**.
+   2(a) is split: **2(a1)** = plain prompts + locally handled slash commands — **done** (99f13e7,
+   0e38d35); then **2(r)** (v1 `/review` two-id fix, see Q5 below) — **programmer in flight**;
+   then **2(b)** (`state_update`; unblocks v2 TCK prompt rows); then **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
+   prompts (plan-implementation, goal continuation). #4-#6 research landed; all decided.
 2. **Topic 2(a)** (`session/prompt` on v2, idle case only): mint the `messageId` UUID → pass as
    `clientUserMessageId`; resolve the RPC with `{messageId}` + live `user_message` at the matching
    `userMessage` `item/started|completed` (not at `onTurnStarted`); keep turn execution in the
@@ -154,6 +156,37 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
      `asyncTasks` is advertised → **topic 10**.
   Minor: some v2 test doc comments are stale (e.g. `session-config-options-v2.test.ts` says v2
   sessions can't be created). Fix opportunistically in a later slice.
+- **Topic 2(a1)** — **Done (99f13e7, 0e38d35).** v2 `session/prompt` → `CodexAcpServer.promptV2`:
+  `toV1PromptRequest` (non-v1 content → -32602) → unknown session (v1 error) → closing (-32600) →
+  overlap (-32600 "Session X is already processing a prompt"; checks new `v2PromptsInFlight` set,
+  `activePrompts`, `pendingTurnStarts`) → Codex-turn commands (`/compact`, `/review*` w/ arg,
+  `/goal <obj>|resume`) → temporary -32603 → mint `messageId`, call v1 `prompt()` un-awaited.
+  `prompt()` gained optional 4th param `insertion?: UserMessageInsertion`
+  (`{clientUserMessageId, onInserted}`); the session-event callback checks
+  `isInsertedUserMessage` before the event handler; `sendPrompt` gained a trailing
+  `clientUserMessageId` param (omitted when undefined → v1 `turn/start` unchanged). No insertion
+  by end → -32603 "The prompt ended before Codex recorded the user message"; throw before
+  insertion → v1 error mapping. New `src/AcpV2Prompt.ts` (`UserMessageInsertion`,
+  `isInsertedUserMessage`, `toV1PromptRequest`). `CodexCommands.classifyPrompt()` mirrors
+  `tryHandleCommand`'s switch (comment-only sync guard) → `localCommand` (insert + resolve before
+  running) / `codexTurnCommand` / regular. Fail-loud renders during a v2 turn are caught/logged by
+  `CodexAcpClient.enqueueSessionNotification`; they don't wedge the turn (tested).
+  Tests: `prompt-v2.test.ts` (10) + 10 snapshots. TCK v1 `-k test_prompt` 6 pass / 1 skip
+  (baseline); v2 `-k test_prompt` 9 fail / 1 skip, all timing out waiting for idle `state_update`
+  (→ 2(b)); transcripts show `{messageId}` ~0.4 s after the request, matching chunks.
+  Leftovers routed: `ctx.signal` / `$/cancel_request` before insertion + v2 `session/cancel` →
+  topic 3; overlap check misses goal-continuation/steering turns started via
+  `startNewTurnFromExternalPrompt` → 2(a2)/2(c); non-inserted prompts still publish the
+  fallback session title from prompt text (minor; revisit in 2(a2)). Note for 6(a): v1
+  `createTextEvent` agent chunks already carry `messageId: itemId`.
+- **Topic 8** — **Done (11a1969, 5f9335b).** v2 chain registers `auth/login` →
+  `CodexAcpServer.authenticateV2`, `auth/logout` → `logoutV2` (thin delegates; request shapes
+  identical). `authentication/status|logout` not on v2 (pinned -32601 by test). Tests:
+  `auth-v2.test.ts` + 4 snapshots. TCK `-k test_authentication`: v1 2 pass / 3 skip (baseline);
+  v2 AUTH-201/202/206 pass, AUTH-203/204/205/207 skip (no `--auth-method`/`--allow-logout`; 205
+  known). Known gap → **topic 4**: `chat-gpt-device-code` login on v2 fails (-32603) because
+  `createUrlElicitationRequester` sends `elicitation/create` via the v2 view; add a v2
+  device-code test once topic 4's `elicitation/create` send path exists.
 - **Topic 5b** — after topic 6(a) and 2(a): swap the `start` rejection in `resumeSessionV2` for
   `getOrCreateSessionWithHistory` + `streamThreadHistory`; rerun RESUME-202/204/205. Also: `replayFrom: {type:"start"}` history replay; messageId on
   replayed messages = `userMessage.clientId ?? item.id` (see the Codex insertion research; ACP-RESUME-204/205); subagent replay / orphan
@@ -165,13 +198,13 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | Not started | — | Milestone (a): `session/prompt` response redesign | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1) done; 2(r) in flight | 2(b), then 2(a2) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
 | 6 | Tool calls, messages & terminal streaming | Not started | — | Milestone (a): tool-call upsert fork at `ACPSessionConnection.update()` | Depends on topic 1 |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
-| 8 | Auth flow rename | Not started | — | — | Depends on topic 1 |
+| 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
 | 9 | Config options, modes & plans | **Done** | — | — | 9a + 9b landed |
 | 10 | Unstable/extension methods on v2 (plan gap) | Not started | — | — | Not owned by plan.md topics: register `session/fork` and `providers/{list,set,disable}` via typed `acpV2.methods.agent.*`; `_session/goal`, `_session/async_task/stop` via `onRequest("_…", parser, h)`; outbound `_auth/status_update` via `client.notify`; subagent/async-task renderer cases (see Open questions). `_session/steering` is owned by topic 2(c). Depends on topic 1 |
 
@@ -184,6 +217,11 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   was **dropped**. Since 1b, `extensionOnlyV1View` routes `session/update` from those sites
   through the same `toV2SessionUpdate` fork, so the fork is already centralized. Rerouting would
   only churn v1 code. The sites emit `tool_call_update` → topic 6 covers them via the renderer.
+- 2(a1): the live user message is sent as one `user_message_chunk` (with `messageId`) per prompt
+  block, not a `user_message` upsert. Spec/research allow either (lifecycle research :82); it
+  matches the shape 5b replay produces. Trade-off: an empty prompt emits no user message update.
+- 2 ordering: 2(r) → 2(b) → 2(a2) (instead of 2(a) → 2(b)), so 2(b) builds on correct turn-end
+  detection and unblocks the v2 TCK prompt rows before command turns are added.
 - The v2 fork point is `toV2SessionUpdate` in `src/AcpV2SessionUpdate.ts` (called from
   `ACPSessionConnection`), rather than logic inside `ACPSessionConnection.update()` itself.
 
@@ -306,7 +344,39 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
     2(c)'s queue must not call `turn/start` for B until A's `turn/completed`.
   - `turn/steer` returns immediately, but the message lands only at the next model call; if the
     turn is interrupted first, the steered input is dropped silently (relevant to `_session/steering`).
-  - **Open questions: decide (with the user where it's a product call) before briefing 2(a):**
+  - **User decisions (2026-09-24) on #1-#3, all as recommended:**
+    1. Turn starts but never inserts → fail the pending `session/prompt` with a JSON-RPC error
+       (no `user_message`, no `messageId`).
+    2. Command-prompt replay: accept live-only `user_message` for `/compact`, `/goal`, `/review`
+       (no persistence); on replay **hide** the `clientId: null` reviewer prompt.
+    3. Plan-implementation 2nd turn / goal continuation: **show** live as `user_message`, passing a
+       minted `clientUserMessageId` so live and replayed ids match.
+    #4-#6 → researched: `.agents/research/v2-codex-insertion-followups.md` (resolved 2026-09-24):
+    4. `ResponseItemHistoryFallback` (→ **5b**): keep for tool calls; use its user chunks only for
+       merge ordering, **never emit** them; no `client_id` parsing. Replayed user ids come only from
+       thread items (`clientId ?? item.id`). 5b open: fallback agent/thought chunks lack `messageId`
+       (invalid on v2); how to identify the reviewer prompt to hide (`clientId: null` also matches
+       legacy/foreign messages); fallback can resurrect rolled-back turns on v1 load.
+    5. `/review` (→ **2(a2)**): `review/start` response = parent turn id; `turn/started` = child
+       id; items, `error`s and the single `turn/completed` use the parent id; `turn/interrupt`
+       needs the **child** id. v2 must track two ids per turn: completion id (review/start response)
+       for end/errors/stopReason, interrupt id (latest `turn/started`). On `review/start` success:
+       response + live-only `user_message`, then `running`; never surface the `clientId: null`
+       reviewer message; exactly one `idle` on `turn/completed` for the completion id. Do NOT use
+       the clientId insertion matcher for reviews (would hang). **Existing v1 bug** (not fixed):
+       `CodexEventHandler` overwrites `currentTurnId` with the child id → B1 `completesActiveTurn`
+       never true for reviews; B2 review errors treated as a foreign turn's (duplicate terminal
+       failure for typed-failure clients; others lose error text; quota/auth errors don't fail the
+       prompt). Trap: cancel works only because `currentTurnId` = child id.
+    6. `_session/steering`: pass a fresh UUID as `TurnSteerParams.clientUserMessageId` on every
+       steer (judgment call, harmless on v1); on v2 show a steer as `user_message` only when its
+       userMessage item arrives. Response unchanged. **User approved (2026-09-24): emit on
+       landing** (no messageId in the steering response). Owner: topic 2(c) (`_session/steering`).
+    **User decision (2026-09-24): fix the v1 `/review` bug as its own slice ("2(r)")** —
+    introduce completion-id vs interrupt-id tracking with v1 tests, shipped as a `fix:` commit
+    (intentional v1 behavior change; cancel during review must keep working). Do it before 2(a2),
+    which builds on the two-id tracking.
+  - **Open questions (originally; #1-#3 now decided above):**
     1. A turn starts but never inserts (blocking hook, early error): fail the prompt with an
        error, or insert an adapter-owned `user_message`?
     2. What replay shows for command prompts (`/review`, `/compact`, `/goal`) that Codex history
@@ -342,6 +412,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 - Version-aware `ACPSessionConnection` → **done in 1b** (`toV2SessionUpdate` fork point).
 - The 5 bypass call sites (`CodexElicitationHandler.ts:221,228,556`, `CodexAcpServer.ts:2538,3312`)
   → not rerouted (1c dropped); they already reach the v2 renderer via `extensionOnlyV1View`.
+- Still open: v2 `elicitation/create` send path (MCP OAuth re-auth + device-code login) → topic 4.
 - Still open: v2 `session/request_permission` send path. `extensionOnlyV1View` rejects it today;
   topic 4 must add it (the v2 `ctx.client.request(acpV2.methods.client.session.requestPermission,
   …, {cancellationSignal})`, via the `AcpV2Connection` handle).
