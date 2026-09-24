@@ -1,0 +1,42 @@
+[
+  {
+    "sessionUpdate": {
+      "messageId": "<messageId>",
+      "content": {
+        "text": "/review",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "promptResponse": {
+      "messageId": "<messageId>"
+    }
+  },
+  {
+    "codexNotification": "turn/started"
+  },
+  {
+    "codexNotification": "turn/completed"
+  },
+  {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "stopReason": "end_turn",
+      "_meta": {
+        "quota": {
+          "token_count": null,
+          "model_usage": []
+        }
+      },
+      "state": "idle",
+      "sessionUpdate": "state_update"
+    }
+  }
+]

@@ -4,6 +4,7 @@ import {
     sessionId,
     turnId,
     connectSession,
+    createTurn,
     userMessageItem,
     itemStarted,
     itemCompleted,
@@ -19,7 +20,7 @@ import {
     type TranscriptEntry,
 } from './v2-prompt-harness';
 import type {ServerNotification} from '../../app-server';
-import type {CodexErrorInfo, ThreadGoal, TurnCompletedNotification} from '../../app-server/v2';
+import type {CodexErrorInfo, ErrorNotification, ThreadGoal, TurnCompletedNotification} from '../../app-server/v2';
 import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 const typedFailureCapabilities = {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}};
@@ -530,20 +531,106 @@ describe('session/prompt over ACP v2', () => {
         await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-compact-failed-after-insertion.json');
     });
 
-    it('rejects /review commands until they are supported on v2', async () => {
+    it('runs /review as a Codex command turn, inserting a live-only user message and hiding the reviewer prompt', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
+        const parentTurnId = "review-parent";
+        const childTurnId = "review-child";
+        client.setCodexResponse("review/start", async () => ({
+            reviewThreadId: sessionId,
+            turn: createTurn("inProgress", parentTurnId),
+        }));
 
-        const errors = [];
-        for (const text of ["/review", "/review-branch main", "/review-commit abc123"]) {
-            errors.push(await client.sendPrompt([{type: "text", text}]).then(
-                () => null,
-                (err) => ({text, code: err.code, message: err.message, data: err.data}),
-            ));
-        }
+        const response = client.sendPrompt([{type: "text", text: "/review"}]);
+        const {messageId} = await response;
+        // The review's own turn id (`parentTurnId`) is not the same as the reviewer's child turn
+        // (`childTurnId`) that actually starts and is later interrupted: `review/start`'s response
+        // is the completion id, `turn/started` is the interrupt id.
+        client.emit(turnStarted(childTurnId));
+        client.emit(itemCompleted({
+            type: "enteredReviewMode",
+            id: "entered-review",
+            review: "current changes",
+        }, parentTurnId));
+        // Codex's own reviewer prompt, `clientId: null`, must never be surfaced as a user message.
+        client.emit(itemCompleted(userMessageItem(null, "Review the current changes."), parentTurnId));
+        client.emit(turnFinished("completed", parentTurnId));
+        await client.promptRunFinished();
+        await settle();
 
-        expect(client.transcript.filter(entry => "codexRequest" in entry)).toEqual([]);
-        await expect(dump(errors)).toMatchFileSnapshot('data/prompt-v2-codex-turn-commands.json');
+        expect(client.turnStartParams).toEqual([]);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        const userMessages = sessionUpdates(client.transcript).filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(userMessages).toEqual([{sessionUpdate: "user_message_chunk", messageId, content: {type: "text", text: "/review"}}]);
+        await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-review-command.json');
+    });
+
+    it('fails the prompt when review/start is rejected before it starts', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        client.setCodexResponse("review/start", async () => {
+            throw new ResponseError(-32600, "Cannot review right now");
+        });
+
+        const error = await client.sendPrompt([{type: "text", text: "/review"}]).then(() => null, (err) => err);
+        await client.promptRunFinished();
+
+        expect(error).not.toBeNull();
+        // Never inserted, so the session never left idle.
+        expect(stateUpdates(client.transcript)).toEqual([]);
+        await expect(dump(client.transcript)).toMatchFileSnapshot('data/prompt-v2-review-turn-start-rejected.json');
+    });
+
+    it('ends a review Codex could not resolve before starting it with exactly one idle', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        const parentTurnId = "review-parent";
+        client.setCodexResponse("review/start", async () => ({
+            reviewThreadId: sessionId,
+            turn: createTurn("inProgress", parentTurnId),
+        }));
+
+        const response = client.sendPrompt([{type: "text", text: "/review"}]);
+        const {messageId} = await response;
+        // Codex reports a fatal, non-retried error under the review's turn id and never spawns the
+        // reviewer: no `turn/started`, no `enteredReviewMode`, no `turn/completed`.
+        const notGitRepositoryError: ErrorNotification["error"] = {
+            message: "/test/cwd is not a git repository",
+            codexErrorInfo: null,
+            additionalDetails: null,
+            misalignment: null,
+        };
+        client.emit({
+            method: "error",
+            params: {threadId: sessionId, turnId: parentTurnId, willRetry: false, error: notGitRepositoryError},
+        });
+        await client.promptRunFinished();
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        await expect(dump(stableTranscript(client.transcript, messageId)))
+            .toMatchFileSnapshot('data/prompt-v2-review-unspawned-error.json');
+    });
+
+    it('ends a /review turn that fails after insertion with one idle', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        const parentTurnId = "review-parent";
+        const childTurnId = "review-child";
+        client.setCodexResponse("review/start", async () => ({
+            reviewThreadId: sessionId,
+            turn: createTurn("inProgress", parentTurnId),
+        }));
+
+        const response = client.sendPrompt([{type: "text", text: "/review"}]);
+        const {messageId} = await response;
+        client.emit(turnStarted(childTurnId));
+        client.emit(turnFinished("failed", parentTurnId));
+        await client.promptRunFinished();
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-review-failed-after-insertion.json');
     });
 
     it('rejects content block types that only exist on v2', async () => {

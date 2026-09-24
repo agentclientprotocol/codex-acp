@@ -320,6 +320,7 @@ export class CodexAppServerClient {
     async runReview(
         params: ReviewStartParams,
         onTurnStarted?: (turnId: string, threadId: string) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
@@ -367,6 +368,9 @@ export class CodexAppServerClient {
 
         try {
             const reviewStarted = await this.reviewStart(params);
+            // The reviewer's own user message carries `clientId: null`, never the caller's, so
+            // this response is the earliest signal that Codex accepted the command.
+            onAccepted?.();
             onTurnStarted?.(reviewStarted.turn.id, reviewStarted.reviewThreadId);
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === reviewStarted.turn.id);
             releaseCapture();

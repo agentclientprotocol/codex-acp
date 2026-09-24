@@ -2984,14 +2984,6 @@ export class CodexAcpServer {
             throw RequestError.invalidRequest(`Session ${sessionId} is already processing a prompt`);
         }
         const promptKind = this.availableCommands.classifyPrompt(request.prompt);
-        // `/review*` still needs two-turn-id tracking (parent/child ids); not supported yet.
-        if (promptKind.kind === "codexTurnCommand" && promptKind.name.startsWith("review")) {
-            throw RequestError.internalError(
-                undefined,
-                `'/${promptKind.name}' is not supported on an ACP v2 connection yet`,
-            );
-        }
-
         const messageId = randomUUID();
         const session = new ACPSessionConnection(this.connection, sessionId);
         this.v2PromptsInFlight.add(sessionId);

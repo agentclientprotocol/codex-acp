@@ -726,12 +726,13 @@ export class CodexAcpClient {
         sessionId: string,
         target: ReviewTarget,
         onTurnStarted?: (turnId: string, threadId: string) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification> {
         return await this.codexClient.runReview({
             threadId: sessionId,
             target,
             delivery: "inline",
-        }, onTurnStarted);
+        }, onTurnStarted, onAccepted);
     }
 
     async runCompact(

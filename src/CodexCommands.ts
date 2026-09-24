@@ -383,6 +383,7 @@ export class CodexCommands {
             (turnId, threadId) => {
                 this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
             },
+            options.onCommandAccepted,
         ));
     }
 
