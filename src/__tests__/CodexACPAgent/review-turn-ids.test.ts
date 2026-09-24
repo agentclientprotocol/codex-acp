@@ -22,6 +22,13 @@ const overloadedError: ErrorNotification["error"] = {
     misalignment: null,
 };
 
+const notGitRepositoryError: ErrorNotification["error"] = {
+    message: "/test/cwd is not a git repository",
+    codexErrorInfo: null,
+    additionalDetails: null,
+    misalignment: null,
+};
+
 describe("/review turn ids", () => {
     it("tracks the parent id as the review turn and the child id as the interruptible one", async () => {
         const review = await startReview();
@@ -127,6 +134,64 @@ describe("/review turn ids", () => {
         expect(turnInterrupt).toHaveBeenCalledWith({threadId: sessionId, turnId: parentTurnId});
         await expect(review.prompt).resolves.toMatchObject({stopReason: "cancelled"});
     });
+
+    it("ends the review prompt when Codex fails before starting the review", async () => {
+        const review = await startReview(undefined, undefined, false, false);
+
+        // Codex sends nothing after this error: no turn/started and no turn/completed.
+        review.send(error(notGitRepositoryError));
+
+        const result = await review.prompt;
+        expect(result).toMatchObject({stopReason: "end_turn"});
+        expect(review.sessionState.currentTurnId).toBeNull();
+        expect(review.sessionState.interruptTurnId).toBeNull();
+        await expect(review.dump(result)).toMatchFileSnapshot("data/review-unspawned-error.json");
+
+        const next = await runNextPrompt(review);
+        expect(next.result).toMatchObject({stopReason: "end_turn"});
+        await expect(next.dump).toMatchFileSnapshot("data/review-unspawned-error-next-prompt.json");
+    });
+
+    it("returns a typed failure when Codex fails before starting the review", async () => {
+        const review = await startReview(typedFailureCapabilities, undefined, false, false);
+
+        review.send(error(notGitRepositoryError));
+
+        const result = await review.prompt;
+        expect(result).toMatchObject({
+            stopReason: "end_turn",
+            _meta: {jetbrains: {air: {sessionFailure: {id: `${parentTurnId}:error`, severity: "error"}}}},
+        });
+        await expect(review.dump(result)).toMatchFileSnapshot("data/review-unspawned-typed-failure.json");
+
+        const next = await runNextPrompt(review);
+        expect(next.result).toMatchObject({stopReason: "end_turn"});
+        await expect(next.dump).toMatchFileSnapshot("data/review-unspawned-typed-failure-next-prompt.json");
+    });
+
+    it("still reports the next turn's own fatal error after an unspawned review", async () => {
+        const review = await startReview(undefined, undefined, false, false);
+        review.send(error(notGitRepositoryError));
+        await review.prompt;
+
+        const next = await runNextPrompt(review, notGitRepositoryError);
+        expect(next.result).toMatchObject({stopReason: "end_turn"});
+        await expect(next.dump).toMatchFileSnapshot("data/review-unspawned-error-next-prompt-fails.json");
+    });
+
+    it("keeps waiting for turn/completed after a fatal error once the review has started", async () => {
+        const review = await startReview(undefined, undefined, false);
+        let settled = false;
+        void review.prompt.then(() => settled = true, () => settled = true);
+
+        review.send(error(overloadedError));
+        await review.fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+        await new Promise(resolve => setTimeout(resolve, 10));
+        expect(settled).toBe(false);
+
+        review.send(turnCompleted("failed", overloadedError));
+        await expect(review.prompt).resolves.toMatchObject({stopReason: "end_turn"});
+    });
 });
 
 describe("normal turn ids", () => {
@@ -157,6 +222,7 @@ async function startReview(
     clientCapabilities?: acp.ClientCapabilities,
     signal?: AbortSignal,
     childStarted = true,
+    enteredReview = true,
 ): Promise<{
     fixture: CodexMockTestFixture,
     agent: CodexAcpServer,
@@ -177,16 +243,18 @@ async function startReview(
     const prompt = agent.prompt({sessionId, prompt: [{type: "text", text: "/review"}]}, signal);
     await vi.waitFor(() => expect(sessionState.currentTurnId).toBe(parentTurnId));
     const send = (notification: ServerNotification) => fixture.sendServerNotification(notification);
-    send({
-        method: "item/started",
-        params: {
-            threadId: sessionId,
-            turnId: parentTurnId,
-            startedAtMs: 0,
-            item: {type: "enteredReviewMode", id: "entered-review", review: "current changes"},
-        },
-    });
-    if (childStarted) {
+    if (enteredReview) {
+        send({
+            method: "item/started",
+            params: {
+                threadId: sessionId,
+                turnId: parentTurnId,
+                startedAtMs: 0,
+                item: {type: "enteredReviewMode", id: "entered-review", review: "current changes"},
+            },
+        });
+    }
+    if (enteredReview && childStarted) {
         send({method: "turn/started", params: {threadId: sessionId, turn: turn(childTurnId, "inProgress")}});
     }
     await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
@@ -204,6 +272,26 @@ async function startReview(
             response,
         }, null, 2),
     };
+}
+
+// Codex reports the unfinished review's error again as the failure of the next turn.
+async function runNextPrompt(
+    review: Awaited<ReturnType<typeof startReview>>,
+    ownError: ErrorNotification["error"] | null = null,
+): Promise<{result: acp.PromptResponse, dump: string}> {
+    const {fixture, agent, sessionState, send} = review;
+    fixture.clearAcpConnectionDump();
+    vi.spyOn(fixture.getCodexAppServerClient(), "turnStart").mockResolvedValue({turn: turn("next-turn", "inProgress")});
+    const prompt = agent.prompt({sessionId, prompt: [{type: "text", text: "hello"}]});
+    await vi.waitFor(() => expect(sessionState.currentTurnId).toBe("next-turn"));
+    send({method: "turn/started", params: {threadId: sessionId, turn: turn("next-turn", "inProgress")}});
+    send({method: "item/agentMessage/delta", params: {threadId: sessionId, turnId: "next-turn", itemId: "next-message", delta: "Hi."}});
+    if (ownError) {
+        send({method: "error", params: {threadId: sessionId, turnId: "next-turn", willRetry: false, error: ownError}});
+    }
+    send({method: "turn/completed", params: {threadId: sessionId, turn: turn("next-turn", "failed", ownError ?? notGitRepositoryError)}});
+    const result = await prompt;
+    return {result, dump: review.dump(result)};
 }
 
 async function createSession(fixture: CodexMockTestFixture): Promise<SessionState> {
