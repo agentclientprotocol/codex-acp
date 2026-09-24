@@ -401,6 +401,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
     return {
         currentTurnId: null,
         interruptTurnId: null,
+        codexReportedRunningTurnId: null,
         lastTokenUsage: null,
         totalTokenUsage: null,
         modelContextWindow: null,

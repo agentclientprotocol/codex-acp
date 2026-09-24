@@ -115,12 +115,6 @@
   },
   {
     "sessionUpdate": {
-      "state": "running",
-      "sessionUpdate": "state_update"
-    }
-  },
-  {
-    "sessionUpdate": {
       "toolCallId": "plan-review:plan-item",
       "status": "completed",
       "rawOutput": "User approved the plan.",

@@ -17,9 +17,20 @@ export type AcpV2ClientConnection = Pick<acpV2.AgentContext, "notify" | "request
  */
 export class AcpV2Connection {
     readonly client: AcpV2ClientConnection;
+    private isTurnRunning: (sessionId: string) => boolean = () => true;
 
     constructor(client: AcpV2ClientConnection) {
         this.client = client;
+    }
+
+    /**
+     * Lets the owning server report whether a turn is still running for a session, so
+     * `requestPermission()`'s trailing `running` (below) is only sent when one genuinely is:
+     * a permission request that outlives its turn must not undo the `idle` already sent for it.
+     * Defaults to always running, so callers that never wire this up keep the old behavior.
+     */
+    setTurnRunningCheck(check: (sessionId: string) => boolean): void {
+        this.isTurnRunning = check;
     }
 
     /**
@@ -53,7 +64,9 @@ export class AcpV2Connection {
      * Sends `session/request_permission`, rendered in the v2 wire shape by
      * `toV2RequestPermissionRequest`. Per the spec, brackets the request with `requires_action`/
      * `running` `state_update`s: `requires_action` while the request is pending, `running` again
-     * once it settles (granted, denied, cancelled, or errored all count as resumed).
+     * once it settles (granted, denied, cancelled, or errored all count as resumed) -- but only
+     * if a turn is still running by then; otherwise the turn already went `idle` on its own and
+     * this must not resurrect `running` after it.
      */
     async requestPermission(
         request: acp.RequestPermissionRequest,
@@ -68,7 +81,9 @@ export class AcpV2Connection {
             );
             return toV1RequestPermissionResponse(response);
         } finally {
-            await this.sendState(request.sessionId, {state: "running"});
+            if (this.isTurnRunning(request.sessionId)) {
+                await this.sendState(request.sessionId, {state: "running"});
+            }
         }
     }
 

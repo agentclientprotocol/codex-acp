@@ -19,7 +19,12 @@ import {
     type SessionMetadataWithThread,
     type UrlElicitationRequester
 } from "./CodexAcpClient";
-import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClient";
+import {
+    type ApprovalHandler,
+    CodexAppServerClient,
+    type ElicitationHandler,
+    type McpStartupResult,
+} from "./CodexAppServerClient";
 import {isNoActiveTurnError} from "./CodexThreadErrors";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {
@@ -48,6 +53,7 @@ import type {
     Thread,
     ThreadGoal,
     ThreadItem,
+    TurnStatus,
     UserInput
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
@@ -197,6 +203,14 @@ export interface SessionState {
      * completion under the parent turn id, but treats the reviewer child turn as the running one.
      */
     interruptTurnId: string | null;
+    /**
+     * The Codex-reported turn currently running on this thread (`turn/started` to
+     * `turn/completed`), tracked independently of whether a `session/prompt` started it. Backs
+     * the v2 "Codex turn running" busy signal and the `running`/`idle` states sent for a turn no
+     * v2 prompt owns (an auto goal continuation, or a turn Codex starts right after
+     * `session/resume`).
+     */
+    codexReportedRunningTurnId: string | null;
     lastTokenUsage: TokenCount | null;
     totalTokenUsage: TokenCount | null;
     modelContextWindow: number | null;
@@ -270,6 +284,41 @@ function codexRunningTurnId(sessionState: SessionState, turnId: string): string 
         ? sessionState.interruptTurnId ?? turnId
         : turnId;
 }
+
+/**
+ * Simplified `turn/completed` status to v1 stop reason mapping for a turn no `session/prompt`
+ * owns, where there is no richer terminal-failure handling to consult: only an interruption
+ * counts as cancelled, a failure still ends the turn normally.
+ */
+function stopReasonForUnownedTurn(status: TurnStatus): acp.StopReason {
+    switch (status) {
+        case "completed":
+        case "failed":
+            return "end_turn";
+        case "interrupted":
+            return "cancelled";
+        case "inProgress":
+            // turn/completed never reports an in-progress turn.
+            return "end_turn";
+    }
+}
+
+/**
+ * Approval/elicitation handlers for the baseline Codex turn tracker installed before any prompt
+ * has run (J5). They answer exactly as app-server already defaults to for a thread with no
+ * handler registered, since nothing here can meaningfully act on a request until a real prompt
+ * is issued.
+ */
+const DENY_ALL_APPROVALS: ApprovalHandler = {
+    handleCommandExecution: async () => ({decision: "cancel"}),
+    handleFileChange: async () => ({decision: "cancel"}),
+    handlePermissionsRequest: async () => ({permissions: {}, scope: "turn", strictAutoReview: false}),
+};
+
+const DENY_ALL_ELICITATIONS: ElicitationHandler = {
+    handleElicitation: async () => ({action: "cancel", content: null, _meta: null}),
+    handleUserInput: async () => ({answers: {}}),
+};
 
 function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
     return clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY);
@@ -373,6 +422,9 @@ export class CodexAcpServer {
             this.protocolVersion = 2;
             this.v2Connection = connection.client;
             this.connection = connection.extensionOnlyV1View();
+            // A permission request that outlives its turn must not undo the `idle` already sent
+            // for it (4(a)): only send `running` back if a turn is actually still running.
+            connection.setTurnRunningCheck((sessionId) => this.isCodexTurnRunning(sessionId));
         } else {
             this.protocolVersion = 1;
             this.v2Connection = null;
@@ -807,6 +859,7 @@ export class CodexAcpServer {
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             interruptTurnId: null,
+            codexReportedRunningTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
             modelContextWindow: null,
@@ -903,6 +956,88 @@ export class CodexAcpServer {
     private installSessionState(sessionState: SessionState): void {
         this.sessions.get(sessionState.sessionId)?.asyncTasks.clear();
         this.sessions.set(sessionState.sessionId, sessionState);
+        this.startCodexTurnTracker(sessionState);
+    }
+
+    /**
+     * Installs a baseline session-scoped subscription at session creation, so a Codex-initiated
+     * turn starting before any `session/prompt` has run (right after `session/new`/
+     * `session/resume`) still updates `codexReportedRunningTurnId` and gets its `running`/`idle`
+     * states (J5). `prompt()`'s own subscribe call takes over dispatch once a prompt runs; this
+     * baseline handler answers approval/elicitation requests exactly like app-server's own
+     * default for a thread with no handler registered, so no real prompt has yet run to answer.
+     */
+    private startCodexTurnTracker(sessionState: SessionState): void {
+        void this.codexAcpClient.subscribeToSessionEvents(
+            sessionState.sessionId,
+            async (event) => {
+                await this.trackCodexTurnStart(sessionState, event);
+                await this.trackCodexTurnCompletion(sessionState, event);
+            },
+            DENY_ALL_APPROVALS,
+            DENY_ALL_ELICITATIONS,
+            clientSupportsSubagents(this.clientCapabilities),
+            () => {},
+            async () => null,
+        );
+    }
+
+    /**
+     * Whether Codex reports a turn currently running on the thread, from `turn/started`/
+     * `turn/completed` -- independent of whether a `session/prompt` started it (J5).
+     */
+    private isCodexTurnRunning(sessionId: string): boolean {
+        return this.sessions.get(sessionId)?.codexReportedRunningTurnId != null;
+    }
+
+    /**
+     * Tracks a Codex-reported turn starting, independent of whether a `session/prompt` started
+     * it, and sends `running` for a turn no v2 prompt owns (J1-J3).
+     */
+    private async trackCodexTurnStart(sessionState: SessionState, event: ServerNotification): Promise<void> {
+        if (event.method !== "turn/started" || event.params.threadId !== sessionState.sessionId) {
+            return;
+        }
+        sessionState.codexReportedRunningTurnId = event.params.turn.id;
+        await this.reportUnownedTurnState(sessionState.sessionId, {state: "running"});
+    }
+
+    /**
+     * The other half of `trackCodexTurnStart`: sends exactly one `idle` for a turn no v2 prompt
+     * owns (J1-J3), after the notification's own content has already been handled so `idle`
+     * stays the last thing sent for the turn.
+     */
+    private async trackCodexTurnCompletion(sessionState: SessionState, event: ServerNotification): Promise<void> {
+        if (event.method !== "turn/completed" || event.params.threadId !== sessionState.sessionId) {
+            return;
+        }
+        if (sessionState.codexReportedRunningTurnId === event.params.turn.id) {
+            sessionState.codexReportedRunningTurnId = null;
+        }
+        await this.reportUnownedTurnState(sessionState.sessionId, {
+            state: "idle",
+            stopReason: stopReasonForUnownedTurn(event.params.turn.status),
+        });
+    }
+
+    /**
+     * Sends the v2 `state_update` for a Codex-reported turn no `session/prompt` owns. A turn a
+     * v2 prompt owns sends its own states already, so this is a no-op while one is in flight for
+     * the session; it is also a no-op on v1, which has no `state_update`.
+     */
+    private async reportUnownedTurnState(sessionId: string, state: acpV2.StateUpdate): Promise<void> {
+        if (this.v2PromptsInFlight.has(sessionId)) {
+            return;
+        }
+        const session = new ACPSessionConnection(this.connection, sessionId);
+        if (session.protocolVersion !== 2) {
+            return;
+        }
+        try {
+            await session.updateState(state);
+        } catch (error) {
+            logger.error(`Failed to send the '${state.state}' state for session ${sessionId}`, error);
+        }
     }
 
     private getAuthProviderForAuthenticateRequest(request: acp.AuthenticateRequest): string | null {
@@ -2128,6 +2263,7 @@ export class CodexAcpServer {
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
             interruptTurnId: null,
+            codexReportedRunningTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
             modelContextWindow: null,
@@ -3181,6 +3317,10 @@ export class CodexAcpServer {
             };
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
+                    // Tracks turns this prompt doesn't own too (a `/goal` continuation after this
+                    // prompt's own turn already went idle): the same subscription keeps receiving
+                    // notifications for as long as no later prompt replaces it.
+                    await this.trackCodexTurnStart(sessionState, event);
                     if (pendingInsertion !== undefined
                         && isInsertedUserMessage(event, params.sessionId, pendingInsertion.clientUserMessageId)) {
                         await resolvePendingInsertion();
@@ -3196,6 +3336,7 @@ export class CodexAcpServer {
                     await observeInteraction(event);
                     if (!promptNotificationsActive) {
                         await promptEventHandler.handleSessionScopedNotification(event);
+                        await this.trackCodexTurnCompletion(sessionState, event);
                         return;
                     }
                     const completesActiveTurn = event.method === "turn/completed"
@@ -3207,6 +3348,7 @@ export class CodexAcpServer {
                         // the causal boundary so a queued late error cannot enter the completed turn's buffer.
                         promptNotificationsActive = false;
                     }
+                    await this.trackCodexTurnCompletion(sessionState, event);
                 },
                 approvalHandler,
                 elicitationHandler,

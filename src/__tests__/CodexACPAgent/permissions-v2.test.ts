@@ -95,12 +95,13 @@ describe('session/request_permission over ACP v2', () => {
 
         expect(response).toEqual({decision: "accept"});
         const transcript = client.transcript.slice(start);
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
+        // No turn is running yet (`startPromptWithPendingTurn` leaves `turn/start` pending), so
+        // the trailing `running` that would otherwise close the `requires_action` bracket is
+        // suppressed: sending it would resurrect `running` for a turn that never started.
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
         const requiresAction = indexOf(transcript, isState("requires_action"));
-        const running = indexOf(transcript, isState("running"));
         const permission = indexOf(transcript, entry => "permissionRequest" in entry);
         expect(requiresAction).toBeLessThan(permission);
-        expect(permission).toBeLessThan(running);
         await expect(dump(transcript)).toMatchFileSnapshot('data/permissions-v2-command-allowed.json');
 
         await finishTurn();
@@ -118,7 +119,8 @@ describe('session/request_permission over ACP v2', () => {
 
         expect(response).toEqual({decision: "decline"});
         const transcript = client.transcript.slice(start);
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
+        // No turn is running yet, so the trailing `running` is suppressed (see the allowed test).
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
         await expect(dump(transcript)).toMatchFileSnapshot('data/permissions-v2-command-rejected.json');
 
         await finishTurn();
@@ -136,7 +138,8 @@ describe('session/request_permission over ACP v2', () => {
 
         expect(response).toEqual({decision: "accept"});
         const transcript = client.transcript.slice(start);
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
+        // No turn is running yet, so the trailing `running` is suppressed (see the allowed test).
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
         await expect(dump(transcript)).toMatchFileSnapshot('data/permissions-v2-file-change-allowed.json');
 
         await finishTurn();
@@ -154,8 +157,9 @@ describe('session/request_permission over ACP v2', () => {
 
         expect(response).toEqual({decision: "cancel"});
         const transcript = client.transcript.slice(start);
-        // `requires_action`/`running` still bracket the request even though it was cancelled.
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
+        // No turn is running yet, so the trailing `running` is suppressed even though the
+        // request was cancelled (see the allowed test).
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
 
         await finishTurn();
     });
@@ -186,8 +190,9 @@ describe('session/request_permission over ACP v2', () => {
         const response = await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams());
 
         expect(response).toEqual({decision: "cancel"});
-        // `running` still fires even though the request itself failed.
-        expect(stateUpdates(client.transcript.slice(start))).toEqual([{state: "requires_action"}, {state: "running"}]);
+        // No turn is running yet, so the trailing `running` is suppressed even though the
+        // request itself failed (see the allowed test).
+        expect(stateUpdates(client.transcript.slice(start))).toEqual([{state: "requires_action"}]);
 
         await finishTurn();
     });
@@ -238,12 +243,13 @@ describe('session/request_permission over ACP v2', () => {
                 {optionId: "revise_plan", name: "No, and tell Codex what to do differently", kind: "reject_once"},
             ],
         })]);
-        // The prompt's own `running` (from insertion) brackets the whole exchange; the permission
-        // request additionally brackets itself with `requires_action`/`running` while it is pending.
+        // The prompt's own `running` (from insertion) brackets the whole exchange. The plan
+        // permission request fires after the proposal's turn already completed and before the
+        // implementation turn starts, so no turn is running while it's pending: the trailing
+        // `running` that would otherwise close its own `requires_action` bracket is suppressed.
         expect(stateUpdates(transcript)).toEqual([
             {state: "running"},
             {state: "requires_action"},
-            {state: "running"},
             {state: "idle", stopReason: "end_turn"},
         ]);
         await expect(dump(transcript, messageId).replaceAll(implementationId, "<implementationId>"))
