@@ -917,4 +917,130 @@ describe('session/prompt over ACP v2', () => {
         expect(stateUpdates(client.transcript)).toEqual([]);
         await expect(dump(client.transcript)).toMatchFileSnapshot('data/prompt-v2-v1-unchanged.json');
     });
+
+    it('adopts a prompt steered into an already-running unowned turn without a second `running` (J8)', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        // An unowned turn (e.g. a `/goal` auto-continuation) is already running and has already
+        // sent its own `running` before this prompt exists.
+        client.emit(turnStarted("goal-turn"));
+        await settle();
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}]);
+
+        const start = client.transcript.length;
+        client.setTurnStart(async () => ({turn: createTurn("inProgress", "goal-turn")}));
+        const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+
+        const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+        client.emit(itemCompleted(userMessageItem(clientUserMessageId), "goal-turn"));
+        const {messageId} = await response;
+        expect(messageId).toBe(clientUserMessageId);
+
+        client.emit(turnCompleted("goal-turn"));
+        await client.promptRunFinished();
+        await settle();
+
+        const transcript = client.transcript.slice(start);
+        // No second `running`: the goal turn's own `running` already covers this prompt. Exactly
+        // one `idle`, sent by this prompt once the adopted turn ends.
+        expect(stateUpdates(transcript)).toEqual([{state: "idle", stopReason: "end_turn"}]);
+        const userMessages = transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
+            .filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(userMessages).toEqual([{sessionUpdate: "user_message_chunk", messageId, content: {type: "text", text: "Hello"}}]);
+    });
+
+    it('fails with a JSON-RPC error, and still sends exactly one idle, when the adopted turn ends before the steered input lands (M2)', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        client.emit(turnStarted("goal-turn"));
+        await settle();
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}]);
+
+        const start = client.transcript.length;
+        client.setTurnStart(async () => ({turn: createTurn("inProgress", "goal-turn")}));
+        const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+
+        // Codex drops the steered input: the adopted turn is interrupted before it lands.
+        client.emit(turnFinished("interrupted", "goal-turn"));
+        await client.promptRunFinished();
+        await settle();
+
+        await expect(response).rejects.toMatchObject({
+            message: "Internal error: The prompt ended before Codex recorded the user message",
+        });
+        const transcript = client.transcript.slice(start);
+        expect(transcript.some(entry => "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "user_message_chunk"))
+            .toBe(false);
+        // Exactly one `idle` for the adopted turn: nothing else will send it, since this prompt
+        // is the one that claimed ownership (and suppressed the baseline unowned-turn tracker).
+        expect(stateUpdates(transcript)).toEqual([{state: "idle", stopReason: "cancelled"}]);
+    });
+
+    it('adopts a foreign turn id returned right after session/resume, with no unowned turn known yet (J10)', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        const start = client.transcript.length;
+        client.setTurnStart(async () => {
+            // Codex's own goal auto-continuation wins the race started right after
+            // `session/resume`: its `turn/started` arrives while our request is still pending, so
+            // there was no prior known unowned turn to snapshot.
+            client.emit(turnStarted("goal-turn"));
+            return {turn: createTurn("inProgress", "goal-turn")};
+        });
+        const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+
+        const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+        client.emit(itemCompleted(userMessageItem(clientUserMessageId), "goal-turn"));
+        const {messageId} = await response;
+        expect(messageId).toBe(clientUserMessageId);
+
+        client.emit(turnCompleted("goal-turn"));
+        await client.promptRunFinished();
+        await settle();
+
+        // This prompt was in flight before `turn/started` arrived, so the baseline unowned-turn
+        // tracker is suppressed and this prompt sends its own running/idle -- exactly once each.
+        const transcript = client.transcript.slice(start);
+        expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+    });
+
+    it('adopts a turn with activity both before and during the steer, without duplicate states (M2)', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        client.emit(turnStarted("goal-turn"));
+        client.emit(itemCompleted(userMessageItem(null, "Other"), "goal-turn"));
+        await settle();
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}]);
+
+        const start = client.transcript.length;
+        client.setTurnStart(async () => {
+            // More goal-turn activity arrives while `turn/start` is still pending.
+            client.emit(itemCompleted(userMessageItem(null, "More"), "goal-turn"));
+            return {turn: createTurn("inProgress", "goal-turn")};
+        });
+        const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+
+        const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+        client.emit(itemCompleted(userMessageItem(clientUserMessageId), "goal-turn"));
+        const {messageId} = await response;
+        expect(messageId).toBe(clientUserMessageId);
+
+        client.emit(turnCompleted("goal-turn"));
+        await client.promptRunFinished();
+        await settle();
+
+        const transcript = client.transcript.slice(start);
+        expect(stateUpdates(transcript)).toEqual([{state: "idle", stopReason: "end_turn"}]);
+        const userMessages = transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
+            .filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(userMessages).toEqual([{sessionUpdate: "user_message_chunk", messageId, content: {type: "text", text: "Hello"}}]);
+    });
 });

@@ -3203,7 +3203,13 @@ export class CodexAcpServer {
         };
         return await new Promise<acpV2.PromptResponse>((resolve, reject) => {
             let running: Promise<void> | null = null;
+            let inserted = false;
+            // Set from `onTurnAdopted` when `turn/start` steers this prompt into a turn that was
+            // already running unowned (M2): that turn's `running` already went out before this
+            // prompt existed, so this prompt must not send a second one.
+            let turnWasAdopted = false;
             const onInserted = async () => {
+                inserted = true;
                 try {
                     for (const block of request.prompt) {
                         await session.update(createUserMessageChunk(block, messageId));
@@ -3212,6 +3218,9 @@ export class CodexAcpServer {
                     logger.error(`Failed to send the user message for session ${sessionId}`, error);
                 }
                 resolve({messageId});
+                if (turnWasAdopted) {
+                    return;
+                }
                 // Report `running` only after the response has been queued, as the spec's sequence
                 // shows (response, user message, then `running`). Awaiting it here holds back the
                 // turn's later updates until it is sent.
@@ -3236,34 +3245,50 @@ export class CodexAcpServer {
                             logger.error(`Failed to send the synthetic user message for session ${sessionId}`, error);
                         }
                     },
+                    onTurnAdopted: () => {
+                        turnWasAdopted = true;
+                    },
                 }, reservation);
             };
             run().then(
                 async (response) => {
                     this.v2PromptsInFlight.delete(sessionId);
-                    if (running === null) {
+                    if (!inserted) {
                         reject(RequestError.internalError(
                             undefined,
                             "The prompt ended before Codex recorded the user message",
                         ));
+                        // Codex dropped the steered input before the adopted turn ended: that
+                        // turn's `running` still needs exactly one matching `idle`, and nothing
+                        // else will send it now that this prompt is no longer in flight.
+                        if (turnWasAdopted) {
+                            await sendState(toV2IdleState(response));
+                        }
                         return;
                     }
-                    await running;
+                    if (running !== null) {
+                        await running;
+                    }
                     // The session takes the next prompt before `idle` goes out, so a client that
                     // prompts again as soon as it sees `idle` is not rejected as overlapping.
                     // What v1 would have answered with ends the v2 turn.
                     await sendState(toV2IdleState(response));
                 },
                 async (error: unknown) => {
-                    if (running === null) {
+                    if (!inserted) {
                         this.v2PromptsInFlight.delete(sessionId);
                         reject(error);
+                        if (turnWasAdopted) {
+                            await sendState(toV2IdleState(this.failedPromptResponse(sessionId)));
+                        }
                         return;
                     }
                     // Past insertion the request is answered, so the failure is told as agent
                     // text (unless the turn already sent it) and the turn still ends with `idle`.
                     logger.error(`Prompt for session ${sessionId} failed after it was inserted`, error);
-                    await running;
+                    if (running !== null) {
+                        await running;
+                    }
                     if (!failureWasShownAsMessage(error)) {
                         try {
                             await session.update(createAgentTextMessageChunk(postInsertionFailureText(
@@ -3580,6 +3605,10 @@ export class CodexAcpServer {
             );
             sessionState.lastTokenUsage = null;
             ensurePendingTurnStart();
+            // Snapshot right before dispatch (no await in between): if a turn is already
+            // running here, it is unowned (this prompt hasn't started one yet) and already sent
+            // its own `running`. If `turn/start` steers us into exactly that turn, M2 applies.
+            const priorRunningTurnId = sessionState.codexReportedRunningTurnId;
             const sendPromptPromise = this.runWithProcessCheck(
                 () => this.codexAcpClient.sendPrompt(
                     effectiveParams,
@@ -3598,6 +3627,9 @@ export class CodexAcpServer {
                         }
                         sessionState.currentTurnId = turnId;
                         pendingTurnStart?.resolve(turnId);
+                        if (priorRunningTurnId !== null && turnId === priorRunningTurnId) {
+                            insertion?.onTurnAdopted?.();
+                        }
                         onTurnStarted?.();
                     },
                     () => this.promptShouldStop(params.sessionId, activePrompt),

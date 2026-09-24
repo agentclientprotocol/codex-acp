@@ -17,6 +17,13 @@ export type UserMessageInsertion = {
      * only emits the chunks: no response is resolved and no `state_update` is sent.
      */
     onSyntheticInserted: (clientUserMessageId: string, prompt: acp.ContentBlock[]) => Promise<void>;
+    /**
+     * Fired synchronously once, from the turn-start response, when Codex steers this prompt into
+     * a turn that was already running and unowned (its `running` went out before this prompt
+     * existed). Lets the caller skip sending a duplicate `running` and still close the turn with
+     * one `idle` if the steered input never lands.
+     */
+    onTurnAdopted?: () => void;
 };
 
 /**
