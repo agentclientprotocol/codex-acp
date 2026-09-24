@@ -13,9 +13,9 @@ J11; topics 4 and 5 part-done; topics 3 and 10 not started (2026-09-24).
 
 State as of the flush for a fresh orchestrator restart (2026-09-24, second flush): **no agents in
 flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`, last code commit
-`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`) and in the acp-tck fork (`main`, 4 local commits, **not
-pushed**; the user said don't push). Keep committing with explicit pathspecs. Suite: **889 pass /
-26 skip** (after J11).
+`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`) and in the acp-tck fork (`main`, 4
+local commits, **not pushed**; the user said don't push). Keep committing with explicit pathspecs.
+Suite: **893 pass / 26 skip** (after G-render). **Next: topic 3 slice 3(a).**
 
 **Standing user rules (2026-09-24):** preserve v1 client-visible behavior (change v1 only to fix a
 real bug, with nothing else v1-visible changing); **always assume the latest Codex** (currently the
@@ -75,10 +75,27 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
      removed (plan-impl synthetic insertion kept). Tests retargeted in `CodexAcpClient.test.ts` and
      `prompt-v2.test.ts` (snapshot `prompt-v2-goal-resume-continuation.json` →
      `…-no-continuation.json`). Suite 889 / 26. TCK v1 24/0/3; v2 31/1 (RESUME-202)/4.
-   - **G-render**: the baseline tracker renders items of turns no `prompt()` has rendered (v1 + v2).
-     Reuse the prompt handler's rendering (`CodexEventHandler`); `fix:` commit. Test: a goal turn right
-     after `session/new` and after resume is visible on v1 and v2.
-2. **Topic 3**, cancellation: `ctx.signal` / `$/cancel_request` (incl. a queued prompt → only it is
+   - **G-render** — **Done (612d1a5)**: `startCodexTurnTracker` owns a `CodexEventHandler` (same args
+     as the prompt path, `collectTurnDiffs=false`) and calls `handleSessionScopedNotification` before
+     `trackCodexTurnCompletion`. Ownership = `CodexSubagentSubscriptions` keeps one `current` closure
+     per session; the first `prompt()` subscription replaces the baseline (resume/load reinstall it),
+     so no double render; after that, the prompt's leftover subscription already renders unowned
+     turns via the same call. `DENY_ALL_*` unchanged. Tests: `agent-initiated-turns-v2.test.ts`
+     (+new/resume render, no-double-render), new `agent-initiated-turns-v1.test.ts`; harness gained
+     `thread/resume` response + `agentMessageDelta`. No snapshot changed. Suite 893 / 26. TCK v1
+     24/0/3; v2 31/1 (RESUME-202)/4. Not live-checked → include an auto-goal-turn-after-`session/new`
+     live check in Phase 4.
+2. **Topic 3**, cancellation. Slices (one programmer each, in order):
+   - **3(a)** v1 fixes (`fix:`): cancel-retry option B (recompute `codexRunningTurnId` per attempt;
+     retry "expected active turn id P but found Y" with Y) + retry `Close`-named interrupts
+     (`interruptLateStartedTurn`, `interruptSessionTurn(…,"Close")`). Source: 2(r) entry below +
+     `v2-review-cancel-window.md`.
+   - **3(b)** v2 `session/cancel` registered; drops all queued not-inserted prompts (-32800, no
+     updates), one `idle`/`cancelled` for the running turn; `session/close` drops the queue too.
+   - **3(c)** `$/cancel_request` / `ctx.signal` for a pending v2 `session/prompt` (queued → only it,
+     -32800). Then end-of-topic full TCK v1 + v2.
+   CANCEL-202 goal risk: live probe in `v2-agent-initiated-turns.md` (n=1) saw no goal turn after an
+   interrupt → treated as safe. Original notes: `ctx.signal` / `$/cancel_request` (incl. a queued prompt → only it is
    dropped with -32800) and v2 `session/cancel` (drops all queued not-yet-inserted prompts with
    -32800, one `idle`/`cancelled` for the running turn; `session/close` acts like cancel; the queue
    hook is in `acquireTurnStartReservation`/`promptV2`); v1 cancel-retry option B; retry
@@ -500,7 +517,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i), J11, J11b done | G-render (see Resume here) | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i), J11, J11b, G-render done | — (topic 2 done apart from small follow-ups) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | In progress | 4(a) done | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
