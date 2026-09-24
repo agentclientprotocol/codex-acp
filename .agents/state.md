@@ -27,9 +27,11 @@ topic 5a. The v2 chain currently registers: `initialize`, `session/new|list|clos
    2(a) is split: **2(a1)** = plain prompts + locally handled slash commands — **done** (99f13e7,
    0e38d35); then **2(r)** (v1 `/review` two-id fix) — **done** (1c46656, 3a1a93a);
    then **2(b)** (`state_update`) — **done** (9da450e, 7645580);
-   review cancel-window research **done** (see 2(r) entry); researcher in flight on 2(b) Q1/Q2 (post-insertion throw;
-   idle `_meta`/`usage`) → `v2-post-insertion-errors-and-idle-meta.md`; **6(a) programmer in
-   flight**; then the 2(b) Q1 fix, then **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
+   review cancel-window research **done** (see 2(r) entry); 2(b) Q1/Q2 research **done + decided**
+   (see 2(b) entry); **6(a) done** (893a4a3, 8ee7b42).
+   **Queue (one programmer at a time):** **2(e)** post-insertion error + idle `_meta`/`usage`
+   (in flight) → **6(b)** terminal streaming → **6(c)** diffs → **2(h)** v1 `/review-branch`
+   hang fix (`fix:`) → **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
    prompts (plan-implementation, goal continuation). #4-#6 research landed; all decided.
 2. **Topic 2(a)** (`session/prompt` on v2, idle case only): mint the `messageId` UUID → pass as
    `clientUserMessageId`; resolve the RPC with `{messageId}` + live `user_message` at the matching
@@ -182,6 +184,25 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   `startNewTurnFromExternalPrompt` → 2(a2)/2(c); non-inserted prompts still publish the
   fallback session title from prompt text (minor; revisit in 2(a2)). Note for 6(a): v1
   `createTextEvent` agent chunks already carry `messageId: itemId`.
+- **Topic 6(a)** — **Done (893a4a3, 8ee7b42).** All in `toV2SessionUpdate`; no change to
+  `ContentChunks.ts` or call sites. Agent/thought chunks keep existing ids (item ids); id-less ones
+  (turn error text, config/warning/compaction fallbacks, exited-review text, `/status`, `/skills`,
+  `/mcp`, `/logout`, `/goal`, usage errors) get a fresh UUID at render time (each such call site
+  sends a whole message as one chunk). User chunks without an id still fail loud. `tool_call` and
+  `tool_call_update` → `sessionUpdate:"tool_call_update"`, no field remap (checked vs SDK 1.5.0);
+  content items via an exhaustive switch. Still fail-loud: `diff` content (6(c)), `terminal`
+  content (6(b)), id-less user chunks, `current_mode_update`, subagent/async-task (topic 10).
+  Covers MCP-startup tool calls + the 5 bypass sites. 5b note: `ResponseItemHistoryFallback` agent
+  chunks and `createReviewModeUpdate` history chunks would get random ids → 5b must supply
+  deterministic ids. Tests: `tool-calls-and-messages-v2.test.ts`; guard
+  `src/__tests__/CodexACPAgent/v2-session-update-guard.ts` (unknown unprefixed tags, SDK v2 guard
+  failures, empty `messageId`) wired into all `*-v2` tests; `prompt-v2` setup moved into
+  `v2-prompt-harness.ts`. Suite 825 pass / 26 skip. TCK v1 `-k test_prompt` baseline; v2
+  `-k "test_prompt or test_patches or test_enums"` 12 pass / 9 skip / 0 fail (PROMPT-205 now with
+  real chunks; PATCH-204/208 skip — TCK prompt makes no tool call; 206/207 skip — 6(b)).
+  Known transient gap (orchestrator decision: leave to 6(b)): generic shell commands' create
+  carries terminal content and is dropped, but later content-less updates reach the client → a
+  tool call with no `title` (legal v2; would fail advisory PATCH-208).
 - **Topic 2(b)** — **Done (9da450e, 7645580)**, one open gap. All states sent from
   `CodexAcpServer.promptV2`; `prompt()` unchanged. `running`: inside `onInserted`, after user chunks
   + `resolve({messageId})` and one `setTimeout(0)` (SDK reference agent does the same), awaited so
@@ -197,7 +218,17 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   **Open gap (Q1):** `prompt()` throwing after insertion (usage-limit/auth for non-typed clients,
   process exit, local command reply that can't render, e.g. `/skills`) → `running` and no `idle`.
   Q2: should idle carry v1 `_meta` (quota, AIR typed terminal failure — v2 typed-failure clients
-  currently never see it) and `usage`? Both → researcher, then user.
+  currently never see it) and `usage`?
+  **Resolved** (`v2-post-insertion-errors-and-idle-meta.md`; user decisions 2026-09-24):
+  Q1 → show the error as agent message text, then `idle{stopReason:"end_turn"}` (no `_meta` error,
+  no custom stopReason). Spec MUST: `idle` once a new prompt can be accepted (STATE-202); SDK
+  example agent's no-idle is non-normative; `notice` is forbidden for fatal errors; `refusal` is
+  wrong (Codex keeps the prompt). Usage-limit/auth text exists; Codex exit + local command failure
+  need new text. Q2 → **option A**: copy v1 `PromptResponse._meta` (`quota` +
+  `jetbrains.air.sessionFailure`, incl. synthetic `transport_lost`/`internal_error`) and `usage`
+  (unstable `IdleStateUpdate.usage`) onto the idle unchanged; failure reported once. AIR contract
+  change: AIR must read idle `_meta` on v2. Unverified: whether usage-limit/auth errors always
+  arrive after the userMessage item. Slice **2(e)** implements both.
   Tests: `prompt-v2.test.ts` now 11; 3 snapshots updated (intended). TCK v1 `-k test_prompt`
   6/1 skip (baseline); **v2 `-k test_prompt` 9 pass / 1 skip** (PROMPTCAP-002 audio).
   PROMPT-205 passes only because unrendered agent chunks are dropped → recheck after 6(a).
@@ -220,7 +251,8 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   **Recommended option B** (small v1 fix, not yet scheduled): recompute
   `codexRunningTurnId` on every retry attempt, and also retry "expected active turn id <P> but
   found <Y>" with Y when P is the current completion id, the prompt is active and Y is non-empty.
-  v2 reuses it unchanged. Also found (v1, not yet scheduled): (1) **hang** — `/review-branch` in
+  v2 reuses it unchanged. **User: schedule all three v1 fixes (2026-09-24)**: option B and (2) →
+  topic 3; (1) → its own `fix:` slice **2(h)** before 2(a2). Also found (v1): (1) **hang** — `/review-branch` in
   a non-git cwd: Codex sends `error{turnId:P, willRetry:false}` and then nothing; `runReview`
   waits forever and cancel can't help (discriminator: that error before any
   `enteredReviewMode(P)`), plus the stale error leaks into the next turn; (2) `Close`-named
@@ -252,7 +284,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
-| 6 | Tool calls, messages & terminal streaming | In progress | 6(a) in flight | Milestone (a): tool-call upsert fork at `ACPSessionConnection.update()` | Depends on topic 1 |
+| 6 | Tool calls, messages & terminal streaming | In progress | 6(a) done | 6(b) terminal streaming, then 6(c) | Milestone (a): tool-call upsert fork at `ACPSessionConnection.update()` | Depends on topic 1 |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
 | 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
 | 9 | Config options, modes & plans | **Done** | — | — | 9a + 9b landed |
