@@ -46,6 +46,7 @@ import type {
     Thread,
     ThreadGoal,
     ThreadGoalStatus,
+    ThreadResumeParams,
     ThreadSourceKind,
     TurnCompletedNotification,
     TurnSteerResponse,
@@ -64,7 +65,22 @@ import {
     type GuardedTtyExecOptions,
 } from "./GuardedTtyExec";
 import type {KandevGuardedTtyExecReceipt} from "./AcpExtensions";
+import {isMissingRolloutError, isUnknownThreadError} from "./CodexThreadErrors";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
+
+/**
+ * The slice of `thread/resume` the session layer consumes, plus whether Codex
+ * actually had a rollout for the thread. See {@link CodexAcpClient.resumeThread}.
+ */
+type ResumedThread = {
+    thread: Thread;
+    model: string | null;
+    modelProvider: string;
+    reasoningEffort: ReasoningEffort | null;
+    serviceTier: string | null;
+    turnsBackwardsCursor: string | null;
+    materialized: boolean;
+};
 
 /**
  * Well-known provider id for the client-configurable custom LLM gateway.
@@ -525,11 +541,61 @@ export class CodexAcpClient {
         return settingsModelProvider?.config?.model_provider ?? null;
     }
 
+    /**
+     * `thread/resume`, with a fallback for a thread Codex has not materialized
+     * on disk yet.
+     *
+     * Codex writes a thread's rollout file on its first user message, so
+     * `thread/resume` fails with "no rollout found" for a session that was
+     * created but never prompted. Such a thread is still live in the
+     * app-server -- and still subscribed, since `thread/start` subscribed it --
+     * so `thread/read` answers for it and gives back the same state resume
+     * would have. A thread id Codex has genuinely never seen fails both calls,
+     * and the original resume error is what the caller sees.
+     */
+    private async resumeThread(params: ThreadResumeParams): Promise<ResumedThread> {
+        try {
+            const response = await this.codexClient.threadResume(params);
+            return {
+                thread: response.thread,
+                model: response.model,
+                modelProvider: response.modelProvider,
+                reasoningEffort: response.reasoningEffort,
+                serviceTier: response.serviceTier,
+                turnsBackwardsCursor: response.turnsBackwardsCursor,
+                materialized: true,
+            };
+        } catch (err) {
+            if (!isMissingRolloutError(err)) throw err;
+            let response;
+            try {
+                response = await this.codexClient.threadRead({threadId: params.threadId});
+            } catch {
+                throw err;
+            }
+            logger.log("Thread has no rollout yet; resumed it from its live app-server state", {
+                threadId: params.threadId,
+            });
+            return {
+                thread: response.thread,
+                model: response.thread.model,
+                modelProvider: response.thread.modelProvider,
+                reasoningEffort: response.thread.reasoningEffort,
+                serviceTier: null,
+                // An unmaterialized thread has no persisted history to hydrate:
+                // `thread/turns/list` rejects it outright ("not materialized
+                // yet"), and there is nothing to list either way.
+                turnsBackwardsCursor: null,
+                materialized: false,
+            };
+        }
+    }
+
     async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
-        const response = await this.codexClient.threadResume({
+        const response = await this.resumeThread({
             excludeTurns: true,
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
@@ -569,7 +635,7 @@ export class CodexAcpClient {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
-        const response = await this.codexClient.threadResume({
+        const response = await this.resumeThread({
             excludeTurns: true,
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             cwd: request.cwd,
@@ -579,7 +645,9 @@ export class CodexAcpClient {
         onSubscribed?.();
         // Resume cursors bound durable history; later turns arrive through live events.
         // A null paginated cursor means there was no durable history at resume time.
-        const thread = response.thread.historyMode === "paginated"
+        const thread = !response.materialized
+            ? {...response.thread, turns: []}
+            : response.thread.historyMode === "paginated"
             ? {
                 ...response.thread,
                 turns: response.turnsBackwardsCursor === null
@@ -641,7 +709,21 @@ export class CodexAcpClient {
     }
 
     async deleteSession(sessionId: string): Promise<void> {
-        await this.codexClient.threadArchive({threadId: sessionId});
+        try {
+            await this.codexClient.threadArchive({threadId: sessionId});
+        } catch (err) {
+            // Deleting a session is idempotent: an id Codex has no persisted
+            // thread for has nothing left to archive. That covers a session
+            // that was created but never prompted (Codex materializes the
+            // rollout on the first user message), an already-deleted session,
+            // and an ACP session id that is not a Codex thread id at all --
+            // ACP session ids are opaque strings, Codex thread ids are UUIDs.
+            if (!isUnknownThreadError(err)) throw err;
+            logger.log("Delete request for a session Codex has no persisted thread for; treating as deleted", {
+                sessionId,
+                reason: err instanceof Error ? err.message : String(err),
+            });
+        }
     }
 
     async renameSession(sessionId: string, name: string): Promise<void> {

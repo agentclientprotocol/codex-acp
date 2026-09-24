@@ -20,6 +20,7 @@ import {
     type UrlElicitationRequester
 } from "./CodexAcpClient";
 import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClient";
+import {isNoActiveTurnError} from "./CodexThreadErrors";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
@@ -113,8 +114,13 @@ import {
 } from "./FastModeConfig";
 import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
-import {resolveTerminalOutputMode, type TerminalOutputMode} from "./TerminalOutputMode";
+import {
+    clientSupportsTerminalOutputDelta,
+    resolveTerminalOutputMode,
+    type TerminalOutputMode,
+} from "./TerminalOutputMode";
 import {clientSupportsPlanUpdates} from "./PlanCapabilities";
+import {clientSupportsNotices} from "./SessionNotice";
 import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
@@ -193,6 +199,7 @@ export interface SessionState {
     currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
     terminalOutputMode: TerminalOutputMode;
+    terminalOutputDeltaSupported: boolean;
     currentGoal?: ThreadGoalSnapshot | null;
     goalRevision: number;
     sessionTitle: string | null;
@@ -226,6 +233,21 @@ export interface SessionFailure {
 }
 
 const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;
+
+/**
+ * How long `session/load` waits for an in-flight title generation to settle
+ * before answering anyway. Generous enough for a title model round-trip, short
+ * enough that a wedged generation cannot hold a load open.
+ */
+const TITLE_GENERATION_SETTLE_TIMEOUT_MS = 10_000;
+
+/**
+ * Backoff for re-sending `turn/interrupt` when Codex reports the turn is not
+ * interruptible yet. Covers the sub-second window between a turn's first
+ * streamed event -- which is what prompts a client to cancel in the first
+ * place -- and Codex registering the turn as interruptible.
+ */
+const NO_ACTIVE_TURN_RETRY_DELAYS_MS = [25, 50, 100, 200, 400];
 
 function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
     return clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY);
@@ -281,6 +303,7 @@ export class CodexAcpServer {
     private clientInfo: acp.Implementation | null;
     private clientCapabilities: acp.ClientCapabilities | null;
     private terminalOutputMode: TerminalOutputMode;
+    private terminalOutputDeltaSupported: boolean;
     private booleanConfigOptionsSupported: boolean;
     /** Last `authStatus` pushed to the client; used to suppress duplicates. */
     private currentAuthStatus: AuthStatus | null;
@@ -331,6 +354,7 @@ export class CodexAcpServer {
         this.clientInfo = null;
         this.clientCapabilities = null;
         this.terminalOutputMode = "terminal_output_delta";
+        this.terminalOutputDeltaSupported = false;
         this.booleanConfigOptionsSupported = false;
         this.currentAuthStatus = null;
         this.availableCommands = this.createAvailableCommands(codexAcpClient);
@@ -354,6 +378,7 @@ export class CodexAcpServer {
         this.clientCapabilities = _params.clientCapabilities ?? null;
         this.initializeRequest = _params;
         this.terminalOutputMode = resolveTerminalOutputMode(_params.clientCapabilities);
+        this.terminalOutputDeltaSupported = clientSupportsTerminalOutputDelta(_params.clientCapabilities);
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         this.publishFirstAuthStatusAfterResponse();
@@ -719,6 +744,7 @@ export class CodexAcpServer {
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             terminalOutputMode: this.terminalOutputMode,
+            terminalOutputDeltaSupported: this.terminalOutputDeltaSupported,
             goalRevision: 0,
             sessionTitle: null,
             sessionTitleSource: operation === "resume" ? "unknown" : "unset",
@@ -814,6 +840,10 @@ export class CodexAcpServer {
             await this.providerUpdate;
         }
         logger.log("Loading session...", {sessionId: params.sessionId});
+        // Captured before the load installs a fresh SessionState: a title
+        // generation started by an earlier turn on this session belongs to the
+        // state being replaced, and has to settle before we answer.
+        const previousTitleGen = this.sessions.get(params.sessionId)?.titleGen;
         const {
             sessionId,
             modelState,
@@ -823,6 +853,9 @@ export class CodexAcpServer {
 
         await this.streamThreadHistory(sessionId, thread);
         await this.getSessionState(sessionId).asyncTasks.reconcile();
+        // A load response means "the replay is complete"; a late rename echo
+        // from a still-running title generation would arrive after it.
+        await previousTitleGen?.waitForIdle(TITLE_GENERATION_SETTLE_TIMEOUT_MS);
 
         logger.log("Session loaded", {
             sessionId: sessionId,
@@ -2066,6 +2099,7 @@ export class CodexAcpServer {
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             terminalOutputMode: this.terminalOutputMode,
+            terminalOutputDeltaSupported: this.terminalOutputDeltaSupported,
             goalRevision: 0,
             sessionTitle: null,
             sessionTitleSource: "unset",
@@ -2482,15 +2516,24 @@ export class CodexAcpServer {
             case "text":
                 return input.text.length > 0 ? [{ type: "text", text: input.text }] : [];
             case "image":
-                return [{ type: "text", text: this.formatUriAsLink("image", input.url) }];
+                return [{
+                    type: "text",
+                    text: "url" in input
+                        ? this.formatUriAsLink("image", input.url)
+                        : `image:${input.fileId}`,
+                }];
             case "localImage": {
                 const uri = input.path.startsWith("file://") ? input.path : `file://${input.path}`;
                 return [{ type: "text", text: this.formatUriAsLink(null, uri) }];
             }
             case "skill":
                 return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
+            case "audio":
+            case "localAudio":
+            case "mention":
+                // These inputs are not currently represented in ACP history replay.
+                return [];
         }
-        return [];
     }
 
     private formatUriAsLink(name: string | null, uri: string): string {
@@ -2772,17 +2815,40 @@ export class CodexAcpServer {
         turn: { threadId: string, turnId: string },
         requestName: "Cancel" | "Close",
     ): Promise<void> {
-        try {
-            await this.runWithProcessCheck(() => this.codexAcpClient.turnInterrupt({
-                threadId: turn.threadId,
-                turnId: turn.turnId,
-            }));
-            logger.log(`${requestName} - turnInterrupt succeeded`, {
-                sessionId: turn.threadId,
-                currentTurnId: turn.turnId,
-            });
-        } catch (err) {
-            logger.error(`${requestName} - turnInterrupt failed`, err);
+        for (let attempt = 0; ; attempt++) {
+            try {
+                await this.runWithProcessCheck(() => this.codexAcpClient.turnInterrupt({
+                    threadId: turn.threadId,
+                    turnId: turn.turnId,
+                }));
+                logger.log(`${requestName} - turnInterrupt succeeded`, {
+                    sessionId: turn.threadId,
+                    currentTurnId: turn.turnId,
+                });
+                return;
+            } catch (err) {
+                const retryDelay = requestName === "Cancel"
+                    && isNoActiveTurnError(err)
+                    && attempt < NO_ACTIVE_TURN_RETRY_DELAYS_MS.length
+                    && this.activePrompts.has(turn.threadId)
+                    ? NO_ACTIVE_TURN_RETRY_DELAYS_MS[attempt]!
+                    : null;
+                if (retryDelay === null) {
+                    logger.error(`${requestName} - turnInterrupt failed`, err);
+                    return;
+                }
+                // The cancel raced the turn's registration in Codex: the prompt
+                // is still in flight, so the turn is about to become
+                // interruptible. Dropping the cancel here would let the turn run
+                // to completion and answer `end_turn`, which ACP forbids after a
+                // `session/cancel`.
+                logger.log(`${requestName} - turn not interruptible yet, retrying`, {
+                    sessionId: turn.threadId,
+                    currentTurnId: turn.turnId,
+                    attempt,
+                });
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
+            }
         }
     }
 
@@ -2815,16 +2881,7 @@ export class CodexAcpServer {
             });
         }
         try {
-            await this.runWithProcessCheck(() => this.codexAcpClient.turnInterrupt({
-                threadId: sessionState.sessionId,
-                turnId,
-            }));
-            logger.log(`${requestName} - turnInterrupt succeeded`, {
-                sessionId: sessionState.sessionId,
-                currentTurnId: turnId,
-            });
-        } catch (err) {
-            logger.error(`${requestName} - turnInterrupt failed`, err);
+            await this.requestTurnInterrupt({threadId: sessionState.sessionId, turnId}, requestName);
         } finally {
             if (resolveInterruptedTurn) {
                 this.codexAcpClient.resolveTurnInterrupted({
@@ -2925,6 +2982,7 @@ export class CodexAcpServer {
                 (accountUpdated) => this.handleAccountUpdated(accountUpdated),
                 agentFileChangeReportRequest !== null,
                 clientSupportsCompaction(this.clientCapabilities),
+                clientSupportsNotices(this.clientCapabilities),
             );
             eventHandler = promptEventHandler;
             const permissionLifecycle = this.permissionLifecycleContext(sessionState);

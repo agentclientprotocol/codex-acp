@@ -1,0 +1,80 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Codex warning"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Configuration warning"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Deprecated configuration"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Default configuration",
+        "description": ""
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Old configuration",
+        "description": ""
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Global warning"
+      }
+    }
+  ]
+}

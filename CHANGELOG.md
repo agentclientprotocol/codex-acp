@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.13.1](https://github.com/agentclientprotocol/codex-acp/compare/v1.13.0...v1.13.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* update codex to 0.156.1 ([#541](https://github.com/agentclientprotocol/codex-acp/issues/541)) ([761264b](https://github.com/agentclientprotocol/codex-acp/commit/761264b6323f1caffbfd75941de132cb4744a9e2))
+
+## [1.13.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.12.0...v1.13.0) (2026-09-22)
+
+
+### Features
+
+* Add experimental session notices for Codex advisories ([#532](https://github.com/agentclientprotocol/codex-acp/issues/532)) ([e4c9af6](https://github.com/agentclientprotocol/codex-acp/commit/e4c9af6f4459013e4382dd18e25e8f184b63cb33))
+* Add expermental ACP session compaction updates ([#515](https://github.com/agentclientprotocol/codex-acp/issues/515)) ([6ec22f3](https://github.com/agentclientprotocol/codex-acp/commit/6ec22f39774320d759bf9ba37fc536c68766d1af))
+
+
+### Bug Fixes
+
+* prefer terminal output deltas ([#528](https://github.com/agentclientprotocol/codex-acp/issues/528)) ([71bceb1](https://github.com/agentclientprotocol/codex-acp/commit/71bceb19c20887c91df3a30a6bf930abb033ccf8))
+* update codex to 0.155.0 ([#523](https://github.com/agentclientprotocol/codex-acp/issues/523)) ([d7b07c1](https://github.com/agentclientprotocol/codex-acp/commit/d7b07c1b44a28890cdf3d5450f8974a812db5ae2))
+* update codex to 0.155.1 ([#525](https://github.com/agentclientprotocol/codex-acp/issues/525)) ([acc035a](https://github.com/agentclientprotocol/codex-acp/commit/acc035a7444bf7550aabcc24597ed845ba3e593b))
+
 ## [1.12.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.11.0...v1.12.0) (2026-09-15)
 
 

@@ -366,6 +366,8 @@ describe("session compaction", () => {
             approvalsReviewer: "user",
             sandbox: {type: "dangerFullAccess"},
             reasoningEffort: model.defaultReasoningEffort,
+            disabledPluginIds: [],
+            collaborationMode: null,
             turnsBackwardsCursor: null,
             itemsBackwardsCursor: null,
         });

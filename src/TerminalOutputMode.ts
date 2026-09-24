@@ -6,10 +6,19 @@ export function resolveTerminalOutputMode(
     clientCapabilities?: acp.ClientCapabilities | null
 ): TerminalOutputMode {
     const meta = clientCapabilities?._meta;
+    if (meta?.["terminal_output_delta"] === true) {
+        return "terminal_output_delta";
+    }
     if (meta?.["terminal_output"] === true) {
         return "terminal_output";
     }
     return "terminal_output_delta";
+}
+
+export function clientSupportsTerminalOutputDelta(
+    clientCapabilities?: acp.ClientCapabilities | null
+): boolean {
+    return clientCapabilities?._meta?.["terminal_output_delta"] === true;
 }
 
 export function createTerminalOutputMeta(
