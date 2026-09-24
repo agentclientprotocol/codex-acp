@@ -107,6 +107,38 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         await expect(dump(received)).toMatchFileSnapshot('data/session-update-v2-tool-calls-and-chunks.json');
     });
 
+    it('renders the subagent RFD upsert and async task updates under `_`-prefixed tags', async () => {
+        const {received, view} = await connectV2Client();
+        const session = new ACPSessionConnection(view, "session-1");
+
+        await session.update({
+            sessionUpdate: "subagent_spawned",
+            subagentSessionId: "child-1",
+            name: "Researcher",
+            task: "Look into flaky tests",
+            capabilities: {},
+        });
+        await session.update({sessionUpdate: "subagent_state_update", subagentSessionId: "child-1", state: "completed"});
+        await session.update({
+            sessionUpdate: "async_task_spawned",
+            asyncTaskId: "task-1",
+            name: "npm test",
+            taskType: "shell",
+            showInTranscript: false,
+            canStop: true,
+            toolCallId: "call-1",
+        });
+        await session.update({
+            sessionUpdate: "async_task_state_update",
+            asyncTaskId: "task-1",
+            state: "completed",
+            toolCallId: "call-1",
+        });
+
+        await vi.waitFor(() => expect(received).toHaveLength(4));
+        await expect(dump(received)).toMatchFileSnapshot('data/session-update-v2-subagent-and-async-task.json');
+    });
+
     it('fails loudly for updates whose v2 shape belongs to a later topic', async () => {
         const {received, view} = await connectV2Client();
         const session = new ACPSessionConnection(view, "session-1");

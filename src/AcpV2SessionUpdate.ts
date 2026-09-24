@@ -115,12 +115,38 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
                 ...(content !== undefined ? {content: content && content.map(toV2ToolCallContent)} : {}),
             };
         }
-        // Extension updates have no v2 shape yet.
-        case "subagent_spawned":
-        case "subagent_state_update":
+        // Subagent RFD (spec PR #1992, unmerged) uses a single upsert-style update. Sent under a
+        // `_`-prefixed tag because the RFD's `subagent_update` isn't in the v2 unstable schema yet;
+        // rename to `subagent_update` once it lands there. The AIR `nativeSubagentSessions` gate
+        // already ran upstream (whatever created this update), so no gate check is needed here.
+        case "subagent_spawned": {
+            const {subagentSessionId, name, task, _meta} = update;
+            return {
+                sessionUpdate: "_subagent_update",
+                subagentSessionId,
+                name,
+                task,
+                capabilities: {},
+                ...(_meta != null ? {_meta} : {}),
+            };
+        }
+        case "subagent_state_update": {
+            const {subagentSessionId, state, _meta} = update;
+            return {
+                sessionUpdate: "_subagent_update",
+                subagentSessionId,
+                state,
+                ...(_meta != null ? {_meta} : {}),
+            };
+        }
+        // No upstream v2 design exists for async tasks (AIR-private extension); same payload as v1
+        // under a `_`-prefixed tag. Gated on AIR `asyncTasks` upstream, same as above.
         case "async_task_spawned":
-        case "async_task_progress":
+            return {...update, sessionUpdate: "_async_task_spawned"};
         case "async_task_state_update":
+            return {...update, sessionUpdate: "_async_task_state_update"};
+        // Declared as a type but never emitted; no v2 rendering to give it yet.
+        case "async_task_progress":
             throw acp.RequestError.internalError(
                 undefined,
                 `'${update.sessionUpdate}' session update is not supported on an ACP v2 connection yet`,
