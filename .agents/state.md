@@ -116,9 +116,16 @@ invisible until first prompt; Q6 (ask AIR) fork points match Codex item ids, but
 is our `clientId`.
 
 **Next steps, in order (one programmer at a time; researchers may run in parallel):**
-0. (after the blocking TCK fix + user OK) topic 10 slices 10(a)..10(e) per the research above;
-   confirm Q4/Q5 (researcher) before 10(e). The old items below are history for 1; 2 is superseded
-   by the topic 10 research block.
+0. **Topic 10 slice order** (one programmer at a time; research + decisions are all recorded in the
+   blocks above and in `v2-fork-providers-and-extension-methods.md`,
+   `v2-provider-restart-and-fork-tracking.md`, `v2-resume-goal-turn-timing.md`):
+   10(a) renderer cases (in flight / see its result above) → 10(b) `_session/goal` on v2 →
+   10(c) `_session/async_task/stop` on v2 → 10(d) `session/fork` on v2 (drop `modes`, no
+   `available_commands_update`, Q6 flagged for docs) → 10(e) `providers/*` on v2 (EXT-202 already
+   fixed in the TCK) → 10(f1) early-subscribe tracker on resume/load (v1+v2) → 10(f2)
+   provider-restart reinstall + v2 close-out (v1+v2). Then end-of-topic-10 scoped TCK, then Phase 4
+   (add Phase 4 docs: disabled-`openai` `current` gap (Q3), AIR fork-at-user-message question (Q6);
+   live checks: provider restart with an active goal, `session/new` auto goal turn).
 1. ~~**5b-2b**~~ done (programmer, small): Q1 option A (user decision) — on v2 the
    `ResponseItemHistoryFallback` contributes only its recovered tool calls (`tool_call` /
    `tool_call_update`); every fallback `user_message_chunk` / `agent_message_chunk` /
