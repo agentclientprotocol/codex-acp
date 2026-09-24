@@ -446,7 +446,35 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
   when no v2 `session/prompt` is in flight. What `state_update`/`user_message` sequence does ACP v2
   allow/require for a turn the client didn't request; how should they interact with a v2 prompt that
   arrives meanwhile (overlap check / 2(c) queue)? → `.agents/research/v2-agent-initiated-turns.md`.
-  Status: **in flight.**
+  Status: **research done; live probe in flight; user decisions J1-J7 pending.** Findings:
+  - Callers: goal continuation (`_session/goal` set/resume when `runGoalSet` returns `null`,
+    `CodexAcpServer.ts:586,611`) and steering fallback (`:1717-1734,1793`). The pending request is the
+    extension request, not a `session/prompt`. Neither method is on the v2 chain yet (topic 10), so
+    these callers are unreachable on v2 today.
+  - **New:** Codex 0.156.1's goal extension auto-starts turns (no userMessage) whenever the thread
+    idles with an active goal (after every turn end, `thread/goal/set`, `thread/resume`). Reachable
+    on v2 now via `/goal`. codex-acp sends no states for them; the overlap check misses them.
+  - Spec: `running`…`idle` with no prompt is allowed; required only if the turn counts as
+    "foreground" (undefined → our call). `user_message` without a prompt is allowed. SDK: any
+    `idle` while a client prompt is pending counts as that prompt's stop (`acp.ts:2845-2851`) → a
+    queued B would stop early when an agent turn idles.
+  - Overlap gaps: G1 window before `prompt()` registers; G2 goal turn during a pending
+    `_session/goal`; G3 Codex self-started turns.
+  - Recommendation: every agent-initiated turn → `running` at start + one `idle` at
+    `turn/completed`; goal continuation and steering fallback mint `clientUserMessageId` + emit
+    `user_message` on landing; Codex self-started turns → no `user_message`; one per-session
+    FIFO/reservation for all codex-acp turn starters, taken before the first `await`; "busy" also
+    counts Codex-reported running turns. Judgment calls: **J1** foreground (states) · **J2**
+    `running` at turn start · **J3** no synthetic `user_message` for Codex self-started turns ·
+    **J4** one shared FIFO in arrival order, re-check `canStart` on dequeue · **J5** v2
+    session-level turn subscription independent of `prompt()` (sees auto turns, incl. after resume) ·
+    **J6** whether v1 also uses the shared reservation (scheduling only) · **J7** mint the
+    goal-continuation id on v2 only.
+  - **Possible 2(c) blocker:** a queued B's `turn/start` right after `turn/completed` can race
+    Codex's auto goal turn and get silently steered into it. → live probe (appending
+    "Live verification" to the same file), in flight.
+  - Pre-existing (v1 too): codex-acp's own goal continuation may collide with Codex's auto one;
+    `prompt()` clearing `currentTurnId` (`:3101`) can hide a running Codex turn from cancel/steering.
 
 - (2026-09-24) **TCK-U1** — v2 `_auth/status_update` pushed right after `initialize` fails
   BATCH-202/JSONRPC-003/EXT-201. Is the push allowed; what exactly do those checks accept; does v1
