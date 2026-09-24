@@ -31,8 +31,8 @@ topic 5a. The v2 chain currently registers: `initialize`, `session/new|list|clos
    (see 2(b) entry); **6(a) done** (893a4a3, 8ee7b42).
    **Queue (one programmer at a time):** ~~2(e)~~ **done** (1e20ae9, 7027ed1) → ~~6(b)~~ **done** (2d25cac, e37457a;
    2 open questions resolved) → ~~6(c)~~ **done** (1bcd452, 317786a) → ~~6(d)~~ **done** (5aa5f0e, 3c4ffde; topic 6 **done**) → research TCK-U1/TCK-U2 (in flight, see
-   "Open questions") → **2(h)** v1 `/review-branch`
-   hang fix (`fix:`) → **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
+   "Open questions"; fix slice to follow) ∥ **2(h)** v1 `/review-branch`
+   hang fix (`fix:`, **in flight**; TCK note `.agents/tck/2h-targeted.md`) → **2(a2)** = Codex command turns (`/review`, `/compact`, `/goal`) + synthetic
    prompts (plan-implementation, goal continuation). #4-#6 research landed; all decided.
 2. **Topic 2(a)** (`session/prompt` on v2, idle case only): mint the `messageId` UUID → pass as
    `clientUserMessageId`; resolve the RPC with `{messageId}` + live `user_message` at the matching
