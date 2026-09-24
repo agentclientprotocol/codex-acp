@@ -13,9 +13,9 @@ part-done; topic 10 not started (2026-09-24).
 
 State as of the flush for a fresh orchestrator restart (2026-09-24, second flush): **no agents in
 flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`, last code commit
-`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`, 3(b) `8815bd5`, 3(c) `6aa86ed`, 3(d) `17d8a62`, 3-full `30cc414`) and in the acp-tck fork (`main`, 4
+`b2b81d7`; since then J11 `64d1201`, J11b `e92e366`, G-render `612d1a5`, 3(a) `78a8666`, 3(b) `8815bd5`, 3(c) `6aa86ed`, 3(d) `17d8a62`, 3-full `30cc414`, 4(b) `f901d30`) and in the acp-tck fork (`main`, 4
 local commits, **not pushed**; the user said don't push). Keep committing with explicit pathspecs.
-Suite: **908 pass / 26 skip** (after 3(d)). **Topic 3 done; next: topic 4(b).**
+Suite: **914 pass / 26 skip** (after 4(b)). **Next: 5b-1 (programmer) + Q-IDLE-RA and Q-5B research in parallel.**
 
 **Standing user rules (2026-09-24):** preserve v1 client-visible behavior (change v1 only to fix a
 real bug, with nothing else v1-visible changing); **always assume the latest Codex** (currently the
@@ -155,9 +155,20 @@ fails remaining: cancel rows (topic 3), RESUME-202, EXT-202.
    hook is in `acquireTurnStartReservation`/`promptV2`); v1 cancel-retry option B; retry
    `Close`-named interrupts. Note: CANCEL-202 safety depends on goals pausing on interrupt
    (unverified, `v2-agent-initiated-turns.md` Q2 TCK note).
-3. **Topic 4(b)**, v2 `elicitation/create` send path (MCP OAuth re-auth, `chat-gpt-device-code`
-   login via `createUrlElicitationRequester`) + a v2 device-code test. `extensionOnlyV1View()` still
-   rejects it.
+3. **Topic 4(b)** — **Done (f901d30)**: v1/v2 elicitation types are identical in SDK 1.5.0. New
+   `src/AcpV2Elicitation.ts` (identity conversion points + `elicitationSessionId`);
+   `AcpV2Connection.createElicitation()` (session-scoped → `requires_action` before, `running` in
+   `finally` if `isTurnRunning`; request-scoped, e.g. device-code login → no states) +
+   `completeElicitation()` (`elicitation/complete`); routed from `extensionOnlyV1View()`. Harness:
+   `onElicitation`, elicitation transcript entries. `elicitation-v2.test.ts` (6: OAuth accept/
+   decline/cancel, no-url-mode fallback to permission, cancel aborts, device-code `auth/login` end to
+   end). Suite 914 / 26. TCK v1 `-k "test_authentication or test_prompt"` no fails; v2 `-k "... or
+   test_permission"` 12/0/6 (no TCK elicitation module).
+   **Q-IDLE-RA (researcher dispatched):** a session-scoped permission/elicitation while no turn runs
+   (e.g. MCP OAuth re-auth during MCP startup at `session/new`/`resume`, if that happens) sends
+   `requires_action` and then nothing → client left in `requires_action`. Can it happen; what v2
+   allows (skip `requires_action` when idle? return to `idle`?). Report →
+   `.agents/research/v2-requires-action-outside-turn.md`.
 4. **Topic 5b**, resume replay (list below, item 6).
 5. **Topic 10**, `session/fork`, providers, `_session/goal`, `_session/async_task/stop` on v2 +
    subagent/async-task renderer cases; EXT-202 placement.
@@ -573,7 +584,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
 | 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i..v), 2(c)-1, 2(c)-2(i), J11, J11b, G-render done | — (topic 2 done apart from small follow-ups) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | **Done** | — | — | Depends on topic 2's `state_update` fork existing |
-| 4 | Permission requests & approvals | In progress | 4(a) done | 4(b) elicitation/create | Depends on topic 2's `state_update` fork existing |
+| 4 | Permission requests & approvals | In progress | 4(a), 4(b) done | Q-IDLE-RA outcome | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
 | 6 | Tool calls, messages & terminal streaming | **Done** | — | — | 6(a)-6(d); end-of-topic full TCK in `.agents/tck/6-full-v1-v2.md` |
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
