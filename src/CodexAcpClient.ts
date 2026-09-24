@@ -670,10 +670,6 @@ export class CodexAcpClient {
         };
     }
 
-    async readSessionThread(sessionId: string): Promise<Thread> {
-        return (await this.codexClient.threadReadWithHistory(sessionId)).thread;
-    }
-
     /**
      * The items of the turn at `index` of a session, oldest first, in pages.
      * Returns null when the session has fewer turns.
