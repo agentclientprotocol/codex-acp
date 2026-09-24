@@ -1,0 +1,57 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "user-1",
+      "content": {
+        "text": "Find the missing helper",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "toolCallId": "call-recovered",
+      "name": "exec_command",
+      "title": "Search for 'helper' in src",
+      "kind": "search",
+      "status": "in_progress",
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "toolCallId": "call-recovered",
+      "status": "completed",
+      "rawOutput": {
+        "output": "Chunk ID: recovered\nProcess exited with code 0\nOutput:\nsrc/helper.ts\n"
+      },
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "user-2",
+      "content": {
+        "text": "Thanks",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "agent-1",
+      "content": {
+        "text": "You're welcome.",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  }
+]

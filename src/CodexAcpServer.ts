@@ -2467,12 +2467,16 @@ export class CodexAcpServer {
         const merged = responseItemFallbackUpdates
             ? mergeHistoryUpdates(responseItemFallbackUpdates, threadUpdates)
             : threadUpdates;
-        // The fallback's user chunks only exist to order recovered tool calls in the merge
-        // above; they carry no messageId, which v2 requires on every replayed message. Keep
-        // them for ordering, but never send them on v2 (v1 keeps its existing behavior).
+        // The fallback's user/agent/thought chunks only exist to order recovered tool calls in
+        // the merge above; they carry no messageId, which v2 requires on every replayed message.
+        // Keep them for ordering, but never send them on v2 (v1 keeps its existing behavior).
+        // Only the fallback's recovered tool calls are sent on v2.
         const updates = this.protocolVersion === 2 && responseItemFallbackUpdates
             ? merged.filter((update) => !(
-                update.sessionUpdate === "user_message_chunk" && responseItemFallbackUpdates.includes(update)
+                (update.sessionUpdate === "user_message_chunk"
+                    || update.sessionUpdate === "agent_message_chunk"
+                    || update.sessionUpdate === "agent_thought_chunk")
+                && responseItemFallbackUpdates.includes(update)
             ))
             : merged;
 
