@@ -722,27 +722,15 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(codexAppServerClient, "skillsExtraRootsSet").mockResolvedValue(undefined);
         vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-        vi.spyOn(codexAppServerClient, "threadResume").mockImplementation(async ({threadId}) => {
-            mockFixture.sendServerNotification({
-                method: "thread/settings/updated",
-                params: {
-                    threadId,
-                    threadSettings: {
-                        collaborationMode: {
-                            mode: "plan",
-                            settings: {},
-                        },
-                    },
-                },
-            });
-            return {
-                thread: {id: threadId},
-                model: "gpt-5",
-                modelProvider: "openai",
-                reasoningEffort: "medium",
-                serviceTier: null,
-            } as any;
-        });
+        // Codex sends no thread/settings/updated on a resume. Only the response holds the mode.
+        vi.spyOn(codexAppServerClient, "threadResume").mockImplementation(async ({threadId}) => ({
+            thread: {id: threadId},
+            model: "gpt-5",
+            modelProvider: "openai",
+            reasoningEffort: "medium",
+            serviceTier: null,
+            collaborationMode: {mode: "plan", settings: {}},
+        } as any));
         vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockImplementation(async (threadId) => ({
             thread: {id: threadId, turns: []},
         } as any));
@@ -765,6 +753,22 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(codexAcpAgent.getSessionState("load-id").collaborationMode).toBe("plan");
         expect(resumed.configOptions?.find(option => option.id === "collaboration_mode")).toMatchObject({currentValue: "plan"});
         expect(loaded.configOptions?.find(option => option.id === "collaboration_mode")).toMatchObject({currentValue: "plan"});
+    });
+
+    it('forgets the settings of a thread when its session closes', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        vi.spyOn(codexAppServerClient, "threadUnsubscribe").mockResolvedValue({} as any);
+        mockFixture.sendServerNotification({
+            method: "thread/settings/updated",
+            params: {threadId: "thread-id", threadSettings: {collaborationMode: {mode: "plan", settings: {}}}},
+        } as any);
+        expect(codexAppServerClient.getThreadSettings("thread-id")?.collaborationMode.mode).toBe("plan");
+
+        await codexAcpClient.closeSession("thread-id");
+
+        expect(codexAppServerClient.getThreadSettings("thread-id")).toBeUndefined();
     });
 
     it('uses configured model provider when resuming sessions without an explicit provider', async () => {
