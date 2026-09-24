@@ -44,8 +44,14 @@ BATCH-204/205 (omitted `params`, fixed by 2(u2)).
    `-k test_prompt` baseline. Note for 2(a2-iii): `/goal resume` falling back to
    `GOAL_CONTINUATION_PROMPT` reuses the already-resolved insertion (no new minted id; untested) —
    that continuation needs its own minted `clientUserMessageId` + live `user_message`; **2(a2-ii)**
-   `/review` (**in flight, programmer dispatched 2026-09-24**); **2(a2-iii)** synthetic prompts (plan-implementation, goal continuation) + overlap
-   check for `startNewTurnFromExternalPrompt` + fallback title fix. — Codex command turns (`/review`, `/compact`, `/goal`) and synthetic prompts
+   `/review` — **Done (f4d1020)**: `runReview` gained `onAccepted` (fired on the `review/start`
+   response, before `onTurnStarted`), wired via `onCommandAccepted`; `promptV2` no longer rejects any
+   command. Reviewer message suppression needed no code: `CodexEventHandler` returns `null` for live
+   `userMessage` items on both versions. 2(r)/2(h) machinery reused unchanged. 4 tests + 4 snapshots
+   (old `prompt-v2-codex-turn-commands.json` removed). Suite 858 / 26. TCK v1 `-k "test_prompt or
+   test_cancel"` 8/1, v2 `-k test_prompt` 9/1 (baseline). No live probe; **2(a2-iii)** synthetic prompts (plan-implementation, goal continuation) (**in flight,
+   programmer dispatched 2026-09-24**); **2(a2-iv)** overlap check for
+   `startNewTurnFromExternalPrompt` + fallback title fix for non-inserted prompts. — Codex command turns (`/review`, `/compact`, `/goal`) and synthetic prompts
    (plan-implementation, goal continuation) on v2. Use the two-id tracking from 2(r), with no clientId matcher
    for reviews. On `review/start` success, send the response + live-only `user_message`, then
    `running`, then exactly one `idle`. Synthetic prompts get a minted `clientUserMessageId`. Also:
@@ -393,7 +399,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 |---|-------|--------|------------------------|-----------------|-------|
 | — | SDK dependency bump (prerequisite) | **Done** | — | — | Blocks everything below |
 | 1 | Capability negotiation & `initialize` | **Done** | — | — | Foundational; nothing else can be wired end-to-end without this |
-| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i) done | 2(a2-ii), 2(a2-iii), 2(c) | Long pole — start early per plan.md |
+| 2 | Prompt lifecycle & turn state machine | In progress | 2(a1), 2(r), 2(b), 2(e), 2(h), 2(u2), 2(a2-i), 2(a2-ii) done | 2(a2-iii), 2(a2-iv), 2(c) | Long pole — start early per plan.md |
 | 3 | Cancellation semantics | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 4 | Permission requests & approvals | Not started | — | — | Depends on topic 2's `state_update` fork existing |
 | 5 | Session lifecycle (new/resume/list/close/delete) | In progress | 5a done | 5b after topics 6(a) + 2(a) | Depends on topics 1, 9 |
