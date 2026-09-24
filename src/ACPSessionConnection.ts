@@ -52,6 +52,19 @@ export class AcpV2Connection {
         });
     }
 
+    /**
+     * Sends the whole-message update (`content: []`) that must precede the first replayed chunk
+     * for a given id, clearing any content a reconnecting client already holds for it. Only
+     * `user_message`, `agent_message` and `agent_thought` exist as whole-message updates; there
+     * is no v1 shape for them, so this bypasses `toV2SessionUpdates` entirely.
+     */
+    async startReplayMessage(sessionId: string, kind: ReplayMessageKind, messageId: string): Promise<void> {
+        await this.client.notify(acpV2.methods.client.session.update, {
+            sessionId,
+            update: {sessionUpdate: kind, messageId, content: []},
+        });
+    }
+
     /** `updateState`, with send failures caught and logged instead of propagated. */
     private async sendState(sessionId: string, state: acpV2.StateUpdate): Promise<void> {
         try {
@@ -207,6 +220,14 @@ export class ACPSessionConnection {
         await this.v2Connection.updateState(this.sessionId, state);
     }
 
+    /** `startReplayMessage`, which only exists on v2 and so needs no v1 shape. */
+    async startReplayMessage(kind: ReplayMessageKind, messageId: string): Promise<void> {
+        if (!this.v2Connection) {
+            throw acp.RequestError.internalError(undefined, `'${kind}' does not exist in ACP v1`);
+        }
+        await this.v2Connection.startReplayMessage(this.sessionId, kind, messageId);
+    }
+
     async update(update: UpdateSessionEvent, sessionId: string = this.sessionId) {
         if (this.v2Connection) {
             await this.v2Connection.updateSession(sessionId, update);
@@ -220,3 +241,6 @@ export class ACPSessionConnection {
 }
 
 export type UpdateSessionEvent = AcpSessionUpdate;
+
+/** The v2 whole-message update kinds that a replayed chunk stream can restart. */
+export type ReplayMessageKind = "user_message" | "agent_message" | "agent_thought";

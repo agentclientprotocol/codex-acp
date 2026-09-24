@@ -48,7 +48,7 @@ function createThread(overrides?: Partial<Thread>): Thread {
 }
 
 /** Canned Codex app-server responses, keyed by method. */
-function codexResponse(method: string): unknown {
+function codexResponse(method: string, replayTurns: Thread["turns"] = []): unknown {
     switch (method) {
         case "thread/start":
         case "thread/resume":
@@ -60,6 +60,11 @@ function codexResponse(method: string): unknown {
                 serviceTier: null,
                 turnsBackwardsCursor: null,
             };
+        case "thread/read":
+            // `threadReadWithHistory` reads twice for a "legacy" history-mode thread (once to
+            // learn the history mode, once with `includeTurns: true`); returning the full
+            // history from both is harmless since only the second response is used.
+            return {thread: createThread({turns: replayTurns})};
         case "model/list":
             return {data: [createTestModel({id: "gpt-5"})], nextCursor: null};
         case "skills/list":
@@ -85,14 +90,14 @@ const recordedCodexMethods = new Set([
 ]);
 
 /** Connects a v2 client to the agent through the router, over a mocked Codex app-server. */
-async function connectV2Client() {
+async function connectV2Client(options?: {replayTurns?: Thread["turns"]}) {
     const mocks = createMockConnections();
     const codexRequests: Array<{method: string, params: unknown}> = [];
     mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params?: unknown) => {
         if (recordedCodexMethods.has(method)) {
             codexRequests.push({method, params});
         }
-        return codexResponse(method);
+        return codexResponse(method, options?.replayTurns);
     });
     const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
     vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
@@ -252,19 +257,84 @@ describe('Session lifecycle over ACP v2', () => {
         await expect(dump(error)).toMatchFileSnapshot('data/session-lifecycle-v2-resume-unknown-replay.json');
     });
 
-    it('rejects resume with replayFrom start until history replay is supported on v2', async () => {
-        const {connection, agent, codexRequests} = await connectV2Client();
+    /** A turn with a prompt-inserted user message, a legacy one, an agent message and a tool call. */
+    const replayTurns: Thread["turns"] = [{
+        id: "turn-1",
+        itemsView: "full",
+        status: "completed",
+        error: null,
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+        items: [
+            {
+                type: "userMessage",
+                id: "item-user-1",
+                clientId: "client-user-1",
+                content: [{type: "text", text: "Inserted via session/prompt", text_elements: []}],
+            },
+            {
+                type: "userMessage",
+                id: "item-user-2",
+                clientId: null,
+                content: [{type: "text", text: "A legacy message with no clientId", text_elements: []}],
+            },
+            {
+                type: "agentMessage",
+                id: "item-agent-1",
+                text: "Hello!",
+                phase: null,
+                memoryCitation: null,
+                delivery: null,
+                questions: null,
+            },
+            {
+                type: "commandExecution",
+                id: "item-cmd-1",
+                pluginId: null,
+                scriptPath: null,
+                command: "ls",
+                cwd,
+                processId: null,
+                source: "agent",
+                status: "completed",
+                commandActions: [],
+                aggregatedOutput: "README.md\n",
+                exitCode: 0,
+                durationMs: 5,
+            },
+        ],
+    }];
+
+    it('replays history before answering resume with replayFrom start', async () => {
+        const {connection, agent, codexRequests, updates} = await connectV2Client({replayTurns});
         closeClient = () => connection.close();
 
-        const error = await connection.agent.request(acpV2.methods.agent.session.resume, {
+        const response = await connection.agent.request(acpV2.methods.agent.session.resume, {
             sessionId,
             cwd,
             replayFrom: {type: "start"},
-        }).then(() => null, (err) => ({code: err.code, message: err.message, data: err.data}));
+        });
 
-        expect(codexRequests).toEqual([]);
-        expect(() => agent().getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
-        await expect(dump(error)).toMatchFileSnapshot('data/session-lifecycle-v2-resume-start-replay.json');
+        // RESUME-202: every replayed update must have already arrived by the time the response
+        // resolves; nothing should still be pending afterwards.
+        const replayedUpdates = [...updates];
+        expect(agent().getSessionState(sessionId)).toBeTruthy();
+
+        await expect(dump({response, codexRequests, updates: replayedUpdates}))
+            .toMatchFileSnapshot('data/session-lifecycle-v2-resume-start-replay.json');
+    });
+
+    it('does not replay any history when replayFrom is absent', async () => {
+        const {connection, updates} = await connectV2Client({replayTurns});
+        closeClient = () => connection.close();
+
+        await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd});
+        await waitForSessionUpdates(updates, ["available_commands_update", "session_info_update"]);
+
+        expect(updates.some(({update}) => update.sessionUpdate.endsWith("_message_chunk")
+            || update.sessionUpdate.endsWith("_message")
+            || update.sessionUpdate === "tool_call")).toBe(false);
     });
 
     it('does not register session/load on v2', async () => {

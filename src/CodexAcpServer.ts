@@ -32,6 +32,7 @@ import {
     ACPSessionConnection,
     type AcpV2ClientConnection,
     AcpV2Connection,
+    type ReplayMessageKind,
     type UpdateSessionEvent,
 } from "./ACPSessionConnection";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
@@ -1142,6 +1143,31 @@ export class CodexAcpServer {
             await this.providerUpdate;
         }
         logger.log("Loading session...", {sessionId: params.sessionId});
+        const {sessionId, modelState, modeState} = await this.loadSessionAndReplayHistory(params);
+
+        logger.log("Session loaded", {
+            sessionId: sessionId,
+            modelId: modelState.currentModelId,
+            availableModelCount: modelState.availableModels.length
+        });
+        return {
+            models: modelState,
+            modes: modeState,
+            ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
+        };
+    }
+
+    /**
+     * Shared by v1 `session/load` and v2 `session/resume` with `replayFrom: {type: "start"}`:
+     * reattach, replay retained history as ordinary `session/update`s, then answer.
+     */
+    private async loadSessionAndReplayHistory(
+        params: WithAcpMcpServers<acp.LoadSessionRequest>,
+    ): Promise<{
+        sessionId: SessionId;
+        modelState: LegacySessionModelState;
+        modeState: SessionModeState;
+    }> {
         // Captured before the load installs a fresh SessionState: a title
         // generation started by an earlier turn on this session belongs to the
         // state being replaced, and has to settle before we answer.
@@ -1159,16 +1185,7 @@ export class CodexAcpServer {
         // from a still-running title generation would arrive after it.
         await previousTitleGen?.waitForIdle(TITLE_GENERATION_SETTLE_TIMEOUT_MS);
 
-        logger.log("Session loaded", {
-            sessionId: sessionId,
-            modelId: modelState.currentModelId,
-            availableModelCount: modelState.availableModels.length
-        });
-        return {
-            models: modelState,
-            modes: modeState,
-            ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
-        };
+        return {sessionId, modelState, modeState};
     }
 
     async resumeSession(params: WithAcpMcpServers<acp.ResumeSessionRequest>): Promise<LegacyResumeSessionResponse> {
@@ -1192,18 +1209,15 @@ export class CodexAcpServer {
 
     async resumeSessionV2(params: acpV2.ResumeSessionRequest): Promise<acpV2.ResumeSessionResponse> {
         const {replayFrom, ...request} = params;
-        if (replayFrom != null) {
-            if (replayFrom.type !== "start") {
-                throw RequestError.invalidParams(undefined, `Unsupported replayFrom type: ${replayFrom.type}`);
-            }
-            // History replay emits message and tool call updates, which have no v2 rendering yet.
-            throw RequestError.internalError(
-                undefined,
-                "session/resume with replayFrom 'start' is not supported on an ACP v2 connection yet",
-            );
+        if (replayFrom == null) {
+            await this.resumeSession(request);
+            return this.createSessionConfigOptionsResponseV2(this.getSessionState(params.sessionId));
         }
-        await this.resumeSession(request);
-        return this.createSessionConfigOptionsResponseV2(this.getSessionState(params.sessionId));
+        if (replayFrom.type !== "start") {
+            throw RequestError.invalidParams(undefined, `Unsupported replayFrom type: ${replayFrom.type}`);
+        }
+        const {sessionId} = await this.loadSessionAndReplayHistory(request);
+        return this.createSessionConfigOptionsResponseV2(this.getSessionState(sessionId));
     }
 
     async forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
@@ -2304,7 +2318,7 @@ export class CodexAcpServer {
     }
 
     private async getOrCreateSessionWithHistory(
-        request: acp.LoadSessionRequest
+        request: WithAcpMcpServers<acp.LoadSessionRequest>
     ): Promise<{
         sessionId: SessionId;
         modelState: LegacySessionModelState;
@@ -2446,12 +2460,50 @@ export class CodexAcpServer {
             }
         }
 
-        const updates = responseItemFallbackUpdates
+        const merged = responseItemFallbackUpdates
             ? mergeHistoryUpdates(responseItemFallbackUpdates, threadUpdates)
             : threadUpdates;
+        // The fallback's user chunks only exist to order recovered tool calls in the merge
+        // above; they carry no messageId, which v2 requires on every replayed message. Keep
+        // them for ordering, but never send them on v2 (v1 keeps its existing behavior).
+        const updates = this.protocolVersion === 2 && responseItemFallbackUpdates
+            ? merged.filter((update) => !(
+                update.sessionUpdate === "user_message_chunk" && responseItemFallbackUpdates.includes(update)
+            ))
+            : merged;
+
+        const startedReplayMessages = new Set<string>();
         for (const update of updates) {
+            if (this.protocolVersion === 2) {
+                await this.sendReplayMessageStart(session, update, startedReplayMessages);
+            }
             await session.update(update);
         }
+    }
+
+    /**
+     * On v2, replay reconstructing a message from its beginning via chunks MUST first send a
+     * whole-message update with `content: []` for the same id, clearing any content the client
+     * already holds for it (`session-setup.mdx`). No-op for chunks with no messageId: those get
+     * a fresh random id downstream instead (`toV2SessionUpdate`), so there is nothing to key on
+     * ahead of time.
+     */
+    private async sendReplayMessageStart(
+        session: ACPSessionConnection,
+        update: UpdateSessionEvent,
+        started: Set<string>,
+    ): Promise<void> {
+        const kind = replayMessageStartKind(update.sessionUpdate);
+        const messageId = kind ? (update as {messageId?: string | null}).messageId : null;
+        if (!kind || !messageId) {
+            return;
+        }
+        const key = `${kind}:${messageId}`;
+        if (started.has(key)) {
+            return;
+        }
+        started.add(key);
+        await session.startReplayMessage(kind, messageId);
     }
 
     private async streamNativeThreadHistory(
@@ -2724,7 +2776,10 @@ export class CodexAcpServer {
 
     private createUserMessageUpdates(item: ThreadItem & { type: "userMessage" }): UpdateSessionEvent[] {
         const updates: UpdateSessionEvent[] = [];
-        const messageId = item.id;
+        // On v2, a message inserted via `session/prompt` is replayed under the id the client
+        // provided then (`clientId`), so it round-trips as the same message on reconnect; v1 has
+        // no such client-minted id and keeps using Codex's own item id.
+        const messageId = this.protocolVersion === 2 ? (item.clientId ?? item.id) : item.id;
         for (const input of item.content) {
             const blocks = this.userInputToContentBlocks(input);
             for (const block of blocks) {
@@ -4271,6 +4326,20 @@ function commandItemIds(items: ThreadItem[]): Set<string> {
     return new Set(items
         .filter((item): item is Extract<ThreadItem, {type: "commandExecution"}> => item.type === "commandExecution")
         .map(item => item.id));
+}
+
+/** The whole-message kind a replayed chunk update restarts, or `null` if it isn't a chunk. */
+function replayMessageStartKind(sessionUpdate: UpdateSessionEvent["sessionUpdate"]): ReplayMessageKind | null {
+    switch (sessionUpdate) {
+        case "user_message_chunk":
+            return "user_message";
+        case "agent_message_chunk":
+            return "agent_message";
+        case "agent_thought_chunk":
+            return "agent_thought";
+        default:
+            return null;
+    }
 }
 
 function historyUpdateKey(update: UpdateSessionEvent): string | null {
