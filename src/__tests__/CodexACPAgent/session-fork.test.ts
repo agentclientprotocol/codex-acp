@@ -69,6 +69,7 @@ describe("ACP session fork", () => {
             sessionId: "source-id",
             cwd: "/workspace",
             mcpServers: [{name: "fork-mcp", command: "npx", args: ["fork"], env: []}],
+            _meta: {mcpStartupAwaitTimeoutMs: 30_000},
         });
         let forkSettled = false;
         void forkPromise.then(

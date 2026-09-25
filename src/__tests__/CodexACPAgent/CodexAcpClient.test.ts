@@ -1026,7 +1026,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const sessionPromise = codexAcpAgent.newSession({
             cwd: "/workspace",
-            mcpServers: [readyMcpServer, brokenMcpServer]
+            mcpServers: [readyMcpServer, brokenMcpServer],
+            _meta: {mcpStartupAwaitTimeoutMs: 30_000},
         });
         let sessionSettled = false;
         void sessionPromise.then(
@@ -1090,6 +1091,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             sessionId: "resume-id",
             cwd: "/workspace",
             mcpServers: [{name: "resume-mcp", command: "npx", args: ["resume"], env: []}],
+            _meta: {mcpStartupAwaitTimeoutMs: 30_000},
         });
         let resumeSettled = false;
         void resumePromise.then(
@@ -1106,6 +1108,101 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(resumePromise).resolves.toMatchObject({
             models: {currentModelId: "gpt-5[medium]"},
         });
+    });
+
+    it('skips waiting for MCP startup when _meta.mcpStartupAwaitTimeoutMs is <= 0', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const mcpStartup = deferred<McpStartupResult>();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "new-id",
+            currentModelId: "gpt-5[medium]",
+            models: [createTestModel({id: "gpt-5"})],
+            collaborationMode: "default",
+            currentServiceTier: null,
+            additionalDirectories: [],
+        });
+        vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockReturnValue(mcpStartup.promise);
+
+        const session = await codexAcpAgent.newSession({
+            cwd: "/workspace",
+            mcpServers: [{name: "new-mcp", command: "npx", args: ["new"], env: []}],
+            _meta: {mcpStartupAwaitTimeoutMs: 0},
+        });
+
+        expect(session.sessionId).toBe("new-id");
+    });
+
+    it('does not wait for MCP startup when _meta.mcpStartupAwaitTimeoutMs is omitted', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const mcpStartup = deferred<McpStartupResult>();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "new-id",
+            currentModelId: "gpt-5[medium]",
+            models: [createTestModel({id: "gpt-5"})],
+            collaborationMode: "default",
+            currentServiceTier: null,
+            additionalDirectories: [],
+        });
+        vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockReturnValue(mcpStartup.promise);
+
+        const session = await codexAcpAgent.newSession({
+            cwd: "/workspace",
+            mcpServers: [{name: "new-mcp", command: "npx", args: ["new"], env: []}],
+        });
+
+        expect(session.sessionId).toBe("new-id");
+    });
+
+    it('stops waiting for MCP startup once _meta.mcpStartupAwaitTimeoutMs elapses', async () => {
+        vi.useFakeTimers();
+        try {
+            const mockFixture = createCodexMockTestFixture();
+            const codexAcpAgent = mockFixture.getCodexAcpAgent();
+            const codexAcpClient = mockFixture.getCodexAcpClient();
+            const mcpStartup = deferred<McpStartupResult>();
+
+            vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+            vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+            vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
+            vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+                sessionId: "new-id",
+                currentModelId: "gpt-5[medium]",
+                models: [createTestModel({id: "gpt-5"})],
+                collaborationMode: "default",
+                currentServiceTier: null,
+                additionalDirectories: [],
+            });
+            vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockReturnValue(mcpStartup.promise);
+
+            const sessionPromise = codexAcpAgent.newSession({
+                cwd: "/workspace",
+                mcpServers: [{name: "new-mcp", command: "npx", args: ["new"], env: []}],
+                _meta: {mcpStartupAwaitTimeoutMs: 5_000},
+            });
+            let sessionSettled = false;
+            void sessionPromise.then(() => { sessionSettled = true; });
+
+            await vi.advanceTimersByTimeAsync(0);
+            expect(sessionSettled).toBe(false);
+
+            await vi.advanceTimersByTimeAsync(5_000);
+            const session = await sessionPromise;
+            expect(session.sessionId).toBe("new-id");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('prefetches skills before turn start', async () => {

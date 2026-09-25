@@ -743,13 +743,16 @@ export class CodexAcpServer {
             if (canPublishSessionUpdates) {
                 this.pendingMcpStartupSessions.set(sessionId, pendingStartup);
             }
-            try {
-                await pendingStartup.startup;
-            } catch (err) {
-                if (this.pendingMcpStartupSessions.get(sessionId) === pendingStartup) {
-                    this.pendingMcpStartupSessions.delete(sessionId);
+            const startupAwaitTimeoutMs = parseMcpStartupAwaitTimeoutMs(request._meta);
+            if (startupAwaitTimeoutMs !== undefined && startupAwaitTimeoutMs > 0) {
+                try {
+                    await raceMcpStartupTimeout(pendingStartup.startup, startupAwaitTimeoutMs);
+                } catch (err) {
+                    if (this.pendingMcpStartupSessions.get(sessionId) === pendingStartup) {
+                        this.pendingMcpStartupSessions.delete(sessionId);
+                    }
+                    throw err;
                 }
-                throw err;
             }
             if (canPublishSessionUpdates) {
                 this.publishMcpStartupStatusAsync(sessionId);
@@ -3534,4 +3537,41 @@ function historyUpdateContentKey(update: UpdateSessionEvent): string | null {
 
 function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
     return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(server.name))));
+}
+
+const MCP_STARTUP_AWAIT_TIMEOUT_META_KEY = "mcpStartupAwaitTimeoutMs";
+
+function parseMcpStartupAwaitTimeoutMs(meta: Record<string, unknown> | null | undefined): number | undefined {
+    const value = meta?.[MCP_STARTUP_AWAIT_TIMEOUT_META_KEY];
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+// Resolves once `startup` settles, or once `timeoutMs` elapses, whichever comes first.
+// A startup rejection is only propagated if it happens before the timeout.
+function raceMcpStartupTimeout(startup: Promise<McpStartupResult>, timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                resolve();
+            }
+        }, timeoutMs);
+        startup.then(
+            () => {
+                if (!settled) {
+                    settled = true;
+                    clearTimeout(timer);
+                    resolve();
+                }
+            },
+            (err) => {
+                if (!settled) {
+                    settled = true;
+                    clearTimeout(timer);
+                    reject(err);
+                }
+            },
+        );
+    });
 }
