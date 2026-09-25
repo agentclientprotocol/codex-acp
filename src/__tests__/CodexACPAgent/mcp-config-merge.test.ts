@@ -97,6 +97,75 @@ url = "https://example.com/mcp"
         })).resolves.toBeDefined();
     });
 
+    const clientMcp: McpServerStdio = {
+        name: "client-mcp",
+        command: path.resolve("node_modules/.bin/mcp-hello-world"),
+        args: [],
+        env: [],
+    };
+
+    /** MCP servers the session will run: every server its thread reports, less the disabled ones. */
+    async function sessionMcpServerNames(meta?: Record<string, unknown>): Promise<string[]> {
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const newSessionResponse = await codexAcpAgent.newSession({
+            cwd: projectPath,
+            mcpServers: [clientMcp],
+            ...(meta && {_meta: meta}),
+        });
+        const status = await fixture.getCodexAcpClient().appServerClient.listMcpServerStatus({
+            threadId: newSessionResponse.sessionId,
+        });
+        return status.data
+            .filter(server => server.runtimeStatus !== "disabled")
+            .map(server => server.name)
+            .sort();
+    }
+
+    it('should give a strictMcpConfig session only the ACP MCP servers', async () => {
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+
+        expect(await sessionMcpServerNames()).toEqual(["client-mcp", "shared-mcp"]);
+        expect(await sessionMcpServerNames({codex: {strictMcpConfig: true}})).toEqual(["client-mcp"]);
+    });
+
+    it('should disable a trusted project MCP server in a strictMcpConfig session', async () => {
+        fs.appendFileSync(
+            path.join(codexHome, "config.toml"),
+            `\n[projects.${JSON.stringify(fs.realpathSync(projectPath))}]\ntrust_level = "trusted"\n`,
+            "utf8",
+        );
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+
+        expect(await sessionMcpServerNames()).toEqual(["client-mcp", "project-mcp", "shared-mcp"]);
+        expect(await sessionMcpServerNames({codex: {strictMcpConfig: true}})).toEqual(["client-mcp"]);
+    });
+
+    it('should reject a strictMcpConfig session whose ACP MCP server shares a configured name', async () => {
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+
+        const conflictingMcp: McpServerStdio = {
+            name: "shared-mcp",
+            command: "./node_modules/.bin/mcp-hello-world",
+            args: [],
+            env: [],
+        };
+
+        await expect(codexAcpAgent.newSession({
+            cwd: projectPath,
+            mcpServers: [conflictingMcp],
+            _meta: {codex: {strictMcpConfig: true}},
+        })).rejects.toMatchObject({
+            code: -32602,
+            message: expect.stringContaining("shared-mcp"),
+        });
+    });
+
     it('should not filter the conflicting ACP MCP when config filtering is disabled', async () => {
         vi.stubEnv("DISABLE_MCP_CONFIG_FILTERING", "true");
         const codexAcpAgent = fixture.getCodexAcpAgent();
