@@ -86,15 +86,14 @@ describe("GitPatch", () => {
         expect(createAddedFileGitPatch("/w/huge.txt", "x".repeat(DIFF_PATCH_MAX_BYTES))).toBeNull();
     });
 
-    it("stops before it copies a text that is larger than the limit", () => {
-        const text = "line\n".repeat(10 * 1024 * 1024);
-        const started = performance.now();
+    it("builds no patch that is larger than the limit", () => {
+        const text = "line\n".repeat(Math.ceil(DIFF_PATCH_MAX_BYTES / 5));
 
         expect(createAddedFileGitPatch("/w/huge.txt", text)).toBeNull();
         expect(createDeletedFileGitPatch("/w/huge.txt", text)).toBeNull();
-        expect(createUpdateGitPatch("/w/huge.txt", "/w/huge.txt", `@@ -1 +1 @@\n-a\n+${text}`)).toBeNull();
-        // Building the 50 MB patches took about 350 ms each before the check.
-        expect(performance.now() - started).toBeLessThan(100);
+        const lines = text.split("\n").length - 1;
+        const update = `@@ -1 +1,${lines} @@\n-a\n${text.replace(/^line$/gm, "+line")}`;
+        expect(createUpdateGitPatch("/w/huge.txt", "/w/huge.txt", update)).toBeNull();
     });
 
     it("builds no patch for a malformed or empty update diff", () => {

@@ -31,6 +31,6 @@ export class FuzzySearchReporter {
     }
 }
 
-export function fuzzyFileSearchToolCallId(sessionId: string): string {
+function fuzzyFileSearchToolCallId(sessionId: string): string {
     return `fuzzyFileSearch.${sessionId}`;
 }

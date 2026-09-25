@@ -33,7 +33,7 @@ export class GuardianReporter {
     }
 }
 
-export function guardianApprovalReviewToolCallId(reviewId: string): string {
+function guardianApprovalReviewToolCallId(reviewId: string): string {
     return `guardian_assessment:${reviewId}`;
 }
 

@@ -12,7 +12,7 @@ import {AgentMode} from "../../AgentMode";
 import {DIFF_PATCH_MAX_BYTES} from '../../GitPatch';
 
 async function createFileChangeUpdate(item: ThreadItem & {type: 'fileChange'}, diffPatch = false) {
-    return new AcpToolCallRenderer(ClientCapabilities.DEFAULT).render(await FileChangeReporter.started(item, diffPatch));
+    return new AcpToolCallRenderer(ClientCapabilities.DEFAULT).render(FileChangeReporter.started(item, diffPatch));
 }
 
 const { mockFiles, mockReadDelays, mockFileContent, delayMockFileRead, removeMockFile, clearMockFiles } = vi.hoisted(() => {

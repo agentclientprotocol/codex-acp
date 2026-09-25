@@ -51,6 +51,6 @@ export class PlanReviewReporter {
     }
 }
 
-export function planReviewToolCallId(plan: CompletedPlan): string {
+function planReviewToolCallId(plan: CompletedPlan): string {
     return `plan-review:${plan.itemId}`;
 }

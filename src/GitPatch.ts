@@ -21,7 +21,6 @@ const REGULAR_FILE_MODE = "100644";
  * It keeps the hunk bytes, including a carriage return.
  */
 export function createUpdateGitPatch(oldPath: string, newPath: string, diff: string): string | null {
-    if (overLimit(diff)) return null;
     const hunks = hunkText(diff);
     if (hunks === null || isBinary(hunks)) return null;
     const oldName = gitPath(oldPath);
@@ -46,7 +45,7 @@ export function createDeletedFileGitPatch(filePath: string, text: string): strin
 
 function createWholeFilePatch(filePath: string, text: string, change: "added" | "deleted"): string | null {
     // A hunk cannot express an empty file, and a binary file has no text lines.
-    if (text.length === 0 || overLimit(text) || isBinary(text)) return null;
+    if (text.length === 0 || isBinary(text)) return null;
     const name = gitPath(filePath);
     const lines = text.split("\n");
     const endsWithNewline = lines.at(-1) === "";
@@ -200,10 +199,3 @@ function quotedGitName(prefix: string, name: string): string {
     return `"${quoted}"`;
 }
 
-/**
- * Whether a source text alone is larger than the patch limit. A patch is never smaller than its source text, so the
- * builder can stop before it copies the text. The UTF-16 length is a lower bound of the UTF-8 size.
- */
-function overLimit(text: string): boolean {
-    return text.length > DIFF_PATCH_MAX_BYTES;
-}

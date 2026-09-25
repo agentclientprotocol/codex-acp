@@ -33,10 +33,7 @@ export class McpToolReporter {
         };
     }
 
-    /**
-     * MCP progress text, trimmed, for a client that is not AIR.
-     * AIR does not show MCP progress, so the report is empty for AIR and the adapter sends nothing.
-     */
+    /** MCP progress text, trimmed, for a client that is not AIR. The event handler sends no progress to AIR. */
     static progress(itemId: string, message: string): ToolFacts {
         return {toolCallId: itemId, report: "update", standard: {mcpProgress: message.trim()}};
     }

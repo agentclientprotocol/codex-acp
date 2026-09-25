@@ -2327,7 +2327,7 @@ export class CodexAcpServer {
             case "reasoning":
                 return this.createReasoningUpdates(item);
             case "fileChange":
-                return [renderer.render(await FileChangeReporter.started(item, renderer.capabilities.air.diffPatch))];
+                return [renderer.render(FileChangeReporter.started(item, renderer.capabilities.air.diffPatch))];
             case "commandExecution":
                 return CommandReporter.history(item).map(facts => renderer.render(facts));
             case "mcpToolCall":

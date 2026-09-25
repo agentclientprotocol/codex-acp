@@ -34,7 +34,6 @@ import type {
 import {toTokenCount} from "./TokenCount";
 import { stripShellPrefix } from "./CommandUtils";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
-import type {ToolFacts} from "./tool-calls/ToolFacts";
 import {CommandReporter} from "./tool-calls/reporters/CommandReporter";
 import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
 import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
@@ -555,7 +554,7 @@ export class CodexEventHandler {
                 });
             case "item/commandExecution/outputDelta":
                 this.completeRetryIncidentOnTurnProgress();
-                return this.renderFacts(this.commands.outputDelta(notification.params.itemId, notification.params.delta));
+                return this.renderer.render(this.commands.outputDelta(notification.params.itemId, notification.params.delta));
             case "item/mcpToolCall/progress":
                 this.completeRetryIncidentOnTurnProgress();
                 // AIR does not show MCP progress.
@@ -608,7 +607,7 @@ export class CodexEventHandler {
             case "thread/goal/cleared":
                 return this.createThreadGoalClearedEvent(notification.params);
             case "item/commandExecution/terminalInteraction":
-                return this.renderFacts(this.commands.terminalInput(
+                return this.renderer.render(this.commands.terminalInput(
                     notification.params.itemId,
                     notification.params.stdin,
                 ));
@@ -775,7 +774,7 @@ export class CodexEventHandler {
     private async createItemEvent(event: ItemStartedNotification): Promise<UpdateSessionEvent | null> {
         switch (event.item.type) {
             case "fileChange":
-                return this.renderer.render(await FileChangeReporter.started(
+                return this.renderer.render(FileChangeReporter.started(
                     event.item,
                     this.sessionState.clientCapabilities.air.diffPatch,
                 ));
@@ -871,10 +870,6 @@ export class CodexEventHandler {
             case "enteredReviewMode":
                 return null;
         }
-    }
-
-    private renderFacts(facts: ToolFacts | null): UpdateSessionEvent | null {
-        return facts === null ? null : this.renderer.render(facts);
     }
 
     private rememberAgentMessagePhase(item: ThreadItem & { type: "agentMessage" }): void {
