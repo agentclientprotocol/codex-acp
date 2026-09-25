@@ -4,6 +4,7 @@ import {canonical, type RecordedMessage} from "./scenario-harness";
  * The comparison of the messages for a client that is not AIR with the messages of the adapter before the AIR extensions.
  *
  * `data/baseline/<profile>/<scenario>.jsonl` holds the messages that origin/main at {@link BASELINE_COMMIT} sends.
+ * `data/baseline/zed/` holds a scenario only when its messages differ from the plain client.
  * The functions here apply the allowed differences of the compatibility rule in `docs/air-extensions.md`.
  * The messages of the current adapter must then equal the baseline.
  *

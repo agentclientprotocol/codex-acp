@@ -78,11 +78,19 @@ function baselineFile(profile: ProfileName, name: string): string {
     return path.join(path.dirname(fileURLToPath(import.meta.url)), "data", "baseline", profile, `${name}.jsonl`);
 }
 
+/** The baseline of a scenario. Zed has a file only where its messages differ from the plain client. */
+function readBaseline(profile: "plain" | "zed", name: string): string {
+    const file = baselineFile(profile, name);
+    return fs.existsSync(file) || profile === "plain"
+        ? fs.readFileSync(file, "utf8")
+        : fs.readFileSync(baselineFile("plain", name), "utf8");
+}
+
 describe("clients that are not AIR, compared with the baseline", () => {
     for (const profile of ["plain", "zed"] as const) {
         for (const each of SCENARIOS) {
             it.skipIf(RECORD_BASELINE)(`${profile}: ${each.name} gets the baseline messages with the allowed differences`, () => {
-                const baseline = fromJsonLines(fs.readFileSync(baselineFile(profile, each.name), "utf8"));
+                const baseline = fromJsonLines(readBaseline(profile, each.name));
                 expect(lines(mergedReports(withOutputOnce(recording(profile, each.name)))))
                     .toEqual(lines(mergedReports(withOutputOnce(expectedFromBaseline(each.name, baseline)))));
             });
@@ -107,8 +115,12 @@ describe("clients that are not AIR, compared with the baseline", () => {
     it.runIf(RECORD_BASELINE)("records the baseline", () => {
         for (const profile of ["plain", "zed"] as const) {
             for (const each of SCENARIOS) {
-                fs.mkdirSync(path.dirname(baselineFile(profile, each.name)), {recursive: true});
-                fs.writeFileSync(baselineFile(profile, each.name), toJsonLines(recording(profile, each.name)));
+                const text = toJsonLines(recording(profile, each.name));
+                const file = baselineFile(profile, each.name);
+                fs.rmSync(file, {force: true});
+                if (profile === "zed" && text === toJsonLines(recording("plain", each.name))) continue;
+                fs.mkdirSync(path.dirname(file), {recursive: true});
+                fs.writeFileSync(file, text);
             }
         }
     });
