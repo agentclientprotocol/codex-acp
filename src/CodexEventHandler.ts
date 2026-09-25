@@ -52,7 +52,6 @@ import {
 } from "./ContentChunks";
 import {goalSessionInfoUpdate, sameThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
 import {logger} from "./Logger";
-import {randomUUID} from "node:crypto";
 import {
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
@@ -212,17 +211,13 @@ export class CodexEventHandler {
     constructor(
         connection: AcpClientConnection,
         sessionState: SessionState,
-        supportsTypedSessionFailures = false,
-        sessionFailureEpoch: string = randomUUID(),
-        subagents: CodexSubagentEventRouter = new CodexSubagentEventRouter(
-            sessionState.sessionId,
-            false,
-            new ACPSessionConnection(connection, sessionState.sessionId),
-        ),
-        onAccountUpdated?: (notification: AccountUpdatedNotification) => void,
-        collectTurnDiffs = false,
-        private readonly supportsCompaction = false,
-        private readonly supportsNotices = false,
+        supportsTypedSessionFailures: boolean,
+        sessionFailureEpoch: string,
+        subagents: CodexSubagentEventRouter,
+        onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined,
+        collectTurnDiffs: boolean,
+        private readonly supportsCompaction: boolean,
+        private readonly supportsNotices: boolean,
     ) {
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;

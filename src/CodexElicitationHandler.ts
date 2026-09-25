@@ -24,7 +24,6 @@ import {
 } from "./permissions/mcp";
 import type {PermissionPromptContext} from "./permissions/lifecycle";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
-import {ClientCapabilities} from "./tool-calls/ClientCapabilities";
 import {ElicitationReporter} from "./tool-calls/reporters/ElicitationReporter";
 import {isRecord, normalizeJsonObject, normalizeJsonValue, recordOrNull} from "./permissions/json";
 type AcpBackedMcpElicitationParams = Extract<
@@ -163,9 +162,9 @@ export class CodexElicitationHandler implements ElicitationHandler {
     constructor(
         connection: AcpClientConnection,
         permissionContext: PermissionPromptContext,
-        clientCapabilities: acp.ClientCapabilities | null = null,
-        cancellationSignal?: AbortSignal,
-        renderer: AcpToolCallRenderer = new AcpToolCallRenderer(ClientCapabilities.from(clientCapabilities)),
+        clientCapabilities: acp.ClientCapabilities | null,
+        cancellationSignal: AbortSignal | undefined,
+        renderer: AcpToolCallRenderer,
     ) {
         this.renderer = renderer;
         this.connection = connection;

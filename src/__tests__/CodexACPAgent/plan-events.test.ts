@@ -2,11 +2,11 @@ import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import type {ServerNotification} from "../../app-server";
 import {AgentMode} from "../../AgentMode";
 import type {SessionState} from "../../CodexAcpServer";
-import {CodexEventHandler} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
-import type {ClientCapabilities} from "../../tool-calls/ClientCapabilities";
+import {ClientCapabilities} from "../../tool-calls/ClientCapabilities";
 import {
     createCodexMockTestFixture,
+    createTestEventHandler,
     createTestSessionState,
     setupPromptAndSendNotifications,
     type CodexMockTestFixture,
@@ -182,17 +182,17 @@ describe("CodexEventHandler - plan events", () => {
     });
 
     describe("plan update coalescing", () => {
-        function createHandler(
-            notify = vi.fn(async (_method: unknown, _params: unknown) => {}),
-            capabilities: Parameters<ClientCapabilities["with"]>[0] = {},
-        ) {
+        function createHandler(notify = vi.fn(async (_method: unknown, _params: unknown) => {})) {
             const connection = {
                 notify,
                 request: vi.fn(),
             } as unknown as AcpClientConnection;
-            const handler = new CodexEventHandler(connection, {
+            const handler = createTestEventHandler(connection, {
                 ...sessionState,
-                clientCapabilities: sessionState.clientCapabilities.with({planUpdates: true, ...capabilities}),
+                clientCapabilities: ClientCapabilities.from({
+                    plan: {},
+                    _meta: {terminal_output_delta: true, jetbrains: {air: {version: 1}}},
+                }),
             });
             const planUpdates = () => notify.mock.calls
                 .map(call => call[1] as {update?: {sessionUpdate?: string, plan?: {planId: string, content: string}}})

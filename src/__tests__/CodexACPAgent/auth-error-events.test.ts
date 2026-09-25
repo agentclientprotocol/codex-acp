@@ -4,10 +4,10 @@ import type { ErrorNotification, TurnCompletedNotification } from "../../app-ser
 import type { SessionState } from "../../CodexAcpServer";
 import {
     createCodexMockTestFixture,
+    createTestEventHandler,
     createTestSessionState,
 } from "../acp-test-utils";
 import {logger} from "../../Logger";
-import {CodexEventHandler} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import {CodexCommands, type CommandHandleResult} from "../../CodexCommands";
 
@@ -628,7 +628,7 @@ describe("CodexEventHandler - auth error events", () => {
                     updates.push(params.update);
                 }),
             } as unknown as AcpClientConnection;
-            const handler = new CodexEventHandler(connection, state, true);
+            const handler = createTestEventHandler(connection, state, {typedSessionFailures: true});
             await handler.handleSessionScopedNotification({
                 method: "error",
                 params: {
@@ -683,7 +683,7 @@ describe("CodexEventHandler - auth error events", () => {
                 updates.push(params.update);
             }),
         } as unknown as AcpClientConnection;
-        const handler = new CodexEventHandler(connection, state, true, "test-epoch");
+        const handler = createTestEventHandler(connection, state, {typedSessionFailures: true});
         const retryError = (message: string) => ({
             method: "error" as const,
             params: {

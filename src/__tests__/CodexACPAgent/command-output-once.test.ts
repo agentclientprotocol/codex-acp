@@ -33,8 +33,8 @@ function occurrences(value: unknown, text: string): number {
     return serialized.split(JSON.stringify(text).slice(1, -1)).length - 1;
 }
 
-const DELTA_CLIENT = ClientCapabilities.DEFAULT.with({airClient: true, terminalOutputDelta: true});
-const ZED_CLIENT = ClientCapabilities.DEFAULT.with({terminalOutput: true});
+const DELTA_CLIENT = ClientCapabilities.from({_meta: {terminal_output_delta: true, jetbrains: {air: {version: 1}}}});
+const ZED_CLIENT = ClientCapabilities.from({_meta: {terminal_output: true}});
 
 function completion(item: CommandItem, capabilities: ClientCapabilities) {
     const reporter = new CommandReporter();

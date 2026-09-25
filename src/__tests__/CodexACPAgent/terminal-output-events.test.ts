@@ -133,7 +133,7 @@ describe('CodexEventHandler - terminal output events', () => {
     it('should send one delta when command completion has no streamed output', async () => {
         const deltaSessionState = createTestSessionState({
             sessionId,
-            clientCapabilities: ClientCapabilities.DEFAULT.with({airClient: true, terminalOutputDelta: true}),
+            clientCapabilities: ClientCapabilities.from({_meta: {terminal_output_delta: true, jetbrains: {air: {version: 1}}}}),
         });
         const commandCompletedNotification: ServerNotification = {
             method: 'item/completed',
@@ -229,7 +229,7 @@ describe('CodexEventHandler - terminal output events', () => {
     it('should handle full terminal output flow: start -> delta -> complete', async () => {
         const deltaSessionState = createTestSessionState({
             sessionId,
-            clientCapabilities: ClientCapabilities.DEFAULT.with({terminalOutputDelta: true}),
+            clientCapabilities: ClientCapabilities.from({_meta: {terminal_output_delta: true}}),
         });
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
@@ -305,7 +305,7 @@ describe('CodexEventHandler - terminal output events', () => {
             sessionId,
             currentModelId: 'model-id[effort]',
             agentMode: AgentMode.DEFAULT_AGENT_MODE,
-            clientCapabilities: ClientCapabilities.DEFAULT.with({terminalOutput: true}),
+            clientCapabilities: ClientCapabilities.from({_meta: {terminal_output: true}}),
         });
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
@@ -390,7 +390,7 @@ describe('CodexEventHandler - terminal output events', () => {
             sessionId,
             currentModelId: 'model-id[effort]',
             agentMode: AgentMode.DEFAULT_AGENT_MODE,
-            clientCapabilities: ClientCapabilities.DEFAULT.with({terminalOutput: true}),
+            clientCapabilities: ClientCapabilities.from({_meta: {terminal_output: true}}),
         });
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
@@ -454,7 +454,7 @@ describe('CodexEventHandler - terminal output events', () => {
             sessionId,
             currentModelId: 'model-id[effort]',
             agentMode: AgentMode.DEFAULT_AGENT_MODE,
-            clientCapabilities: ClientCapabilities.DEFAULT.with({airClient: true}),
+            clientCapabilities: ClientCapabilities.from({_meta: {jetbrains: {air: {version: 1}}}}),
         });
         const commandStartNotification: ServerNotification = {
             method: 'item/started',

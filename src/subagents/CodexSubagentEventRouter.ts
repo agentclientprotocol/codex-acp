@@ -59,7 +59,7 @@ export class CodexSubagentEventRouter {
         private readonly rootSessionId: string,
         private readonly supported: boolean,
         private readonly session: ACPSessionConnection,
-        private readonly onChildSessionEnded: (sessionId: string) => void = () => {},
+        private readonly onChildSessionEnded: (sessionId: string) => void,
     ) {}
 
     async handle(notification: ServerNotification): Promise<boolean> {
