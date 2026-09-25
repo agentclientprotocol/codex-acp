@@ -1,10 +1,8 @@
 import type {ACPSessionConnection, UpdateSessionEvent} from "./ACPSessionConnection";
-import {withAirMeta} from "./AirExtension";
+import {AIR_CONTENT_DELTA_KEY, withAirMeta} from "./AirExtension";
 import {createAgentTextMessageChunk, createMessagePhaseMeta} from "./ContentChunks";
 import {logger} from "./Logger";
 import type {ClientCapabilities} from "./tool-calls/ClientCapabilities";
-
-export const AIR_CONTENT_DELTA_KEY = "contentDelta";
 
 /**
  * Streams the Markdown plan that Codex writes in plan mode.

@@ -22,3 +22,8 @@ export function toToolStatus(status: CodexItemStatus): acp.ToolCallStatus {
             return "failed";
     }
 }
+
+/** The status of a finished item. Every status other than `completed` is a failure. */
+export function toTerminalToolStatus(status: CodexItemStatus): "completed" | "failed" {
+    return status === "completed" ? "completed" : "failed";
+}

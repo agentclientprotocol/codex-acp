@@ -10,7 +10,7 @@ import {
 } from "../../GitPatch";
 import {logger} from "../../Logger";
 import type {PermissionToolFacts, ToolFacts} from "../ToolFacts";
-import {toToolStatus} from "./ToolStatus";
+import {toTerminalToolStatus, toToolStatus} from "./ToolStatus";
 
 type FileChangeItem = ThreadItem & {type: "fileChange"};
 
@@ -45,7 +45,7 @@ export class FileChangeReporter {
         return {
             toolCallId: item.id,
             report: "update",
-            status: item.status === "completed" ? "completed" : "failed",
+            status: toTerminalToolStatus(item.status),
         };
     }
 

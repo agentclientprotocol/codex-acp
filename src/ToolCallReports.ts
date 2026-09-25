@@ -1,5 +1,6 @@
 import type {UpdateSessionEvent} from "./ACPSessionConnection";
 import {logger} from "./Logger";
+import {isRecord} from "./permissions/json";
 
 type ToolCallReport = Extract<UpdateSessionEvent, {sessionUpdate: "tool_call" | "tool_call_update"}>;
 
@@ -171,8 +172,4 @@ function reportedFields(update: ToolCallReport, withMeta: boolean): Array<[strin
 
 function hasPayload(update: Record<string, unknown>): boolean {
     return Object.keys(update).some(name => name !== "sessionUpdate" && name !== "toolCallId");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
 }
