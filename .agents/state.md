@@ -6,7 +6,7 @@
 
 ## Current position in the sequencing plan
 
-Phase: **Phase 4.** Prerequisite and topics 1-10 done; then Phase 4 (2026-09-25). Rough progress ~80%.
+Phase: **Phase 4.** Prerequisite and topics 1-10 done (2026-09-25). Rough progress ~93%.
 
 ### Resume here (for a fresh orchestrator)
 
@@ -35,6 +35,11 @@ scoped runs) and EXT-202 (advisory, `capabilities.providers` placement → topic
 full-run fails now: none (EXT-202 fixed in the TCK fork, see below).
 
 **Fourth flush (2026-09-25); user resumed the same day. Topic 10 DONE. Now: Phase 4.**
+In flight: programmer on **P4(a)** (`docs:` — AIR v2 contract + known gaps in `readme-dev.md`; stale
+v2 test comments); researcher on **P4(b)** live `/run-codex` checks (goal auto-turn after
+`session/new`, cancel during a real approval, provider restart with an active goal, resume with an
+active goal) → `.agents/research/v2-phase4-live-checks.md`. Full TCK already CONFORMANT on both
+(end of topic 10). After both: fix any live-check defects, final full TCK, then done.
 
 **10(f2) done (37bbc23 `fix:`):** `SessionState.awaitingClientLoad` (true for `operation ===
 "fork"`, false on load). `enqueueProviderUpdate` restart loop: captures `previousClient`; for every
