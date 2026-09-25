@@ -236,6 +236,14 @@ export interface SessionState {
     subagents: CodexSubagentEventRouter;
     asyncTasks: CodexBackgroundTerminalTasks;
     compactions: CodexSessionCompactions;
+    /**
+     * True only for a freshly forked session: `forkSession` unsubscribes the new thread right
+     * after `thread/fork` on purpose, so no updates go out before the client's own
+     * `session/resume`/`session/load` loads it (fork design, commit 69ca755). A provider restart
+     * must leave such a session alone -- not resume it, and not install a baseline tracker for
+     * it -- rather than pulling it into the app-server early.
+     */
+    awaitingClientLoad: boolean;
 }
 
 export type SessionFailureCategory =
@@ -924,6 +932,7 @@ export class CodexAcpServer {
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
+            awaitingClientLoad: operation === "fork",
         };
         sessionState.titleGen = new TitleGenerator(
             this.codexAcpClient.appServerClient,
@@ -1520,6 +1529,11 @@ export class CodexAcpServer {
             }
             await this.finishAllAsyncTasks("stopped", "before the provider restart");
             const replacement = await this.restartCodexClient();
+            // Captured before the swap: draining its per-session queues below (after the process
+            // it wraps has already exited) is how a turn left running on the old client gets
+            // closed out, since the old process's EOF drops the notification and no
+            // `turn/completed` ever arrives for it.
+            const previousClient = this.codexAcpClient;
             apply(replacement);
             if (this.initializeRequest === null) {
                 throw new Error("Cannot restart Codex app-server before ACP initialization");
@@ -1530,7 +1544,17 @@ export class CodexAcpServer {
 
             const resumeErrors: unknown[] = [];
             for (const session of this.sessions.values()) {
+                if (session.awaitingClientLoad) {
+                    // A fork the client hasn't loaded yet: leave it unsubscribed, matching the
+                    // fork design (commit 69ca755) rather than pulling it into the new app-server.
+                    continue;
+                }
                 session.asyncTasks.setAppServer(replacement.appServerClient);
+                // Registered before `resumeSession`, so a goal turn Codex auto-starts within a
+                // few ms of `thread/resume`'s response can't slip past an empty subscription
+                // registry on the new client (10(f1) `startCodexTurnTracker`).
+                const [trackerReady, settleTrackerReady] = createDeferred<SessionState | null>();
+                this.startCodexTurnTracker(session.sessionId, trackerReady);
                 try {
                     await replacement.resumeSession({
                         sessionId: session.sessionId,
@@ -1540,12 +1564,30 @@ export class CodexAcpServer {
                     });
                     session.authProvider = replacement.getModelProvider();
                     session.asyncTasks.refresh();
+                    settleTrackerReady(session);
                     logger.log("Resumed session after provider restart", {sessionId: session.sessionId});
                 } catch (error) {
+                    settleTrackerReady(null);
                     resumeErrors.push(error);
                     logger.error(`Failed to resume session ${session.sessionId} after provider restart`, error);
                 }
             }
+
+            // v2 only: a turn still running when the old process was killed never gets its
+            // `turn/completed` -- the old process's EOF just drops the notification -- which
+            // would otherwise leave the session wedged at `running` forever (an R13 MUST
+            // violation) and `isSessionBusy` stuck true. Drain the old client's queue first so an
+            // already-buffered `turn/completed` still clears this normally; only a turn genuinely
+            // orphaned by the restart gets force-closed. No-op on v1 (no state channel) and while
+            // a v2 prompt is in flight for the session (its own `idle` closes the state).
+            for (const session of this.sessions.values()) {
+                if (session.awaitingClientLoad) continue;
+                await previousClient.waitForSessionNotifications(session.sessionId);
+                if (session.codexReportedRunningTurnId === null) continue;
+                session.codexReportedRunningTurnId = null;
+                await this.reportUnownedTurnState(session.sessionId, {state: "idle", stopReason: "cancelled"});
+            }
+
             if (resumeErrors.length > 0) {
                 throw new AggregateError(resumeErrors, `Failed to resume ${resumeErrors.length} session(s) after provider restart`);
             }
@@ -2471,6 +2513,7 @@ export class CodexAcpServer {
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
+            awaitingClientLoad: false,
         };
         sessionState.titleGen = new TitleGenerator(
             this.codexAcpClient.appServerClient,

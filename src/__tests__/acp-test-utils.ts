@@ -434,6 +434,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         goalRevision: 0,
         sessionTitle: null,
         sessionTitleSource: "unknown",
+        awaitingClientLoad: false,
         compactions: new CodexSessionCompactions(),
         subagents: new CodexSubagentEventRouter(
             sessionId,

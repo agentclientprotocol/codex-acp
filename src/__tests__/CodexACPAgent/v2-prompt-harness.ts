@@ -128,6 +128,8 @@ export type PromptSession = {
     triggerApproval(method: string, params: unknown): Promise<unknown>;
     /** The `{threadId, turnId}` params of every `turn/interrupt` sent to Codex so far, in order. */
     turnInterruptCalls(): Array<{threadId: string, turnId: string}>;
+    /** The agent instance behind the connection, for spying on private methods (e.g. `restartCodexClient`). */
+    agent: CodexAcpServer;
 };
 
 /** Connects a client (v2 by default) to the agent through the router, over a mocked Codex app-server, and opens a session. */
@@ -310,6 +312,49 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         turnInterruptCalls: () => mocks.mockCodexConnection.sendRequest.mock.calls
             .filter(([method]: [string]) => method === "turn/interrupt")
             .map(([, params]: [string, {threadId: string, turnId: string}]) => params),
+        agent: agent!,
+    };
+}
+
+/**
+ * Builds a standalone mocked `CodexAcpClient` (with its own mocked Codex connection), suitable as
+ * the replacement `restartCodexClient()` resolves to in a provider-restart test. Spied the same
+ * way `connectSession`'s own client is, plus an `emit` to fire notifications as if they came from
+ * this replacement's (post-restart) app-server process.
+ */
+export function createReplacementCodexAcpClient(): {
+    codexAcpClient: CodexAcpClient;
+    appServer: CodexAppServerClient;
+    emit(notification: ServerNotification): void;
+    turnStartParams: Array<Record<string, unknown>>;
+    /** Overrides the canned `turn/start` response, e.g. to run a prompt through this replacement. */
+    setTurnStart(handler: (params: Record<string, unknown>) => Promise<unknown>): void;
+} {
+    const mocks = createMockConnections();
+    const turnStartParams: Array<Record<string, unknown>> = [];
+    let turnStart: (params: Record<string, unknown>) => Promise<unknown> = async () => ({
+        turn: createTurn("inProgress", `replacement-turn-${turnStartParams.length}`),
+    });
+    mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params?: any) => {
+        if (method !== "turn/start") {
+            return codexResponse(method);
+        }
+        turnStartParams.push(params as Record<string, unknown>);
+        return await turnStart(params as Record<string, unknown>);
+    });
+    const appServer = new CodexAppServerClient(mocks.mockCodexConnection as any);
+    const codexAcpClient = new CodexAcpClient(appServer);
+    vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+    vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
+    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+    return {
+        codexAcpClient,
+        appServer,
+        emit: (notification) => mocks.getUnhandledNotificationHandler()!(notification),
+        turnStartParams,
+        setTurnStart: (handler) => {
+            turnStart = handler;
+        },
     };
 }
 
