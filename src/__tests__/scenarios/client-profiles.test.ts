@@ -667,10 +667,10 @@ describe("AIR", () => {
         ]);
     });
 
-    it("gets the output of a read, search or list command once, as rawOutput text at the end", () => {
+    it("gets the output of a search or list command once, as rawOutput text at the end, and no output of a file read", () => {
         const ends = updates("air", "read-search-list").filter(update => update["status"] === "completed");
         expect(ends.map(update => [update["toolCallId"], update["rawOutput"], update["content"], update["_meta"]])).toEqual([
-            ["read-1", "export const a = 1;\n", undefined, undefined],
+            ["read-1", undefined, undefined, undefined],
             ["search-1", "src/app.ts:3: // TODO\n", undefined, undefined],
             ["list-1", "app.ts\n", undefined, undefined],
         ]);

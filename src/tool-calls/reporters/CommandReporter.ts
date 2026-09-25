@@ -199,7 +199,8 @@ function commandActionFacts(
 
 /**
  * The end of a command for AIR. A shell command sends the output that did not stream to the chunk channel once.
- * A read, search or list command sends its whole output in `rawOutput`.
+ * A search or list command sends its whole output in `rawOutput`. A read of a file sends no output: AIR shows it as
+ * the viewed file, and that view does not show the text.
  */
 function completionFacts(
     item: CommandItem,
@@ -215,7 +216,8 @@ function completionFacts(
         status: toTerminalToolStatus(item.status),
     };
     if (!usesTerminal(item)) {
-        return output.length === 0 ? facts : {...facts, opaqueResult: output};
+        const viewedFile = singleAction(item.commandActions)?.type === "read";
+        return output.length === 0 || viewedFile ? facts : {...facts, opaqueResult: output};
     }
     return {
         ...facts,
