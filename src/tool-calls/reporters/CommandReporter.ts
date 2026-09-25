@@ -10,7 +10,7 @@ import {commandToolName} from "../../ToolCallName";
 import {textContent} from "../AcpToolCallRenderer";
 import type {PermissionToolFacts, ToolFacts} from "../ToolFacts";
 import {permissionProfileContent, permissionProfilePaths} from "./SandboxPermissionReporter";
-import {toToolStatus} from "./ToolStatus";
+import {toTerminalToolStatus, toToolStatus} from "./ToolStatus";
 
 type CommandPermissionParams = CommandExecutionRequestApprovalParams & {
     additionalPermissions?: AdditionalPermissionProfile | null;
@@ -212,7 +212,7 @@ function completionFacts(
         toolCallId: item.id,
         report: "update",
         ...(name === undefined ? {} : {name}),
-        status: item.status === "completed" ? "completed" : "failed",
+        status: toTerminalToolStatus(item.status),
     };
     if (!usesTerminal(item)) {
         return output.length === 0 ? facts : {...facts, opaqueResult: output};

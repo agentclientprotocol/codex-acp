@@ -50,17 +50,15 @@ import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
 } from "./ContentChunks";
-import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
+import {goalSessionInfoUpdate, sameThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
 import {logger} from "./Logger";
 import {randomUUID} from "node:crypto";
 import {
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
-    AIR_GOAL_KEY,
     AIR_META_KEY,
     AIR_SESSION_FAILURE_KEY,
     JETBRAINS_META_KEY,
-    withAirMeta,
 } from "./AirExtension";
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import type {SubagentState} from "./subagents/AcpSubagents";
@@ -733,7 +731,7 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = goalSnapshot;
 
-        return this.createGoalSessionInfoUpdate(goalSnapshot);
+        return goalSessionInfoUpdate(goalSnapshot, this.sessionState.clientCapabilities.airClient);
     }
 
     private createThreadGoalClearedEvent(_event: ThreadGoalClearedNotification): UpdateSessionEvent | null {
@@ -743,16 +741,7 @@ export class CodexEventHandler {
         }
         this.sessionState.currentGoal = null;
 
-        return this.createGoalSessionInfoUpdate(null);
-    }
-
-    /** Only AIR gets the goal. The update carries nothing else, so another client gets no update. */
-    private createGoalSessionInfoUpdate(goal: ThreadGoalSnapshot | null): UpdateSessionEvent | null {
-        if (!this.sessionState.clientCapabilities.airClient) return null;
-        return {
-            sessionUpdate: "session_info_update",
-            _meta: withAirMeta(undefined, AIR_GOAL_KEY, goal),
-        };
+        return goalSessionInfoUpdate(null, this.sessionState.clientCapabilities.airClient);
     }
 
     private createReasoningDeltaEvent(

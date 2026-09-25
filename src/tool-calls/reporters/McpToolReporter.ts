@@ -1,6 +1,6 @@
 import type {ThreadItem} from "../../app-server/v2";
 import type {ToolFacts} from "../ToolFacts";
-import {toToolStatus} from "./ToolStatus";
+import {toTerminalToolStatus, toToolStatus} from "./ToolStatus";
 
 type McpToolCallItem = ThreadItem & {type: "mcpToolCall"};
 
@@ -27,7 +27,7 @@ export class McpToolReporter {
         return {
             toolCallId: item.id,
             report: "update",
-            status: item.status === "completed" ? "completed" : "failed",
+            status: toTerminalToolStatus(item.status),
             input: mcpInput(item),
             ...resultFacts(item),
         };

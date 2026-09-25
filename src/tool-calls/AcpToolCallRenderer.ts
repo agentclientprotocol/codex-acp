@@ -1,10 +1,8 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type {UpdateSessionEvent} from "../ACPSessionConnection";
-import {AIR_CONTEXT_COMPACTION_KEY, withAirMeta} from "../AirExtension";
+import {AIR_CONTEXT_COMPACTION_KEY, AIR_SUBAGENT_KEY, withAirMeta} from "../AirExtension";
 import type {ClientCapabilities} from "./ClientCapabilities";
 import type {CommandEnd, PermissionToolFacts, StandardToolCallFields, ToolFacts} from "./ToolFacts";
-
-export const AIR_SUBAGENT_KEY = "subagent";
 
 type ToolCallReport = Extract<UpdateSessionEvent, {sessionUpdate: "tool_call" | "tool_call_update"}>;
 

@@ -46,26 +46,19 @@ function reviewFacts(event: GuardianApprovalReviewNotification, report: ToolFact
         status: toAcpGuardianApprovalReviewStatus(event.review.status),
         input: {action: event.action},
         ...(action ? {readableInput: `Action: ${action}`} : {}),
-        result: [reviewVerdict(event.review)],
+        result: [reviewVerdict(event.review, null)],
         standard: {
             // A client that is not AIR gets one text with the action, and the whole event.
-            content: [standardReviewText(event.review, action)],
+            content: [reviewVerdict(event.review, action)],
             ...(report === "start" ? {rawInput: event} : {rawInput: null, rawOutput: event}),
         },
     };
 }
 
-function standardReviewText(review: GuardianApprovalReview, action: string | null): acp.ToolCallContent {
+/** The review verdict as text. The text names the action only when `action` is set. */
+function reviewVerdict(review: GuardianApprovalReview, action: string | null): acp.ToolCallContent {
     const lines = [`Status: ${formatGuardianApprovalReviewStatus(review.status)}`];
     if (action) lines.push(`Action: ${action}`);
-    if (review.riskLevel) lines.push(`Risk: ${review.riskLevel}`);
-    if (review.userAuthorization) lines.push(`Authorization: ${review.userAuthorization}`);
-    if (review.rationale?.trim()) lines.push(`Rationale: ${review.rationale}`);
-    return textContent(lines.join("\n"));
-}
-
-function reviewVerdict(review: GuardianApprovalReview): acp.ToolCallContent {
-    const lines = [`Status: ${formatGuardianApprovalReviewStatus(review.status)}`];
     if (review.riskLevel) lines.push(`Risk: ${review.riskLevel}`);
     if (review.userAuthorization) lines.push(`Authorization: ${review.userAuthorization}`);
     if (review.rationale?.trim()) lines.push(`Rationale: ${review.rationale}`);

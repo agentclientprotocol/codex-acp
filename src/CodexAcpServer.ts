@@ -79,11 +79,7 @@ import {
     type SessionSteerRequest,
 } from "./AcpExtensions";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
-import {
-    AIR_PLAN_CONTENT_DELTA_KEY,
-    AIR_RAW_INPUT_RENDERING_KEY,
-    ClientCapabilities,
-} from "./tool-calls/ClientCapabilities";
+import {ClientCapabilities} from "./tool-calls/ClientCapabilities";
 import {CollabAgentReporter} from "./tool-calls/reporters/CollabAgentReporter";
 import {CommandReporter} from "./tool-calls/reporters/CommandReporter";
 import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
@@ -114,7 +110,12 @@ import {
     createMessagePhaseMeta,
     createUserMessageChunk,
 } from "./ContentChunks";
-import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot,} from "./ThreadGoalSnapshot";
+import {
+    goalSessionInfoUpdate,
+    sameThreadGoalSnapshot,
+    type ThreadGoalSnapshot,
+    toThreadGoalSnapshot,
+} from "./ThreadGoalSnapshot";
 import {
     clientSupportsSubagents,
     type SubagentAwareSessionCapabilities,
@@ -135,6 +136,8 @@ import {
     AIR_ASYNC_TASKS_KEY,
     AIR_DIFF_PATCH_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
+    AIR_PLAN_CONTENT_DELTA_KEY,
+    AIR_RAW_INPUT_RENDERING_KEY,
     AIR_RECOMMENDED_CONFIG_VALUE_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
@@ -144,7 +147,6 @@ import {
     AIR_SESSION_FAILURE_KEY,
     clientSupportsAirCapability,
     JETBRAINS_META_KEY,
-    withAirMeta,
 } from "./AirExtension";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
@@ -1901,13 +1903,9 @@ export class CodexAcpServer {
             return;
         }
         sessionState.currentGoal = snapshot;
-        // Only AIR gets the goal. The update carries nothing else, so another client gets no update.
-        if (!sessionState.clientCapabilities.airClient) return;
-        const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
-        await session.update({
-            sessionUpdate: "session_info_update",
-            _meta: withAirMeta(undefined, AIR_GOAL_KEY, snapshot),
-        });
+        const update = goalSessionInfoUpdate(snapshot, sessionState.clientCapabilities.airClient);
+        if (update === null) return;
+        await new ACPSessionConnection(this.connection, sessionState.sessionId).update(update);
     }
 
     private findCurrentModel(models: Model[], currentModelId: string): Model | undefined {

@@ -2,7 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import type {DynamicToolCallOutputContentItem, ThreadItem} from "../../app-server/v2";
 import {functionToolName} from "../../ToolCallName";
 import type {ToolFacts} from "../ToolFacts";
-import {toToolStatus} from "./ToolStatus";
+import {toTerminalToolStatus, toToolStatus} from "./ToolStatus";
 
 type DynamicToolCallItem = ThreadItem & {type: "dynamicToolCall"};
 
@@ -26,7 +26,7 @@ export class DynamicToolReporter {
             toolCallId: item.id,
             report: "update",
             name: functionToolName(item.tool, item.namespace),
-            status: item.status === "completed" ? "completed" : "failed",
+            status: toTerminalToolStatus(item.status),
             ...resultFacts(item),
         };
     }

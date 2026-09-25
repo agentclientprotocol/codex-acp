@@ -1,8 +1,11 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import {AIR_DIFF_PATCH_KEY, clientSupportsAirCapability, isAirClient} from "../AirExtension";
-
-export const AIR_RAW_INPUT_RENDERING_KEY = "rawInputRendering";
-export const AIR_PLAN_CONTENT_DELTA_KEY = "planContentDelta";
+import {
+    AIR_DIFF_PATCH_KEY,
+    AIR_PLAN_CONTENT_DELTA_KEY,
+    AIR_RAW_INPUT_RENDERING_KEY,
+    clientSupportsAirCapability,
+    isAirClient,
+} from "../AirExtension";
 
 /** The `_meta` key of a command output chunk. */
 type TerminalOutputKey = "terminal_output" | "terminal_output_delta";
