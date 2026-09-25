@@ -15,6 +15,7 @@ import {
     createCodexMockTestFixture,
     createTestSessionState,
     setupPromptAndSendNotifications,
+    deferred,
 } from "../acp-test-utils";
 
 type CommandExecutionItem = Extract<ThreadItem, {type: "commandExecution"}>;
@@ -717,14 +718,4 @@ function childCompletedByCollaboration() {
         reasoningEffort: null,
         agentsStates: {"child-1": {status: "completed", message: null}},
     });
-}
-
-function deferred<T>() {
-    let resolve!: (value?: T) => void;
-    let reject!: (reason?: unknown) => void;
-    const promise = new Promise<T>((innerResolve, innerReject) => {
-        resolve = innerResolve as (value?: T) => void;
-        reject = innerReject;
-    });
-    return {promise, resolve, reject};
 }

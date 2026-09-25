@@ -9,7 +9,8 @@ import {
     createTestFixture,
     createTestModel,
     createTestSessionState,
-    type TestFixture
+    type TestFixture,
+    deferred,
 } from "../acp-test-utils";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
@@ -1149,14 +1150,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
     async function flushAsyncWork(): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-
-    function deferred<T>(): {promise: Promise<T>, resolve: (value: T) => void} {
-        let resolve: (value: T) => void = () => {};
-        const promise = new Promise<T>((innerResolve) => {
-            resolve = innerResolve;
-        });
-        return {promise, resolve};
     }
 
     it('should map events from dump', async () => {

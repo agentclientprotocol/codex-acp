@@ -4,6 +4,7 @@ import {
     createTestModel,
     mockPromptTurn,
     type CodexMockTestFixture,
+    deferred,
 } from "../acp-test-utils";
 import type {CodexAcpServer} from "../../CodexAcpServer";
 import type {CodexAcpClient, SessionMetadata} from "../../CodexAcpClient";
@@ -524,14 +525,6 @@ function createSessionMetadata(): SessionMetadata {
         currentServiceTier: null,
         additionalDirectories: [],
     };
-}
-
-function deferred<T>(): {promise: Promise<T>, resolve: (value: T) => void} {
-    let resolve: (value: T) => void = () => {};
-    const promise = new Promise<T>((innerResolve) => {
-        resolve = innerResolve;
-    });
-    return {promise, resolve};
 }
 
 async function waitForMicrotasks(): Promise<void> {

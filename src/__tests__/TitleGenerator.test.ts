@@ -1,14 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import {TitleGenerator} from "../TitleGenerator";
 import type {CodexAppServerClient} from "../CodexAppServerClient";
-
-function deferred<T>(): {promise: Promise<T>; resolve: (value: T) => void} {
-    let resolve: (value: T) => void = () => {};
-    const promise = new Promise<T>(innerResolve => {
-        resolve = innerResolve;
-    });
-    return {promise, resolve};
-}
+import {deferred} from "./acp-test-utils";
 
 function createGenerator(client: Partial<CodexAppServerClient>) {
     return new TitleGenerator(client as CodexAppServerClient, "thread-id", "/test/cwd", () => "unset");
