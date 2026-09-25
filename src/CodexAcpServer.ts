@@ -1604,6 +1604,11 @@ export class CodexAcpServer {
                 const [trackerReady, settleTrackerReady] = createDeferred<SessionState | null>();
                 this.startCodexTurnTracker(session.sessionId, trackerReady);
                 try {
+                    // FIXME(D3): a session that was created but never had its first turn has no
+                    // rollout on disk yet, so `thread/resume` fails ("no rollout found for thread
+                    // id ..."), the `thread/read` fallback below fails too ("thread not loaded"),
+                    // and this provider restart leaves the session dead: any later
+                    // `session/prompt` for it fails with "thread not found".
                     await replacement.resumeSession({
                         sessionId: session.sessionId,
                         cwd: session.cwd,

@@ -155,6 +155,10 @@ schema alone:
 - Open question for AIR: AIR's fork points match Codex item ids, but on v2 a user message's
   rendered id is the client-minted `clientId` (when the client supplied one), not the Codex item id.
   A fork at a user message would not resolve. This is flagged for AIR, not fixed here.
+- A session that never had its first turn before a provider restart has no rollout on disk yet, so
+  `thread/resume` (and the `thread/read` fallback) fails during the restart's resume loop, and the
+  session is left dead: `providers/*` reports a resume failure and the next `session/prompt` for
+  that session fails with "thread not found". Not fixed here.
 
 #### Verification
 
