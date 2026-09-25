@@ -16,7 +16,7 @@ flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`; la
 `503f867`) and in the acp-tck fork (`main` @ `b15c7bd`, 6 local commits, **not pushed**; the user said
 don't push). Keep committing with explicit pathspecs. Suite: **974 pass / 26 skip**. `bun` is
 missing locally: programmers use `npm run build` for the TCK (see `.agents/tck/HOW-TO-RUN.md`).
-**P4(d) done (04222da `fix:`, TCK 5842518). Next slice: P4(e)** + small hardening (see "Remaining work" under Next steps). Topics 1-10 done; Phase 4 left:
+**P4(d) done (04222da `fix:`, TCK 5842518). P4(e) done (ce87145 `fix:` tracker clear on `turn/completed`; 2509fb6 `docs:` D3 FIXME + Known gaps). Next: final full TCK v1 + v2** (dispatched 2026-09-25; results → `.agents/tck/p4-final-full-v1-v2.md`). Topics 1-10 done; Phase 4 left:
 P4(d), P4(e), final full TCK. Rough progress ~96%.
 
 **Standing user rules:** preserve v1 client-visible behavior (change v1 only to fix a real bug, with
@@ -237,9 +237,12 @@ is our `clientId`.
      **Orchestrator review gap:** tracker is never cleared on turn end, so an item missing its
      `item/completed` would be re-failed on a later restart → hardening folded into P4(e) (clear
      `openToolCalls` on `turn/completed`, separate `fix:` commit).
-   - **P4(e)** D3 (`docs:`): `FIXME` comment at the restart resume loop (`CodexAcpServer.ts`
-     ~1546-1574, never-prompted session has no rollout → `thread/resume` fails → session dies) +
-     `readme-dev.md` Known gaps entry. Don't fix.
+   - ~~**P4(e)**~~ done: ce87145 `fix:` `CodexSessionToolCalls.clear()` called in
+     `CodexEventHandler.createUpdateEvent` `case "turn/completed"` (~597, shared `SessionState`, so
+     seen by per-prompt and session-scoped paths) + test "does not re-fail an item that missed its
+     item/completed but whose own turn already ended"; 2509fb6 `docs:` D3 `FIXME` before
+     `replacement.resumeSession` (`CodexAcpServer.ts` ~1607) + `readme-dev.md` Known gaps bullet.
+     Suite 978 / 26.
    - **Final:** full TCK v1 + v2 (expect v1 50/1 SCHEMA-002/5, v2 84/0/19), record, done. Topic 10 and
      earlier slices are history (below).
 1. ~~**5b-2b**~~ done (programmer, small): Q1 option A (user decision) — on v2 the
