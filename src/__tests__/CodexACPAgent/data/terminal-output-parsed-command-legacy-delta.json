@@ -26,8 +26,7 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-read-file",
-        "status": "completed",
-        "rawOutput": "# Project\n"
+        "status": "completed"
       }
     }
   ]

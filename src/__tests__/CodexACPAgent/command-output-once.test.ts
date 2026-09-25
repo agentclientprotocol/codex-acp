@@ -79,7 +79,7 @@ describe("command output is sent once", () => {
         });
     });
 
-    it("sends the output of a file read to AIR once in rawOutput", () => {
+    it("sends no output of a file read to AIR, which shows the viewed file", () => {
         const update = completion(command({
             commandActions: [{type: "read", command: "cat a.txt", name: "a.txt", path: "/workspace/a.txt"}],
         }), DELTA_CLIENT);
@@ -88,7 +88,6 @@ describe("command output is sent once", () => {
             sessionUpdate: "tool_call_update",
             toolCallId: "cmd-1",
             status: "completed",
-            rawOutput: "a.txt\nb.txt\n",
         });
     });
 
@@ -166,7 +165,7 @@ describe("command output is sent once", () => {
         expect(dump).not.toContain("terminal_output_delta");
     });
 
-    it("sends the output of a live file read to AIR once, at the end, and not as chunks", async () => {
+    it("sends no output of a live file read to AIR, neither as chunks nor at the end", async () => {
         const fixture = createCodexMockTestFixture();
         const sessionId = "read-once";
         const read = {commandActions: [{type: "read" as const, command: "cat a.txt", name: "a.txt", path: "/workspace/a.txt"}]};
@@ -178,9 +177,9 @@ describe("command output is sent once", () => {
         );
 
         const dump = fixture.getAcpConnectionDump([]);
-        expect(occurrences(dump, "a.txt\nb.txt\n")).toBe(1);
+        expect(occurrences(dump, "a.txt\nb.txt\n")).toBe(0);
         expect(dump).not.toContain("terminal_output_delta");
-        expect(dump).toContain("\"rawOutput\": \"a.txt");
+        expect(dump).not.toContain("\"rawOutput\"");
     });
 
     it("sends the output of a command that got stdin and no output chunk at the end", () => {
