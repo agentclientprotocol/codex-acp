@@ -641,6 +641,11 @@ export class CodexAppServerClient {
         return await this.sendRequest({method: "thread/items/list", params});
     }
 
+    /** The turns of a thread in pages, from the first page. See {@link historyPages}. */
+    threadTurnPages({threadId, ...params}: Omit<ThreadTurnsListParams, "cursor">): AsyncGenerator<Turn[]> {
+        return historyPages(threadId, "thread/turns/list", cursor => this.threadTurnsList({threadId, cursor, ...params}));
+    }
+
     /**
      * The items of a thread, or of one turn, oldest first, in pages.
      *
@@ -664,31 +669,22 @@ export class CodexAppServerClient {
         }), "thread/items/list", threadId);
         const lastItemId = last.data[0]?.item.id;
         if (lastItemId === undefined) return;
-        const seenCursors = new Set<string>();
-        let cursor: string | null = null;
-        do {
-            const page: ThreadItemsListResponse = await withHistoryTimeout(this.threadItemsList({
-                threadId,
-                turnId,
-                cursor,
-                limit: HISTORY_PAGE_ITEMS,
-                sortDirection: "asc",
-            }), "thread/items/list", threadId);
-            const items = page.data.map(entry => entry.item);
+        const pages = historyPages(threadId, "thread/items/list", cursor => this.threadItemsList({
+            threadId,
+            turnId,
+            cursor,
+            limit: HISTORY_PAGE_ITEMS,
+            sortDirection: "asc",
+        }));
+        for await (const page of pages) {
+            const items = page.map(entry => entry.item);
             const lastIndex = items.findIndex(item => item.id === lastItemId);
             if (lastIndex >= 0) {
                 yield items.slice(0, lastIndex + 1);
                 return;
             }
             yield items;
-            cursor = page.nextCursor;
-            if (cursor !== null) {
-                if (seenCursors.has(cursor)) {
-                    throw new Error("Codex returned a repeated thread history cursor");
-                }
-                seenCursors.add(cursor);
-            }
-        } while (cursor !== null);
+        }
     }
 
     async threadReadWithHistory(threadId: string): Promise<ThreadReadResponse> {
@@ -711,39 +707,24 @@ export class CodexAppServerClient {
      * during the read is not in the pages.
      */
     private async *threadHistoryPages(threadId: string): AsyncGenerator<Turn[]> {
-        const last = await this.threadTurnsList({
+        const last = await withHistoryTimeout(this.threadTurnsList({
             threadId,
             cursor: null,
             limit: 1,
             sortDirection: "desc",
             itemsView: "notLoaded",
-        });
+        }), "thread/turns/list", threadId);
         const lastTurnId = last.data[0]?.id;
         if (lastTurnId === undefined) return;
-        const seenCursors = new Set<string>();
-        let cursor: string | null = null;
-        do {
-            const page = await this.threadTurnsList({
-                threadId,
-                cursor,
-                limit: HISTORY_PAGE_TURNS,
-                sortDirection: "asc",
-                itemsView: "full",
-            });
-            const lastIndex = page.data.findIndex(turn => turn.id === lastTurnId);
+        const pages = this.threadTurnPages({threadId, limit: HISTORY_PAGE_TURNS, sortDirection: "asc", itemsView: "full"});
+        for await (const page of pages) {
+            const lastIndex = page.findIndex(turn => turn.id === lastTurnId);
             if (lastIndex >= 0) {
-                yield page.data.slice(0, lastIndex + 1);
+                yield page.slice(0, lastIndex + 1);
                 return;
             }
-            yield page.data;
-            cursor = page.nextCursor;
-            if (cursor !== null) {
-                if (seenCursors.has(cursor)) {
-                    throw new Error("Codex returned a repeated thread history cursor");
-                }
-                seenCursors.add(cursor);
-            }
-        } while (cursor !== null);
+            yield page;
+        }
     }
 
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
@@ -1330,6 +1311,30 @@ function extractTurnRouting(notification: ServerNotification): { threadId: strin
         return {threadId, turnId: params.turn.id};
     }
     return {threadId, turnId: null};
+}
+
+/**
+ * The pages of a history list, from the first page. A page request fails when Codex does not answer
+ * within {@link HISTORY_PAGE_TIMEOUT_MS}. The read fails when Codex returns a cursor a second time.
+ */
+async function* historyPages<T>(
+    threadId: string,
+    method: string,
+    requestPage: (cursor: string | null) => Promise<{data: T[]; nextCursor: string | null}>,
+): AsyncGenerator<T[]> {
+    const seenCursors = new Set<string>();
+    let cursor: string | null = null;
+    do {
+        const page: {data: T[]; nextCursor: string | null} = await withHistoryTimeout(requestPage(cursor), method, threadId);
+        yield page.data;
+        cursor = page.nextCursor;
+        if (cursor !== null) {
+            if (seenCursors.has(cursor)) {
+                throw new Error("Codex returned a repeated thread history cursor");
+            }
+            seenCursors.add(cursor);
+        }
+    } while (cursor !== null);
 }
 
 /** The page, or an error when Codex does not answer within {@link HISTORY_PAGE_TIMEOUT_MS}. */

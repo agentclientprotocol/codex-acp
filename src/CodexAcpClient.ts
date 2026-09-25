@@ -681,26 +681,18 @@ export class CodexAcpClient {
             const turn = legacy.thread.turns[index];
             return turn ? oneItemPage(turn.items) : null;
         }
-        const seenCursors = new Set<string>();
         let first = 0;
-        let cursor: string | null = null;
-        do {
-            const page = await this.codexClient.threadTurnsList({
-                threadId: sessionId,
-                cursor,
-                limit: 50,
-                sortDirection: "asc",
-                itemsView: "notLoaded",
-            });
-            const turn = page.data[index - first];
+        const pages = this.codexClient.threadTurnPages({
+            threadId: sessionId,
+            limit: 50,
+            sortDirection: "asc",
+            itemsView: "notLoaded",
+        });
+        for await (const page of pages) {
+            const turn = page[index - first];
             if (turn) return this.codexClient.threadItemPages(sessionId, {turnId: turn.id});
-            first += page.data.length;
-            cursor = page.nextCursor;
-            if (cursor !== null) {
-                if (seenCursors.has(cursor)) throw new Error("Codex returned a repeated thread history cursor");
-                seenCursors.add(cursor);
-            }
-        } while (cursor !== null);
+            first += page.length;
+        }
         return null;
     }
 
