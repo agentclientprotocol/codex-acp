@@ -312,6 +312,7 @@ export class CodexEventHandler {
             return;
         }
         await this.finishCompactionsForNotification(notification);
+        if (this.isAuthenticationRequiredError(notification.params.error.codexErrorInfo)) return;
         if (notification.params.willRetry) {
             await this.session.update(this.createSessionFailureUpdate(this.recordRetryWarning(notification.params, false)));
             return;
@@ -364,6 +365,10 @@ export class CodexEventHandler {
     }
 
     async handleFailedTurn(turn: Turn): Promise<void> {
+        if (turn.status === "failed" && this.isAuthenticationRequiredError(turn.error?.codexErrorInfo ?? null)) {
+            this.failure = RequestError.authRequired();
+            return;
+        }
         const activeFailure = this.sessionState.sessionFailure;
         if (!this.supportsTypedSessionFailures
             || turn.status !== "failed"
@@ -1193,6 +1198,14 @@ export class CodexEventHandler {
             });
             return null;
         }
+        // ACP authRequired starts the client login flow. A second access update
+        // or chat message would show the same refusal as a false session error.
+        if (this.isAuthenticationRequiredError(error)) {
+            if (!params.willRetry && params.turnId === this.sessionState.currentTurnId) {
+                this.failure = RequestError.authRequired();
+            }
+            return null;
+        }
         if (params.turnId !== this.sessionState.currentTurnId) {
             if (this.supportsTypedSessionFailures) {
                 const failure = params.willRetry
@@ -1231,10 +1244,6 @@ export class CodexEventHandler {
             this.failure = RequestError.internalError(
                 this.createTurnErrorData(params.error),
             );
-        } else if (this.isAuthenticationRequiredError(error)) {
-            this.failure = this.sessionState.authConfigured
-                ? RequestError.internalError(this.createTurnErrorData(params.error))
-                : RequestError.authRequired(this.createTurnErrorData(params.error), params.error.message);
         }
         return createAgentTextMessageChunk(`${params.error.message}\n\n`);
     }
