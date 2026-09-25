@@ -35,7 +35,15 @@ start` replay), `session/set_config_option`, `session/cancel`, `auth/login|logou
 scoped runs) and EXT-202 (advisory, `capabilities.providers` placement → topic 10). Expected v2
 full-run fails now: none (EXT-202 fixed in the TCK fork, see below).
 
-**Fourth flush (2026-09-25); user resumed the same day. In flight: programmer on 10(e).**
+**Fourth flush (2026-09-25); user resumed the same day. In flight: programmer on 10(f1).**
+
+**10(e) done (01543bf):** `AcpAgentRouter.ts` v2 `providers/list|set|disable` → direct delegates
+(`listProviders`/`setProvider`/`disableProvider`); restart path untouched. Tests
+`providers-v2.test.ts` (v1/v2 loop: list, set, disable, idempotent unknown disable, unsupported
+`apiType` / unknown id → -32602; pins: v2 non-URI `baseUrl` → -32602 (SDK `format: uri`), v1 same
+input succeeds). No live sessions → restart not exercised. Suite 961 / 26. TCK
+(`.agents/tck/10e-targeted.md`) v1 init/ext 7/1 (SCHEMA-002); v2 init/ext 14/0; v2 `-k
+test_session` 24/0/2.
 
 **10(d) done (b2e5732):** `forkSession` param widened to `WithAcpMcpServers<…>` (type-only); new
 `forkSessionV2` = `forkSession` + `{sessionId, ...createSessionConfigOptionsResponseV2(...)}` (no
@@ -164,8 +172,7 @@ is our `clientId`.
    `v2-provider-restart-and-fork-tracking.md`, `v2-resume-goal-turn-timing.md`):
    ~~10(a)~~ done (1ac2e35) → ~~10(b)~~ done (5025885) →
    ~~10(c)~~ done (d1584bb) → ~~10(d)~~ done (b2e5732) `session/fork` on v2 (drop `modes`, no
-   `available_commands_update`, Q6 flagged for docs) → 10(e) `providers/*` on v2 (EXT-202 already
-   fixed in the TCK) → 10(f1) early-subscribe tracker on resume/load (v1+v2) → 10(f2)
+   `available_commands_update`, Q6 flagged for docs) → ~~10(e)~~ done (01543bf) `providers/*` → 10(f1) early-subscribe tracker on resume/load (v1+v2) → 10(f2)
    provider-restart reinstall + v2 close-out (v1+v2). Then end-of-topic-10 scoped TCK, then Phase 4
    (add Phase 4 docs: disabled-`openai` `current` gap (Q3), AIR fork-at-user-message question (Q6);
    live checks: provider restart with an active goal, `session/new` auto goal turn).
@@ -799,7 +806,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
 | 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
 | 9 | Config options, modes & plans | **Done** | — | — | 9a + 9b landed |
-| 10 | Unstable/extension methods on v2 (plan gap) | In progress | research, 10(a) (1ac2e35), 10(b) (5025885), 10(c) (d1584bb), 10(d) (b2e5732) | 10(e) `providers/*` | Not owned by plan.md topics: register `session/fork` and `providers/{list,set,disable}` via typed `acpV2.methods.agent.*`; `_session/goal`, `_session/async_task/stop` via `onRequest("_…", parser, h)`; outbound `_auth/status_update` via `client.notify`; subagent/async-task renderer cases (see Open questions). `_session/steering` is owned by topic 2(c). Depends on topic 1 |
+| 10 | Unstable/extension methods on v2 (plan gap) | In progress | research, 10(a) (1ac2e35), 10(b) (5025885), 10(c) (d1584bb), 10(d) (b2e5732), 10(e) (01543bf) | 10(f1) early-subscribe tracker | Not owned by plan.md topics: register `session/fork` and `providers/{list,set,disable}` via typed `acpV2.methods.agent.*`; `_session/goal`, `_session/async_task/stop` via `onRequest("_…", parser, h)`; outbound `_auth/status_update` via `client.notify`; subagent/async-task renderer cases (see Open questions). `_session/steering` is owned by topic 2(c). Depends on topic 1 |
 
 ## Deviations from `architecture.md`
 
