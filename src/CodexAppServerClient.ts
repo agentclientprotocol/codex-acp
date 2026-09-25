@@ -151,10 +151,6 @@ const ToolRequestUserInputRequest = new RequestType<
 
 const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
 
-/**
- * A type-safe client over the Codex App Server's JSON-RPC API.
- * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
- */
 /** The number of turns in one page of a full history read. */
 const HISTORY_PAGE_TURNS = 5;
 
@@ -167,6 +163,10 @@ const HISTORY_PAGE_ITEMS = 100;
  */
 const HISTORY_PAGE_TIMEOUT_MS = 60_000;
 
+/**
+ * A type-safe client over the Codex App Server's JSON-RPC API.
+ * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
+ */
 export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
