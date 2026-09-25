@@ -17,9 +17,18 @@ describe('MCP config merge across configured MCP servers and ACP request', { tim
     beforeEach(() => {
         vi.clearAllMocks();
 
+        const node = JSON.stringify(process.execPath);
+        const mcpServer = JSON.stringify(path.resolve(process.cwd(), "node_modules/mcp-hello-world/build/stdio.js"));
         const globalConfig = `
 [mcp_servers.shared-mcp]
 url = "https://example.com/mcp"
+
+[mcp_servers.same-transport]
+command = "missing-global-command"
+
+[mcp_servers.global-only]
+command = ${node}
+args = [${mcpServer}]
 `;
 
         const projectConfig = `
@@ -95,6 +104,37 @@ url = "https://example.com/mcp"
             cwd: projectPath,
             mcpServers: [conflictingMcp],
         })).resolves.toBeDefined();
+    });
+
+    it('should prefer a same-transport ACP MCP and preserve unrelated configured servers', async () => {
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const startupVersion = codexAcpClient.getMcpServerStartupVersion();
+        const mcpServer = path.resolve(process.cwd(), "node_modules/mcp-hello-world/build/stdio.js");
+        await codexAcpAgent.newSession({
+            cwd: "",
+            mcpServers: [{
+                name: "same-transport",
+                command: process.execPath,
+                args: [mcpServer],
+                env: [],
+            }],
+        });
+
+        await expect(codexAcpClient.awaitMcpServerStartup(["same-transport"], startupVersion)).resolves.toEqual({
+            ready: ["same-transport"],
+            failed: [],
+            cancelled: [],
+        });
+        await expect(codexAcpClient.listMcpServers()).resolves.toMatchObject({
+            data: expect.arrayContaining([
+                expect.objectContaining({name: "same-transport"}),
+                expect.objectContaining({name: "global-only"}),
+            ]),
+        });
     });
 
     it('should not filter the conflicting ACP MCP when config filtering is disabled', async () => {

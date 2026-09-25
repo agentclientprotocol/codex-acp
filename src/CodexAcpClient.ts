@@ -840,9 +840,15 @@ export class CodexAcpClient {
         }));
         let serversToConfigure = requestedServers;
         if (shouldDeduplicateMcpConflicts()) {
-            // Prevents Codex from deep-merging incompatible field types, such as url and stdio schemas.
-            const existingNames = await this.getConfigMcpServerNames(projectPath);
-            serversToConfigure = requestedServers.filter(mcp => !existingNames.has(mcp.name));
+            // Codex deep-merges session config into its persisted config. Let the session replace
+            // connection details when both definitions use the same transport, but keep filtering
+            // incompatible transports because merging e.g. `url` and `command` produces an invalid
+            // hybrid definition.
+            const existingServers = await this.getConfigMcpServers(projectPath);
+            serversToConfigure = requestedServers.filter(mcp => {
+                const existing = existingServers.get(mcp.name);
+                return existing === undefined || haveCompatibleMcpTransports(existing, mcp.server);
+            });
         }
         if (serversToConfigure.length === 0) {
             return configWithWorkspaceRoots;
@@ -854,7 +860,7 @@ export class CodexAcpClient {
         };
     }
 
-    private async getConfigMcpServerNames(projectPath: string): Promise<Set<string>> {
+    private async getConfigMcpServers(projectPath: string): Promise<Map<string, JsonObject>> {
         const response = await this.codexClient.configRead({ includeLayers: true, cwd: projectPath });
         const effectiveMcpServers = response?.config?.["mcp_servers"];
         const configLayers = response?.layers ?? [];
@@ -862,10 +868,15 @@ export class CodexAcpClient {
             return isJsonObject(layer.config) ? layer.config["mcp_servers"] : undefined;
         });
         const configuredMcpServers = [effectiveMcpServers, ...layerMcpServers].filter(isJsonObject);
-        if (configuredMcpServers.length === 0) {
-            return new Set();
+        const servers = new Map<string, JsonObject>();
+        for (const configured of configuredMcpServers) {
+            for (const [name, server] of Object.entries(configured)) {
+                if (!servers.has(name) && isJsonObject(server)) {
+                    servers.set(name, server);
+                }
+            }
         }
-        return new Set(configuredMcpServers.flatMap(server => Object.keys(server)));
+        return servers;
     }
 
     getModelProvider(): string | null {
@@ -1298,6 +1309,16 @@ function formatUriAsLink(name: string | null | undefined, uri: string): string {
 function shouldDeduplicateMcpConflicts(): boolean {
     const disabledByEnv = process.env["DISABLE_MCP_CONFIG_FILTERING"] === "true";
     return !disabledByEnv;
+}
+
+function haveCompatibleMcpTransports(configured: JsonObject, requested: McpServer): boolean {
+    const configuredTransport = "command" in configured && !("url" in configured)
+        ? "stdio"
+        : "url" in configured && !("command" in configured)
+            ? "http"
+            : null;
+    const requestedTransport = "type" in requested ? requested.type : "stdio";
+    return configuredTransport === requestedTransport;
 }
 
 type WireApi = "responses";
