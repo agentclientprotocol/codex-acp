@@ -135,6 +135,28 @@ describe("paginated thread history", () => {
         }
     });
 
+    it("fails a turn page that Codex does not answer instead of waiting forever", async () => {
+        vi.useFakeTimers();
+        try {
+            const fixture = createCodexMockTestFixture();
+            const appServer = fixture.getCodexAppServerClient();
+            vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: {id: "history", turns: []} as any});
+            const store = turnStore([messageTurn("first")]);
+            // Only the first ascending page is lost.
+            vi.spyOn(appServer, "threadTurnsList").mockImplementation(params =>
+                params.sortDirection === "asc" ? new Promise(() => {}) : store(params));
+            const error = "Codex did not answer thread/turns/list for thread history within 60 s";
+
+            const history = expect(appServer.threadReadWithHistory("history")).rejects.toThrow(error);
+            const turnItems = expect(fixture.getCodexAcpClient().readSessionTurnItems("history", 0)).rejects.toThrow(error);
+            await vi.advanceTimersByTimeAsync(60_000);
+            await history;
+            await turnItems;
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("pages the items of one large turn", async () => {
         const fixture = createCodexMockTestFixture();
         const appServer = fixture.getCodexAppServerClient();
