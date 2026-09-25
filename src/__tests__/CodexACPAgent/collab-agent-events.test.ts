@@ -1387,7 +1387,8 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         expect(request?.args[0].sessionId).toBe("pending-child");
     });
 
-    it("uses a new ACP child generation when Codex reactivates a terminal thread", async () => {
+    it.each(["resumeAgent", "sendInput", "followupTask"] as const)(
+        "uses a new ACP child generation when a %s reactivates a terminal thread", async (tool) => {
         await initializeNativeSubagents();
         const childTurn = (status: "completed" | "inProgress"): ServerNotification => ({
             method: status === "completed" ? "turn/completed" : "turn/started",
@@ -1431,11 +1432,11 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                     item: {
                         type: "collabAgentToolCall",
                         id: "resume-call",
-                        tool: "resumeAgent",
+                        tool,
                         status: "completed",
                         senderThreadId: sessionId,
                         receiverThreadIds: ["resumable-child"],
-                        prompt: null,
+                        prompt: tool === "resumeAgent" ? null : "Check again.",
                         model: null,
                         reasoningEffort: null,
                         agentsStates: {"resumable-child": {status: "running", message: null}},

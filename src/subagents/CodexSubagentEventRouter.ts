@@ -115,7 +115,8 @@ export class CodexSubagentEventRouter {
         }
         if (item.type !== "collabAgentToolCall") return false;
 
-        if (item.tool === "resumeAgent" || item.tool === "sendInput") {
+        // These tools start a turn of an idle child. A `sendMessage` only queues the message and starts no turn.
+        if (item.tool === "resumeAgent" || item.tool === "sendInput" || item.tool === "followupTask") {
             for (const [childThreadId, state] of Object.entries(item.agentsStates)) {
                 if (state?.status === "running" || state?.status === "pendingInit") {
                     await this.reopen(childThreadId);
