@@ -35,7 +35,16 @@ start` replay), `session/set_config_option`, `session/cancel`, `auth/login|logou
 scoped runs) and EXT-202 (advisory, `capabilities.providers` placement → topic 10). Expected v2
 full-run fails now: none (EXT-202 fixed in the TCK fork, see below).
 
-**Fourth flush (2026-09-25); user resumed the same day. In flight: programmer on 10(d).**
+**Fourth flush (2026-09-25); user resumed the same day. In flight: programmer on 10(e).**
+
+**10(d) done (b2e5732):** `forkSession` param widened to `WithAcpMcpServers<…>` (type-only); new
+`forkSessionV2` = `forkSession` + `{sessionId, ...createSessionConfigOptionsResponseV2(...)}` (no
+`modes`); registered via `acpV2.methods.agent.session.fork` after `session.resume`. Q2 parity
+already given by `tryCreateSession` (`canPublishSessionUpdates=false` for fork). Q6 untouched.
+Tests in `session-lifecycle-v2.test.ts` (+4; snapshots `data/session-lifecycle-v2-fork.json`,
+`…-fork-invalid-params.json` -32602, `…-fork-unknown-session.json` -32603, same as v1); v1 pin
+`modes` defined in `session-fork.test.ts`. Suite 947 / 26. TCK (`.agents/tck/10d-targeted.md`) v1
+`-k test_session` 18/0/2; v2 24/0/2; v2 init/ext 14/0.
 
 **10(c) done (d1584bb):** `AcpAgentRouter.ts` v2 `.onRequest(ASYNC_TASK_STOP_METHOD,
 asyncTaskStopParamsParser, → extMethod)`; shared `extMethod` branch (`CodexAcpServer.ts:654-665`)
@@ -154,7 +163,7 @@ is our `clientId`.
    blocks above and in `v2-fork-providers-and-extension-methods.md`,
    `v2-provider-restart-and-fork-tracking.md`, `v2-resume-goal-turn-timing.md`):
    ~~10(a)~~ done (1ac2e35) → ~~10(b)~~ done (5025885) →
-   ~~10(c)~~ done (d1584bb) → 10(d) `session/fork` on v2 (drop `modes`, no
+   ~~10(c)~~ done (d1584bb) → ~~10(d)~~ done (b2e5732) `session/fork` on v2 (drop `modes`, no
    `available_commands_update`, Q6 flagged for docs) → 10(e) `providers/*` on v2 (EXT-202 already
    fixed in the TCK) → 10(f1) early-subscribe tracker on resume/load (v1+v2) → 10(f2)
    provider-restart reinstall + v2 close-out (v1+v2). Then end-of-topic-10 scoped TCK, then Phase 4
@@ -790,7 +799,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
 | 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
 | 9 | Config options, modes & plans | **Done** | — | — | 9a + 9b landed |
-| 10 | Unstable/extension methods on v2 (plan gap) | In progress | research, 10(a) (1ac2e35), 10(b) (5025885), 10(c) (d1584bb) | 10(d) `session/fork` | Not owned by plan.md topics: register `session/fork` and `providers/{list,set,disable}` via typed `acpV2.methods.agent.*`; `_session/goal`, `_session/async_task/stop` via `onRequest("_…", parser, h)`; outbound `_auth/status_update` via `client.notify`; subagent/async-task renderer cases (see Open questions). `_session/steering` is owned by topic 2(c). Depends on topic 1 |
+| 10 | Unstable/extension methods on v2 (plan gap) | In progress | research, 10(a) (1ac2e35), 10(b) (5025885), 10(c) (d1584bb), 10(d) (b2e5732) | 10(e) `providers/*` | Not owned by plan.md topics: register `session/fork` and `providers/{list,set,disable}` via typed `acpV2.methods.agent.*`; `_session/goal`, `_session/async_task/stop` via `onRequest("_…", parser, h)`; outbound `_auth/status_update` via `client.notify`; subagent/async-task renderer cases (see Open questions). `_session/steering` is owned by topic 2(c). Depends on topic 1 |
 
 ## Deviations from `architecture.md`
 
