@@ -645,6 +645,9 @@ export class CodexEventHandler {
             case "thread/attachment/updated":
                 // Persisted attachment metadata has no ACP session update counterpart.
                 return null;
+            case "account/gatewayOAuth/changed":
+                // Gateway login state is account-scoped and has no ACP session update counterpart.
+                return null;
             // ignored events
             case "thread/deleted":
             case "thread/reverted":
