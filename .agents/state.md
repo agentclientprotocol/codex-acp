@@ -6,17 +6,18 @@
 
 ## Current position in the sequencing plan
 
-Phase: **Phase 4.** Prerequisite and topics 1-10 done (2026-09-25). Rough progress ~93%.
+Phase: **Phase 4 tail.** Prerequisite and topics 1-10 done; P4(a)-(c) done (2026-09-25). Rough
+progress ~96%.
 
 ### Resume here (for a fresh orchestrator)
 
-State as of the **fourth flush** (2026-09-25): **no agents in flight; everything is committed** in
-codex-acp (branch `eugenethedev/acp-v2`; last code commit `1ac2e35`) and in the acp-tck fork
-(`main` @ `b15c7bd`, 6 local commits, **not pushed**; the user said don't push). Keep committing
-with explicit pathspecs (the user may have unrelated staged edits to `.agents/agents/*.md`). Suite:
-**934 pass / 26 skip**. `bun` is missing locally: programmers use `npm run build` for the TCK (see
-`.agents/tck/HOW-TO-RUN.md`). **Next slice: 10(b) `_session/goal` on v2** (see "Topic 10 slice
-order" under Next steps; details in the fourth-flush block below).
+State as of the **fifth flush** (2026-09-25, graceful flush requested by the user): **no agents in
+flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`; last code commit
+`503f867`) and in the acp-tck fork (`main` @ `b15c7bd`, 6 local commits, **not pushed**; the user said
+don't push). Keep committing with explicit pathspecs. Suite: **974 pass / 26 skip**. `bun` is
+missing locally: programmers use `npm run build` for the TCK (see `.agents/tck/HOW-TO-RUN.md`).
+**Next slice: P4(d)** (see "Remaining work" under Next steps). Topics 1-10 done; Phase 4 left:
+P4(d), P4(e), final full TCK. Rough progress ~96%.
 
 **Standing user rules:** preserve v1 client-visible behavior (change v1 only to fix a real bug, with
 nothing else v1-visible changing; the user decides v1-visible trade-offs); **always assume the
@@ -34,7 +35,8 @@ start` replay), `session/set_config_option`, `session/cancel`, `auth/login|logou
 scoped runs) and EXT-202 (advisory, `capabilities.providers` placement → topic 10). Expected v2
 full-run fails now: none (EXT-202 fixed in the TCK fork, see below).
 
-**Fourth flush (2026-09-25); user resumed the same day. Topic 10 DONE. Now: Phase 4.**
+**Fourth flush (2026-09-25); user resumed the same day. Topic 10 DONE. Now: Phase 4 (fifth flush:
+P4(a)-(c) done, next P4(d)).**
 **P4(a) done (87fdeca `docs:`):** `readme-dev.md` "ACP v2 support" (v2 method chain, no new
 knobs), "AIR v2 client contract", "Known gaps" (Q3, Q6), "Verification" (→ HOW-TO-RUN). Stale
 comments fixed in `session-config-options-v2.test.ts`, `prompt-v2.test.ts` (test renamed),
@@ -48,7 +50,12 @@ goal FAIL on v2:**
   Codex's new goal turn (~3 ms after `thread/resume`) already overwrote `codexReportedRunningTurnId`
   (`trackCodexTurnStart` `:1096`) → `running, running, idle cancelled, content while idle, idle`.
   Fix: per session, drain the old client + close out **before** registering the tracker and resuming
-  (old process already exited, `:1643`). → programmer slice **P4(c)** in flight.
+  (old process already exited, `:1643`). → **P4(c) done (503f867 `fix:`):** `enqueueProviderUpdate`
+  (~1545-1590) now one loop: per session (skip `awaitingClientLoad`) drain + v2 close-out, then
+  register the ready-gated tracker, then `replacement.resumeSession`. Test in
+  `provider-restart-turn-tracking.test.ts` (auto-started turn right on resume → `running, idle
+  cancelled, running, idle end_turn`, busy during the new turn; fails pre-fix). Suite 974 / 26. TCK
+  (`.agents/tck/p4c-targeted.md`) v2 session/state 24/0/2; v1 `-k test_session` 18/0/2.
 - **D2 (v1+v2):** the cut-off turn's in-flight tool call stays `in_progress` forever (terminal
   open); the old process's `item/completed` is lost. → **user (2026-09-25): fix on v1 + v2** (mark
   in-flight tool calls `failed`, end terminals, in the restart close-out) → slice **P4(d)** after P4(c).
@@ -217,8 +224,7 @@ is our `clientId`.
 **Next steps, in order (one programmer at a time; researchers may run in parallel):**
 0. **Remaining work (Phase 4 tail), one programmer at a time; all decisions are recorded in the
    "P4(b) live checks done" block above:**
-   - **P4(c)** D1 restart close-out race (v2) — in flight at the time of the fourth-session flush
-     request; see that block for the result if recorded.
+   - ~~**P4(c)**~~ D1 done (503f867).
    - **P4(d)** D2 (v1 + v2): in the provider-restart close-out, mark the cut-off turn's in-flight tool
      calls `failed` and end their terminals (`fix:`). Evidence: `v2-phase4-live-checks.md` check 3.
    - **P4(e)** D3 (`docs:`): `FIXME` comment at the restart resume loop (`CodexAcpServer.ts`
