@@ -38,7 +38,7 @@
         "rawOutput": {
           "result": null,
           "error": {
-            "message": "File /Users/aleksandr.slapoguzov/Projects/ultimate/.ai/local.md doesn't exist or can't be opened"
+            "message": "File /workspace/.ai/local.md doesn't exist or can't be opened"
           }
         }
       }

@@ -353,7 +353,7 @@ describe('CodexEventHandler - command action events', () => {
                     threadId: sessionId,
                     turnId: 'turn-1',
                     itemId: 'call-id',
-                    message: "File /Users/aleksandr.slapoguzov/Projects/ultimate/.ai/local.md doesn't exist or can't be opened",
+                    message: "File /workspace/.ai/local.md doesn't exist or can't be opened",
                 },
             },
             {
@@ -375,7 +375,7 @@ describe('CodexEventHandler - command action events', () => {
                         pluginId: null,
                         result: null,
                         error: {
-                            message: "File /Users/aleksandr.slapoguzov/Projects/ultimate/.ai/local.md doesn't exist or can't be opened",
+                            message: "File /workspace/.ai/local.md doesn't exist or can't be opened",
                         },
                         durationMs: 15,
                     },
