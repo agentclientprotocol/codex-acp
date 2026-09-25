@@ -19,6 +19,11 @@ export class CodexSessionToolCalls {
         this.open.delete(itemId);
     }
 
+    /** Drops all tracked entries without emitting anything, e.g. when their turn ends. */
+    clear(): void {
+        this.open.clear();
+    }
+
     /** Fails every still-open tool call and ends its terminal, if it had one. */
     finishOutstanding(): UpdateSessionEvent[] {
         const updates: UpdateSessionEvent[] = [];

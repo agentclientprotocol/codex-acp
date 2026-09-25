@@ -594,6 +594,9 @@ export class CodexEventHandler {
                 this.clearPlanTurnState();
                 this.sessionState.currentTurnId = null;
                 this.sessionState.interruptTurnId = null;
+                // An item that missed its item/completed (e.g. dropped by a provider restart
+                // mid-turn) must not linger past its own turn and get failed by a later restart.
+                this.sessionState.openToolCalls.clear();
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);

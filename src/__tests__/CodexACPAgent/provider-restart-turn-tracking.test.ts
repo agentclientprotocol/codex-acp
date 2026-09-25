@@ -373,4 +373,30 @@ describe('provider restart fails outstanding tool calls left open by the cut-off
             {state: "idle", stopReason: "cancelled"},
         ]);
     });
+
+    it('v2: does not re-fail an item that missed its item/completed but whose own turn already ended', async () => {
+        const client = await connectSession(2);
+        closeClient = () => client.connection.close();
+
+        // exec-1 starts and never gets an item/completed, but its own turn (turn-a) ends anyway.
+        client.emit(turnStarted("turn-a"));
+        client.emit(itemStarted(commandExecutionItem("exec-1"), "turn-a"));
+        client.emit(turnCompleted("turn-a"));
+        await settle();
+
+        // A later turn (turn-b) is running when the restart happens; exec-1 belongs to the
+        // already-finished turn-a and must not be failed as if it were cut off by this restart.
+        client.emit(turnStarted("turn-b"));
+        await settle();
+
+        const replacement = createReplacementCodexAcpClient();
+        vi.spyOn(client.agent as any, "restartCodexClient").mockResolvedValue(replacement.codexAcpClient);
+        await client.request(acpV2.methods.agent.providers.set, setProviderParams());
+        await settle();
+
+        expect(toolCallUpdates(client.transcript).some(update =>
+            (update as {toolCallId: string, status?: string}).toolCallId === "exec-1"
+            && (update as {status?: string}).status === "failed",
+        )).toBe(false);
+    });
 });
