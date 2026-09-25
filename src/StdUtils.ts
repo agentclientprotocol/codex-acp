@@ -1,4 +1,5 @@
 import {Readable, Writable} from "node:stream";
+import {StringDecoder} from "node:string_decoder";
 import {Emitter} from "vscode-jsonrpc/node";
 import type {DataCallback, Disposable, Message, MessageReader, MessageWriter, PartialMessageInfo} from "vscode-jsonrpc/node";
 import * as acp from "@agentclientprotocol/sdk";
@@ -33,8 +34,9 @@ export function createJSONRPCReader(readable: Readable): MessageReader {
     return {
         listen(callback: DataCallback): Disposable {
             let buf = '';
-            const onData = (chunk: Buffer) => {
-                buf += chunk.toString();
+            const decoder = new StringDecoder('utf8');
+            const onData = (chunk: Buffer | string) => {
+                buf += typeof chunk === 'string' ? chunk : decoder.write(chunk);
                 for (;;) {
                     const i = buf.indexOf('\n');
                     if (i < 0) break;
