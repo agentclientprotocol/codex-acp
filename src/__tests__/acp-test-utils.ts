@@ -586,3 +586,14 @@ export function createTestEventHandler(
         false,
     );
 }
+
+/** A promise that the test resolves or rejects from outside. */
+export function deferred<T>(): {promise: Promise<T>, resolve: (value: T) => void, reject: (reason: unknown) => void} {
+    let resolve: (value: T) => void = () => {};
+    let reject: (reason: unknown) => void = () => {};
+    const promise = new Promise<T>((innerResolve, innerReject) => {
+        resolve = innerResolve;
+        reject = innerReject;
+    });
+    return {promise, resolve, reject};
+}

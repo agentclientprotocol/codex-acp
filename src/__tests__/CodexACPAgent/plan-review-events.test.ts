@@ -6,6 +6,7 @@ import {
     createCodexMockTestFixture,
     createTestSessionState,
     type CodexMockTestFixture,
+    deferred,
 } from "../acp-test-utils";
 
 type TurnCompletion = {
@@ -39,14 +40,6 @@ type TurnStartResponse = {
         durationMs: null;
     };
 };
-
-function deferred<T>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>((promiseResolve) => {
-        resolve = promiseResolve;
-    });
-    return {promise, resolve};
-}
 
 describe("CodexACPAgent - plan review", () => {
     let fixture: CodexMockTestFixture;
