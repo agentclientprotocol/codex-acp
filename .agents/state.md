@@ -16,7 +16,7 @@ flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`; la
 `503f867`) and in the acp-tck fork (`main` @ `b15c7bd`, 6 local commits, **not pushed**; the user said
 don't push). Keep committing with explicit pathspecs. Suite: **974 pass / 26 skip**. `bun` is
 missing locally: programmers use `npm run build` for the TCK (see `.agents/tck/HOW-TO-RUN.md`).
-**Next slice: P4(d)** (see "Remaining work" under Next steps). Topics 1-10 done; Phase 4 left:
+**P4(d) done (04222da `fix:`, TCK 5842518). Next slice: P4(e)** + small hardening (see "Remaining work" under Next steps). Topics 1-10 done; Phase 4 left:
 P4(d), P4(e), final full TCK. Rough progress ~96%.
 
 **Standing user rules:** preserve v1 client-visible behavior (change v1 only to fix a real bug, with
@@ -225,8 +225,18 @@ is our `clientId`.
 0. **Remaining work (Phase 4 tail), one programmer at a time; all decisions are recorded in the
    "P4(b) live checks done" block above:**
    - ~~**P4(c)**~~ D1 done (503f867).
-   - **P4(d)** D2 (v1 + v2): in the provider-restart close-out, mark the cut-off turn's in-flight tool
-     calls `failed` and end their terminals (`fix:`). Evidence: `v2-phase4-live-checks.md` check 3.
+   - ~~**P4(d)**~~ D2 done (04222da `fix:`): new session-owned `src/CodexSessionToolCalls.ts`
+     (`SessionState.openToolCalls`; start/complete fed by `CodexEventHandler.trackOpenToolCall` on
+     `item/started`/`item/completed` for `fileChange|commandExecution|mcpToolCall|dynamicToolCall|
+     webSearch|imageView|imageGeneration`); `CodexAcpServer.finishOutstandingToolCalls(session)` in the
+     restart loop inside the `codexReportedRunningTurnId !== null` block, before
+     `reportUnownedTurnState` → `tool_call_update failed` (+ `_meta.terminal_exit` when it had a
+     terminal) via `ACPSessionConnection.update()`, v1 + v2. Tests: 3 new in
+     `provider-restart-turn-tracking.test.ts`. Suite 977 / 26, no snapshot drift. TCK
+     (`.agents/tck/p4d-targeted.md`): v2 session/state 24/0/2, v1 `-k test_session` 18/0/2.
+     **Orchestrator review gap:** tracker is never cleared on turn end, so an item missing its
+     `item/completed` would be re-failed on a later restart → hardening folded into P4(e) (clear
+     `openToolCalls` on `turn/completed`, separate `fix:` commit).
    - **P4(e)** D3 (`docs:`): `FIXME` comment at the restart resume loop (`CodexAcpServer.ts`
      ~1546-1574, never-prompted session has no rollout → `thread/resume` fails → session dies) +
      `readme-dev.md` Known gaps entry. Don't fix.
