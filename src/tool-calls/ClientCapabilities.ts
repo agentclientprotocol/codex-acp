@@ -5,7 +5,7 @@ export const AIR_RAW_INPUT_RENDERING_KEY = "rawInputRendering";
 export const AIR_PLAN_CONTENT_DELTA_KEY = "planContentDelta";
 
 /** The `_meta` key of a command output chunk. */
-export type TerminalOutputKey = "terminal_output" | "terminal_output_delta";
+type TerminalOutputKey = "terminal_output" | "terminal_output_delta";
 
 /** The AIR capabilities that change the tool call and plan reports. */
 export type AirCapabilities = {

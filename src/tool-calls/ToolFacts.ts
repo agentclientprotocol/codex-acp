@@ -82,8 +82,6 @@ export type CommandEnd = {
     terminal: boolean;
     /** Output or stdin chunks of the command came before the end. */
     streamed: boolean;
-    /** The end comes from the thread history. */
-    replay: boolean;
 };
 
 /**

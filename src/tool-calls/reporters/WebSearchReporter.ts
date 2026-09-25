@@ -31,7 +31,7 @@ function facts(item: WebSearchItem, report: ToolFacts["report"]): ToolFacts {
     };
 }
 
-export function webSearchTitle(item: WebSearchItem): string {
+function webSearchTitle(item: WebSearchItem): string {
     const action = item.action;
     if (!action) {
         return item.query ? `Web search: ${item.query}` : "Web search";

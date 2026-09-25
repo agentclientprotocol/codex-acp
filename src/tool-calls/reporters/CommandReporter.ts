@@ -12,7 +12,7 @@ import type {PermissionToolFacts, ToolFacts} from "../ToolFacts";
 import {permissionProfileContent, permissionProfilePaths} from "./SandboxPermissionReporter";
 import {toToolStatus} from "./ToolStatus";
 
-export type CommandPermissionParams = CommandExecutionRequestApprovalParams & {
+type CommandPermissionParams = CommandExecutionRequestApprovalParams & {
     additionalPermissions?: AdditionalPermissionProfile | null;
 };
 
@@ -83,7 +83,6 @@ export class CommandReporter {
                     exitCode: item.exitCode,
                     terminal: this.terminalCommands.delete(item.id),
                     streamed: this.standardStreamedCommands.delete(item.id),
-                    replay: false,
                 },
             },
         };
@@ -151,14 +150,13 @@ export class CommandReporter {
                     exitCode: item.exitCode,
                     terminal: usesTerminal(item),
                     streamed: false,
-                    replay: true,
                 },
             },
         }];
     }
 }
 
-export function usesTerminal(item: CommandItem): boolean {
+function usesTerminal(item: CommandItem): boolean {
     const action = singleAction(item.commandActions);
     return action === undefined || action.type === "unknown";
 }
@@ -174,7 +172,7 @@ function startFacts(item: CommandItem): ToolFacts {
 }
 
 /** The start report of a command with one parsed action. */
-export function commandActionFacts(
+function commandActionFacts(
     id: string,
     status: CommandExecutionStatus,
     cwd: string,

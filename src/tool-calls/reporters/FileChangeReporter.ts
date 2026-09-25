@@ -14,7 +14,7 @@ import {toToolStatus} from "./ToolStatus";
 
 type FileChangeItem = ThreadItem & {type: "fileChange"};
 
-export const FILE_CHANGE_TITLE = "Editing files";
+const FILE_CHANGE_TITLE = "Editing files";
 
 /**
  * Reports a Codex file change from the Codex diff alone. The reporter never reads the file.
