@@ -23,6 +23,8 @@ import {
     type McpElicitationContext,
 } from "./permissions/mcp";
 import type {PermissionPromptContext} from "./permissions/lifecycle";
+import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
+import {ElicitationReporter} from "./tool-calls/reporters/ElicitationReporter";
 import {isRecord, normalizeJsonObject, normalizeJsonValue, recordOrNull} from "./permissions/json";
 type AcpBackedMcpElicitationParams = Extract<
     McpServerElicitationRequestParams,
@@ -137,6 +139,7 @@ function userInputResponseValue(
 
 export class CodexElicitationHandler implements ElicitationHandler {
     private readonly connection: AcpClientConnection;
+    private readonly renderer: AcpToolCallRenderer;
     private readonly permissionContext: PermissionPromptContext;
     private readonly clientCapabilities: acp.ClientCapabilities | null;
     private readonly cancellationSignal: AbortSignal | undefined;
@@ -159,9 +162,11 @@ export class CodexElicitationHandler implements ElicitationHandler {
     constructor(
         connection: AcpClientConnection,
         permissionContext: PermissionPromptContext,
-        clientCapabilities: acp.ClientCapabilities | null = null,
-        cancellationSignal?: AbortSignal
+        clientCapabilities: acp.ClientCapabilities | null,
+        cancellationSignal: AbortSignal | undefined,
+        renderer: AcpToolCallRenderer,
     ) {
+        this.renderer = renderer;
         this.connection = connection;
         this.permissionContext = permissionContext;
         this.clientCapabilities = clientCapabilities;
@@ -205,6 +210,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 params,
                 context,
                 () => this.permissionContext.nextStandaloneMcpToolCallId(params.serverName),
+                this.renderer,
             );
             const response = await this.connection.request(
                 acp.methods.client.session.requestPermission,
@@ -220,21 +226,16 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 if (result.action === "accept") {
                     await this.connection.notify(acp.methods.client.session.update, {
                         sessionId: params.threadId,
-                        update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
+                        update: this.renderer.render(ElicitationReporter.accepted(correlatedCallId)),
                     });
                 }
             } else {
                 try {
                     await this.connection.notify(acp.methods.client.session.update, {
                         sessionId: params.threadId,
-                        update: {
-                            sessionUpdate: "tool_call_update",
-                            toolCallId: request.toolCall.toolCallId,
-                            status: "completed",
-                            title: request.toolCall.title,
-                            content: request.toolCall.content,
-                            rawOutput: { action: result.action },
-                        },
+                        update: this.renderer.render(
+                            ElicitationReporter.answered(request.toolCall.toolCallId, result.action),
+                        ),
                     });
                 } catch (error) {
                     logger.error("Failed to finalize standalone MCP elicitation tool call", error);
@@ -555,7 +556,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
         await this.connection.notify(acp.methods.client.session.update, {
             sessionId,
-            update: { sessionUpdate: "tool_call_update", toolCallId: context.correlatedCallId, status: "in_progress" },
+            update: this.renderer.render(ElicitationReporter.accepted(context.correlatedCallId)),
         });
     }
 

@@ -1,8 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import type {ServerNotification} from "../../app-server";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
-import {CodexEventHandler} from "../../CodexEventHandler";
-import {createTestSessionState} from "../acp-test-utils";
+import {createTestEventHandler, createTestSessionState} from "../acp-test-utils";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "../../AgentFileChangeReport";
 
 describe("CodexEventHandler - turn diff events", () => {
@@ -18,16 +17,7 @@ describe("CodexEventHandler - turn diff events", () => {
             notify: vi.fn(async () => {}),
             request: vi.fn(),
         } as unknown as AcpClientConnection;
-        const handler = new CodexEventHandler(
-            connection,
-            sessionState,
-            false,
-            true,
-            "test-epoch",
-            undefined,
-            undefined,
-            collectTurnDiffs,
-        );
+        const handler = createTestEventHandler(connection, sessionState, {typedSessionFailures: true, collectTurnDiffs});
         return {handler, sessionState};
     }
 

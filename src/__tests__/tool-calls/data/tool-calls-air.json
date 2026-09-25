@@ -1,0 +1,353 @@
+{
+  "command": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "cmd",
+      "kind": "execute",
+      "title": "npm test",
+      "status": "in_progress",
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "cmd"
+        }
+      ],
+      "rawInput": {
+        "command": "/bin/zsh -lc 'npm test'",
+        "cwd": "/w"
+      },
+      "_meta": {
+        "terminal_info": {
+          "cwd": "/w",
+          "terminal_id": "cmd"
+        }
+      }
+    },
+    {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "cmd",
+      "_meta": {
+        "terminal_output_delta": {
+          "data": "ok\n",
+          "terminal_id": "cmd"
+        }
+      }
+    },
+    {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "cmd",
+      "_meta": {
+        "terminal_input": {
+          "data": "y",
+          "terminal_id": "cmd"
+        }
+      }
+    },
+    {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "cmd",
+      "status": "completed",
+      "_meta": {
+        "terminal_exit": {
+          "exit_code": 0,
+          "signal": null,
+          "terminal_id": "cmd"
+        }
+      }
+    }
+  ],
+  "read": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "read",
+      "kind": "read",
+      "title": "Read file '/w/a.txt'",
+      "status": "in_progress",
+      "locations": [
+        {
+          "path": "/w/a.txt"
+        }
+      ]
+    },
+    {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "read",
+      "status": "completed"
+    }
+  ],
+  "mcp": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "mcp",
+      "kind": "execute",
+      "title": "mcp.docs.search",
+      "status": "in_progress",
+      "rawInput": {
+        "server": "docs",
+        "tool": "search",
+        "arguments": {
+          "q": "acp"
+        }
+      },
+      "_meta": {
+        "is_mcp_tool_call": true
+      }
+    },
+    {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "mcp"
+    },
+    {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "mcp",
+      "status": "completed",
+      "rawInput": {
+        "server": "docs",
+        "tool": "search",
+        "arguments": {
+          "q": "acp"
+        }
+      },
+      "rawOutput": {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "hit"
+            }
+          ],
+          "structuredContent": {
+            "hits": 1
+          },
+          "_meta": null
+        },
+        "error": null
+      }
+    }
+  ],
+  "dynamicTool": [
+    {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "dyn",
+      "name": "list_apps",
+      "status": "completed",
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "Done"
+          }
+        }
+      ]
+    }
+  ],
+  "webSearch": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "web",
+      "kind": "search",
+      "title": "Web search: acp",
+      "status": "completed",
+      "rawInput": {
+        "query": "acp",
+        "action": null
+      }
+    }
+  ],
+  "imageView": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "img",
+      "name": "view_image",
+      "kind": "read",
+      "title": "View Image /w/a.png",
+      "status": "completed",
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "resource_link",
+            "name": "/w/a.png",
+            "uri": "/w/a.png"
+          }
+        }
+      ],
+      "locations": [
+        {
+          "path": "/w/a.png"
+        }
+      ],
+      "rawInput": {
+        "path": "/w/a.png"
+      }
+    }
+  ],
+  "imageGeneration": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "gen",
+      "kind": "other",
+      "title": "Image generation",
+      "status": "completed",
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "Revised prompt: A square"
+          }
+        },
+        {
+          "type": "content",
+          "content": {
+            "type": "image",
+            "data": "AAAA",
+            "mimeType": "image/png",
+            "uri": "/w/square.png"
+          }
+        }
+      ]
+    }
+  ],
+  "collab": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "collab",
+      "kind": "other",
+      "title": "spawnAgent",
+      "status": "completed",
+      "rawInput": {
+        "prompt": "Find the weather.",
+        "senderThreadId": "root",
+        "receiverThreadIds": [
+          "child"
+        ],
+        "agentsStates": {
+          "child": {
+            "status": "completed",
+            "message": null
+          }
+        },
+        "model": null,
+        "reasoningEffort": null
+      },
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "subagent": true
+          }
+        }
+      }
+    }
+  ],
+  "subagentActivity": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "act",
+      "kind": "other",
+      "title": "Start subagent child",
+      "status": "in_progress",
+      "rawInput": {
+        "agentThreadId": "child",
+        "agentPath": "/root/child",
+        "activityKind": "started"
+      },
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "subagent": true
+          }
+        }
+      }
+    }
+  ],
+  "fuzzySearch": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "fuzzyFileSearch.f",
+      "kind": "search",
+      "title": "Search for 'App'",
+      "status": "in_progress",
+      "locations": [],
+      "rawInput": {
+        "query": "App"
+      }
+    }
+  ],
+  "guardian": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "guardian_assessment:r",
+      "kind": "think",
+      "title": "Guardian Review",
+      "status": "completed",
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "Status: Approved\nRisk: low\nRationale: Safe."
+          }
+        }
+      ],
+      "rawInput": {
+        "action": {
+          "type": "command",
+          "source": "shell",
+          "command": "ls",
+          "cwd": "/w"
+        }
+      }
+    }
+  ],
+  "compaction": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "compact",
+      "kind": "think",
+      "title": "Compact conversation",
+      "status": "completed",
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "contextCompaction": {
+              "version": 1
+            }
+          }
+        }
+      }
+    }
+  ],
+  "elicitation": [
+    {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "ask",
+      "status": "completed",
+      "rawOutput": {
+        "action": "accept"
+      }
+    }
+  ],
+  "mcpStartup": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "mcp_startup.db",
+      "kind": "other",
+      "title": "mcp__db__startup",
+      "status": "failed",
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "[codex-acp forwarded startup error] MCP server `db` failed to start: boom"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -41,7 +41,13 @@ type TerminalSnapshot = {
 
 /** Maps Codex-owned background terminals to the AIR async task extension. */
 export class CodexBackgroundTerminalTasks {
+    /** The live tasks. A task leaves the map when it ends, so the map holds only the running commands. */
     private readonly tasks = new Map<string, Task>();
+    /**
+     * The thread of each task that ended while Codex can still list it, for example from a list that started
+     * before the end. A task leaves the map when a list of its thread no longer names it.
+     */
+    private readonly ended = new Map<string, string>();
     private readonly syncs = new Map<string, PendingSync>();
     private appServerGeneration = 0;
     private appServerQueriesEnabled = true;
@@ -71,11 +77,10 @@ export class CodexBackgroundTerminalTasks {
             await this.observeCommandCompleted(notification.params.item, threadId);
             return;
         }
-        if (notification.method === "turn/completed") {
-            await this.reconcile(threadId, sessionId);
-            return;
-        }
-        if (notification.method === "item/started") {
+        // Codex sends no event when a command moves to the background or its background process exits, so the
+        // adapter lists the background terminals. It does so only while a command of the thread runs. The turn end
+        // does not wait for the list: a background task outlives the turn.
+        if (notification.method === "turn/completed" || (notification.method === "item/started" && this.hasRunningTask(threadId))) {
             this.refresh(threadId, sessionId);
         }
     }
@@ -133,6 +138,7 @@ export class CodexBackgroundTerminalTasks {
         for (const terminal of snapshot.terminals) {
             if (!this.queryIsCurrent(snapshot.generation)) return;
             if (!itemIds.has(terminal.itemId)) continue;
+            if (this.ended.has(wireTaskId(this.rootSessionId, threadId, terminal.itemId))) continue;
             const task = this.remember(threadId, sessionId, terminal);
             if (task.publication === "unpublished" && task.state === "running") await this.announce(task);
         }
@@ -141,7 +147,7 @@ export class CodexBackgroundTerminalTasks {
     async finishAll(state: TerminalState): Promise<void> {
         if (!this.isActive()) return;
         const errors: unknown[] = [];
-        for (const task of this.tasks.values()) {
+        for (const task of [...this.tasks.values()]) {
             try {
                 await this.finish(task, state);
             } catch (error) {
@@ -209,7 +215,22 @@ export class CodexBackgroundTerminalTasks {
         this.appServerGeneration += 1;
         this.appServerQueriesEnabled = false;
         this.tasks.clear();
+        this.ended.clear();
         this.syncs.clear();
+    }
+
+    private hasRunningTask(threadId: string): boolean {
+        for (const task of this.tasks.values()) {
+            if (task.threadId === threadId && task.state === "running") return true;
+        }
+        return false;
+    }
+
+    /** Forgets a task that ended and whose end the client has, or never needs. */
+    private forget(task: Task): void {
+        if (this.tasks.get(task.asyncTaskId) !== task) return;
+        this.tasks.delete(task.asyncTaskId);
+        this.ended.set(task.asyncTaskId, task.threadId);
     }
 
     private async syncThread(threadId: string, sessionId: string): Promise<void> {
@@ -217,14 +238,19 @@ export class CodexBackgroundTerminalTasks {
         if (snapshot === null || !this.queryIsCurrent(snapshot.generation)) return;
 
         const liveTaskIds = new Set<string>();
+        const listedTaskIds = new Set(snapshot.terminals.map(terminal => wireTaskId(this.rootSessionId, threadId, terminal.itemId)));
+        for (const [taskId, taskThreadId] of [...this.ended]) {
+            if (taskThreadId === threadId && !listedTaskIds.has(taskId)) this.ended.delete(taskId);
+        }
         for (const terminal of snapshot.terminals) {
             if (!this.queryIsCurrent(snapshot.generation)) return;
             liveTaskIds.add(terminal.itemId);
+            if (this.ended.has(wireTaskId(this.rootSessionId, threadId, terminal.itemId))) continue;
             const task = this.remember(threadId, sessionId, terminal);
             if (task.publication === "unpublished" && task.state === "running") await this.announce(task);
         }
 
-        for (const task of this.tasks.values()) {
+        for (const task of [...this.tasks.values()]) {
             if (!this.queryIsCurrent(snapshot.generation)) return;
             if (task.threadId === threadId
                 && task.publication === "published"
@@ -342,6 +368,7 @@ export class CodexBackgroundTerminalTasks {
         }
         if (task.announcement !== null) await task.announcement;
         if (task.publication === "published") await this.publishTerminalState(task);
+        else this.forget(task);
     }
 
     private async publishTerminalState(task: Task): Promise<void> {
@@ -360,6 +387,7 @@ export class CodexBackgroundTerminalTasks {
         try {
             await terminalUpdate;
             task.terminalPublished = true;
+            this.forget(task);
         } finally {
             if (task.terminalUpdate === terminalUpdate) task.terminalUpdate = null;
         }

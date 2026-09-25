@@ -39,7 +39,6 @@
 ### Performance Improvements
 
 * derive file change reports from turn diffs ([#518](https://github.com/agentclientprotocol/codex-acp/issues/518)) ([caddefe](https://github.com/agentclientprotocol/codex-acp/commit/caddefe56ff55a3f0827aa8ad60d03779f168425))
-* supply validated diff statistics to ACP clients ([#501](https://github.com/agentclientprotocol/codex-acp/issues/501)) ([989a8f1](https://github.com/agentclientprotocol/codex-acp/commit/989a8f1735f2465f3db2e8acfa00a4da8f352c00))
 
 ## [1.11.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.10.0...v1.11.0) (2026-09-09)
 

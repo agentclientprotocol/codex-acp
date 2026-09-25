@@ -92,10 +92,11 @@ describe("agent file-change report lifecycle", () => {
         vi.clearAllMocks();
     });
 
-    it("advertises the AIR capability", async () => {
+    it("advertises the AIR capability to AIR", async () => {
         const fixture = createCodexMockTestFixture();
         const response = await fixture.getCodexAcpAgent().initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: []}}}},
         });
 
         expect(response._meta).toMatchObject({

@@ -25,12 +25,7 @@
           "toolCallId": "history-compaction",
           "kind": "think",
           "title": "Compact conversation",
-          "status": "completed",
-          "_meta": {
-            "contextCompaction": {
-              "version": 1
-            }
-          }
+          "status": "completed"
         }
       }
     ]

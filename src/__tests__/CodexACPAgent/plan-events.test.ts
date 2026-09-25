@@ -2,10 +2,11 @@ import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import type {ServerNotification} from "../../app-server";
 import {AgentMode} from "../../AgentMode";
 import type {SessionState} from "../../CodexAcpServer";
-import {CodexEventHandler} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
+import {ClientCapabilities} from "../../tool-calls/ClientCapabilities";
 import {
     createCodexMockTestFixture,
+    createTestEventHandler,
     createTestSessionState,
     setupPromptAndSendNotifications,
     type CodexMockTestFixture,
@@ -30,7 +31,7 @@ describe("CodexEventHandler - plan events", () => {
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
     });
 
-    it("emits the authoritative completed plan after buffering deltas", async () => {
+    it("streams plan deltas as message text and keeps them when the completed plan differs", async () => {
         const notifications: ServerNotification[] = [
             {
                 method: "item/started",
@@ -85,7 +86,7 @@ describe("CodexEventHandler - plan events", () => {
         );
     });
 
-    it("falls back to buffered deltas when the completed plan is empty", async () => {
+    it("sends nothing more when the completed plan is empty after streamed deltas", async () => {
         const notifications: ServerNotification[] = [
             {
                 method: "item/plan/delta",
@@ -181,14 +182,18 @@ describe("CodexEventHandler - plan events", () => {
     });
 
     describe("plan update coalescing", () => {
-        function createHandler(
-            notify = vi.fn(async (_method: unknown, _params: unknown) => {}),
-        ) {
+        function createHandler(notify = vi.fn(async (_method: unknown, _params: unknown) => {})) {
             const connection = {
                 notify,
                 request: vi.fn(),
             } as unknown as AcpClientConnection;
-            const handler = new CodexEventHandler(connection, sessionState, true);
+            const handler = createTestEventHandler(connection, {
+                ...sessionState,
+                clientCapabilities: ClientCapabilities.from({
+                    plan: {},
+                    _meta: {terminal_output_delta: true, jetbrains: {air: {version: 1}}},
+                }),
+            });
             const planUpdates = () => notify.mock.calls
                 .map(call => call[1] as {update?: {sessionUpdate?: string, plan?: {planId: string, content: string}}})
                 .filter(params => params.update?.sessionUpdate === "plan_update")

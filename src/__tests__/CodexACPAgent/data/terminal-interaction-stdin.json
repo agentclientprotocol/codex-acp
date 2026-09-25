@@ -7,8 +7,8 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-123",
         "_meta": {
-          "terminal_output_delta": {
-            "data": "\ncontinue\n",
+          "terminal_input": {
+            "data": "continue",
             "terminal_id": "command-123"
           }
         }

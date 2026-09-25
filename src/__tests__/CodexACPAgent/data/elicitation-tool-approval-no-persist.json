@@ -8,6 +8,14 @@
         "kind": "execute",
         "status": "pending",
         "title": "MCP tool call approval",
+        "rawInput": {
+          "serverName": "tool-server",
+          "description": "Allow tool call?",
+          "schema": {
+            "type": "object",
+            "properties": {}
+          }
+        },
         "content": [
           {
             "type": "content",
@@ -16,29 +24,19 @@
               "text": "Allow tool call?"
             }
           }
-        ],
-        "rawInput": {
-          "serverName": "tool-server",
-          "description": "Allow tool call?",
-          "schema": {
-            "type": "object",
-            "properties": {}
-          }
-        }
+        ]
       },
       "_meta": "_meta",
       "options": [
         {
           "optionId": "allow_once",
           "name": "Allow",
-          "kind": "allow_once",
-          "_meta": "_meta"
+          "kind": "allow_once"
         },
         {
           "optionId": "cancel",
           "name": "Cancel",
-          "kind": "reject_once",
-          "_meta": "_meta"
+          "kind": "reject_once"
         }
       ]
     }
@@ -53,16 +51,6 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "elicitation:test-session-id:tool-server:1",
         "status": "completed",
-        "title": "MCP tool call approval",
-        "content": [
-          {
-            "type": "content",
-            "content": {
-              "type": "text",
-              "text": "Allow tool call?"
-            }
-          }
-        ],
         "rawOutput": {
           "action": "accept"
         }

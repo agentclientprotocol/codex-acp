@@ -1,8 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import type * as acp from "@agentclientprotocol/sdk";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
@@ -147,9 +144,11 @@ describe("CodexACPAgent - loadSession", () => {
             sandbox: {type: "dangerFullAccess"},
             reasoningEffort: model.defaultReasoningEffort,
         });
-        appServer.threadReadWithHistory = vi.fn().mockImplementation((threadId) => {
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread: root});
+        // The adapter reads one turn of a child for each generation.
+        appServer.threadRead = vi.fn().mockImplementation(({threadId}) => {
             if (threadId === "orphan-history") return Promise.reject(new Error("missing child history"));
-            return Promise.resolve({thread: threadId === root.id ? root : child});
+            return Promise.resolve({thread: {...child, historyMode: "legacy"}});
         });
         appServer.threadBackgroundTerminalsList = vi.fn().mockImplementation(({threadId}) => Promise.resolve({
             data: threadId === "child-history"
@@ -427,6 +426,89 @@ describe("CodexACPAgent - loadSession", () => {
         );
     });
 
+    it("closes the session again when a history page fails after the replay started", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread: {id: "session-1", historyMode: "paginated", turns: [], cwd: "/test/project", name: null, preview: ""},
+            itemsBackwardsCursor: "item:last",
+            model: model.id,
+            modelProvider: "openai",
+            cwd: "/test/project",
+            approvalPolicy: "never",
+            sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        const message = (id: string) => ({turnId: "turn-1", item: {type: "agentMessage", id, text: id, phase: null, memoryCitation: null, delivery: null, questions: null}});
+        appServer.threadItemsList = vi.fn()
+            .mockResolvedValueOnce({data: [message("last")], nextCursor: null, backwardsCursor: null})
+            .mockResolvedValueOnce({data: [message("first")], nextCursor: "page-2", backwardsCursor: null})
+            .mockRejectedValueOnce(new Error("History unavailable"));
+        const closeSpy = vi.spyOn(client, "closeSession").mockResolvedValue(undefined as never);
+
+        await agent.initialize({protocolVersion: 1});
+        await expect(agent.loadSession({sessionId: "session-1", cwd: "/test/project", mcpServers: []}))
+            .rejects.toThrow("History unavailable");
+
+        expect(closeSpy).toHaveBeenCalledWith("session-1");
+        expect(() => agent.getSessionState("session-1")).toThrow();
+    });
+
+    it("stops the history read when the client closes the session during the load", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread: {id: "session-1", historyMode: "paginated", turns: [], cwd: "/test/project", name: null, preview: ""},
+            itemsBackwardsCursor: "item:last",
+            model: model.id,
+            modelProvider: "openai",
+            cwd: "/test/project",
+            approvalPolicy: "never",
+            sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        const message = (id: string) => ({turnId: "turn-1", item: {type: "agentMessage", id, text: id, phase: null, memoryCitation: null, delivery: null, questions: null}});
+        let closed: Promise<unknown> = Promise.resolve();
+        appServer.threadItemsList = vi.fn()
+            .mockResolvedValueOnce({data: [message("last")], nextCursor: null, backwardsCursor: null})
+            .mockResolvedValueOnce({data: [message("first")], nextCursor: "page-2", backwardsCursor: null})
+            .mockImplementationOnce(async () => {
+                closed = agent.closeSession({sessionId: "session-1"});
+                await closed;
+                return {data: [message("second")], nextCursor: "page-3", backwardsCursor: null};
+            })
+            .mockResolvedValue({data: [message("more")], nextCursor: "page-3", backwardsCursor: null});
+        const closeSpy = vi.spyOn(client, "closeSession").mockResolvedValue(undefined as never);
+
+        await agent.initialize({protocolVersion: 1});
+        await expect(agent.loadSession({sessionId: "session-1", cwd: "/test/project", mcpServers: []}))
+            .rejects.toMatchObject({code: -32600, data: "Session session-1 is closing"});
+        await closed;
+
+        // The page that the close interrupted is the last page read. The load does not close the session again.
+        expect(appServer.threadItemsList).toHaveBeenCalledTimes(3);
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+        const texts = JSON.stringify(fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0]));
+        expect(texts).toContain("first");
+        expect(texts).not.toContain("second");
+    });
+
     it("should not recover session mcp servers during loadSession when request omits them", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -517,275 +599,6 @@ describe("CodexACPAgent - loadSession", () => {
         });
 
         expect(codexAcpAgent.getSessionState("session-1").sessionMcpServers).toEqual([]);
-    });
-
-    it("should recover response item function calls when app-server history omits tool items", async () => {
-        const fixture = createCodexMockTestFixture();
-        const codexAcpAgent = fixture.getCodexAcpAgent();
-        const codexAcpClient = fixture.getCodexAcpClient();
-        const codexAppServerClient = fixture.getCodexAppServerClient();
-        const tempDir = await mkdtemp(join(tmpdir(), "codex-acp-rollout-history-"));
-
-        try {
-            const rolloutPath = join(tempDir, "rollout.jsonl");
-            const rolloutRecords = [
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "message",
-                        role: "user",
-                        content: [{ type: "input_text", text: "# AGENTS.md\n\nHidden bootstrap context" }],
-                    },
-                },
-                {
-                    type: "event_msg",
-                    payload: {
-                        type: "user_message",
-                        message: "List the files",
-                        images: [],
-                        local_images: [],
-                        text_elements: [],
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "message",
-                        role: "user",
-                        content: [{ type: "input_text", text: "List the files" }],
-                    },
-                },
-                {
-                    type: "event_msg",
-                    payload: {
-                        type: "agent_reasoning",
-                        text: "Need to inspect the directory.",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "reasoning",
-                        summary: [],
-                        content: [],
-                        encrypted_content: null,
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call",
-                        name: "exec_command",
-                        arguments: JSON.stringify({
-                            cmd: "rg \"Service\" src | head -n 20",
-                            workdir: "/test/project",
-                            yield_time_ms: 1000,
-                        }),
-                        call_id: "call-rg",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call_output",
-                        call_id: "call-rg",
-                        output: "Chunk ID: search123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nsrc/service.ts:export class Service {}\n",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call",
-                        name: "exec_command",
-                        arguments: JSON.stringify({
-                            cmd: "rg \"Missing\" src",
-                            workdir: "/test/project",
-                            yield_time_ms: 1000,
-                        }),
-                        call_id: "call-rg-failed",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call_output",
-                        call_id: "call-rg-failed",
-                        output: "Chunk ID: search456\nWall time: 0.0000 seconds\nProcess exited with code 1\nOutput:\n",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call",
-                        name: "exec_command",
-                        arguments: JSON.stringify({
-                            cmd: "nl -ba src/index.ts | sed -n '1,40p'",
-                            workdir: "/test/project",
-                            yield_time_ms: 1000,
-                        }),
-                        call_id: "call-read",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call_output",
-                        call_id: "call-read",
-                        output: "Chunk ID: read123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\n     1\tconsole.log('hi');\n",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call",
-                        name: "exec_command",
-                        arguments: JSON.stringify({
-                            cmd: "ls",
-                            workdir: "/test/project",
-                            yield_time_ms: 1000,
-                        }),
-                        call_id: "call-ls",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call_output",
-                        call_id: "call-ls",
-                        output: "Chunk ID: abc123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nREADME.md\nsrc\n",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "message",
-                        role: "assistant",
-                        content: [{ type: "output_text", text: "The directory contains README.md and src." }],
-                        phase: "final_answer",
-                    },
-                },
-            ];
-            await writeFile(
-                rolloutPath,
-                `${rolloutRecords.map((record) => JSON.stringify(record)).join("\n")}\n`,
-                "utf8",
-            );
-
-            codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
-            codexAcpClient.getAccount = vi.fn().mockResolvedValue({
-                account: null,
-                requiresOpenaiAuth: false,
-            });
-            codexAcpClient.listSkills = vi.fn().mockResolvedValue({ data: [] });
-
-            const model = createTestModel({ id: "gpt-5.2", displayName: "GPT-5.2" });
-            codexAppServerClient.listModels = vi.fn().mockResolvedValue({
-                data: [model],
-                nextCursor: null,
-            });
-
-            const thread: Thread = {
-                id: "session-legacy",
-                sessionId: "session-legacy",
-                parentThreadId: null,
-                threadSource: null,
-                originator: null,
-                forkedFromId: null,
-                preview: "List the files",
-                ephemeral: false,
-                modelProvider: "openai",
-                model: null,
-                reasoningEffort: null,
-                createdAt: 123,
-                updatedAt: 124,
-                recencyAt: null,
-                status: { type: "idle" },
-                path: rolloutPath,
-                cwd: "/test/project",
-                cliVersion: "0.139.0",
-                section: null,
-                sectionEnteredAt: null,
-                projectId: null,
-                historyMode: "legacy",
-                source: "vscode",
-                agentNickname: null,
-                agentRole: null,
-                gitInfo: null,
-                name: null,
-                turns: [
-                    {
-                        id: "turn-1",
-                        itemsView: "full",
-                        status: "completed",
-                        error: null,
-                        startedAt: null,
-                        completedAt: null,
-                        durationMs: null,
-                        items: [
-                            {
-                                type: "userMessage",
-                                id: "item-user-1",
-                                clientId: null,
-                                content: [{ type: "text", text: "List the files", text_elements: [] }],
-                            },
-                            {
-                                type: "reasoning",
-                                id: "item-reasoning-1",
-                                summary: ["Need to inspect the directory."],
-                                content: [],
-                            },
-                            {
-                                type: "plan",
-                                id: "item-plan-1",
-                                text: "Inspect project files",
-                            },
-                            {
-                                type: "agentMessage",
-                                id: "item-agent-1",
-                                text: "The directory contains README.md and src.",
-                                phase: null,
-                                memoryCitation: null,
-                                delivery: null,
-                                questions: null,
-                            },
-                        ],
-                    },
-                ],
-            };
-
-            codexAppServerClient.threadResume = vi.fn().mockResolvedValue({
-                thread,
-                model: model.id,
-                modelProvider: "openai",
-                cwd: "/test/project",
-                approvalPolicy: "never",
-                sandbox: { type: "dangerFullAccess" },
-                reasoningEffort: model.defaultReasoningEffort,
-            });
-            codexAppServerClient.threadReadWithHistory = vi.fn().mockResolvedValue({
-                thread,
-            });
-
-            await codexAcpAgent.initialize({
-                protocolVersion: 1,
-                clientCapabilities: {
-                    _meta: {
-                        terminal_output: true,
-                    },
-                },
-            });
-            await codexAcpAgent.loadSession({
-                sessionId: thread.id,
-                cwd: "/test/project",
-                mcpServers: [],
-            });
-
-            await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
-                "data/load-session-response-item-history-fallback.json",
-            );
-        } finally {
-            await rm(tempDir, { recursive: true, force: true });
-        }
     });
 
     it("publishes MCP startup failure for explicitly requested servers during loadSession", async () => {
@@ -896,7 +709,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         await vi.waitFor(() => {
             const dump = fixture.getAcpConnectionDump([]);
-            expect(dump).toContain('"toolCallId": "mcp_startup.broken-mcp"');
+            expect(dump).toMatch(/"toolCallId": "mcp_startup\.broken-mcp\.[0-9a-f-]{36}"/);
             expect(dump).toContain('MCP server `broken-mcp` failed to start: boom');
         });
     });

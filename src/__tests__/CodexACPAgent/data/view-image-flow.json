@@ -6,8 +6,8 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "view-image-1",
-        "kind": "read",
         "name": "view_image",
+        "kind": "read",
         "title": "View Image /tmp/codex/input.png",
         "status": "completed",
         "content": [

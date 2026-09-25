@@ -6,7 +6,11 @@ import type {
     FileChangeRequestApprovalParams,
     PermissionsRequestApprovalParams,
 } from "../../app-server/v2";
-import {createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture} from "../acp-test-utils";
+import {
+    createCodexMockTestFixture,
+    createTestSessionState,
+    type CodexMockTestFixture,
+} from "../acp-test-utils";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
 import {ApprovalOptionId} from "../../permissions/option-ids";
@@ -20,9 +24,15 @@ describe("Approval Events", () => {
     let fixture: CodexMockTestFixture;
     const sessionId = "test-session-id";
 
-    beforeEach(() => {
+    beforeEach(async () => {
         fixture = createCodexMockTestFixture();
         vi.clearAllMocks();
+        // The permission presentation of these tests is the AIR shape.
+        await fixture.getCodexAcpAgent().initialize({
+            protocolVersion: 1,
+            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: []}}}},
+        });
+        fixture.clearAcpConnectionDump();
     });
 
     function setupSessionWithPendingPrompt() {
@@ -130,6 +140,46 @@ describe("Approval Events", () => {
             await finish(prompt);
         });
 
+        it("keeps the status and the title of a started command and carries the raw input", async () => {
+            const prompt = setupSessionWithPendingPrompt();
+            fixture.sendServerNotification({
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "commandExecution",
+                        id: "command-item",
+                        pluginId: null,
+                        scriptPath: null,
+                        command: "npm test",
+                        cwd: "/workspace",
+                        processId: null,
+                        source: "agent",
+                        status: "inProgress",
+                        commandActions: [],
+                        aggregatedOutput: null,
+                        exitCode: null,
+                        durationMs: null,
+                    },
+                },
+            });
+            await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+            fixture.clearAcpConnectionDump();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowOnce}});
+
+            await fixture.sendServerRequest("item/commandExecution/requestApproval", commandParams(["accept", "cancel"]));
+
+            // The request carries the title that the tool call already shows, so the client keeps it.
+            expect(permissionRequest().toolCall).toEqual({
+                toolCallId: "command-item",
+                title: "npm test",
+                rawInput: {command: "npm test", cwd: "/workspace"},
+            });
+            await finish(prompt);
+        });
+
         it("emits an autonomous ACP v1 snapshot and maps explicit reject to decline", async () => {
             const prompt = setupSessionWithPendingPrompt();
             fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.Decline}});
@@ -170,15 +220,15 @@ describe("Approval Events", () => {
                         kind: "reject_once",
                     },
                 ],
-                _meta: {permission: {
+                _meta: {jetbrains: {air: {version: 1, permission: {
                     version: 1,
                     title: "Run command?",
                     description: "Needed to verify the changes.",
-                }},
+                }}}},
             });
             for (const option of permissionRequest().options) {
-                if (option._meta?.permission) {
-                    expect(option._meta.permission).not.toHaveProperty("changes");
+                if (option._meta?.jetbrains?.air?.permission) {
+                    expect(option._meta.jetbrains.air.permission).not.toHaveProperty("changes");
                 }
             }
             expect(JSON.stringify(permissionRequest())).not.toContain("exact_command");
@@ -454,7 +504,7 @@ describe("Approval Events", () => {
                     {name: "No, and tell Codex what to do differently"},
                 ],
             });
-            expect(permissionRequest()._meta.permission.description).toBe("Needed to verify the changes.");
+            expect(permissionRequest()._meta.jetbrains.air.permission.description).toBe("Needed to verify the changes.");
             await finish(prompt);
         });
 
@@ -475,11 +525,11 @@ describe("Approval Events", () => {
                     }),
                 );
                 expect(response).toEqual({decision});
-                expect(permissionRequest()._meta).toEqual({permission: {
+                expect(permissionRequest()._meta).toEqual({jetbrains: {air: {version: 1, permission: {
                     version: 1,
                     title: "Allow network access?",
                     description: "Needed to verify the changes.",
-                }});
+                }}}});
                 expect(permissionRequest().toolCall).toMatchObject({
                     title: `${protocol} network access to example.test`,
                     content: [{type: "content", content: {type: "text", text: `${protocol} access to example.test`}}],
@@ -613,19 +663,18 @@ describe("Approval Events", () => {
             );
 
             expect(response).toEqual({decision: "acceptForSession"});
+            // The file change already started, so the request keeps its status and kind.
+            expect(permissionRequest().toolCall).toEqual({
+                toolCallId: "file-item",
+                title: "Editing files",
+                locations: [{path: "/workspace/a.ts"}, {path: "/workspace/b.ts"}],
+            });
             expect(permissionRequest()).toMatchObject({
-                toolCall: {
-                    toolCallId: "file-item",
-                    kind: "edit",
-                    status: "pending",
-                    title: "Edit files",
-                    locations: [{path: "/workspace/a.ts"}, {path: "/workspace/b.ts"}],
-                },
-                _meta: {permission: {
+                _meta: {jetbrains: {air: {version: 1, permission: {
                     version: 1,
                     title: "Make edits?",
                     description: "Apply the generated edits.",
-                }},
+                }}}},
             });
             expect(JSON.stringify(permissionRequest())).not.toContain("grantRoot");
             expect(JSON.stringify(permissionRequest())).not.toContain("writes under");
@@ -709,11 +758,11 @@ describe("Approval Events", () => {
                             'write Codex filesystem scope {"kind":"project_roots","subpath":"build"}',
                         ].join("\n")}}],
                     },
-                    _meta: {permission: {
+                    _meta: {jetbrains: {air: {version: 1, permission: {
                         version: 1,
                         title: "Grant permissions?",
                         description: "The build needs generated output access.",
-                    }},
+                    }}}},
                 });
                 expect(permissionRequest().options).toEqual([
                     {

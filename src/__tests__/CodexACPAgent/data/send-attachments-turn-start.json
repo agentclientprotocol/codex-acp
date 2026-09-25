@@ -1,18 +1,5 @@
 {
   "eventType": "request",
-  "method": "skills/list",
-  "params": {
-    "cwds": [
-      "/test/cwd"
-    ],
-    "forceReload": true
-  }
-}
-{
-  "eventType": "response"
-}
-{
-  "eventType": "request",
   "method": "turn/start",
   "params": {
     "threadId": "threadId",

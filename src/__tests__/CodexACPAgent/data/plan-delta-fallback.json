@@ -8,11 +8,38 @@
         "messageId": "plan-2",
         "content": {
           "type": "text",
-          "text": "### Buffered plan\n\n1. Use the buffered fallback."
+          "text": "### Buffered plan\n\n"
         },
         "_meta": {
-          "codex": {
-            "phase": "final_answer"
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "final_answer"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "plan-2",
+        "content": {
+          "type": "text",
+          "text": "1. Use the buffered fallback."
+        },
+        "_meta": {
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "final_answer"
+            }
           }
         }
       }

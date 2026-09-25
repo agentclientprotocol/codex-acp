@@ -4,10 +4,11 @@ import type { ErrorNotification, TurnCompletedNotification } from "../../app-ser
 import type { SessionState } from "../../CodexAcpServer";
 import {
     createCodexMockTestFixture,
+    createTestEventHandler,
     createTestSessionState,
+    deferred,
 } from "../acp-test-utils";
 import {logger} from "../../Logger";
-import {CodexEventHandler} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import {CodexCommands, type CommandHandleResult} from "../../CodexCommands";
 
@@ -628,7 +629,7 @@ describe("CodexEventHandler - auth error events", () => {
                     updates.push(params.update);
                 }),
             } as unknown as AcpClientConnection;
-            const handler = new CodexEventHandler(connection, state, false, true);
+            const handler = createTestEventHandler(connection, state, {typedSessionFailures: true});
             await handler.handleSessionScopedNotification({
                 method: "error",
                 params: {
@@ -683,7 +684,7 @@ describe("CodexEventHandler - auth error events", () => {
                 updates.push(params.update);
             }),
         } as unknown as AcpClientConnection;
-        const handler = new CodexEventHandler(connection, state, false, true, "test-epoch");
+        const handler = createTestEventHandler(connection, state, {typedSessionFailures: true});
         const retryError = (message: string) => ({
             method: "error" as const,
             params: {
@@ -822,6 +823,37 @@ describe("CodexEventHandler - auth error events", () => {
     );
 });
 
+describe("CodexEventHandler - error text once", () => {
+    it("does not repeat the prompt error message as agent text", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "limited-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Usage limits were exceeded",
+            codexErrorInfo: "usageLimitExceeded",
+            additionalDetails: null,
+            misalignment: null,
+        });
+
+        expect(result).toMatchObject({data: {message: "Usage limits were exceeded"}});
+        expect(JSON.stringify(updates)).not.toContain("Usage limits were exceeded");
+    });
+
+    it("keeps the message as agent text when the prompt error carries other details", async () => {
+        const {updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "details-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Provider returned 401",
+            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: 401}},
+            additionalDetails: "HTTP status 401",
+            misalignment: null,
+        });
+
+        expect(JSON.stringify(updates)).toContain("Provider returned 401");
+    });
+});
+
 async function runPromptWithError(
     sessionState: SessionState,
     turnError: ErrorNotification["error"],
@@ -958,12 +990,4 @@ function createTurn(
         completedAt: null,
         durationMs: null,
     };
-}
-
-function deferred<T>(): {promise: Promise<T>, resolve: (value: T) => void} {
-    let resolve: (value: T) => void = () => {};
-    const promise = new Promise<T>((innerResolve) => {
-        resolve = innerResolve;
-    });
-    return {promise, resolve};
 }
