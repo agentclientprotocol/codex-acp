@@ -1629,6 +1629,59 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         expect(router.takeBufferedNotifications()).toHaveLength(count);
     });
 
+    it("drops the buffer of a child that ends before Codex reports its activity", async () => {
+        const ended: string[] = [];
+        const router = new CodexSubagentEventRouter(
+            sessionId,
+            true,
+            new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+            childSessionId => ended.push(childSessionId),
+        );
+        const rootItem = (item: Record<string, unknown>) => router.handle({
+            method: "item/started",
+            params: {threadId: sessionId, turnId: "root-turn", startedAtMs: 0, item},
+        } as never);
+        await rootItem({
+            type: "collabAgentToolCall", id: "dropped-spawn", tool: "spawnAgent", status: "inProgress",
+            senderThreadId: sessionId, receiverThreadIds: ["dropped-child"], prompt: "Dropped task",
+            model: null, reasoningEffort: null, agentsStates: {"dropped-child": {status: "running", message: null}},
+        });
+        for (let index = 0; index < 3; index++) {
+            expect(await router.handle({
+                method: "item/agentMessage/delta",
+                params: {threadId: "dropped-child", turnId: "child-turn", itemId: `dropped-${index}`, delta: "x"},
+            })).toBe(true);
+        }
+
+        await router.handle({
+            method: "turn/completed",
+            params: {
+                threadId: "dropped-child",
+                turn: {
+                    id: "child-turn", items: [], itemsView: "notLoaded", status: "completed", error: null,
+                    startedAt: null, completedAt: null, durationMs: null,
+                },
+            },
+        } as never);
+        expect(ended).toEqual(["dropped-child"]);
+        // The ended spawn keeps what a reopen needs, and no buffer.
+        expect((router as unknown as {terminalPendingSpawns: Map<string, unknown>}).terminalPendingSpawns.get("dropped-child"))
+            .toEqual({parentThreadId: sessionId, task: "Dropped task"});
+
+        expect(await rootItem({
+            type: "subAgentActivity", id: "dropped-activity", kind: "started",
+            agentThreadId: "dropped-child", agentPath: "/root/dropped",
+        })).toBe(true);
+        await rootItem({
+            type: "collabAgentToolCall", id: "dropped-resume", tool: "resumeAgent", status: "completed",
+            senderThreadId: sessionId, receiverThreadIds: ["dropped-child"], prompt: null,
+            model: null, reasoningEffort: null, agentsStates: {"dropped-child": {status: "running", message: null}},
+        });
+
+        expect(await router.waitForMaterializedSession("dropped-child")).toBe("dropped-child:generation:2");
+        expect(router.takeBufferedNotifications()).toEqual([]);
+    });
+
     it("publishes a terminal child state exactly once under concurrent completion", async () => {
         const router = new CodexSubagentEventRouter(
             sessionId,
