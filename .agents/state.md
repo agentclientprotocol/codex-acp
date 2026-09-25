@@ -50,10 +50,13 @@ goal FAIL on v2:**
   Fix: per session, drain the old client + close out **before** registering the tracker and resuming
   (old process already exited, `:1643`). → programmer slice **P4(c)** in flight.
 - **D2 (v1+v2):** the cut-off turn's in-flight tool call stays `in_progress` forever (terminal
-  open); the old process's `item/completed` is lost. → **user decision pending** (v1-visible).
+  open); the old process's `item/completed` is lost. → **user (2026-09-25): fix on v1 + v2** (mark
+  in-flight tool calls `failed`, end terminals, in the restart close-out) → slice **P4(d)** after P4(c).
 - **D3 (pre-existing on `main`, v1+v2):** `session/new` then `providers/set|disable` before the first
   prompt → `thread/resume` "no rollout found" → -32603 "Failed to resume 1 session(s)", next prompt
-  "thread not found" (`:1546-1574`). → **user decision pending** (design).
+  "thread not found" (`:1546-1574`). → **user (2026-09-25): don't fix now**; leave a clear `FIXME`
+  comment at the restart resume loop describing the problem + document it in `readme-dev.md` Known
+  gaps → slice **P4(e)** (`docs:`), after P4(d). Then final full TCK → done.
 
 **10(f2) done (37bbc23 `fix:`):** `SessionState.awaitingClientLoad` (true for `operation ===
 "fork"`, false on load). `enqueueProviderUpdate` restart loop: captures `previousClient`; for every
