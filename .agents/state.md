@@ -6,8 +6,8 @@
 
 ## Current position in the sequencing plan
 
-Phase: **Phase 4 tail.** Prerequisite and topics 1-10 done; P4(a)-(c) done (2026-09-25). Rough
-progress ~96%.
+Phase: **DONE.** Prerequisite, topics 1-10 and Phase 4 (a)-(e) + final full TCK done (2026-09-25).
+Progress 100%.
 
 ### Resume here (for a fresh orchestrator)
 
@@ -16,7 +16,7 @@ flight; everything is committed** in codex-acp (branch `eugenethedev/acp-v2`; la
 `503f867`) and in the acp-tck fork (`main` @ `b15c7bd`, 6 local commits, **not pushed**; the user said
 don't push). Keep committing with explicit pathspecs. Suite: **974 pass / 26 skip**. `bun` is
 missing locally: programmers use `npm run build` for the TCK (see `.agents/tck/HOW-TO-RUN.md`).
-**P4(d) done (04222da `fix:`, TCK 5842518). P4(e) done (ce87145 `fix:` tracker clear on `turn/completed`; 2509fb6 `docs:` D3 FIXME + Known gaps). Next: final full TCK v1 + v2** (dispatched 2026-09-25; results → `.agents/tck/p4-final-full-v1-v2.md`). Topics 1-10 done; Phase 4 left:
+**P4(d) done (04222da `fix:`, TCK 5842518). P4(e) done (ce87145 `fix:` tracker clear on `turn/completed`; 2509fb6 `docs:` D3 FIXME + Known gaps). Final full TCK done (bb43b5d, `.agents/tck/p4-final-full-v1-v2.md`): v1 CONFORMANT 50/1 (SCHEMA-002)/5, v2 CONFORMANT 84/0/19, no deltas vs. topic 10.** **ACP v2 migration COMPLETE (2026-09-25).** Unscheduled leftovers: D3 (documented Known gap), `TitleGenerator` keeps the dead client after restart, Q3/Q5/Q6. Topics 1-10 done; Phase 4 left:
 P4(d), P4(e), final full TCK. Rough progress ~96%.
 
 **Standing user rules:** preserve v1 client-visible behavior (change v1 only to fix a real bug, with
@@ -243,7 +243,7 @@ is our `clientId`.
      item/completed but whose own turn already ended"; 2509fb6 `docs:` D3 `FIXME` before
      `replacement.resumeSession` (`CodexAcpServer.ts` ~1607) + `readme-dev.md` Known gaps bullet.
      Suite 978 / 26.
-   - **Final:** full TCK v1 + v2 (expect v1 50/1 SCHEMA-002/5, v2 84/0/19), record, done. Topic 10 and
+   - ~~**Final:**~~ full TCK v1 + v2 done (bb43b5d): v1 50/1 SCHEMA-002/5, v2 84/0/19, no deltas. Topic 10 and
      earlier slices are history (below).
 1. ~~**5b-2b**~~ done (programmer, small): Q1 option A (user decision) — on v2 the
    `ResponseItemHistoryFallback` contributes only its recovered tool calls (`tool_call` /
