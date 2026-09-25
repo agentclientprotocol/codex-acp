@@ -5,7 +5,7 @@
  * The caller then sends the standard ACP diff.
  */
 
-/** The largest patch text that the adapter sends. A larger change uses the standard ACP diff. */
+/** The largest diff or patch text that the adapter sends. The adapter sends no diff for a larger Codex diff. */
 export const DIFF_PATCH_MAX_BYTES = 1024 * 1024;
 
 /** Git reads a file as binary when its first 8000 bytes contain a NUL byte. */

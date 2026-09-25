@@ -173,7 +173,7 @@ function startFacts(item: CommandItem): ToolFacts {
     };
 }
 
-/** The start report of a command with one parsed action. The history fallback also uses it. */
+/** The start report of a command with one parsed action. */
 export function commandActionFacts(
     id: string,
     status: CommandExecutionStatus,
