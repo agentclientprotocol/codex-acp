@@ -165,6 +165,53 @@ describe('provider restart reinstalls the baseline turn tracker', () => {
         ]);
     });
 
+    it('v2: closes out the cut-off turn before a continuation turn Codex auto-starts right after resume', async () => {
+        const client = await connectSession(2);
+        closeClient = () => client.connection.close();
+
+        // An unowned (Codex-started) turn is already running when the restart begins.
+        client.emit(turnStarted());
+        await settle();
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}]);
+
+        const replacement = createReplacementCodexAcpClient();
+        vi.spyOn(client.agent as any, "restartCodexClient").mockResolvedValue(replacement.codexAcpClient);
+
+        // Simulate Codex auto-starting a continuation turn moments after `thread/resume`
+        // resolves, by emitting its `turn/started` as a side effect of `resumeSession` itself.
+        // The close-out for the cut-off turn must happen before this call, not after it.
+        const originalResumeSession = replacement.codexAcpClient.resumeSession.bind(replacement.codexAcpClient);
+        vi.spyOn(replacement.codexAcpClient, "resumeSession").mockImplementation(async (...args: Parameters<typeof originalResumeSession>) => {
+            const result = await originalResumeSession(...args);
+            replacement.emit(turnStarted("new-turn"));
+            return result;
+        });
+
+        await client.request(acpV2.methods.agent.providers.set, setProviderParams());
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"},
+            {state: "idle", stopReason: "cancelled"},
+            {state: "running"},
+        ]);
+        expect((client.agent as any).isSessionBusy(sessionId)).toBe(true);
+
+        replacement.emit(agentMessageDelta("Working on the goal", "new-turn"));
+        replacement.emit(turnCompleted("new-turn"));
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"},
+            {state: "idle", stopReason: "cancelled"},
+            {state: "running"},
+            {state: "idle", stopReason: "end_turn"},
+        ]);
+        expect(agentMessageChunks(client.transcript)).toEqual([
+            expect.objectContaining({sessionUpdate: "agent_message_chunk"}),
+        ]);
+    });
+
     it('v1: a turn still running at restart gets no new frames from the close-out (v2-only)', async () => {
         const client = await connectSession(1);
         closeClient = () => client.connection.close();

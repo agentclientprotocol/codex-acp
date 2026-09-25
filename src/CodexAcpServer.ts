@@ -1549,6 +1549,24 @@ export class CodexAcpServer {
                     // fork design (commit 69ca755) rather than pulling it into the new app-server.
                     continue;
                 }
+
+                // v2 only: a turn still running when the old process was killed never gets its
+                // `turn/completed` -- the old process's EOF just drops the notification -- which
+                // would otherwise leave the session wedged at `running` forever (an R13 MUST
+                // violation) and `isSessionBusy` stuck true. Drain the old client's queue first so
+                // an already-buffered `turn/completed` still clears this normally; only a turn
+                // genuinely orphaned by the restart gets force-closed. No-op on v1 (no state
+                // channel) and while a v2 prompt is in flight for the session (its own `idle`
+                // closes the state). This must happen before this session's tracker is registered
+                // and it's resumed: Codex can auto-start a continuation turn within a few ms of
+                // `thread/resume`'s response, and that turn's own `running` would otherwise be
+                // mistaken for the cut-off one and cancelled instead.
+                await previousClient.waitForSessionNotifications(session.sessionId);
+                if (session.codexReportedRunningTurnId !== null) {
+                    session.codexReportedRunningTurnId = null;
+                    await this.reportUnownedTurnState(session.sessionId, {state: "idle", stopReason: "cancelled"});
+                }
+
                 session.asyncTasks.setAppServer(replacement.appServerClient);
                 // Registered before `resumeSession`, so a goal turn Codex auto-starts within a
                 // few ms of `thread/resume`'s response can't slip past an empty subscription
@@ -1571,21 +1589,6 @@ export class CodexAcpServer {
                     resumeErrors.push(error);
                     logger.error(`Failed to resume session ${session.sessionId} after provider restart`, error);
                 }
-            }
-
-            // v2 only: a turn still running when the old process was killed never gets its
-            // `turn/completed` -- the old process's EOF just drops the notification -- which
-            // would otherwise leave the session wedged at `running` forever (an R13 MUST
-            // violation) and `isSessionBusy` stuck true. Drain the old client's queue first so an
-            // already-buffered `turn/completed` still clears this normally; only a turn genuinely
-            // orphaned by the restart gets force-closed. No-op on v1 (no state channel) and while
-            // a v2 prompt is in flight for the session (its own `idle` closes the state).
-            for (const session of this.sessions.values()) {
-                if (session.awaitingClientLoad) continue;
-                await previousClient.waitForSessionNotifications(session.sessionId);
-                if (session.codexReportedRunningTurnId === null) continue;
-                session.codexReportedRunningTurnId = null;
-                await this.reportUnownedTurnState(session.sessionId, {state: "idle", stopReason: "cancelled"});
             }
 
             if (resumeErrors.length > 0) {
