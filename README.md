@@ -100,6 +100,20 @@ Codex can keep a shell command running after a turn continues. AIR clients can s
 
 See [docs/async-tasks.md](docs/async-tasks.md) for the capability, lifecycle events, and stop request.
 
+### Client-only MCP servers
+
+By default, a session gets the MCP servers in the user's Codex configuration plus the client's `mcpServers`. A client that needs a session to have exactly its own servers sets `strictMcpConfig` in the request's `_meta`, on `session/new`, `session/load`, `session/resume` and `session/fork`:
+
+```json
+{
+  "cwd": "/path/to/project",
+  "mcpServers": [],
+  "_meta": { "codex": { "strictMcpConfig": true } }
+}
+```
+
+The adapter then disables every MCP server that Codex's configuration would load for `cwd`, and turns off the `apps`, `plugins` and `skill_mcp_dependency_install` features, which add MCP servers of their own. The rest of the configuration still applies. A client server whose name matches a configured one is rejected with `invalid_params`, because Codex would merge the two entries. Pass it under another name.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.

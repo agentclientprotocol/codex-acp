@@ -588,7 +588,7 @@ export class CodexAcpClient {
 
         const response = await this.resumeThread({
             excludeTurns: true,
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], readStrictMcpConfig(request._meta)),
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
@@ -609,11 +609,12 @@ export class CodexAcpClient {
 
     async forkSession(request: acp.ForkSessionRequest): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        const strictMcpConfig = readStrictMcpConfig(request._meta);
         return await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
             refreshSkills: (cwd, directories) => this.refreshSkills(cwd, directories),
             createSessionConfig: (cwd, directories, mcpServers) =>
-                this.createSessionConfig(cwd, directories, mcpServers),
+                this.createSessionConfig(cwd, directories, mcpServers, strictMcpConfig),
             getResumeModelProvider: () => this.getResumeModelProvider(),
             fetchAvailableModels: () => this.fetchAvailableModels(),
             createCurrentModelId: (models, model, reasoningEffort) =>
@@ -628,7 +629,7 @@ export class CodexAcpClient {
 
         const response = await this.resumeThread({
             excludeTurns: true,
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], readStrictMcpConfig(request._meta)),
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
@@ -669,7 +670,7 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadStart({
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers, readStrictMcpConfig(request._meta)),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });
@@ -807,7 +808,8 @@ export class CodexAcpClient {
     private async createSessionConfig(
         projectPath: string,
         additionalDirectories: string[],
-        mcpServers: Array<McpServer>
+        mcpServers: Array<McpServer>,
+        strictMcpConfig: boolean,
     ): Promise<JsonObject> {
         const sessionRoots = [projectPath, ...additionalDirectories];
         const activeProvider = this.gatewayConfig
@@ -830,14 +832,19 @@ export class CodexAcpClient {
             }])),
         };
         const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
-        if (mcpServers.length === 0) {
-            return configWithWorkspaceRoots;
-        }
-
         const requestedServers = mcpServers.map(mcp => ({
             name: sanitizeMcpServerName(mcp.name),
             server: mcp,
         }));
+
+        if (strictMcpConfig) {
+            return await this.createStrictMcpSessionConfig(projectPath, configWithWorkspaceRoots, requestedServers);
+        }
+
+        if (mcpServers.length === 0) {
+            return configWithWorkspaceRoots;
+        }
+
         let serversToConfigure = requestedServers;
         if (shouldDeduplicateMcpConflicts()) {
             // Prevents Codex from deep-merging incompatible field types, such as url and stdio schemas.
@@ -852,6 +859,54 @@ export class CodexAcpClient {
             ...configWithWorkspaceRoots,
             "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
         };
+    }
+
+    /**
+     * Session config for `_meta.codex.strictMcpConfig`: the session's MCP servers are
+     * exactly the client's. Every server Codex has configured is disabled by name, and
+     * the features that add MCP servers of their own are turned off.
+     */
+    private async createStrictMcpSessionConfig(
+        projectPath: string,
+        config: JsonObject,
+        requestedServers: Array<{ name: string, server: McpServer }>,
+    ): Promise<JsonObject> {
+        const configuredNames = await this.getEffectiveMcpServerNames(projectPath);
+        // A client server cannot replace a configured one: Codex deep-merges the two
+        // entries, so fields of the configured server would leak into the client's.
+        const conflicts = requestedServers
+            .map(mcp => mcp.name)
+            .filter(name => configuredNames.has(name));
+        if (conflicts.length > 0) {
+            throw RequestError.invalidParams(
+                undefined,
+                `_meta.codex.strictMcpConfig: MCP server name(s) ${conflicts.join(", ")} are also configured in Codex; pass them under different names`,
+            );
+        }
+
+        const features = isJsonObject(config["features"]) ? config["features"] : {};
+        return {
+            ...config,
+            features: {
+                ...features,
+                ...STRICT_MCP_DISABLED_FEATURES,
+            },
+            "mcp_servers": {
+                ...Object.fromEntries([...configuredNames].map(name => [name, {enabled: false}])),
+                ...Object.fromEntries(requestedServers.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+            },
+        };
+    }
+
+    /**
+     * Names of the MCP servers Codex will load for `projectPath`: the effective config
+     * only. Servers in disabled layers (an untrusted project, for example) never load,
+     * and naming them in the session config would create entries with no transport.
+     */
+    private async getEffectiveMcpServerNames(projectPath: string): Promise<Set<string>> {
+        const response = await this.codexClient.configRead({ includeLayers: false, cwd: projectPath });
+        const effectiveMcpServers = response?.config?.["mcp_servers"];
+        return new Set(isJsonObject(effectiveMcpServers) ? Object.keys(effectiveMcpServers) : []);
     }
 
     private async getConfigMcpServerNames(projectPath: string): Promise<Set<string>> {
@@ -1312,6 +1367,29 @@ interface GatewayConfig {
         http_headers: Record<string, string>,
         wire_api: WireApi
     }
+}
+
+/**
+ * Features that add MCP servers of their own. `strictMcpConfig` turns them off so a
+ * session's servers are exactly the ones the client passed.
+ */
+const STRICT_MCP_DISABLED_FEATURES = {
+    apps: false,
+    plugins: false,
+    skill_mcp_dependency_install: false,
+} as const;
+
+/** Reads `_meta.codex.strictMcpConfig`. Absent means false; any non-boolean is rejected. */
+function readStrictMcpConfig(meta?: Record<string, unknown> | null): boolean {
+    const codexMeta = meta?.["codex"] as JsonValue | undefined;
+    if (!isJsonObject(codexMeta) || !("strictMcpConfig" in codexMeta)) {
+        return false;
+    }
+    const value = codexMeta["strictMcpConfig"];
+    if (typeof value !== "boolean") {
+        throw RequestError.invalidParams(undefined, "_meta.codex.strictMcpConfig must be a boolean");
+    }
+    return value;
 }
 
 function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[] | undefined {
