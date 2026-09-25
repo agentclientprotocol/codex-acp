@@ -16,6 +16,8 @@ import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
+import {CodexEventHandler} from "../CodexEventHandler";
+import type {AccountUpdatedNotification} from "../app-server/v2";
 import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTerminalTasks";
 import {CodexSessionCompactions} from "../CodexSessionCompactions";
 import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
@@ -420,7 +422,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         collaborationMode: DEFAULT_COLLABORATION_MODE,
         fastModeEnabled: false,
         currentModelSupportsFast: false,
-        clientCapabilities: ClientCapabilities.DEFAULT.with({airClient: true, terminalOutputDelta: true}),
+        clientCapabilities: ClientCapabilities.from({_meta: {terminal_output_delta: true, jetbrains: {air: {version: 1}}}}),
         goalRevision: 0,
         sessionTitle: null,
         sessionTitleSource: "unknown",
@@ -430,6 +432,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
             sessionId,
             false,
             new ACPSessionConnection({notify: vi.fn(), request: vi.fn()} as AcpClientConnection, sessionId),
+            () => {},
         ),
         asyncTasks: new CodexBackgroundTerminalTasks(
             false,
@@ -558,4 +561,28 @@ export async function setupPromptAndSendNotifications(
         const dump = fixture.getAcpConnectionDump([]);
         expect(dump.length).toBeGreaterThan(0);
     });
+}
+
+/** Creates the event handler of a prompt with the given options and without the other capabilities. */
+export function createTestEventHandler(
+    connection: AcpClientConnection,
+    sessionState: SessionState,
+    options: {
+        typedSessionFailures?: boolean;
+        sessionFailureEpoch?: string;
+        onAccountUpdated?: (notification: AccountUpdatedNotification) => void;
+        collectTurnDiffs?: boolean;
+    } = {},
+): CodexEventHandler {
+    return new CodexEventHandler(
+        connection,
+        sessionState,
+        options.typedSessionFailures ?? false,
+        options.sessionFailureEpoch ?? "test-epoch",
+        sessionState.subagents,
+        options.onAccountUpdated,
+        options.collectTurnDiffs ?? false,
+        false,
+        false,
+    );
 }

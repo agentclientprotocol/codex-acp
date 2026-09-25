@@ -17,9 +17,9 @@ describe("CodexPlanStream", () => {
 
     it("sends the whole plan once and then only AIR content deltas", async () => {
         vi.useFakeTimers();
-        const {stream, updates} = createStream(ClientCapabilities.DEFAULT.with({
-            planUpdates: true,
-            air: {planContentDelta: true},
+        const {stream, updates} = createStream(ClientCapabilities.from({
+            plan: {},
+            _meta: {jetbrains: {air: {version: 1, capabilities: ["planContentDelta"]}}},
         }));
 
         stream.delta("plan", "# Plan\n");
@@ -39,9 +39,9 @@ describe("CodexPlanStream", () => {
     });
 
     it("replaces the plan with a snapshot when the completed plan differs from the streamed text", async () => {
-        const {stream, updates} = createStream(ClientCapabilities.DEFAULT.with({
-            planUpdates: true,
-            air: {planContentDelta: true},
+        const {stream, updates} = createStream(ClientCapabilities.from({
+            plan: {},
+            _meta: {jetbrains: {air: {version: 1, capabilities: ["planContentDelta"]}}},
         }));
 
         stream.delta("plan", "draft");
@@ -55,7 +55,7 @@ describe("CodexPlanStream", () => {
     });
 
     it("sends snapshots to a client without the AIR plan content delta", async () => {
-        const {stream, updates} = createStream(ClientCapabilities.DEFAULT.with({planUpdates: true}));
+        const {stream, updates} = createStream(ClientCapabilities.from({plan: {}}));
 
         stream.delta("plan", "# Plan\n");
         await stream.flush();
@@ -69,7 +69,7 @@ describe("CodexPlanStream", () => {
     });
 
     it("streams message text to AIR without plan updates and sends only the missing end", async () => {
-        const {stream} = createStream(ClientCapabilities.DEFAULT.with({airClient: true}));
+        const {stream} = createStream(ClientCapabilities.from({_meta: {jetbrains: {air: {version: 1}}}}));
 
         const first = stream.delta("plan", "# Plan\n");
         const completed = await stream.completed("plan", "# Plan\n1. Step");

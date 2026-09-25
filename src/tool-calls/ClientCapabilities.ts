@@ -90,15 +90,5 @@ export class ClientCapabilities {
         if (this.terminalOutput) return terminal ? "terminal_output" : null;
         return this.airClient ? null : "terminal_output_delta";
     }
-
-    with(changes: Partial<Omit<ClientCapabilityValues, "air">> & {air?: Partial<AirCapabilities>}): ClientCapabilities {
-        return new ClientCapabilities({
-            airClient: changes.airClient ?? this.airClient,
-            terminalOutput: changes.terminalOutput ?? this.terminalOutput,
-            terminalOutputDelta: changes.terminalOutputDelta ?? this.terminalOutputDelta,
-            planUpdates: changes.planUpdates ?? this.planUpdates,
-            air: {...this.air, ...changes.air},
-        });
-    }
 }
 

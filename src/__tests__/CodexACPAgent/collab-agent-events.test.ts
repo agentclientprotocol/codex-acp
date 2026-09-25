@@ -43,6 +43,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             sessionId,
             true,
             new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+            () => {},
         );
         return response;
     }
@@ -1103,6 +1104,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             sessionId,
             true,
             new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+            () => {},
         );
         await router.handle({
             method: "item/started",
@@ -1471,6 +1473,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             sessionId,
             true,
             new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+            () => {},
         );
         const activity = (threadId: string, path: string): ServerNotification => ({
             method: "item/started",
@@ -1543,6 +1546,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             sessionId,
             true,
             new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+            () => {},
         );
         await router.handle({
             method: "item/started",
@@ -1601,6 +1605,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             sessionId,
             true,
             new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+            () => {},
         );
         const spawn = (item: Record<string, unknown>) => router.handle({
             method: "item/started",
@@ -1629,6 +1634,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             sessionId,
             true,
             new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+            () => {},
         );
         await router.handle({
             method: "item/started",

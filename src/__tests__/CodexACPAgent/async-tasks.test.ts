@@ -489,7 +489,7 @@ describe("Codex background terminal tasks", () => {
         });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
         const session = new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId);
-        sessionState.subagents = new CodexSubagentEventRouter(sessionState.sessionId, true, session);
+        sessionState.subagents = new CodexSubagentEventRouter(sessionState.sessionId, true, session, () => {});
         sessionState.asyncTasks = new CodexBackgroundTerminalTasks(
             true,
             sessionState.sessionId,

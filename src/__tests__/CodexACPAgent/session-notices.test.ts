@@ -213,6 +213,7 @@ async function createFixture(clientCapabilities?: unknown, nativeSubagents = fal
             sessionId,
             true,
             new ACPSessionConnection(fixture.getAcpConnection(), sessionId),
+            () => {},
         );
     }
     vi.spyOn(agent, "getSessionState").mockReturnValue(sessionState);
