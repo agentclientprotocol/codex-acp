@@ -33,5 +33,5 @@ describe('CodexACPAgent - process exit error', () => {
 
         await expect(agent.initialize({ protocolVersion: acp.PROTOCOL_VERSION }))
             .rejects.toThrow("Codex process has exited with code 1:\ncodex: failed to launch");
-    });
+    }, 15_000); // A real process start can take more than 5 s in a full serial run.
 });
