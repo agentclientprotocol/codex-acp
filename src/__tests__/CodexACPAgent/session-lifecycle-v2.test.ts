@@ -11,6 +11,7 @@ import {createMockConnections} from './test-utils';
 import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 const sessionId = "thread-1";
+const forkedSessionId = "fork-1";
 const cwd = "/workspace";
 
 function createThread(overrides?: Partial<Thread>): Thread {
@@ -60,6 +61,14 @@ function codexResponse(method: string, replayTurns: Thread["turns"] = []): unkno
                 serviceTier: null,
                 turnsBackwardsCursor: null,
             };
+        case "thread/fork":
+            return {
+                thread: createThread({id: forkedSessionId, sessionId: forkedSessionId}),
+                model: "gpt-5",
+                modelProvider: "openai",
+                reasoningEffort: "medium",
+                serviceTier: null,
+            };
         case "thread/read":
             // `threadReadWithHistory` reads twice for a "legacy" history-mode thread (once to
             // learn the history mode, once with `includeTurns: true`); returning the full
@@ -84,18 +93,26 @@ function codexResponse(method: string, replayTurns: Thread["turns"] = []): unkno
 const recordedCodexMethods = new Set([
     "thread/start",
     "thread/resume",
+    "thread/fork",
     "thread/list",
     "thread/unsubscribe",
     "thread/archive",
 ]);
 
 /** Connects a v2 client to the agent through the router, over a mocked Codex app-server. */
-async function connectV2Client(options?: {replayTurns?: Thread["turns"]}) {
+async function connectV2Client(options?: {
+    replayTurns?: Thread["turns"];
+    /** Makes the given Codex app-server method reject, to simulate a Codex-side failure. */
+    failMethod?: {method: string; error: Error};
+}) {
     const mocks = createMockConnections();
     const codexRequests: Array<{method: string, params: unknown}> = [];
     mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params?: unknown) => {
         if (recordedCodexMethods.has(method)) {
             codexRequests.push({method, params});
+        }
+        if (options?.failMethod?.method === method) {
+            throw options.failMethod.error;
         }
         return codexResponse(method, options?.replayTurns);
     });
@@ -335,6 +352,65 @@ describe('Session lifecycle over ACP v2', () => {
         expect(updates.some(({update}) => update.sessionUpdate.endsWith("_message_chunk")
             || update.sessionUpdate.endsWith("_message")
             || update.sessionUpdate === "tool_call")).toBe(false);
+    });
+
+    it('forks a session, dropping modes and using v2-shaped configOptions', async () => {
+        const {connection, codexRequests, updates} = await connectV2Client();
+        closeClient = () => connection.close();
+
+        const response = await connection.agent.request(acpV2.methods.agent.session.fork, {
+            sessionId,
+            cwd,
+            mcpServers: [],
+        });
+
+        expect("modes" in response).toBe(false);
+        expect(Array.isArray(response.configOptions)).toBe(true);
+        // Same parity as v1 (Q2): forking publishes no `available_commands_update`.
+        expect(updates.some(({update}) => update.sessionUpdate === "available_commands_update")).toBe(false);
+        await expect(dump({response, codexRequests})).toMatchFileSnapshot('data/session-lifecycle-v2-fork.json');
+    });
+
+    it('installs the forked session so it is immediately usable', async () => {
+        const {connection, agent} = await connectV2Client();
+        closeClient = () => connection.close();
+
+        const response = await connection.agent.request(acpV2.methods.agent.session.fork, {
+            sessionId,
+            cwd,
+            mcpServers: [],
+        });
+
+        expect(agent().getSessionState(response.sessionId)).toBeTruthy();
+    });
+
+    it('rejects fork with an unresolved AIR fork point, same as v1', async () => {
+        const {connection} = await connectV2Client();
+        closeClient = () => connection.close();
+
+        const error = await connection.agent.request(acpV2.methods.agent.session.fork, {
+            sessionId,
+            cwd,
+            mcpServers: [],
+            _meta: {jetbrains: {air: {fork: {version: 1, messageId: "missing-item"}}}},
+        }).then(() => null, (err) => ({code: err.code, message: err.message}));
+
+        await expect(dump(error)).toMatchFileSnapshot('data/session-lifecycle-v2-fork-invalid-params.json');
+    });
+
+    it('rejects fork of an unknown session, same as v1', async () => {
+        const {connection} = await connectV2Client({
+            failMethod: {method: "thread/fork", error: new Error("Session not found: unknown-source")},
+        });
+        closeClient = () => connection.close();
+
+        const error = await connection.agent.request(acpV2.methods.agent.session.fork, {
+            sessionId: "unknown-source",
+            cwd,
+            mcpServers: [],
+        }).then(() => null, (err) => ({code: err.code, message: err.message}));
+
+        await expect(dump(error)).toMatchFileSnapshot('data/session-lifecycle-v2-fork-unknown-session.json');
     });
 
     it('does not register session/load on v2', async () => {

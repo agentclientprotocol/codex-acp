@@ -1220,7 +1220,7 @@ export class CodexAcpServer {
         return this.createSessionConfigOptionsResponseV2(this.getSessionState(sessionId));
     }
 
-    async forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
+    async forkSession(params: WithAcpMcpServers<acp.ForkSessionRequest>): Promise<acp.ForkSessionResponse> {
         if (this.providerUpdate !== null) {
             await this.providerUpdate;
         }
@@ -1238,6 +1238,14 @@ export class CodexAcpServer {
             await this.handleError(error);
             throw e;
         }
+    }
+
+    async forkSessionV2(params: acpV2.ForkSessionRequest): Promise<acpV2.ForkSessionResponse> {
+        const {sessionId} = await this.forkSession(params);
+        return {
+            sessionId,
+            ...this.createSessionConfigOptionsResponseV2(this.getSessionState(sessionId)),
+        };
     }
 
     async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {

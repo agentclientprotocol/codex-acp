@@ -142,6 +142,7 @@ export function createAcpAgentRouter(
         .onRequest(acpV2.methods.agent.session.list, (ctx) => getAgent().listSessions(ctx.params))
         .onRequest(acpV2.methods.agent.session.delete, (ctx) => getAgent().deleteSession(ctx.params))
         .onRequest(acpV2.methods.agent.session.resume, (ctx) => getAgent().resumeSessionV2(ctx.params))
+        .onRequest(acpV2.methods.agent.session.fork, (ctx) => getAgent().forkSessionV2(ctx.params))
         .onRequest(acpV2.methods.agent.session.close, (ctx) => getAgent().closeSession(ctx.params))
         // No `session/set_mode`: v2 removed the modes API; modes are config options.
         .onRequest(acpV2.methods.agent.session.setConfigOption, (ctx) => getAgent().setSessionConfigOptionV2(ctx.params))
