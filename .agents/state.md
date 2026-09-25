@@ -215,14 +215,17 @@ invisible until first prompt; Q6 (ask AIR) fork points match Codex item ids, but
 is our `clientId`.
 
 **Next steps, in order (one programmer at a time; researchers may run in parallel):**
-0. **Topic 10 slice order** (one programmer at a time; research + decisions are all recorded in the
-   blocks above and in `v2-fork-providers-and-extension-methods.md`,
-   `v2-provider-restart-and-fork-tracking.md`, `v2-resume-goal-turn-timing.md`):
-   ~~10(a)~~ done (1ac2e35) → ~~10(b)~~ done (5025885) →
-   ~~10(c)~~ done (d1584bb) → ~~10(d)~~ done (b2e5732) `session/fork` on v2 (drop `modes`, no
-   `available_commands_update`, Q6 flagged for docs) → ~~10(e)~~ done (01543bf) `providers/*` → ~~10(f1)~~ done (b6b5935) → ~~10(f2)~~ done (37bbc23). Then end-of-topic-10 scoped TCK, then Phase 4
-   (add Phase 4 docs: disabled-`openai` `current` gap (Q3), AIR fork-at-user-message question (Q6);
-   live checks: provider restart with an active goal, `session/new` auto goal turn).
+0. **Remaining work (Phase 4 tail), one programmer at a time; all decisions are recorded in the
+   "P4(b) live checks done" block above:**
+   - **P4(c)** D1 restart close-out race (v2) — in flight at the time of the fourth-session flush
+     request; see that block for the result if recorded.
+   - **P4(d)** D2 (v1 + v2): in the provider-restart close-out, mark the cut-off turn's in-flight tool
+     calls `failed` and end their terminals (`fix:`). Evidence: `v2-phase4-live-checks.md` check 3.
+   - **P4(e)** D3 (`docs:`): `FIXME` comment at the restart resume loop (`CodexAcpServer.ts`
+     ~1546-1574, never-prompted session has no rollout → `thread/resume` fails → session dies) +
+     `readme-dev.md` Known gaps entry. Don't fix.
+   - **Final:** full TCK v1 + v2 (expect v1 50/1 SCHEMA-002/5, v2 84/0/19), record, done. Topic 10 and
+     earlier slices are history (below).
 1. ~~**5b-2b**~~ done (programmer, small): Q1 option A (user decision) — on v2 the
    `ResponseItemHistoryFallback` contributes only its recovered tool calls (`tool_call` /
    `tool_call_update`); every fallback `user_message_chunk` / `agent_message_chunk` /
