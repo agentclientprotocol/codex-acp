@@ -668,13 +668,15 @@ export class CodexAcpClient {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
-        const response = await this.codexClient.threadStart({
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
-            modelProvider: this.getModelProvider(),
-            cwd: request.cwd,
-        });
-
-        const codexModels = await this.fetchAvailableModels();
+        const config = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers);
+        const [response, codexModels] = await Promise.all([
+            this.codexClient.threadStart({
+                config,
+                modelProvider: this.getModelProvider(),
+                cwd: request.cwd,
+            }),
+            this.fetchAvailableModels(),
+        ]);
         if (codexModels.length === 0) {
             throw new Error("Codex did not return any models");
         }

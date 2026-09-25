@@ -100,8 +100,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             "account/read",
             "thread/start",
             "model/list",
-            "thread/started",
             "account/read",
+            "thread/started",
             "skills/list",
         ]);
         expect(loginRequest).toEqual({
@@ -476,6 +476,35 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             forceReload: true,
         });
         expect(listSkillsSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
+    });
+
+    it('fetches models while a new thread is starting', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const threadStart = deferred<Awaited<ReturnType<typeof codexAppServerClient.threadStart>>>();
+
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "threadStart").mockReturnValue(threadStart.promise);
+        const listModelsSpy = vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        const session = codexAcpClient.newSession({cwd: "/workspace", mcpServers: []});
+        await vi.waitFor(() => expect(listModelsSpy).toHaveBeenCalledOnce());
+
+        threadStart.resolve({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as Awaited<ReturnType<typeof codexAppServerClient.threadStart>>);
+
+        await expect(session).resolves.toMatchObject({
+            sessionId: "thread-id",
+            currentModelId: "gpt-5[medium]",
+        });
     });
 
     it('prefers ACP additional directories over legacy meta roots for new session skill discovery', async () => {
