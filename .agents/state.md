@@ -39,10 +39,21 @@ full-run fails now: none (EXT-202 fixed in the TCK fork, see below).
 knobs), "AIR v2 client contract", "Known gaps" (Q3, Q6), "Verification" (→ HOW-TO-RUN). Stale
 comments fixed in `session-config-options-v2.test.ts`, `prompt-v2.test.ts` (test renamed),
 `providers-v2.test.ts`; no `.agents/` refs in `src/`. No code-vs-state mismatches. Suite 973 / 26.
-In flight: researcher on **P4(b)** live `/run-codex` checks (goal auto-turn after
-`session/new`, cancel during a real approval, provider restart with an active goal, resume with an
-active goal) → `.agents/research/v2-phase4-live-checks.md`. Full TCK already CONFORMANT on both
-(end of topic 10). After both: fix any live-check defects, final full TCK, then done.
+**P4(b) live checks done** (`.agents/research/v2-phase4-live-checks.md`; real Codex 0.156.1,
+snapshot @85c21c7, temp CODEX_HOME, logs `/tmp/p4live/logs/`): 1 goal turn after `session/new` PASS
+(v1+v2); 2 cancel during a real approval PASS (v1+v2; known `running` between `requires_action` and
+idle); 4 resume with an active goal PASS (v2 ±replay, v1 load). **3 provider restart with an active
+goal FAIL on v2:**
+- **D1 (10(f2) race, v2):** close-out pass (`CodexAcpServer.ts:1583-1589`) runs after all resumes;
+  Codex's new goal turn (~3 ms after `thread/resume`) already overwrote `codexReportedRunningTurnId`
+  (`trackCodexTurnStart` `:1096`) → `running, running, idle cancelled, content while idle, idle`.
+  Fix: per session, drain the old client + close out **before** registering the tracker and resuming
+  (old process already exited, `:1643`). → programmer slice **P4(c)** in flight.
+- **D2 (v1+v2):** the cut-off turn's in-flight tool call stays `in_progress` forever (terminal
+  open); the old process's `item/completed` is lost. → **user decision pending** (v1-visible).
+- **D3 (pre-existing on `main`, v1+v2):** `session/new` then `providers/set|disable` before the first
+  prompt → `thread/resume` "no rollout found" → -32603 "Failed to resume 1 session(s)", next prompt
+  "thread not found" (`:1546-1574`). → **user decision pending** (design).
 
 **10(f2) done (37bbc23 `fix:`):** `SessionState.awaitingClientLoad` (true for `operation ===
 "fork"`, false on load). `enqueueProviderUpdate` restart loop: captures `previousClient`; for every
