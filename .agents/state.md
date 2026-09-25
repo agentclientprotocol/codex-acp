@@ -6,8 +6,7 @@
 
 ## Current position in the sequencing plan
 
-Phase: **Phase 2/3 — nearly done.** Prerequisite, topics 1-9 done; topic 10 in progress (10(a) done,
-next 10(b)); then Phase 4 (2026-09-25). Rough progress ~80%.
+Phase: **Phase 4.** Prerequisite and topics 1-10 done; then Phase 4 (2026-09-25). Rough progress ~80%.
 
 ### Resume here (for a fresh orchestrator)
 
@@ -35,7 +34,22 @@ start` replay), `session/set_config_option`, `session/cancel`, `auth/login|logou
 scoped runs) and EXT-202 (advisory, `capabilities.providers` placement → topic 10). Expected v2
 full-run fails now: none (EXT-202 fixed in the TCK fork, see below).
 
-**Fourth flush (2026-09-25); user resumed the same day. In flight: programmer on 10(f2).**
+**Fourth flush (2026-09-25); user resumed the same day. Topic 10 DONE. Now: Phase 4.**
+
+**10(f2) done (37bbc23 `fix:`):** `SessionState.awaitingClientLoad` (true for `operation ===
+"fork"`, false on load). `enqueueProviderUpdate` restart loop: captures `previousClient`; for every
+non-`awaitingClientLoad` session registers the ready-gated baseline tracker before
+`replacement.resumeSession` (settled session / `null`); second pass drains
+`previousClient.waitForSessionNotifications` and, if `codexReportedRunningTurnId` is set, clears it +
+`reportUnownedTurnState(idle, cancelled)` (v2-only by that helper's guard; no-op with a v2 prompt in
+flight). Restart doesn't wait for unowned turns. **Deviation (bug fix, side effect):** unloaded forks
+(`awaitingClientLoad`) are no longer re-resumed on restart (the old loop resumed them, contrary to
+69ca755); their later `session/load` resumes them as usual. Harness: `v2-prompt-harness.ts`
+`createReplacementCodexAcpClient()`, `PromptSession.agent`. Tests
+`provider-restart-turn-tracking.test.ts` (6). Suite 973 / 26, no snapshot changed. **Full TCK**
+(`.agents/tck/10-full-v1-v2.md`): v1 CONFORMANT 50/1 (SCHEMA-002)/5; v2 CONFORMANT 84/0/19. Out of
+scope, unscheduled: `TitleGenerator` keeps the dead client after restart; session open racing
+`providers/set`; `_goal/control`/steering don't wait for a pending provider update.
 
 **10(f1) done (b6b5935 `fix:`, v1+v2):** `createDeferred<T>()`; `startCodexTurnTracker(sessionId,
 ready: Promise<SessionState|null>)` awaits `ready`, builds the `CodexEventHandler` lazily; registered
@@ -184,8 +198,7 @@ is our `clientId`.
    `v2-provider-restart-and-fork-tracking.md`, `v2-resume-goal-turn-timing.md`):
    ~~10(a)~~ done (1ac2e35) → ~~10(b)~~ done (5025885) →
    ~~10(c)~~ done (d1584bb) → ~~10(d)~~ done (b2e5732) `session/fork` on v2 (drop `modes`, no
-   `available_commands_update`, Q6 flagged for docs) → ~~10(e)~~ done (01543bf) `providers/*` → ~~10(f1)~~ done (b6b5935) → 10(f2)
-   provider-restart reinstall + v2 close-out (v1+v2). Then end-of-topic-10 scoped TCK, then Phase 4
+   `available_commands_update`, Q6 flagged for docs) → ~~10(e)~~ done (01543bf) `providers/*` → ~~10(f1)~~ done (b6b5935) → ~~10(f2)~~ done (37bbc23). Then end-of-topic-10 scoped TCK, then Phase 4
    (add Phase 4 docs: disabled-`openai` `current` gap (Q3), AIR fork-at-user-message question (Q6);
    live checks: provider restart with an active goal, `session/new` auto goal turn).
 1. ~~**5b-2b**~~ done (programmer, small): Q1 option A (user decision) — on v2 the
@@ -818,7 +831,7 @@ servers) → 5 (session lifecycle; makes the v2 TCK runnable end-to-end) → 2(a
 | 7 | MCP config & client execution surface removal | **Done** | — | — | Depends on topic 1 |
 | 8 | Auth flow rename | **Done** | — | — | 11a1969, 5f9335b |
 | 9 | Config options, modes & plans | **Done** | — | — | 9a + 9b landed |
-| 10 | Unstable/extension methods on v2 (plan gap) | In progress | research, 10(a) (1ac2e35), 10(b) (5025885), 10(c) (d1584bb), 10(d) (b2e5732), 10(e) (01543bf), 10(f1) (b6b5935) | 10(f2) provider-restart tracking | Not owned by plan.md topics: register `session/fork` and `providers/{list,set,disable}` via typed `acpV2.methods.agent.*`; `_session/goal`, `_session/async_task/stop` via `onRequest("_…", parser, h)`; outbound `_auth/status_update` via `client.notify`; subagent/async-task renderer cases (see Open questions). `_session/steering` is owned by topic 2(c). Depends on topic 1 |
+| 10 | Unstable/extension methods on v2 (plan gap) | Done | research, 10(a) (1ac2e35), 10(b) (5025885), 10(c) (d1584bb), 10(d) (b2e5732), 10(e) (01543bf), 10(f1) (b6b5935), 10(f2) (37bbc23) | — | Not owned by plan.md topics: register `session/fork` and `providers/{list,set,disable}` via typed `acpV2.methods.agent.*`; `_session/goal`, `_session/async_task/stop` via `onRequest("_…", parser, h)`; outbound `_auth/status_update` via `client.notify`; subagent/async-task renderer cases (see Open questions). `_session/steering` is owned by topic 2(c). Depends on topic 1 |
 
 ## Deviations from `architecture.md`
 
