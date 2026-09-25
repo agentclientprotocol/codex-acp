@@ -35,8 +35,11 @@ scoped runs) and EXT-202 (advisory, `capabilities.providers` placement → topic
 full-run fails now: none (EXT-202 fixed in the TCK fork, see below).
 
 **Fourth flush (2026-09-25); user resumed the same day. Topic 10 DONE. Now: Phase 4.**
-In flight: programmer on **P4(a)** (`docs:` — AIR v2 contract + known gaps in `readme-dev.md`; stale
-v2 test comments); researcher on **P4(b)** live `/run-codex` checks (goal auto-turn after
+**P4(a) done (87fdeca `docs:`):** `readme-dev.md` "ACP v2 support" (v2 method chain, no new
+knobs), "AIR v2 client contract", "Known gaps" (Q3, Q6), "Verification" (→ HOW-TO-RUN). Stale
+comments fixed in `session-config-options-v2.test.ts`, `prompt-v2.test.ts` (test renamed),
+`providers-v2.test.ts`; no `.agents/` refs in `src/`. No code-vs-state mismatches. Suite 973 / 26.
+In flight: researcher on **P4(b)** live `/run-codex` checks (goal auto-turn after
 `session/new`, cancel during a real approval, provider restart with an active goal, resume with an
 active goal) → `.agents/research/v2-phase4-live-checks.md`. Full TCK already CONFORMANT on both
 (end of topic 10). After both: fix any live-check defects, final full TCK, then done.
