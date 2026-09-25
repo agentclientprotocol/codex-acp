@@ -700,6 +700,18 @@ export class CodexAcpClient {
         }
     }
 
+    /**
+     * Drops a session's notification handler without unsubscribing on the
+     * app-server: for a baseline tracker registered before `thread/resume`
+     * (to catch a Codex-initiated turn that starts before setup finishes)
+     * whose resume/load never actually subscribed the connection, so there
+     * is nothing to unsubscribe there.
+     */
+    discardSessionSubscription(sessionId: string): void {
+        this.codexClient.clearThreadHandlers(sessionId);
+        this.subagents.clear(sessionId);
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         try {
             await this.codexClient.threadArchive({threadId: sessionId});

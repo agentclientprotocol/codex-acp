@@ -276,6 +276,15 @@ const TITLE_GENERATION_SETTLE_TIMEOUT_MS = 10_000;
  */
 const NO_ACTIVE_TURN_RETRY_DELAYS_MS = [25, 50, 100, 200, 400];
 
+/** A promise plus its own `resolve`, for settling a promise from outside its executor. */
+function createDeferred<T>(): [Promise<T>, (value: T) => void] {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+        resolve = res;
+    });
+    return [promise, resolve];
+}
+
 /**
  * Maps a turn id to the id Codex accepts for `turn/interrupt` and `turn/steer`. For the session's
  * current turn that is the latest `turn/started` id (a review's child turn), once one arrived.
@@ -823,9 +832,15 @@ export class CodexAcpServer {
 
         let sessionMetadata: SessionMetadata;
         let resumeSubscribed = false;
+        // Registered before `thread/resume` is even sent, so a goal turn Codex auto-starts on the
+        // resumed thread can't slip in before a handler exists; see `startCodexTurnTracker`.
+        let settleTrackerReady: ((state: SessionState | null) => void) | null = null;
         if (operation === "resume") {
             const resumeRequest = request as WithAcpMcpServers<acp.ResumeSessionRequest>;
             logger.log(`Resume existing session: ${resumeRequest.sessionId}...`);
+            const [trackerReady, resolveTrackerReady] = createDeferred<SessionState | null>();
+            settleTrackerReady = resolveTrackerReady;
+            this.startCodexTurnTracker(resumeRequest.sessionId, trackerReady);
             try {
                 sessionMetadata = await this.runWithProcessCheck(() =>
                     this.codexAcpClient.resumeSession(resumeRequest, () => {
@@ -833,8 +848,13 @@ export class CodexAcpServer {
                     })
                 );
             } catch (err) {
+                settleTrackerReady?.(null);
                 if (resumeSubscribed && requestedSessionGeneration !== null) {
                     await this.cleanupStaleSessionOpen(resumeRequest.sessionId, requestedSessionGeneration);
+                } else {
+                    // `thread/resume` never subscribed the connection, so there is nothing for
+                    // `cleanupStaleSessionOpen` to unsubscribe; just drop the local handler.
+                    this.codexAcpClient.discardSessionSubscription(resumeRequest.sessionId);
                 }
                 throw err;
             }
@@ -853,6 +873,7 @@ export class CodexAcpServer {
         try {
             authState = await this.getAuthStateForProvider(authProvider);
         } catch (err) {
+            settleTrackerReady?.(null);
             if (resumeSubscribed && requestedSessionGeneration !== null) {
                 await this.cleanupStaleSessionOpen(sessionId, requestedSessionGeneration);
             }
@@ -860,6 +881,7 @@ export class CodexAcpServer {
         }
         const sessionGeneration = requestedSessionGeneration ?? this.beginSessionOpen(sessionId);
         if (!this.sessionOpenCanInstall(sessionId, sessionGeneration)) {
+            settleTrackerReady?.(null);
             resumeSubscribed = false;
             await this.closeStaleSessionOpen(sessionId, sessionGeneration);
         }
@@ -910,6 +932,11 @@ export class CodexAcpServer {
             () => sessionState.sessionTitleSource,
         );
         this.installSessionState(sessionState);
+        if (settleTrackerReady) {
+            settleTrackerReady(sessionState);
+        } else {
+            this.startCodexTurnTracker(sessionId, Promise.resolve(sessionState));
+        }
         resumeSubscribed = false;
 
         const canPublishSessionUpdates = operation !== "fork";
@@ -973,37 +1000,49 @@ export class CodexAcpServer {
     private installSessionState(sessionState: SessionState): void {
         this.sessions.get(sessionState.sessionId)?.asyncTasks.clear();
         this.sessions.set(sessionState.sessionId, sessionState);
-        this.startCodexTurnTracker(sessionState);
     }
 
     /**
-     * Installs a baseline session-scoped subscription at session creation, so a Codex-initiated
-     * turn starting before any `session/prompt` has run (right after `session/new`/
-     * `session/resume`) still updates `codexReportedRunningTurnId`, gets its `running`/`idle`
-     * states (J5), and renders its items. `prompt()`'s own `subscribeToSessionEvents` call
-     * permanently replaces this dispatch (`CodexSubagentSubscriptions.subscribe` keeps a single
-     * `current` subscription per session) the first time a prompt runs, and that subscription's
-     * own leftover-rendering path takes over from then on; this baseline handler only ever
-     * dispatches for a session no prompt has subscribed to yet, so it cannot double-render. It
-     * answers approval/elicitation requests exactly like app-server's own default for a thread
-     * with no handler registered, so no real prompt has yet run to answer.
+     * Installs a baseline session-scoped subscription, so a Codex-initiated turn starting before
+     * any `session/prompt` has run still updates `codexReportedRunningTurnId`, gets its
+     * `running`/`idle` states (J5), and renders its items. `prompt()`'s own
+     * `subscribeToSessionEvents` call permanently replaces this dispatch
+     * (`CodexSubagentSubscriptions.subscribe` keeps a single `current` subscription per session)
+     * the first time a prompt runs, and that subscription's own leftover-rendering path takes over
+     * from then on; this baseline handler only ever dispatches for a session no prompt has
+     * subscribed to yet, so it cannot double-render. It answers approval/elicitation requests
+     * exactly like app-server's own default for a thread with no handler registered, so no real
+     * prompt has yet run to answer.
+     *
+     * `ready` lets a resume/load caller register this *before* `thread/resume`/`thread/load` is
+     * even sent, so a goal turn Codex auto-starts on the resumed thread within a few ms of the
+     * response can't slip in before a handler exists (nothing else buffers dropped notifications).
+     * The per-session notification queue (`enqueueSessionNotification`) serializes handler calls,
+     * so awaiting `ready` in the first event holds every later event for this session in order;
+     * nothing is dropped or reordered. `ready` resolves to the real `SessionState` once install
+     * finishes (or `null` on a failed/superseded open, in which case events are silently ignored).
      */
-    private startCodexTurnTracker(sessionState: SessionState): void {
-        const baselineEventHandler = new CodexEventHandler(
-            this.connection,
-            sessionState,
-            clientSupportsPlanUpdates(this.clientCapabilities),
-            clientSupportsTypedSessionFailures(this.clientCapabilities),
-            this.sessionFailureEpoch,
-            sessionState.subagents,
-            (accountUpdated) => this.handleAccountUpdated(accountUpdated),
-            false,
-            clientSupportsCompaction(this.clientCapabilities),
-            clientSupportsNotices(this.clientCapabilities),
-        );
+    private startCodexTurnTracker(sessionId: string, ready: Promise<SessionState | null>): void {
+        let baselineEventHandler: CodexEventHandler | null = null;
         void this.codexAcpClient.subscribeToSessionEvents(
-            sessionState.sessionId,
+            sessionId,
             async (event) => {
+                const sessionState = await ready;
+                if (!sessionState) return;
+                if (!baselineEventHandler) {
+                    baselineEventHandler = new CodexEventHandler(
+                        this.connection,
+                        sessionState,
+                        clientSupportsPlanUpdates(this.clientCapabilities),
+                        clientSupportsTypedSessionFailures(this.clientCapabilities),
+                        this.sessionFailureEpoch,
+                        sessionState.subagents,
+                        (accountUpdated) => this.handleAccountUpdated(accountUpdated),
+                        false,
+                        clientSupportsCompaction(this.clientCapabilities),
+                        clientSupportsNotices(this.clientCapabilities),
+                    );
+                }
                 await this.trackCodexTurnStart(sessionState, event);
                 await this.trackSteerLanding(sessionState, event);
                 // Codex-started turns carry no `userMessage` item; `handleSessionScopedNotification`
@@ -1177,9 +1216,17 @@ export class CodexAcpServer {
             modelState,
             modeState,
             thread,
+            sessionState,
+            settleTrackerReady,
         } = await this.getOrCreateSessionWithHistory(params);
 
-        await this.streamThreadHistory(sessionId, thread);
+        try {
+            await this.streamThreadHistory(sessionId, thread);
+        } finally {
+            // Only after replay is fully streamed does the baseline tracker start dispatching
+            // live events, so a live goal-turn frame can never race ahead of history.
+            settleTrackerReady(sessionState);
+        }
         await this.getSessionState(sessionId).asyncTasks.reconcile();
         // A load response means "the replay is complete"; a late rename echo
         // from a still-running title generation would arrive after it.
@@ -2332,6 +2379,10 @@ export class CodexAcpServer {
         modelState: LegacySessionModelState;
         modeState: SessionModeState;
         thread: Thread;
+        sessionState: SessionState;
+        // Settles the baseline tracker's `ready` gate; resolve after `streamThreadHistory` so a
+        // live goal-turn frame Codex fires right after resume/load never races ahead of replay.
+        settleTrackerReady: (state: SessionState | null) => void;
     }> {
         const requestedSessionGeneration = this.beginSessionOpen(request.sessionId);
         await this.checkAuthorization();
@@ -2342,6 +2393,9 @@ export class CodexAcpServer {
 
         logger.log(`Load existing session: ${request.sessionId}...`);
         let subscribed = false;
+        // Registered before `thread/resume` is even sent; see `startCodexTurnTracker`.
+        const [trackerReady, settleTrackerReady] = createDeferred<SessionState | null>();
+        this.startCodexTurnTracker(request.sessionId, trackerReady);
         let sessionMetadata: SessionMetadataWithThread;
         try {
             sessionMetadata = await this.runWithProcessCheck(() =>
@@ -2350,8 +2404,13 @@ export class CodexAcpServer {
                 })
             );
         } catch (err) {
+            settleTrackerReady(null);
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
+            } else {
+                // `thread/resume` never subscribed the connection, so there is nothing for
+                // `cleanupStaleSessionOpen` to unsubscribe; just drop the local handler.
+                this.codexAcpClient.discardSessionSubscription(request.sessionId);
             }
             throw err;
         }
@@ -2362,12 +2421,14 @@ export class CodexAcpServer {
         try {
             authState = await this.getAuthStateForProvider(authProvider);
         } catch (err) {
+            settleTrackerReady(null);
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
             }
             throw err;
         }
         if (!this.sessionOpenCanInstall(sessionId, requestedSessionGeneration)) {
+            settleTrackerReady(null);
             subscribed = false;
             await this.closeStaleSessionOpen(sessionId, requestedSessionGeneration);
         }
@@ -2438,6 +2499,8 @@ export class CodexAcpServer {
             modelState: sessionModelState,
             modeState: sessionModeState,
             thread: thread,
+            sessionState: sessionState,
+            settleTrackerReady: settleTrackerReady,
         };
     }
 
