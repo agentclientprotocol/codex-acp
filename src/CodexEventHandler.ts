@@ -197,6 +197,22 @@ const STRUCTURED_CODEX_ERROR_CATEGORIES = {
     activeTurnNotSteerable: "provider_error",
 } satisfies Record<StructuredCodexErrorKind, CodexFailureKind>;
 
+/**
+ * Item types that render as a plain `tool_call`/`tool_call_update` and have no outstanding-item
+ * tracker of their own (`contextCompaction` has `CodexSessionCompactions`; `collabAgentToolCall`/
+ * `subAgentActivity` have `CodexSubagentEventRouter`). Used to track which open items a provider
+ * restart's close-out needs to fail (D2).
+ */
+const PLAIN_TOOL_CALL_ITEM_TYPES = new Set<ThreadItem["type"]>([
+    "fileChange",
+    "commandExecution",
+    "mcpToolCall",
+    "dynamicToolCall",
+    "webSearch",
+    "imageView",
+    "imageGeneration",
+]);
+
 /** Prompt failures whose text the client has already received as an agent message. */
 const failuresShownAsMessages = new WeakSet<RequestError>();
 
@@ -535,11 +551,15 @@ export class CodexEventHandler {
             case "item/plan/delta":
                 this.completeRetryIncidentOnTurnProgress();
                 return this.createPlanDeltaEvent(notification.params);
-            case "item/started":
+            case "item/started": {
                 this.completeRetryIncidentOnTurnProgress();
-                return await this.createItemEvent(notification.params);
+                const update = await this.createItemEvent(notification.params);
+                this.trackOpenToolCall(notification.params.item);
+                return update;
+            }
             case "item/completed":
                 this.completeRetryIncidentOnTurnProgress();
+                this.sessionState.openToolCalls.complete(notification.params.item.id);
                 return await this.completeItemEvent(notification.params);
             case "turn/plan/updated":
                 this.completeRetryIncidentOnTurnProgress();
@@ -1140,6 +1160,12 @@ export class CodexEventHandler {
 
     private static getMcpStartupToolCallId(serverName: string): string {
         return `mcp_startup.${encodeURIComponent(serverName)}`;
+    }
+
+    private trackOpenToolCall(item: ThreadItem): void {
+        if (!PLAIN_TOOL_CALL_ITEM_TYPES.has(item.type)) return;
+        const hasTerminal = item.type === "commandExecution" && commandExecutionUsesTerminalOutput(item);
+        this.sessionState.openToolCalls.start(item.id, hasTerminal);
     }
 
     private completeCommandExecutionEvent(item: ThreadItem & { "type": "commandExecution" }): UpdateSessionEvent {

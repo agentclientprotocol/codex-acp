@@ -175,6 +175,7 @@ import {
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
 import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdate} from "./CodexSessionCompactions";
+import {CodexSessionToolCalls} from "./CodexSessionToolCalls";
 import {
     type AgentFileChangeReport,
     type AgentFileChangeReportRequest,
@@ -236,6 +237,12 @@ export interface SessionState {
     subagents: CodexSubagentEventRouter;
     asyncTasks: CodexBackgroundTerminalTasks;
     compactions: CodexSessionCompactions;
+    /**
+     * Tool-call items reported `item/started` but not yet `item/completed` (D2), for item types
+     * with no outstanding-item tracker of their own. A provider restart's close-out fails
+     * whatever is still open here for a turn the dead app-server process never finished.
+     */
+    openToolCalls: CodexSessionToolCalls;
     /**
      * True only for a freshly forked session: `forkSession` unsubscribes the new thread right
      * after `thread/fork` on purpose, so no updates go out before the client's own
@@ -932,6 +939,7 @@ export class CodexAcpServer {
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
+            openToolCalls: new CodexSessionToolCalls(),
             awaitingClientLoad: operation === "fork",
         };
         sessionState.titleGen = new TitleGenerator(
@@ -1132,6 +1140,23 @@ export class CodexAcpServer {
             await session.updateState(state);
         } catch (error) {
             logger.error(`Failed to send the '${state.state}' state for session ${sessionId}`, error);
+        }
+    }
+
+    /**
+     * Fails every tool call this session's tracker still has open (D2: a provider restart's
+     * dead app-server process never sent `item/completed` for it). No-op if nothing is open, e.g.
+     * every item on the cut-off turn already completed before the restart. Runs on v1 and v2
+     * alike -- `ACPSessionConnection.update()` renders each accordingly.
+     */
+    private async finishOutstandingToolCalls(session: SessionState): Promise<void> {
+        const updates = session.openToolCalls.finishOutstanding();
+        if (updates.length === 0) {
+            return;
+        }
+        const connection = new ACPSessionConnection(this.connection, session.sessionId);
+        for (const update of updates) {
+            await connection.update(update);
         }
     }
 
@@ -1564,6 +1589,11 @@ export class CodexAcpServer {
                 await previousClient.waitForSessionNotifications(session.sessionId);
                 if (session.codexReportedRunningTurnId !== null) {
                     session.codexReportedRunningTurnId = null;
+                    // D2: the dead process's EOF drops `item/completed` for anything still open on
+                    // the cut-off turn (v1 + v2), leaving the client with a spinner forever. Fail
+                    // those tool calls -- and end their terminals -- before the turn's own
+                    // idle/cancelled close-out below.
+                    await this.finishOutstandingToolCalls(session);
                     await this.reportUnownedTurnState(session.sessionId, {state: "idle", stopReason: "cancelled"});
                 }
 
@@ -2516,6 +2546,7 @@ export class CodexAcpServer {
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
+            openToolCalls: new CodexSessionToolCalls(),
             awaitingClientLoad: false,
         };
         sessionState.titleGen = new TitleGenerator(

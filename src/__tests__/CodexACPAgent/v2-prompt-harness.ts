@@ -362,6 +362,25 @@ export function userMessageItem(clientId: string | null, text = "Hello"): Thread
     return {type: "userMessage", id: "item-user", clientId, content: [{type: "text", text, text_elements: []}]};
 }
 
+/** A long-running command (no single known action, so it uses a terminal), for D2-style tests. */
+export function commandExecutionItem(id: string, status: "inProgress" | "completed" | "failed" = "inProgress"): ThreadItem {
+    return {
+        type: "commandExecution",
+        id,
+        pluginId: null,
+        scriptPath: null,
+        command: "sleep 12",
+        cwd,
+        processId: null,
+        source: "agent",
+        status,
+        commandActions: [],
+        aggregatedOutput: status === "inProgress" ? null : "",
+        exitCode: status === "inProgress" ? null : 0,
+        durationMs: null,
+    };
+}
+
 export function itemStarted(item: ThreadItem, id = turnId): ServerNotification {
     return {method: "item/started", params: {threadId: sessionId, turnId: id, item, startedAtMs: 0}};
 }

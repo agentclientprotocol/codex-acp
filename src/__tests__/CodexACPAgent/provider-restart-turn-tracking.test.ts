@@ -8,15 +8,25 @@ import {
     createReplacementCodexAcpClient,
     createTurn,
     userMessageItem,
+    commandExecutionItem,
+    itemStarted,
     itemCompleted,
     turnStarted,
     turnCompleted,
     agentMessageDelta,
     settle,
     stateUpdates,
+    indexOf,
+    isState,
     type PromptSession,
+    type TranscriptEntry,
 } from './v2-prompt-harness';
 import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
+
+function toolCallUpdates(transcript: TranscriptEntry[]) {
+    return transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
+        .filter(update => update.sessionUpdate === "tool_call_update");
+}
 
 function agentMessageChunks(transcript: PromptSession['transcript']) {
     return transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
@@ -242,6 +252,125 @@ describe('provider restart reinstalls the baseline turn tracker', () => {
         expect(stateUpdates(client.transcript)).toEqual([
             {state: "running"},
             {state: "idle", stopReason: "end_turn"},
+        ]);
+    });
+});
+
+/**
+ * D2: the cut-off turn's still-open tool calls never get `item/completed` -- the old app-server
+ * process's EOF drops it -- so without this fix they stay `in_progress` forever. The restart
+ * close-out must fail them (and end any open terminal) before the turn's own idle/cancelled
+ * state, on both v1 and v2, and must not touch a tool call that already completed.
+ */
+describe('provider restart fails outstanding tool calls left open by the cut-off turn (D2)', () => {
+    let closeClient: (() => void) | null = null;
+
+    afterEach(() => {
+        closeClient?.();
+        closeClient = null;
+        expectConformingV2SessionUpdates();
+    });
+
+    it('v2: fails an in-progress command tool call and ends its terminal, before idle/cancelled', async () => {
+        const client = await connectSession(2);
+        closeClient = () => client.connection.close();
+
+        client.emit(turnStarted());
+        client.emit(itemStarted(commandExecutionItem("exec-1")));
+        await settle();
+
+        const replacement = createReplacementCodexAcpClient();
+        vi.spyOn(client.agent as any, "restartCodexClient").mockResolvedValue(replacement.codexAcpClient);
+        await client.request(acpV2.methods.agent.providers.set, setProviderParams());
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"},
+            {state: "idle", stopReason: "cancelled"},
+        ]);
+
+        const failedIndex = indexOf(client.transcript, entry =>
+            "sessionUpdate" in entry
+            && entry.sessionUpdate.sessionUpdate === "tool_call_update"
+            && (entry.sessionUpdate as {toolCallId: string, status?: string}).toolCallId === "exec-1"
+            && (entry.sessionUpdate as {status?: string}).status === "failed");
+        const idleIndex = indexOf(client.transcript, isState("idle"));
+        expect(failedIndex).toBeGreaterThan(-1);
+        expect(failedIndex).toBeLessThan(idleIndex);
+
+        // v2 renders both the item's creation and its later close-out under the same
+        // `tool_call_update` tag; only the second one is this fix's synthetic failure.
+        expect(toolCallUpdates(client.transcript)).toEqual([
+            expect.objectContaining({toolCallId: "exec-1", status: "in_progress"}),
+            {sessionUpdate: "tool_call_update", toolCallId: "exec-1", status: "failed"},
+        ]);
+        const terminalUpdate = client.transcript.find(entry =>
+            "sessionUpdate" in entry
+            && entry.sessionUpdate.sessionUpdate === "terminal_update"
+            && "exitStatus" in entry.sessionUpdate);
+        expect(terminalUpdate).toEqual({
+            sessionUpdate: {
+                sessionUpdate: "terminal_update",
+                terminalId: "exec-1",
+                exitStatus: {exitCode: null, signal: null},
+            },
+        });
+    });
+
+    it('v1: fails an in-progress command tool call and ends its terminal, with nothing else v1-visible changing', async () => {
+        const client = await connectSession(1);
+        closeClient = () => client.connection.close();
+
+        client.emit(turnStarted());
+        client.emit(itemStarted(commandExecutionItem("exec-1")));
+        await settle();
+        const beforeRestart = client.transcript.length;
+
+        const replacement = createReplacementCodexAcpClient();
+        vi.spyOn(client.agent as any, "restartCodexClient").mockResolvedValue(replacement.codexAcpClient);
+        await client.request(acp.methods.agent.providers.set, setProviderParams());
+        await settle();
+
+        const newUpdates = client.transcript.slice(beforeRestart)
+            .flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : []);
+        expect(newUpdates).toEqual([
+            expect.objectContaining({
+                sessionUpdate: "tool_call_update",
+                toolCallId: "exec-1",
+                status: "failed",
+                _meta: expect.objectContaining({
+                    terminal_exit: {exit_code: null, signal: null, terminal_id: "exec-1"},
+                }),
+            }),
+        ]);
+    });
+
+    it('v2: does not re-fail a tool call that already completed before the restart', async () => {
+        const client = await connectSession(2);
+        closeClient = () => client.connection.close();
+
+        client.emit(turnStarted());
+        client.emit(itemStarted(commandExecutionItem("exec-done")));
+        client.emit(itemCompleted(commandExecutionItem("exec-done", "completed")));
+        await settle();
+        // v2 renders both the item's creation and its completion under the same
+        // `tool_call_update` tag.
+        expect(toolCallUpdates(client.transcript)).toEqual([
+            expect.objectContaining({toolCallId: "exec-done", status: "in_progress"}),
+            expect.objectContaining({toolCallId: "exec-done", status: "completed"}),
+        ]);
+        const beforeRestart = client.transcript.length;
+
+        const replacement = createReplacementCodexAcpClient();
+        vi.spyOn(client.agent as any, "restartCodexClient").mockResolvedValue(replacement.codexAcpClient);
+        await client.request(acpV2.methods.agent.providers.set, setProviderParams());
+        await settle();
+
+        const newToolCallUpdates = toolCallUpdates(client.transcript.slice(beforeRestart));
+        expect(newToolCallUpdates).toEqual([]);
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"},
+            {state: "idle", stopReason: "cancelled"},
         ]);
     });
 });
