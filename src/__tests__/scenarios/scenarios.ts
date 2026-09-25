@@ -7,7 +7,7 @@
 
 export const SESSION_ID = "session-1";
 export const TURN_ID = "turn-1";
-const CHILD_THREAD_ID = "child-thread";
+export const CHILD_THREAD_ID = "child-thread";
 
 export type ScenarioStep =
     | {notify: Record<string, unknown>}
@@ -43,8 +43,8 @@ function item(method: "item/started" | "item/completed", value: Record<string, u
     };
 }
 
-const started = (value: Record<string, unknown>, threadId?: string) => item("item/started", value, threadId);
-const completed = (value: Record<string, unknown>, threadId?: string) => item("item/completed", value, threadId);
+export const started = (value: Record<string, unknown>, threadId?: string) => item("item/started", value, threadId);
+export const completed = (value: Record<string, unknown>, threadId?: string) => item("item/completed", value, threadId);
 
 function notify(method: string, params: Record<string, unknown>): ScenarioStep {
     return {notify: {method, params: {threadId: SESSION_ID, turnId: TURN_ID, ...params}}};
@@ -120,7 +120,7 @@ function turnCompleted(threadId = SESSION_ID, turnId = TURN_ID): Record<string, 
 const NESTED_CHILD_THREAD_ID = "grandchild-thread";
 
 /** A Codex collaboration tool call of `senderThreadId` that addresses `receiverThreadId`. */
-function collab(
+export function collab(
     id: string,
     tool: string,
     status: "inProgress" | "completed",
@@ -136,7 +136,7 @@ function collab(
 }
 
 /** The activity item that announces the session of a spawned subagent. */
-function spawnActivity(id: string, agentThreadId: string, agentPath: string, threadId = SESSION_ID): ScenarioStep {
+export function spawnActivity(id: string, agentThreadId: string, agentPath: string, threadId = SESSION_ID): ScenarioStep {
     return started({type: "subAgentActivity", id, kind: "started", agentThreadId, agentPath}, threadId);
 }
 

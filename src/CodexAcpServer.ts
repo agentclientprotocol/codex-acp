@@ -2198,7 +2198,8 @@ export class CodexAcpServer {
                     }
                     continue;
                 }
-                if (item.type === "collabAgentToolCall") continue;
+                // The activity items above replay the lifecycle of a spawn. A control call is a tool call, as in the live session.
+                if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") continue;
                 for (const update of await this.createHistoryUpdates(item, sessionState)) {
                     await session.update(update);
                 }

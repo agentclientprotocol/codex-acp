@@ -16,7 +16,7 @@ import {
     runScenario,
     toJsonLines,
 } from "./scenario-harness";
-import {SCENARIOS, type Scenario} from "./scenarios";
+import {CHILD_THREAD_ID, collab, completed, SCENARIOS, SESSION_ID, type Scenario, started} from "./scenarios";
 
 const PROFILE_NAMES: ProfileName[] = ["plain", "zed", "air"];
 
@@ -448,6 +448,53 @@ describe("subagents", () => {
         ]);
         expect(controls.every(update => update["_meta"] === undefined)).toBe(true);
     });
+
+    const CONTROL_TOOLS = [
+        "wait", "sendInput", "resumeAgent", "closeAgent", "sendMessage", "followupTask", "interruptAgent", "listAgents",
+    ];
+
+    for (const tool of CONTROL_TOOLS) {
+        it(`air: gets a replayed ${tool} as the tool call that the live session reports`, async () => {
+            const endState = tool === "closeAgent" ? "completed" : "running";
+            const spawn = collab("spawn-1", "spawnAgent", "completed", "running");
+            const activity = {type: "subAgentActivity", id: "act-1", kind: "started", agentThreadId: CHILD_THREAD_ID, agentPath: "/root/weather"};
+            const control = (status: "inProgress" | "completed", state: "running" | "completed") =>
+                collab("control-1", tool, status, state, SESSION_ID, CHILD_THREAD_ID, "Use Celsius.");
+            const reported = async (each: Scenario) => normalize(await runScenario(each, "air"))
+                .filter(message => message.method === "session/update")
+                .map(message => message.params as {sessionId: string; update: Update})
+                .filter(({update}) => update["toolCallId"] === "control-1");
+            const live = await reported({
+                name: `live-${tool}`,
+                steps: [
+                    started(spawn),
+                    started(activity),
+                    started(control("inProgress", "running")),
+                    completed(control("completed", endState)),
+                    // The child ends, so that the prompt does not wait for it.
+                    completed(collab("spawn-1", "spawnAgent", "completed", "completed")),
+                ],
+            });
+            const replayed = await reported({name: `history-${tool}`, history: [spawn, activity, control("completed", endState)]});
+
+            expect(live.map(({update}) => update["sessionUpdate"])).toEqual(["tool_call", "tool_call_update"]);
+            expect(replayed).toEqual([{
+                sessionId: SESSION_ID,
+                update: {...live[0]!.update, ...live[1]!.update, sessionUpdate: "tool_call"},
+            }]);
+            expect(replayed[0]!.update).toMatchObject({
+                kind: "other",
+                title: tool,
+                status: "completed",
+                rawInput: {
+                    prompt: "Use Celsius.",
+                    senderThreadId: SESSION_ID,
+                    receiverThreadIds: [CHILD_THREAD_ID],
+                    agentsStates: {[CHILD_THREAD_ID]: {status: endState, message: null}},
+                },
+            });
+        });
+    }
 });
 
 describe("plain ACP client", () => {
