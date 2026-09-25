@@ -532,7 +532,7 @@ describe('session/prompt over ACP v2', () => {
         ]);
     });
 
-    it('keeps the turn going when a tool call cannot be rendered on v2 yet', async () => {
+    it('keeps the turn going across a rendered tool call', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
@@ -542,7 +542,7 @@ describe('session/prompt over ACP v2', () => {
         client.emit(turnStarted());
         client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
         await first;
-        // A file edit: its diff content has no v2 rendering yet.
+        // A file edit, rendered as a tool call with diff content.
         client.emit(itemStarted({
             type: "fileChange",
             id: "item-edit",

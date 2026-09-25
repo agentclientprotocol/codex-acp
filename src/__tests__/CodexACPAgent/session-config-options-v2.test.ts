@@ -90,7 +90,7 @@ describe('Session config options over ACP v2', () => {
         const {connection, agent, sessionState} = await connectV2Client();
         closeClient = () => connection.close();
 
-        // @ts-expect-error - the helper session responses will use once v2 `session/new` exists
+        // @ts-expect-error - private method, called directly to test the response shape in isolation
         const response = agent.createSessionConfigOptionsResponseV2(sessionState);
 
         await expect(dump(response)).toMatchFileSnapshot('data/session-config-options-v2-list.json');

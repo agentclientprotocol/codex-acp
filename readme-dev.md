@@ -107,3 +107,57 @@ compaction lifecycle instead of the legacy completion advisory.
 
 See the [diff statistics specification](docs/diff-statistics-extension.md) for the
 `_meta.jetbrains.air.diffStats` payload and its compatibility rules.
+
+### ACP v2 support
+
+The agent speaks both ACP v1 and the unstable ACP v2 (Draft) protocol from the same process; the
+version is negotiated on the first `initialize` request and fixed for the connection's lifetime.
+
+The v2 chain registers: `initialize`, `session/new|list|close|delete|resume` (v2 folds `session/load`
+into `session/resume` with `replayFrom`), `session/set_config_option`, `session/cancel`,
+`auth/login|logout`, `session/prompt` (plus `$/cancel_request`), `session/fork`, and
+`providers/list|set|disable`. Unstable extension methods on top of that: `_session/steering`,
+`_session/goal` (set/pause/resume/clear), and `_session/async_task/stop`. `session/fork` drops the
+v1 `modes` field (v2 removed the modes API in favor of config options), and forked sessions do not
+get an `available_commands_update`, matching v1. There are no new environment/config knobs specific
+to v2; it reuses the runtime environment variables above.
+
+#### AIR v2 client contract
+
+These are behaviors the AIR (JetBrains) ACP client relies on that aren't obvious from the wire
+schema alone:
+
+- On a failed prompt, read `sessionFailure` (`_meta.jetbrains.air.sessionFailure`) and `quota`
+  (`_meta.quota`) from the idle `state_update` that ends the turn, not from a separate error
+  channel. The same `_meta` v1 attaches to `PromptResponse` is copied onto the v2 idle update.
+- Custom session updates are renamed on v2: `subagent_spawned`/`subagent_state_update` become a
+  single `_subagent_update` (gated on the AIR `nativeSubagentSessions` capability; it will rename to
+  `subagent_update` once the subagent RFD, spec PR #1992, lands), and
+  `async_task_spawned`/`async_task_state_update` become `_async_task_spawned`/`_async_task_state_update`
+  (gated on the AIR `asyncTasks` capability). Payload shapes are unchanged.
+- The SDK client treats any `idle` state update as the stop of whichever prompt is pending, not just
+  one paired 1:1 with a `session/prompt` call.
+- A steer (`_session/steering`) shows up as a `user_message` once it actually lands in the turn.
+- On cancel, any permission or elicitation request still waiting on a client response is withdrawn
+  with `$/cancel_request`, not just the underlying Codex turn.
+- Turns Codex starts on its own (goal auto-turns, e.g. after `session/resume` or `session/new`) are
+  rendered the same as prompted turns (`running` then one `idle`) but with no corresponding
+  `session/prompt` call — clients should not assume every `running`/`idle` pair has a matching
+  outbound prompt.
+- After a tool call streams terminal output as `terminal_output_chunk`s, completion does not resend a
+  full `output` snapshot; the streamed chunks are the only copy of the output.
+
+#### Known gaps
+
+- After `providers/disable("openai")`, `providers/list` still reports native OpenAI routing as the
+  current provider. The providers RFD says a disabled provider's `current` should be `null`; this is
+  left as-is and documented here rather than fixed.
+- Open question for AIR: AIR's fork points match Codex item ids, but on v2 a user message's
+  rendered id is the client-minted `clientId` (when the client supplied one), not the Codex item id.
+  A fork at a user message would not resolve. This is flagged for AIR, not fixed here.
+
+#### Verification
+
+The ACP TCK (Technology Compatibility Kit) can run against either protocol version; see
+`.agents/tck/HOW-TO-RUN.md` for the full setup and commands (run the v1 suite as-is, and the v2 suite
+with `--protocol-version 2`).

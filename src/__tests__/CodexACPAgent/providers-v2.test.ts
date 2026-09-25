@@ -171,9 +171,9 @@ describe('providers/* over ACP v1 and v2', () => {
         expect(error?.code).toBe(-32602);
     });
 
-    // The v2 SDK validates `baseUrl` as `format: uri` before codex-acp's own handler runs
-    // (v2-fork-providers-and-extension-methods.md: no `format: uri` on v1's schema, so v1's own
-    // handler-level check — non-empty string only — is all that applies there).
+    // The v2 SDK validates `baseUrl` as `format: uri` before codex-acp's own handler runs.
+    // v1's schema has no such format constraint, so v1's handler-level check (non-empty string
+    // only) is all that applies there.
     it('v2 only: rejects a non-URL baseUrl with invalid_params from the SDK', async () => {
         const client = connectClient("v2");
         closeClient = () => client.connection.close();
