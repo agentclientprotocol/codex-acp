@@ -137,6 +137,7 @@ import {TitleGenerator} from "./TitleGenerator";
 import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
+    AIR_CUSTOM_INSTRUCTIONS_KEY,
     AIR_ASYNC_TASKS_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     AIR_RECOMMENDED_CONFIG_VALUE_KEY,
@@ -422,6 +423,7 @@ export class CodexAcpServer {
                         [AIR_EXTENSION_CAPABILITIES_KEY]: [
                             AIR_SESSION_FAILURE_KEY,
                             AIR_AGENT_FILE_CHANGE_REPORT_KEY,
+                            AIR_CUSTOM_INSTRUCTIONS_KEY,
                             AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                             AIR_ASYNC_TASKS_KEY,
                             AIR_RECOMMENDED_CONFIG_VALUE_KEY,

@@ -15,6 +15,7 @@ export const AIR_EXTENSION_CAPABILITIES_KEY = "capabilities";
 export const AIR_DIFF_STATS_KEY = "diffStats";
 export const AIR_SESSION_FAILURE_KEY = "sessionFailure";
 export const AIR_AGENT_FILE_CHANGE_REPORT_KEY = "agentFileChangeReport";
+export const AIR_CUSTOM_INSTRUCTIONS_KEY = "customInstructions";
 export const AIR_NATIVE_SUBAGENT_SESSIONS_KEY = "nativeSubagentSessions";
 export const AIR_ASYNC_TASKS_KEY = "asyncTasks";
 export const AIR_RECOMMENDED_CONFIG_VALUE_KEY = "recommendedValue";
@@ -58,6 +59,15 @@ export function clientSupportsAirCapability(
         && version >= AIR_EXTENSION_VERSION
         && Array.isArray(supported)
         && supported.includes(capability);
+}
+
+/** Read custom instructions from `session/new` metadata. */
+export function airCustomInstructions(meta: unknown): string | undefined {
+    const root = asRecord(meta);
+    const jetbrains = asRecord(root[JETBRAINS_META_KEY]);
+    const air = asRecord(jetbrains[AIR_META_KEY]);
+    const instructions = air[AIR_CUSTOM_INSTRUCTIONS_KEY];
+    return typeof instructions === "string" ? instructions : undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
