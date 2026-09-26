@@ -32,8 +32,7 @@ import type {
     Thread,
     ThreadGoal,
     ThreadItem,
-    UserInput
-} from "./app-server/v2";
+    UserInput, AccountRateLimitsUpdatedNotification, RateLimitSnapshot} from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
@@ -132,6 +131,20 @@ import {
     gatewayStatus,
     sameAuthStatus,
 } from "./AuthStatusMeta";
+import {
+    RATE_LIMITS_META_KEY,
+    RATE_LIMITS_UPDATE_METHOD,
+    rateLimitsCapability,
+    sameRateLimits,
+    toRateLimits,
+    type RateLimits,
+} from "./RateLimitsMeta";
+import {mergeRateLimitSnapshot} from "./RateLimitsMap";
+
+/** Whether two auth statuses describe the same signed-in identity. */
+function sameAccount(previous: AuthStatus, next: AuthStatus): boolean {
+    return previous.kind === next.kind && previous.account?.email === next.account?.email;
+}
 import {randomUUID} from "node:crypto";
 import {TitleGenerator} from "./TitleGenerator";
 import {once} from "node:events";
@@ -295,6 +308,14 @@ export class CodexAcpServer {
     private booleanConfigOptionsSupported: boolean;
     /** Last `authStatus` pushed to the client; used to suppress duplicates. */
     private currentAuthStatus: AuthStatus | null;
+    /** Connection-level merge baseline for the sparse app-server
+     *  `account/rateLimits/updated`, per `limitId`. Per-session state cannot be
+     *  the baseline: it is reset on every session create and the account
+     *  notification fans out to every session's handler. */
+    private readonly rateLimitSnapshots = new Map<string, RateLimitSnapshot>();
+    /** Last `_account/rate_limits_update` payload pushed per `limitId`; the
+     *  duplicate filter. */
+    private readonly pushedRateLimits = new Map<string, RateLimits>();
 
     private readonly sessions: Map<string, SessionState>;
     private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
@@ -331,6 +352,7 @@ export class CodexAcpServer {
         this.permissionLifecycleContexts = new WeakMap();
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
+        this.observeAccountNotifications(codexAcpClient);
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.codexProcessState = codexProcessState ?? null;
         this.captureStderr();
@@ -404,6 +426,9 @@ export class CodexAcpServer {
                     // Presence means "this agent pushes `_auth/status_update`". It
                     // never carries a payload, and the client never asks for one.
                     [AUTH_STATUS_META_KEY]: authStatusCapability(),
+                    // Presence means "this agent pushes `_account/rate_limits_update`"
+                    // (RateLimitsMeta.ts). Same contract shape as `authStatus`.
+                    [RATE_LIMITS_META_KEY]: rateLimitsCapability(),
                 },
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
@@ -1051,6 +1076,7 @@ export class CodexAcpServer {
     async logout(_params: acp.LogoutRequest): Promise<void> {
         logger.log("Logout request received");
         await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+        this.forgetRateLimits();
         await this.refreshAuthState(null);
         logger.log("Logout request completed");
     }
@@ -1099,6 +1125,7 @@ export class CodexAcpServer {
             }
             await replacement.initialize(this.initializeRequest);
             this.codexAcpClient = replacement;
+            this.observeAccountNotifications(replacement);
             this.availableCommands = this.createAvailableCommands(replacement);
 
             const resumeErrors: unknown[] = [];
@@ -1350,11 +1377,82 @@ export class CodexAcpServer {
         if (sameAuthStatus(this.currentAuthStatus, next)) {
             return;
         }
+        if (this.currentAuthStatus !== null && !sameAccount(this.currentAuthStatus, next)) {
+            this.forgetRateLimits();
+        }
         this.currentAuthStatus = next;
         try {
             await this.connection.notify(AUTH_STATUS_UPDATE_METHOD, {authStatus: next});
         } catch (error) {
             logger.log("Failed to send auth status update", {error: String(error)});
+        }
+    }
+
+    /**
+     * Subscribes to account-level app-server notifications at the connection,
+     * where each arrives exactly once and in receive order. A per-session
+     * handler would see the same notification once per open session, from
+     * queues that can reorder the copies, so a stale snapshot could overwrite a
+     * newer one. Re-run for a replacement client.
+     */
+    private observeAccountNotifications(client: CodexAcpClient): void {
+        client.appServerClient.onAccountNotification((notification) => {
+            if (notification.method === "account/rateLimits/updated") {
+                this.handleRateLimitsUpdated(notification.params);
+            }
+        });
+    }
+
+    /**
+     * Handles the app-server `account/rateLimits/updated` push.
+     *
+     * The notification is sparse: the app-server asks clients to merge available
+     * values into the most recent snapshot. That merge happens HERE, against a
+     * connection-level baseline per `limitId`, because per-session state is reset
+     * on every session create and would make a freshly created session report
+     * `planType: null` for the same account the previous session knew. The
+     * windows themselves are taken as reported (a `null` window is "not
+     * reported", not "unchanged"); `limitName` and the account metadata carry
+     * forward through {@link mergeRateLimitSnapshot}.
+     */
+    handleRateLimitsUpdated(notification: AccountRateLimitsUpdatedNotification): void {
+        const raw = notification.rateLimits;
+        const limitId = raw.limitId ?? "codex";
+        const previous = this.rateLimitSnapshots.get(limitId);
+        const merged: RateLimitSnapshot = previous
+            ? mergeRateLimitSnapshot(previous, raw)
+            : {...raw, limitId};
+        merged.limitName = merged.limitName ?? previous?.limitName ?? null;
+        this.rateLimitSnapshots.set(limitId, merged);
+        void this.setRateLimits(toRateLimits(limitId, merged));
+    }
+
+    /**
+     * Pushes `_account/rate_limits_update` for one limit when its payload changed.
+     * A push replaces the client's state for that `limitId` only; other limits
+     * on the account are pushed separately, so a repeat of one limit's windows
+     * (the fan-out, or a sparse update that added nothing) never goes out.
+     */
+    /**
+     * The windows belong to the account that is signed in. When that changes
+     * (logout, or a login reported for a different account) the baseline and
+     * the duplicate filter are dropped, so the next update for the new account
+     * is pushed even when its values happen to equal the old account's.
+     */
+    private forgetRateLimits(): void {
+        this.rateLimitSnapshots.clear();
+        this.pushedRateLimits.clear();
+    }
+
+    private async setRateLimits(next: RateLimits): Promise<void> {
+        if (sameRateLimits(this.pushedRateLimits.get(next.limitId) ?? null, next)) {
+            return;
+        }
+        this.pushedRateLimits.set(next.limitId, next);
+        try {
+            await this.connection.notify(RATE_LIMITS_UPDATE_METHOD, {rateLimits: next});
+        } catch (error) {
+            logger.log("Failed to send rate limits update", {error: String(error)});
         }
     }
 

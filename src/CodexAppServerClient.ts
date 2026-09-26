@@ -822,6 +822,18 @@ export class CodexAppServerClient {
         this.codexEventHandlers.push(callback);
     }
 
+    /**
+     * Registers a listener for account-level (thread-less) notifications. Each
+     * such notification reaches every listener exactly once, in receive order,
+     * before the per-session fan-out below; a subscriber that needs the
+     * account's state as one ordered stream uses this rather than a session
+     * handler, whose asynchronous queue can reorder copies across sessions.
+     */
+    onAccountNotification(callback: (event: ServerNotification) => void) {
+        this.accountNotificationListeners.push(callback);
+    }
+
+    private accountNotificationListeners: Array<(event: ServerNotification) => void> = [];
     private notificationHandlers = new Map<string, (event: ServerNotification) => void>();
     private notify(notification: ServerNotification) {
         const threadId = extractThreadId(notification);
@@ -831,6 +843,9 @@ export class CodexAppServerClient {
                 handler(notification);
             }
             return;
+        }
+        for (const listener of this.accountNotificationListeners) {
+            listener(notification);
         }
         for (const notificationHandler of this.notificationHandlers.values()) {
             notificationHandler(notification);
