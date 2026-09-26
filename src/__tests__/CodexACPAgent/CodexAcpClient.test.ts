@@ -950,6 +950,58 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
+    it('preserves MCP servers from CODEX_CONFIG when ACP adds another MCP server', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        (codexAcpClient as unknown as {config: Record<string, unknown>}).config = {
+            mcp_servers: {
+                node_repl: {
+                    env: {
+                        HTTPS_PROXY: "http://127.0.0.1:7890",
+                    },
+                },
+            },
+        };
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config: {}} as any);
+        const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
+            thread: {id: "thread-id"} as any,
+            model: "gpt-5",
+            reasoningEffort: "medium",
+            serviceTier: null,
+        } as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+
+        await codexAcpClient.newSession({
+            cwd: "/workspace",
+            mcpServers: [{
+                name: "docs",
+                command: "npx",
+                args: ["docs-mcp"],
+                env: [{name: "DOCS_TOKEN", value: "token"}],
+            }],
+        });
+
+        const threadStartRequest = threadStartSpy.mock.calls[0]![0];
+        expect(threadStartRequest.config?.["mcp_servers"]).toEqual({
+            node_repl: {
+                env: {
+                    HTTPS_PROXY: "http://127.0.0.1:7890",
+                },
+            },
+            docs: {
+                command: "npx",
+                args: ["docs-mcp"],
+                env: {DOCS_TOKEN: "token"},
+            },
+        });
+    });
+
     it('waits for typed mcp startup status updates and returns terminal states', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
