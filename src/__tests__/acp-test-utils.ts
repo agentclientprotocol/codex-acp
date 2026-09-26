@@ -91,6 +91,7 @@ export interface ConnectionConfig {
     getExitCode: () => number | null;
     acpConnection?: AcpConnectionConfig;
     codexProcessState?: CodexProcessState;
+    acpDisconnectSignal?: AbortSignal;
 }
 
 export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
@@ -111,6 +112,7 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         config.getExitCode,
         undefined,
         config.codexProcessState,
+        config.acpDisconnectSignal,
     );
 
     const transportEvents: CodexConnectionEvent[] = [];
@@ -274,6 +276,7 @@ export interface CodexMockTestFixture extends TestFixture {
 export function createCodexMockTestFixture(
     restartCodexClient?: () => Promise<CodexAcpClient>,
     process?: CodexConnection["process"],
+    acpDisconnectSignal?: AbortSignal,
 ): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
@@ -329,6 +332,7 @@ export function createCodexMockTestFixture(
             modelProvider: undefined,
             stderr: "",
         }} : {}),
+        ...(acpDisconnectSignal ? {acpDisconnectSignal} : {}),
         acpConnection: {
             connection: acpConnection,
             events: acpConnectionEvents,
