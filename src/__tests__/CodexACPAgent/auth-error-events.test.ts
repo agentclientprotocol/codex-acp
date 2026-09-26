@@ -247,7 +247,7 @@ describe("CodexEventHandler - auth error events", () => {
         }]);
     });
 
-    it("returns a typed auth failure without forwarding provider details", async () => {
+    it("uses the ACP login error without forwarding provider details", async () => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: "typed-auth-session",
             account: null,
@@ -259,11 +259,55 @@ describe("CodexEventHandler - auth error events", () => {
             misalignment: null,
         }, false, typedFailureCapabilities);
 
-        expect(result).toMatchObject({
-            stopReason: "end_turn",
-            _meta: {jetbrains: {air: {sessionFailure: {category: "access"}}}},
-        });
+        expect(result).toMatchObject({code: -32000, message: "Authentication required"});
         expect(JSON.stringify(result)).not.toContain("secret authentication details");
+        expect(JSON.stringify(result)).not.toContain("sessionFailure");
+        expect(updates).toEqual([]);
+    });
+
+    it("does not forward an auth error from another turn", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "foreign-auth-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Sign in to continue",
+            codexErrorInfo: "unauthorized",
+            additionalDetails: null,
+            misalignment: null,
+        }, false, typedFailureCapabilities, "foreign-turn");
+
+        expect(result).toMatchObject({stopReason: "end_turn"});
+        expect(updates).toEqual([]);
+    });
+
+    it("uses the ACP login error when auth arrives before the turn id", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "early-auth-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Sign in to continue",
+            codexErrorInfo: "unauthorized",
+            additionalDetails: null,
+            misalignment: null,
+        }, false, typedFailureCapabilities, "turn-id", true);
+
+        expect(result).toMatchObject({code: -32000, message: "Authentication required"});
+        expect(updates).toEqual([]);
+    });
+
+    it("uses the ACP login error when only the failed turn reports auth", async () => {
+        const {result, updates} = await runPromptWithCompletedTurn(
+            createTestSessionState({sessionId: "completion-auth-session", account: {type: "apiKey"}}),
+            typedFailureCapabilities,
+            createTurn("failed", "turn-id", {
+                message: "Sign in to continue",
+                codexErrorInfo: "unauthorized",
+                additionalDetails: null,
+                misalignment: null,
+            }),
+        );
+
+        expect(result).toMatchObject({code: -32000, message: "Authentication required"});
         expect(updates).toEqual([]);
     });
 
@@ -303,7 +347,6 @@ describe("CodexEventHandler - auth error events", () => {
 
     it.each([
         ["connection", {responseStreamDisconnected: {httpStatusCode: 503}}],
-        ["access", "unauthorized"],
         ["limit", {responseStreamDisconnected: {httpStatusCode: 429}}],
         ["limit", "usageLimitExceeded"],
         ["service", "serverOverloaded"],
@@ -758,25 +801,7 @@ describe("CodexEventHandler - auth error events", () => {
         expect(response).toMatchObject({
             stopReason: "end_turn",
         });
-        expect(updates).toEqual([{
-            sessionUpdate: "session_info_update",
-            _meta: {
-                codex: {
-                    error: {
-                        message: "Reconnecting after provider returned 401",
-                        codexErrorInfo: {
-                            responseStreamDisconnected: {
-                                httpStatusCode: 401,
-                            },
-                        },
-                        additionalDetails: "HTTP status 401",
-                        misalignment: null,
-                        turnId: "turn-id",
-                        willRetry: true,
-                    },
-                },
-            },
-        }]);
+        expect(updates).toEqual([]);
     });
 
     it("returns AuthRequired for auth errors when no auth is configured", async () => {
@@ -791,14 +816,8 @@ describe("CodexEventHandler - auth error events", () => {
             misalignment: null,
         });
 
-        expect(error).toMatchObject({
-            code: -32000,
-            message: "Authentication required: Authentication is required",
-            data: {
-                message: "Authentication is required",
-                codexErrorInfo: "unauthorized",
-            },
-        });
+        expect(error).toMatchObject({code: -32000, message: "Authentication required"});
+        expect(JSON.stringify(error)).not.toContain("Authentication is required");
     });
 
     it.each(configuredAuthFailureCases)(
@@ -810,14 +829,12 @@ describe("CodexEventHandler - auth error events", () => {
                 ...sessionOverrides,
             }), turnError);
 
-            expect(error).toMatchObject({
-                code: -32603,
-                message: "Internal error",
-                data: expectedData,
-            });
-            expect(error).not.toMatchObject({
-                code: -32000,
-            });
+            if (turnError.codexErrorInfo === "usageLimitExceeded") {
+                expect(error).toMatchObject({code: -32603, message: "Internal error", data: expectedData});
+            } else {
+                expect(error).toMatchObject({code: -32000, message: "Authentication required"});
+                expect(JSON.stringify(error)).not.toContain(turnError.message);
+            }
         },
     );
 });
