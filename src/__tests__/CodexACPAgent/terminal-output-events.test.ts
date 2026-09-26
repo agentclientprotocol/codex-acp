@@ -165,6 +165,57 @@ describe('CodexEventHandler - terminal output events', () => {
         );
     });
 
+    it('should flush aggregated output after terminal input without streamed output', async () => {
+        const deltaSessionState = createTestSessionState({
+            sessionId,
+            terminalOutputDeltaSupported: true,
+        });
+        const terminalInteractionNotification: ServerNotification = {
+            method: 'item/commandExecution/terminalInteraction',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'command-123',
+                processId: 'pid-456',
+                stdin: 'continue',
+            },
+        };
+        const commandCompletedNotification: ServerNotification = {
+            method: 'item/completed',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                completedAtMs: 0,
+                item: {
+                    type: 'commandExecution',
+                    id: 'command-123',
+                    pluginId: null,
+                    scriptPath: null,
+                    command: 'read answer; echo done',
+                    cwd: '/test/project',
+                    processId: 'pid-456',
+                    source: 'agent',
+                    status: 'completed',
+                    commandActions: [],
+                    aggregatedOutput: 'done\n',
+                    exitCode: 0,
+                    durationMs: 150,
+                },
+            },
+        };
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, deltaSessionState, [
+            terminalInteractionNotification,
+            commandCompletedNotification,
+        ]);
+
+        const updates = mockFixture.getAcpConnectionEvents([]).map(event => event.args[0].update);
+        expect(updates).toHaveLength(2);
+        expect(updates[0]._meta?.terminal_output_delta?.data).toBe('\ncontinue\n');
+        expect(updates[1]._meta?.terminal_output_delta?.data).toBe('done\n');
+        expect(updates[1]).not.toHaveProperty('rawOutput');
+    });
+
     it('should handle failed command completion', async () => {
         const commandFailedNotification: ServerNotification = {
             method: 'item/completed',
