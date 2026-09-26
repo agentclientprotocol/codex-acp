@@ -46,8 +46,13 @@ export class CodexSubagentSubscriptions {
         this.registerInteractiveHandlers(session, subscription.rootSessionId);
     }
 
+    /** Child thread ids discovered under a root session; cleared with it. */
+    childSessionIds(rootSessionId: string): string[] {
+        return [...this.sessions.get(rootSessionId)?.children ?? []];
+    }
+
     clear(rootSessionId: string): void {
-        for (const childSessionId of this.sessions.get(rootSessionId)?.children ?? []) {
+        for (const childSessionId of this.childSessionIds(rootSessionId)) {
             this.client.clearThreadHandlers(childSessionId);
         }
         this.sessions.delete(rootSessionId);
