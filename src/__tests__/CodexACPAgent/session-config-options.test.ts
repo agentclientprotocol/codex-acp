@@ -132,13 +132,18 @@ describe("Session config options", () => {
                     name: "Full access",
                     description: "Unrestricted access to the internet and any file on your computer",
                 },
+                {
+                    value: "ask-always",
+                    name: "Ask every time",
+                    description: "Ask before every command and file edit, including reads. Approved commands run in the workspace sandbox without network access.",
+                },
             ],
         });
         expect((modeOption as any).options.map((o: any) => o.value)).toEqual(
             AgentMode.all().map(m => m.id)
         );
         expect(response.modes?.availableModes.map(mode => mode.id)).toEqual([
-            "read-only", "workspace-write", "agent", "agent-full-access",
+            "read-only", "workspace-write", "agent", "agent-full-access", "ask-always",
         ]);
     });
 
@@ -263,6 +268,13 @@ describe("Session config options", () => {
         {selection: "INITIAL_AGENT_MODE", initialMode: "workspace-write", modeId: "workspace-write"},
         {selection: "session/set_mode", initialMode: "read-only", modeId: "workspace-write"},
         {selection: "session/set_config_option", initialMode: "read-only", modeId: "workspace-write"},
+        {selection: "INITIAL_AGENT_MODE", initialMode: "ask-always", modeId: "ask-always"},
+        {selection: "session/set_mode", initialMode: "agent", modeId: "ask-always"},
+        {selection: "session/set_mode", initialMode: "workspace-write", modeId: "ask-always"},
+        {selection: "session/set_config_option", initialMode: "agent-full-access", modeId: "ask-always"},
+        {selection: "session/set_config_option", initialMode: "read-only", modeId: "ask-always"},
+        {selection: "session/set_mode", initialMode: "ask-always", modeId: "read-only"},
+        {selection: "session/set_config_option", initialMode: "ask-always", modeId: "workspace-write"},
     ])("applies $modeId permissions after $selection from $initialMode", async ({selection, initialMode, modeId}) => {
         vi.stubEnv("INITIAL_AGENT_MODE", initialMode);
         const {fast} = buildModels();
@@ -301,7 +313,7 @@ describe("Session config options", () => {
         });
 
         // Assert the actual outgoing policy, independently of the preset object.
-        // Additional session roots are writable only in the workspace-write preset.
+        // Additional session roots are writable only in the workspace-write sandbox presets.
         const policies = turnStart.mock.calls.map(([{approvalPolicy, approvalsReviewer, sandboxPolicy}]) => ({
             approvalPolicy, approvalsReviewer, sandboxPolicy,
         }));

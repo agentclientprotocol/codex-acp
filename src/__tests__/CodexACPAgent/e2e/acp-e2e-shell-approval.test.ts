@@ -146,6 +146,61 @@ describeE2E("E2E read-only mode shell permission tests", () => {
     });
 });
 
+describeE2E("E2E ask-always mode shell permission tests", () => {
+    let fixture: SpawnedAgentFixture;
+
+    beforeEach(async () => {
+        fixture = await createAuthenticatedFixture(AgentMode.AskAlways);
+    });
+
+    afterEach(async () => {
+        await fixture.dispose();
+    });
+
+    it("requests permission for a command that only reads the workspace", async () => {
+        const fileName = generateFileNameForTest();
+        fs.writeFileSync(path.join(fixture.workspaceDir, fileName), "ask-always e2e");
+        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowOnce));
+        const sessionId = (await fixture.createSession()).sessionId;
+        const response = await fixture.connection.prompt({
+            sessionId,
+            prompt: [{
+                type: "text",
+                text: `Use your shell tool to run exactly \`cat '${fileName}'\` and nothing else.`,
+            }],
+        });
+
+        expectEndTurn(response);
+        expect(fixture.readPermissionRequests(sessionId, "execute").length).toBeGreaterThanOrEqual(1);
+        expect(fixture.readPermissionRequests(sessionId, "edit")).toHaveLength(0);
+    });
+
+    it("requests permission for a command that writes inside the workspace", async () => {
+        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowOnce));
+        const sessionId = await writeToFile(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()));
+
+        expect(fixture.readPermissionRequests(sessionId, "execute").length).toBeGreaterThanOrEqual(1);
+        expect(fixture.readPermissionRequests(sessionId, "edit")).toHaveLength(0);
+    });
+
+    it("does not write inside the workspace when shell permission is cancelled", async () => {
+        fixture.setPermissionResponder(() => createPermissionResponse(null));
+        const filePath = path.join(fixture.workspaceDir, generateFileNameForTest());
+        const sessionId = (await fixture.createSession()).sessionId;
+        const response = await fixture.connection.prompt({
+            sessionId,
+            prompt: [{
+                type: "text",
+                text: `Use your shell tool to run exactly \`printf 'blocked' > '${filePath}'\`. Do not modify files any other way.`,
+            }],
+        });
+
+        expect(fs.existsSync(filePath),
+            `stopReason=${response.stopReason}; agent said: ${fixture.readText(sessionId)}`,
+        ).toBe(false);
+    });
+});
+
 describeE2E("E2E workspace access mode shell permission tests", () => {
     let fixture: SpawnedAgentFixture;
 
