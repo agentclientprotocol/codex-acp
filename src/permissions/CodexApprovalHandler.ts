@@ -35,13 +35,14 @@ export class CodexApprovalHandler implements ApprovalHandler {
         private readonly connection: AcpClientConnection,
         private readonly permissionContext: PermissionPromptContext,
         private readonly cancellationSignal?: AbortSignal,
+        private readonly continueOnReject = false,
     ) {}
 
     async handleCommandExecution(
         params: CommandExecutionRequestApprovalParams,
     ): Promise<CommandExecutionRequestApprovalResponse> {
         const authoritativeParams = params as CommandParamsWithAvailableDecisions;
-        const decisions = commandDecisionOptions(authoritativeParams);
+        const decisions = commandDecisionOptions(authoritativeParams, this.continueOnReject);
         if (!decisions) {
             logger.error("Cancelling command approval without a complete authoritative decision set", undefined);
             return {decision: "cancel"};
@@ -65,7 +66,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
     }
 
     async handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse> {
-        const decisions = fileChangeDecisionOptions();
+        const decisions = fileChangeDecisionOptions(this.continueOnReject);
         try {
             const response = await this.requestPermission({
                 sessionId: params.threadId,

@@ -15,9 +15,11 @@ export type DecisionOption<T> = {option: acp.PermissionOption; decision: T};
 
 export function commandDecisionOptions(
     params: CommandParamsWithAvailableDecisions,
+    continueOnReject = false,
 ): DecisionOption<CommandExecutionApprovalDecision>[] | undefined {
-    const decisions = parseAvailableCommandDecisions(params);
-    if (!decisions) return undefined;
+    const parsed = parseAvailableCommandDecisions(params);
+    if (!parsed) return undefined;
+    const decisions = continueOnReject && !params.additionalPermissions ? withDeclineBeforeCancel(parsed) : parsed;
 
     const options: DecisionOption<CommandExecutionApprovalDecision>[] = [];
     let networkIndex = 0;
@@ -86,13 +88,27 @@ export function commandDecisionOptions(
     return hasAllow && hasReject && hasUniqueOptionIds ? orderedOptions : undefined;
 }
 
+/**
+ * Codex accepts `decline` for command approvals, but does not advertise it in every decision set
+ * (for example under the `untrusted` approval policy, where only `cancel` rejects). For clients that
+ * opt in with the `continueOnReject` capability, offer `decline` right before `cancel`.
+ */
+function withDeclineBeforeCancel(
+    decisions: CommandExecutionApprovalDecision[],
+): CommandExecutionApprovalDecision[] {
+    if (decisions.includes("decline")) return decisions;
+    const cancelIndex = decisions.indexOf("cancel");
+    if (cancelIndex === -1) return decisions;
+    return [...decisions.slice(0, cancelIndex), "decline", ...decisions.slice(cancelIndex)];
+}
+
 function permissionOptionOrder(option: acp.PermissionOption): number {
     if (option.kind === "allow_once") return 0;
     if (option.kind === "allow_always") return 1;
     return 2;
 }
 
-export function fileChangeDecisionOptions(): DecisionOption<FileChangeApprovalDecision>[] {
+export function fileChangeDecisionOptions(continueOnReject = false): DecisionOption<FileChangeApprovalDecision>[] {
     return [
         decisionOption(ApprovalOptionId.AllowOnce, "Yes, proceed", "allow_once", "accept"),
         decisionOption(
@@ -101,6 +117,14 @@ export function fileChangeDecisionOptions(): DecisionOption<FileChangeApprovalDe
             "allow_always",
             "acceptForSession",
         ),
+        ...(continueOnReject
+            ? [decisionOption<FileChangeApprovalDecision>(
+                ApprovalOptionId.Decline,
+                "No, continue without making these edits",
+                "reject_once",
+                "decline",
+            )]
+            : []),
         decisionOption(
             ApprovalOptionId.Cancel,
             "No, and tell Codex what to do differently",

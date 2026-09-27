@@ -1,0 +1,42 @@
+{
+  "sessionId": "test-session-id",
+  "toolCall": {
+    "toolCallId": "command-item",
+    "kind": "execute",
+    "status": "pending",
+    "title": "Run command",
+    "rawInput": {
+      "command": "ls",
+      "cwd": "/workspace"
+    }
+  },
+  "options": [
+    {
+      "optionId": "allow_once",
+      "name": "Yes, proceed",
+      "kind": "allow_once"
+    },
+    {
+      "optionId": "accept_execpolicy_amendment",
+      "name": "Yes, and don't ask again for commands that start with `ls`",
+      "kind": "allow_always"
+    },
+    {
+      "optionId": "decline",
+      "name": "No, continue without running it",
+      "kind": "reject_once"
+    },
+    {
+      "optionId": "cancel",
+      "name": "No, and tell Codex what to do differently",
+      "kind": "reject_once"
+    }
+  ],
+  "_meta": {
+    "permission": {
+      "version": 1,
+      "title": "Run command?",
+      "description": "Needed to verify the changes."
+    }
+  }
+}

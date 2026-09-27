@@ -2,6 +2,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
+import {clientSupportsContinueOnReject} from "./permissions/capabilities";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
 import {
     planImplementationApproved,
@@ -2895,6 +2896,7 @@ export class CodexAcpServer {
                 this.connection,
                 permissionContext,
                 activePrompt.signal,
+                clientSupportsContinueOnReject(this.clientCapabilities),
             );
             const elicitationHandler = new CodexElicitationHandler(
                 this.connection,

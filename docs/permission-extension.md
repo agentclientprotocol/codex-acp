@@ -117,7 +117,7 @@ When Codex sends `availableDecisions`, that ordered list is authoritative. Older
 
 Exec-policy and network amendments are returned as the exact structured values supplied by Codex. An amendment is rejected if it does not match the corresponding proposal. An exec-policy option whose rendered prefix contains a line break is not shown, matching the native Codex UI.
 
-Unknown, malformed, empty, or internally inconsistent authoritative decision sets fail closed with `cancel`; the adapter does not invent replacement choices.
+Unknown, malformed, empty, or internally inconsistent authoritative decision sets fail closed with `cancel`; the adapter does not invent replacement choices. The only addition to a valid decision set is opt-in; see [Continue-on-reject capability](#continue-on-reject-capability).
 
 ## File changes
 
@@ -129,7 +129,33 @@ File-change approvals expose the native Codex choices:
 | `Yes, and don't ask again for these files` | `allow_always` | `acceptForSession` |
 | `No, and tell Codex what to do differently` | `reject_once` | `cancel` |
 
-Although the protocol decision enum also contains `decline`, the native Codex file-change prompt does not currently advertise it.
+Although the protocol decision enum also contains `decline`, the native Codex file-change prompt does not currently advertise it. Clients that opt in with the [continue-on-reject capability](#continue-on-reject-capability) also get `No, continue without making these edits` (`reject_once`, `decline`) before the `cancel` option.
+
+## Continue-on-reject capability
+
+Status: Experimental
+
+Codex has two ways to reject an action: `decline` rejects it and lets the turn continue, while `cancel` rejects it and interrupts the turn. Codex does not always advertise `decline`. File-change prompts never do, and command approvals under the `untrusted` approval policy offer only `accept`, an exec-policy amendment and `cancel`. In those prompts the only `reject_once` option interrupts the turn, and `session/prompt` ends with `stopReason: "cancelled"`.
+
+A client that wants a reject option that continues the turn advertises it on `initialize`:
+
+```json
+{
+  "protocolVersion": 1,
+  "clientCapabilities": {
+    "_meta": {
+      "continueOnReject": true
+    }
+  }
+}
+```
+
+With the capability, `codex-acp` adds `decline` right before `cancel`:
+
+- in command and network approvals whose decision set contains `cancel` but not `decline`, labelled `No, continue without running it`;
+- in every file-change approval, labelled `No, continue without making these edits`.
+
+Nothing else changes. `decline` is never added twice, never to a decision set without `cancel`, and never to the legacy additional-permissions fallback, which keeps accept and cancel only. Selecting `cancel`, or an ACP `cancelled` outcome, still returns `cancel`. Without the capability, permission requests are unchanged.
 
 ## Additional sandbox permissions
 

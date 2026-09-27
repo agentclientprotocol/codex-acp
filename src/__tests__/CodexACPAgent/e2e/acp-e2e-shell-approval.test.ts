@@ -181,6 +181,36 @@ describeE2E("E2E full-access mode shell permission tests", () => {
     });
 });
 
+describeE2E("E2E continue-on-reject shell permission tests", () => {
+    let fixture: SpawnedAgentFixture;
+
+    beforeEach(async () => {
+        fixture = await createAuthenticatedFixture(AgentMode.ReadOnly, undefined, {continueOnReject: true});
+    });
+
+    afterEach(async () => {
+        await fixture.dispose();
+    });
+
+    it("continues the turn when a workspace write command is declined", async () => {
+        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.Decline));
+        const filePath = path.join(fixture.workspaceDir, generateFileNameForTest());
+        const sessionId = (await fixture.createSession()).sessionId;
+        const response = await fixture.connection.prompt({
+            sessionId,
+            prompt: [{
+                type: "text",
+                text: `Use your shell tool to run exactly \`printf 'blocked' > '${filePath}'\`. Do not modify files any other way.`,
+            }],
+        });
+
+        const diagnostics = `stopReason=${response.stopReason}; agent said: ${fixture.readText(sessionId)}`;
+        expect(fixture.readPermissionRequests(sessionId, "execute").length, diagnostics).toBeGreaterThanOrEqual(1);
+        expectEndTurn(response);
+        expect(fs.existsSync(filePath), diagnostics).toBe(false);
+    });
+});
+
 describeE2E("E2E shell cancellation tests", () => {
     let fixture: SpawnedAgentFixture | null = null;
 
