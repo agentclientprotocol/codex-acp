@@ -6,7 +6,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
 - `OPENAI_API_KEY` - fallback API key used when the API-key auth method is selected.
 - `CODEX_PATH` - run a specific Codex executable instead of the bundled package dependency.
-- `CODEX_CONFIG` - JSON object merged into the Codex session config. For workspace-write modes, `{"sandbox_workspace_write":{"network_access":true}}` also enables networking in the per-turn sandbox policy without granting writes outside the workspace. Omitted or non-boolean values retain the mode default; `false` explicitly disables networking. This override does not change read-only or full-access sandbox policies.
+- `CODEX_CONFIG` - JSON object merged into the Codex session config. Set `sandbox_workspace_write.network_access` to `true` to enable networking in workspace-write modes.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, or `agent-full-access`.
