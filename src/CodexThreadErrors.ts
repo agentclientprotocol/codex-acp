@@ -55,6 +55,16 @@ export function isNoActiveTurnError(err: unknown): boolean {
 }
 
 /**
+ * `turn/interrupt` answers this when Codex has since moved on to another turn --
+ * most commonly a review's child turn -- registered after the id we sent. The
+ * message names the turn Codex considers active, which is the id to retry with.
+ */
+export function parseExpectedActiveTurnMismatch(err: unknown): {expected: string, found: string} | null {
+    const match = errorText(err).match(/expected active turn id (\S+) but found (\S+)/);
+    return match ? {expected: match[1]!, found: match[2]!} : null;
+}
+
+/**
  * True when the error means "Codex has no persisted thread under this id" for
  * any reason -- unparseable id, unknown id, or an id whose rollout was never
  * materialized.

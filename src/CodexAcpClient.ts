@@ -8,7 +8,7 @@ import {
 } from "./CodexAuthMethod";
 import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
-import {type McpServer, RequestError} from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk";
 import type {
     ApprovalHandler,
     CodexAppServerClient,
@@ -29,6 +29,7 @@ import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
 import {sanitizeMcpServerName} from "./McpServerName";
+import {type AcpMcpServer, type WithAcpMcpServers, getMcpServerName, normalizeMcpServer, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
@@ -49,6 +50,7 @@ import type {
     ThreadResumeParams,
     ThreadSourceKind,
     ThreadItem,
+    ThreadItemEntry,
     TurnCompletedNotification,
     TurnSteerResponse,
     UserInput,
@@ -153,7 +155,7 @@ export class CodexAcpClient {
         name: `${packageJson.name}`, title: "Codex ACP", version: `${packageJson.version}`
     };
 
-    async initialize(request: acp.InitializeRequest): Promise<void> {
+    async initialize(request: Pick<acp.InitializeRequest, "clientInfo">): Promise<void> {
         const response = await this.codexClient.initialize({
             capabilities: {
                 experimentalApi: true,
@@ -587,7 +589,7 @@ export class CodexAcpClient {
         }
     }
 
-    async resumeSession(request: acp.ResumeSessionRequest, onSubscribed?: () => void): Promise<SessionMetadata> {
+    async resumeSession(request: WithAcpMcpServers<acp.ResumeSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -613,7 +615,7 @@ export class CodexAcpClient {
         }
     }
 
-    async forkSession(request: acp.ForkSessionRequest): Promise<SessionMetadata> {
+    async forkSession(request: WithAcpMcpServers<acp.ForkSessionRequest>): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         return await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
@@ -628,7 +630,7 @@ export class CodexAcpClient {
         });
     }
 
-    async loadSession(request: acp.LoadSessionRequest, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+    async loadSession(request: WithAcpMcpServers<acp.LoadSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -643,16 +645,24 @@ export class CodexAcpClient {
         // Resume cursors bound durable history; later turns arrive through live events.
         // A null paginated cursor means there was no durable history at resume time.
         let thread: Thread = {...response.thread, turns: []};
-        let history: AsyncIterable<ThreadItem[]> = noItems();
+        let history: AsyncIterable<ThreadItemEntry[]> = noItems();
         if (response.materialized && response.thread.historyMode === "paginated") {
             if (response.itemsBackwardsCursor !== null) {
-                history = this.codexClient.threadItemPages(response.thread.id, {lastItemCursor: response.itemsBackwardsCursor});
+                history = this.codexClient.threadItemEntryPages(
+                    response.thread.id,
+                    {lastItemCursor: response.itemsBackwardsCursor},
+                );
             }
         } else if (response.materialized) {
             // A legacy store reads the whole history in one request.
             const legacy = (await this.codexClient.threadReadWithHistory(response.thread.id)).thread;
             thread = {...legacy, turns: []};
-            history = oneItemPage(legacy.turns.flatMap(turn => turn.items));
+            history = oneItemPage(legacy.turns.flatMap(turn => turn.items.map(item => ({
+                turnId: turn.id,
+                item,
+                startedAtMs: null,
+                completedAtMs: null,
+            }))));
         }
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
@@ -696,12 +706,12 @@ export class CodexAcpClient {
         return null;
     }
 
-    async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
+    async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadStart({
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
+            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });
@@ -731,6 +741,18 @@ export class CodexAcpClient {
         }
     }
 
+    /**
+     * Drops a session's notification handler without unsubscribing on the
+     * app-server: for a baseline tracker registered before `thread/resume`
+     * (to catch a Codex-initiated turn that starts before setup finishes)
+     * whose resume/load never actually subscribed the connection, so there
+     * is nothing to unsubscribe there.
+     */
+    discardSessionSubscription(sessionId: string): void {
+        this.codexClient.clearThreadHandlers(sessionId);
+        this.subagents.clear(sessionId);
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         try {
             await this.codexClient.threadArchive({threadId: sessionId});
@@ -757,19 +779,21 @@ export class CodexAcpClient {
         sessionId: string,
         target: ReviewTarget,
         onTurnStarted?: (turnId: string, threadId: string) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification> {
         return await this.codexClient.runReview({
             threadId: sessionId,
             target,
             delivery: "inline",
-        }, onTurnStarted);
+        }, onTurnStarted, onAccepted);
     }
 
     async runCompact(
         sessionId: string,
         onTurnStarted?: (turnId: string) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification | undefined> {
-        const completed = await this.codexClient.runCompact({threadId: sessionId}, onTurnStarted);
+        const completed = await this.codexClient.runCompact({threadId: sessionId}, onTurnStarted, onAccepted);
         return completed.method === "turn/completed" ? completed.params : undefined;
     }
 
@@ -783,16 +807,17 @@ export class CodexAcpClient {
         objective: string,
         onTurnStarted?: (turnId: string) => void,
         onGoalSet?: (goal: ThreadGoal) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification | null> {
         const params = {
             threadId: sessionId,
             objective,
             status: "active",
         } as const;
-        if (onGoalSet === undefined) {
+        if (onGoalSet === undefined && onAccepted === undefined) {
             return await this.codexClient.runGoalSet(params, onTurnStarted);
         }
-        return await this.codexClient.runGoalSet(params, onTurnStarted, undefined, onGoalSet);
+        return await this.codexClient.runGoalSet(params, onTurnStarted, undefined, onGoalSet, onAccepted);
     }
 
     async setGoalStatus(sessionId: string, status: ThreadGoalStatus): Promise<ThreadGoal> {
@@ -813,15 +838,16 @@ export class CodexAcpClient {
         sessionId: string,
         onTurnStarted?: (turnId: string) => void,
         onGoalSet?: (goal: ThreadGoal) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification | null> {
         const params = {
             threadId: sessionId,
             status: "active",
         } as const;
-        if (onGoalSet === undefined) {
+        if (onGoalSet === undefined && onAccepted === undefined) {
             return await this.codexClient.runGoalSet(params, onTurnStarted);
         }
-        return await this.codexClient.runGoalSet(params, onTurnStarted, undefined, onGoalSet);
+        return await this.codexClient.runGoalSet(params, onTurnStarted, undefined, onGoalSet, onAccepted);
     }
 
     async clearGoal(sessionId: string): Promise<void> {
@@ -839,7 +865,7 @@ export class CodexAcpClient {
     private async createSessionConfig(
         projectPath: string,
         additionalDirectories: string[],
-        mcpServers: Array<McpServer>
+        mcpServers: Array<AcpMcpServer>
     ): Promise<JsonObject> {
         const sessionRoots = [projectPath, ...additionalDirectories];
         const activeProvider = this.gatewayConfig
@@ -867,7 +893,7 @@ export class CodexAcpClient {
         }
 
         const requestedServers = mcpServers.map(mcp => ({
-            name: sanitizeMcpServerName(mcp.name),
+            name: sanitizeMcpServerName(getMcpServerName(mcp)),
             server: mcp,
         }));
         let serversToConfigure = requestedServers;
@@ -882,7 +908,7 @@ export class CodexAcpClient {
 
         return {
             ...configWithWorkspaceRoots,
-            "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+            "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, toCodexMcpServerConfig(normalizeMcpServer(mcp.server))])),
         };
     }
 
@@ -923,30 +949,6 @@ export class CodexAcpClient {
         if (!arraysEqual(this.skillExtraRoots, skillExtraRoots)) {
             await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
             this.skillExtraRoots = skillExtraRoots;
-        }
-    }
-
-    /**
-     * Create a codex config entry for MCP server
-     */
-    private createMcpSeverConfig(mcpServer: McpServer): JsonObject {
-        if ("type" in mcpServer) {
-            switch (mcpServer.type) {
-                case "acp":
-                    throw RequestError.invalidRequest("Codex doesn't support MCP ACP transport protocol")
-                case "sse":
-                    throw RequestError.invalidRequest("Codex doesn't support MCP SSE transport protocol")
-                case "http":
-                    return {
-                        "url": mcpServer.url,
-                        "http_headers": Object.fromEntries(mcpServer.headers.map(h => [h.name, h.value])),
-                    }
-            }
-        }
-        return {
-            "command": mcpServer.command,
-            "args": mcpServer.args,
-            "env": Object.fromEntries(mcpServer.env.map(env => [env.name, env.value])),
         }
     }
 
@@ -1047,6 +1049,7 @@ export class CodexAcpClient {
         additionalDirectories: string[],
         onTurnStarted?: (turnId: string) => void,
         shouldCancel?: () => boolean,
+        clientUserMessageId?: string,
     ): Promise<TurnCompletedNotification | null> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
@@ -1064,6 +1067,7 @@ export class CodexAcpClient {
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,
+            ...(clientUserMessageId !== undefined ? {clientUserMessageId} : {}),
         }, onTurnStarted);
     }
 
@@ -1210,11 +1214,12 @@ export class CodexAcpClient {
         });
     }
 
-    async steerTurn(params: { threadId: string, turnId: string, prompt: acp.ContentBlock[] }): Promise<TurnSteerResponse> {
+    async steerTurn(params: { threadId: string, turnId: string, prompt: acp.ContentBlock[], clientUserMessageId: string }): Promise<TurnSteerResponse> {
         return await this.codexClient.turnSteer({
             threadId: params.threadId,
             expectedTurnId: params.turnId,
             input: buildPromptItems(params.prompt),
+            clientUserMessageId: params.clientUserMessageId,
         });
     }
 
@@ -1441,8 +1446,8 @@ function mergeGatewayConfig(config: JsonObject, gatewayConfig: GatewayConfig | n
     }
 }
 
-async function* noItems(): AsyncGenerator<ThreadItem[]> {}
+async function* noItems<T>(): AsyncGenerator<T[]> {}
 
-async function* oneItemPage(items: ThreadItem[]): AsyncGenerator<ThreadItem[]> {
+async function* oneItemPage<T>(items: T[]): AsyncGenerator<T[]> {
     if (items.length > 0) yield items;
 }

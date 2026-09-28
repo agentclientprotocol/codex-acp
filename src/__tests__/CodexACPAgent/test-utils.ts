@@ -6,10 +6,13 @@ export interface MockConnections {
     mockCodexConnection: any;
     notificationHandlers: Map<string, Function>;
     getUnhandledNotificationHandler: () => Function | null;
+    /** The handler `CodexAppServerClient` registered for a `vscode-jsonrpc` `RequestType` (by its `.method`). */
+    getRequestHandler: (method: string) => Function | null;
 }
 
 export function createMockConnections(): MockConnections {
     const notificationHandlers = new Map<string, Function>();
+    const requestHandlers = new Map<string, Function>();
     let unhandledNotificationHandler: Function | null = null;
 
     const mockAcpConnection = {
@@ -25,7 +28,9 @@ export function createMockConnections(): MockConnections {
         onNotification: vi.fn((method: string, handler: Function) => {
             notificationHandlers.set(method, handler);
         }),
-        onRequest: vi.fn(),
+        onRequest: vi.fn((type: {method: string}, handler: Function) => {
+            requestHandlers.set(type.method, handler);
+        }),
         end: vi.fn(),
     };
 
@@ -34,6 +39,7 @@ export function createMockConnections(): MockConnections {
         mockCodexConnection,
         notificationHandlers,
         getUnhandledNotificationHandler: () => unhandledNotificationHandler,
+        getRequestHandler: (method: string) => requestHandlers.get(method) ?? null,
     };
 }
 

@@ -59,6 +59,7 @@ import type {
     ThreadTurnsListParams,
     ThreadTurnsListResponse,
     ThreadItem,
+    ThreadItemEntry,
     ThreadItemsListParams,
     ThreadItemsListResponse,
     Turn,
@@ -87,6 +88,8 @@ import type {
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
     ItemCompletedNotification,
+    ErrorNotification,
+    TurnError,
 } from "./app-server/v2";
 import type {
     ThreadBackgroundTerminalsRequest,
@@ -119,19 +122,19 @@ export type McpStartupResult = {
     cancelled: Array<string>;
 };
 
-const CommandExecutionApprovalRequest = new RequestType<
+export const CommandExecutionApprovalRequest = new RequestType<
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
     void
 >('item/commandExecution/requestApproval');
 
-const FileChangeApprovalRequest = new RequestType<
+export const FileChangeApprovalRequest = new RequestType<
     FileChangeRequestApprovalParams,
     FileChangeRequestApprovalResponse,
     void
 >('item/fileChange/requestApproval');
 
-const PermissionsApprovalRequest = new RequestType<
+export const PermissionsApprovalRequest = new RequestType<
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
     void
@@ -183,11 +186,12 @@ export class CodexAppServerClient {
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
+    private readonly leakedReviewErrors = new Map<string, {error: TurnError, failedTurnIds: Set<string>}>();
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
         this.connection.onUnhandledNotification((data) => {
-            const serverNotification = data as ServerNotification;
+            const serverNotification = this.dropLeakedReviewError(data as ServerNotification);
             if (isMcpServerStatusUpdatedNotification(serverNotification)) {
                 this.mcpServerStartupVersion += 1;
                 this.mcpServerStartupStates.set(serverNotification.params.name, {
@@ -334,23 +338,73 @@ export class CodexAppServerClient {
     async runReview(
         params: ReviewStartParams,
         onTurnStarted?: (turnId: string, threadId: string) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
             capturedCompletions.push(event);
         });
+        // If Codex cannot resolve the review request (e.g. a base branch in a non-git cwd), it reports
+        // one fatal error under the review turn id and never starts or completes that turn. A spawned
+        // review always reports `enteredReviewMode` first, so a fatal error before it ends the review.
+        let reviewTurnId: string | null = null;
+        const enteredReviewTurnIds = new Set<string>();
+        const unspawnedReviewErrors = new Map<string, ErrorNotification>();
+        const finishUnspawnedReview = (error: ErrorNotification) => {
+            this.leakedReviewErrors.set(error.threadId, {error: error.error, failedTurnIds: new Set()});
+            this.recordTurnCompleted({
+                threadId: error.threadId,
+                turn: {
+                    id: error.turnId,
+                    items: [],
+                    itemsView: "notLoaded",
+                    status: "failed",
+                    error: error.error,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
+                },
+            });
+        };
+        const releaseRoutingCapture = this.captureTurnRoutings(params.threadId, (turnId, notification) => {
+            if ((notification.method === "item/started" || notification.method === "item/completed")
+                && notification.params.item.type === "enteredReviewMode") {
+                enteredReviewTurnIds.add(turnId);
+                return;
+            }
+            if (notification.method !== "error"
+                || notification.params.willRetry
+                || enteredReviewTurnIds.has(turnId)
+                || unspawnedReviewErrors.has(turnId)) {
+                return;
+            }
+            unspawnedReviewErrors.set(turnId, notification.params);
+            if (turnId === reviewTurnId) {
+                finishUnspawnedReview(notification.params);
+            }
+        });
 
         try {
             const reviewStarted = await this.reviewStart(params);
+            // The reviewer's own user message carries `clientId: null`, never the caller's, so
+            // this response is the earliest signal that Codex accepted the command.
+            onAccepted?.();
             onTurnStarted?.(reviewStarted.turn.id, reviewStarted.reviewThreadId);
             const earlyCompletion = capturedCompletions.find(event => event.turn.id === reviewStarted.turn.id);
             releaseCapture();
             if (earlyCompletion) {
                 return earlyCompletion;
             }
-            return await this.awaitTurnCompleted(reviewStarted.reviewThreadId, reviewStarted.turn.id);
+            const completion = this.awaitTurnCompleted(reviewStarted.reviewThreadId, reviewStarted.turn.id);
+            reviewTurnId = reviewStarted.turn.id;
+            const earlyError = unspawnedReviewErrors.get(reviewTurnId);
+            if (earlyError) {
+                finishUnspawnedReview(earlyError);
+            }
+            return await completion;
         } finally {
             releaseCapture();
+            releaseRoutingCapture();
         }
     }
 
@@ -359,6 +413,7 @@ export class CodexAppServerClient {
         onTurnStarted?: (turnId: string) => void,
         runtimeEffectsGraceMs = GOAL_RUNTIME_EFFECTS_GRACE_MS,
         onGoalSet?: (goal: ThreadGoal) => void,
+        onAccepted?: () => void,
     ): Promise<TurnCompletedNotification | null> {
         let goalTurnId: string | null = null;
         const capturedCompletions: Array<TurnCompletedNotification> = [];
@@ -409,6 +464,10 @@ export class CodexAppServerClient {
 
         try {
             const goalSetResponse = await this.threadGoalSet(params);
+            // `/goal` records no user message, live or in history, so this response is the
+            // earliest signal that Codex accepted the command, whether or not a runtime turn
+            // ends up running.
+            onAccepted?.();
             expectedGoal = goalSetResponse.goal;
             onGoalSet?.(expectedGoal);
             if (capturedGoalUpdates.some(event => goalsMatch(event.goal, expectedGoal!))) {
@@ -538,6 +597,7 @@ export class CodexAppServerClient {
     async runCompact(
         params: ThreadCompactStartParams,
         onTurnStarted?: (turnId: string) => void,
+        onAccepted?: () => void,
     ): Promise<CompactionCompletedNotification | Extract<ServerNotification, {method: "turn/completed"}>> {
         type Result = CompactionCompletedNotification | Extract<ServerNotification, {method: "turn/completed"}>;
         let compactTurnId: string | null = null;
@@ -570,6 +630,9 @@ export class CodexAppServerClient {
         });
         try {
             await this.threadCompactStart(params);
+            // Compaction records no user message, so this is the earliest signal that Codex
+            // accepted the command.
+            onAccepted?.();
             return await completed;
         } finally {
             releaseTurnCapture();
@@ -659,6 +722,16 @@ export class CodexAppServerClient {
         threadId: string,
         options: {lastItemCursor?: string | null; turnId?: string} = {},
     ): AsyncGenerator<ThreadItem[]> {
+        for await (const page of this.threadItemEntryPages(threadId, options)) {
+            yield page.map(entry => entry.item);
+        }
+    }
+
+    /** The pages of {@link threadItemPages}, with the turn of each item. */
+    async *threadItemEntryPages(
+        threadId: string,
+        options: {lastItemCursor?: string | null; turnId?: string} = {},
+    ): AsyncGenerator<ThreadItemEntry[]> {
         const turnId = options.turnId ?? null;
         const last = await withHistoryTimeout(this.threadItemsList({
             threadId,
@@ -677,13 +750,12 @@ export class CodexAppServerClient {
             sortDirection: "asc",
         }));
         for await (const page of pages) {
-            const items = page.map(entry => entry.item);
-            const lastIndex = items.findIndex(item => item.id === lastItemId);
+            const lastIndex = page.findIndex(entry => entry.item.id === lastItemId);
             if (lastIndex >= 0) {
-                yield items.slice(0, lastIndex + 1);
+                yield page.slice(0, lastIndex + 1);
                 return;
             }
-            yield items;
+            yield page;
         }
     }
 
@@ -905,6 +977,36 @@ export class CodexAppServerClient {
         for (const notificationHandler of this.notificationHandlers.values()) {
             notificationHandler(notification);
         }
+    }
+
+    /**
+     * Codex never ends a review turn whose request failed to resolve, and then reports that turn's
+     * error again as the failure of the next turn on the thread, which did not fail. Report that
+     * next turn as completed unless it raised a fatal error of its own.
+     */
+    private dropLeakedReviewError(notification: ServerNotification): ServerNotification {
+        if (notification.method === "error") {
+            if (!notification.params.willRetry) {
+                this.leakedReviewErrors.get(notification.params.threadId)?.failedTurnIds.add(notification.params.turnId);
+            }
+            return notification;
+        }
+        if (!isTurnCompletedNotification(notification)) {
+            return notification;
+        }
+        const {threadId, turn} = notification.params;
+        const leaked = this.leakedReviewErrors.get(threadId);
+        if (!leaked) {
+            return notification;
+        }
+        this.leakedReviewErrors.delete(threadId);
+        if (turn.status !== "failed"
+            || leaked.failedTurnIds.has(turn.id)
+            || turn.error?.message !== leaked.error.message
+            || JSON.stringify(turn.error.codexErrorInfo) !== JSON.stringify(leaked.error.codexErrorInfo)) {
+            return notification;
+        }
+        return {...notification, params: {...notification.params, turn: {...turn, status: "completed", error: null}}};
     }
 
     private recordTurnCompleted(event: TurnCompletedNotification): void {

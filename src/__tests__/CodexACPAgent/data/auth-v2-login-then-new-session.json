@@ -1,0 +1,33 @@
+{
+  "authRequired": {
+    "code": -32000,
+    "message": "Authentication required"
+  },
+  "login": {},
+  "codexRequests": [
+    {
+      "method": "account/login/start",
+      "params": {
+        "type": "apiKey",
+        "apiKey": "sk-test"
+      }
+    },
+    {
+      "method": "thread/start",
+      "params": {
+        "config": {
+          "features": {
+            "cwd_relative_turn_diffs": false
+          },
+          "projects": {
+            "/workspace": {
+              "trust_level": "trusted"
+            }
+          }
+        },
+        "modelProvider": null,
+        "cwd": "/workspace"
+      }
+    }
+  ]
+}
