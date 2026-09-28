@@ -761,6 +761,10 @@ export class CodexAcpServer {
                     if (this.pendingMcpStartupSessions.get(sessionId) === pendingStartup) {
                         this.pendingMcpStartupSessions.delete(sessionId);
                     }
+                    // The session is installed already. A failed wait closes it, so the client never gets a half-open session.
+                    await this.closeSession({sessionId}).catch(closeError => {
+                        logger.error(`Failed to close session ${sessionId} after a failed MCP startup wait`, closeError);
+                    });
                     throw err;
                 }
             }

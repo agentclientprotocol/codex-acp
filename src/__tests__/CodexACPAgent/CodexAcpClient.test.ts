@@ -1167,6 +1167,35 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(session.sessionId).toBe("new-id");
     });
 
+    it('closes the session when the MCP startup wait fails', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "new-id",
+            currentModelId: "gpt-5[medium]",
+            models: [createTestModel({id: "gpt-5"})],
+            collaborationMode: "default",
+            currentServiceTier: null,
+            additionalDirectories: [],
+        });
+        vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockRejectedValue(new Error("app-server exited"));
+        const closeSpy = vi.spyOn(codexAcpClient, "closeSession").mockResolvedValue(undefined as never);
+
+        await expect(codexAcpAgent.newSession({
+            cwd: "/workspace",
+            mcpServers: [{name: "new-mcp", command: "npx", args: ["new"], env: []}],
+            _meta: {mcpStartupAwaitTimeoutMs: 5_000},
+        })).rejects.toThrow("app-server exited");
+
+        expect(closeSpy).toHaveBeenCalledWith("new-id");
+        expect(() => codexAcpAgent.getSessionState("new-id")).toThrow();
+    });
+
     it('stops waiting for MCP startup once _meta.mcpStartupAwaitTimeoutMs elapses', async () => {
         vi.useFakeTimers();
         try {
