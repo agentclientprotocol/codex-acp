@@ -2,13 +2,17 @@ import type {ToolCallContent} from "@agentclientprotocol/sdk";
 import {parsePatch, type StructuredPatch} from "diff";
 import {AIR_DIFF_PATCH_KEY, withAirMeta} from "../../AirExtension";
 import type {FileChangeRequestApprovalParams, FileUpdateChange, ThreadItem} from "../../app-server/v2";
+import {DIFF_GIT_PATCH_META_KEY} from "../../AcpV2SessionUpdate";
 import {
     createAddedFileGitPatch,
     createDeletedFileGitPatch,
+    createEmptyFileGitPatch,
+    createRenameGitPatch,
     createUpdateGitPatch,
     DIFF_PATCH_MAX_BYTES,
 } from "../../GitPatch";
 import {logger} from "../../Logger";
+import type {DiffPatchFormat} from "../ClientCapabilities";
 import type {PermissionToolFacts, ToolFacts} from "../ToolFacts";
 import {toTerminalToolStatus, toToolStatus} from "./ToolStatus";
 
@@ -22,10 +26,10 @@ const FILE_CHANGE_TITLE = "Editing files";
  * An update gets one ACP diff per Codex hunk: `oldText` and `newText` hold the changed lines and the context lines
  * of the hunk, not the whole file. An added or a deleted file gets its whole text. A diff whose text is larger than
  * {@link DIFF_PATCH_MAX_BYTES} is not sent. With the AIR `diffPatch` capability, the diff is a Git patch,
- * see `docs/air-extensions.md#diff-patch`.
+ * see `docs/air-extensions.md#diff-patch`. On ACP v2, each file gets one diff with a Git patch.
  */
 export class FileChangeReporter {
-    static started(item: FileChangeItem, diffPatch: boolean): ToolFacts {
+    static started(item: FileChangeItem, diffPatch: DiffPatchFormat): ToolFacts {
         const diffs: ToolCallContent[] = [];
         for (const change of item.changes) {
             // An unparseable or a too large change has no diff.
@@ -64,8 +68,10 @@ export class FileChangeReporter {
     }
 }
 
-function createPatchContent(change: FileUpdateChange, supportsDiffPatch: boolean): ToolCallContent[] {
+function createPatchContent(change: FileUpdateChange, diffPatch: DiffPatchFormat): ToolCallContent[] {
+    const supportsDiffPatch = diffPatch === "air";
     try {
+        if (diffPatch === "acpV2") return createAcpV2Content(change);
         switch (change.kind.type) {
             case "add":
                 return createWholeFileContent(change, "add", supportsDiffPatch);
@@ -134,6 +140,47 @@ function createUpdateFileContent(
         const {oldText, newText} = hunkTexts(hunk.lines);
         return {type: "diff", oldText, newText, path: targetPath, _meta: {kind: "update"}};
     });
+}
+
+/**
+ * The diff of a change for ACP v2: one diff per file, with the Git patch and the path before the change
+ * in `_meta`, see `toV2Diff`. A change without a valid patch has no diff.
+ */
+function createAcpV2Content(change: FileUpdateChange): ToolCallContent[] {
+    const kind = change.kind;
+    const oldPath = change.path;
+    const path = kind.type === "update" ? kind.move_path ?? change.path : change.path;
+    const diff = kind.type === "update" ? recoverCorruptedDiff(change.diff) : change.diff;
+    if (!fitsDiffLimit(diff)) {
+        logger.log("Skipped the diff of a file change that is too large", {path});
+        return [];
+    }
+    let patch: string | null;
+    switch (kind.type) {
+        case "add":
+            patch = diff.length === 0 ? createEmptyFileGitPatch(path, "added") : createAddedFileGitPatch(path, diff);
+            break;
+        case "delete":
+            patch = diff.length === 0 ? createEmptyFileGitPatch(path, "deleted") : createDeletedFileGitPatch(path, diff);
+            break;
+        case "update":
+            // A pure rename has no hunks.
+            patch = kind.move_path !== null && diff.trim().length === 0
+                ? createRenameGitPatch(oldPath, path)
+                : createUpdateGitPatch(oldPath, path, diff);
+            break;
+    }
+    if (patch === null) {
+        logger.log("Skipped a file change without a valid Git patch", {path});
+        return [];
+    }
+    return [{
+        type: "diff",
+        oldText: null,
+        newText: "",
+        path,
+        _meta: {kind: kind.type, [DIFF_GIT_PATCH_META_KEY]: {oldPath, text: patch}},
+    }];
 }
 
 /**

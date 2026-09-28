@@ -3,6 +3,7 @@ import type {AcpClientConnection} from "../ACPSessionConnection";
 import type {CodexAcpClient} from "../CodexAcpClient";
 import {logger} from "../Logger";
 import {sanitizeMcpServerName} from "../McpServerName";
+import {type AcpMcpServer, getMcpServerName} from "../McpServerConfig";
 import {settledWithin} from "../StdUtils";
 import {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
 import type {ClientCapabilities} from "../tool-calls/ClientCapabilities";
@@ -66,7 +67,7 @@ export class McpSessionStartup {
      */
     begin(
         sessionId: string,
-        mcpServers: Array<acp.McpServer>,
+        mcpServers: Array<AcpMcpServer>,
         afterVersion: number,
         options: McpSessionStartupOptions,
     ): Promise<void> | null {
@@ -118,7 +119,7 @@ export class McpSessionStartup {
 
     private createPendingSession(
         sessionId: string,
-        mcpServers: Array<acp.McpServer>,
+        mcpServers: Array<AcpMcpServer>,
         afterVersion: number,
         skippedServers: Array<string>,
     ): PendingMcpStartupSession {
@@ -202,8 +203,8 @@ export class McpSessionStartup {
     }
 }
 
-export function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
-    return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(server.name))));
+export function getRequestedMcpServerNames(mcpServers: Array<AcpMcpServer>): Array<string> {
+    return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(getMcpServerName(server)))));
 }
 
 const MCP_STARTUP_AWAIT_TIMEOUT_META_KEY = "mcpStartupAwaitTimeoutMs";
