@@ -12,7 +12,7 @@ import {canonical, type RecordedMessage} from "./scenario-harness";
  * `RECORD_SCENARIO_BASELINE=1 npx vitest run src/__tests__/scenarios/client-profiles.test.ts -t baseline` there.
  * Then copy `data/baseline/` back.
  */
-export const BASELINE_COMMIT = "1cc62233fb6f2abde7cadd518a53de9d0826ea77";
+export const BASELINE_COMMIT = "59d0fb0b6fd9dc85bf7c45f841f39a5225bea232";
 
 type Json = Record<string, unknown>;
 
