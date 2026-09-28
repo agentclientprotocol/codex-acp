@@ -60,6 +60,11 @@ import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUt
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
+import {
+    executeGuardedTtyExec,
+    type GuardedTtyExecOptions,
+} from "./GuardedTtyExec";
+import type {KandevGuardedTtyExecReceipt} from "./AcpExtensions";
 import {isMissingRolloutError, isUnknownThreadError} from "./CodexThreadErrors";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 
@@ -167,6 +172,10 @@ export class CodexAcpClient {
 
     getHomePath(): string | null {
         return this.configPath;
+    }
+
+    async guardedTtyExec(options: GuardedTtyExecOptions): Promise<KandevGuardedTtyExecReceipt> {
+        return await executeGuardedTtyExec(this.codexClient, options);
     }
 
     async authenticate(
