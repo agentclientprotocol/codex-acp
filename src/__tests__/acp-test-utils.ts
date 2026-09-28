@@ -78,6 +78,7 @@ export interface TestFixture {
     getAcpConnectionDump(ignoredFields: string[]): string,
     clearAcpConnectionDump(): void,
     getAcpConnection(): AcpClientConnection,
+    dispose(): Promise<void>,
 }
 
 export interface CodexConnectionDumpOptions {
@@ -181,7 +182,8 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
         },
         getAcpConnection(): AcpClientConnection {
             return acpConnection;
-        }
+        },
+        async dispose(): Promise<void> {},
     };
 }
 
@@ -200,14 +202,32 @@ export function createTestFixture(): TestFixture {
         ...process.env,
         CODEX_HOME: codexHome,
     });
-    codexConnection.process.on("exit", () => {
-        removeDirectoryWithRetry(codexHome);
-    });
-
-    return createBaseTestFixture({
+    const fixture = createBaseTestFixture({
         connection: codexConnection.connection,
         getExitCode: () => codexConnection.process.exitCode
     });
+    let disposed = false;
+    fixture.dispose = async () => {
+        if (disposed) return;
+        disposed = true;
+        const child = codexConnection.process;
+        try {
+            if (child.exitCode === null && child.signalCode === null) {
+                await new Promise<void>((resolve) => {
+                    const timeout = setTimeout(() => child.kill("SIGKILL"), 2_000);
+                    child.once("close", () => {
+                        clearTimeout(timeout);
+                        resolve();
+                    });
+                    child.kill();
+                });
+            }
+        } finally {
+            codexConnection.connection.dispose();
+            removeDirectoryWithRetry(codexHome);
+        }
+    };
+    return fixture;
 }
 
 function createTestCodexHome(): string {
