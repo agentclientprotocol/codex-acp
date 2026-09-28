@@ -1041,6 +1041,7 @@ export class CodexAcpClient {
         request: acp.PromptRequest,
         agentMode: AgentMode,
         modelId: ModelId,
+        modelName: string,
         serviceTier: ServiceTier | null,
         disableSummary: boolean,
         cwd: string,
@@ -1062,7 +1063,7 @@ export class CodexAcpClient {
             sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
             summary: disableSummary ? "none" : "auto",
             effort: effort,
-            model: modelId.model,
+            model: modelName,
             serviceTier: serviceTier,
         }, onTurnStarted);
     }

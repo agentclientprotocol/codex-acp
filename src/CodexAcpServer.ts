@@ -3043,6 +3043,8 @@ export class CodexAcpServer {
             }
 
             const modelId = ModelId.fromString(sessionState.currentModelId);
+            const modelName = this.findCurrentModel(sessionState.availableModels, sessionState.currentModelId)?.model
+                ?? modelId.model;
             const modelLacksReasoning = sessionState.supportedReasoningEfforts.length > 0
                 && sessionState.supportedReasoningEfforts.every(e => e.reasoningEffort === "none");
 
@@ -3069,6 +3071,7 @@ export class CodexAcpServer {
                     effectiveParams,
                     agentMode,
                     modelId,
+                    modelName,
                     serviceTier,
                     disableSummary,
                     sessionState.cwd,
@@ -3169,6 +3172,7 @@ export class CodexAcpServer {
                             implementationRequest,
                             agentMode,
                             modelId,
+                            modelName,
                             serviceTier,
                             disableSummary,
                             sessionState.cwd,
