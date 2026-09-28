@@ -1071,12 +1071,11 @@ export class CodexEventHandler {
     }
 
     private createTerminalInteractionEvent(event: TerminalInteractionNotification): UpdateSessionEvent {
-        return this.createCommandOutputDeltaEvent({
-            threadId: event.threadId,
-            turnId: event.turnId,
-            itemId: event.itemId,
-            delta: `\n${event.stdin}\n`,
-        });
+        return this.createCommandOutputEvent(
+            event.itemId,
+            `\n${event.stdin}\n`,
+            this.commandOutputMode(event.itemId),
+        );
     }
 
     private commandOutputMode(itemId: string): TerminalOutputMode {
