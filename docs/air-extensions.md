@@ -901,7 +901,6 @@ It does not go out as a `sessionFailure` record. Errors still use `sessionFailur
 | Codex condition | Category | Actions |
 | --- | --- | --- |
 | `httpConnectionFailed`, `responseStreamConnectionFailed`, `responseStreamDisconnected`, `responseTooManyFailedAttempts`, app-server exit | `connection` | `retry`, `new_session` |
-| `unauthorized`, HTTP 401 | `access` | `login` |
 | `rateLimitExceeded`, HTTP 429 | `limit` | `retry` |
 | `usageLimitExceeded` | `limit` | none |
 | `contextWindowExceeded`, `sessionBudgetExceeded` | `limit` | `new_session` |
@@ -914,6 +913,8 @@ It does not go out as a `sessionFailure` record. Errors still use `sessionFailur
 A retry warning (`willRetry: true`) has `severity: warning` and no actions.
 A notice has `severity: warning`.
 A `deprecationNotice` is shown only to a client with the capability. Other clients never saw it.
+
+`unauthorized` and HTTP 401 get no session failure. The prompt ends with the ACP `authRequired` error, and the client starts the ACP login flow.
 
 The actions of version 1 are `retry`, `login`, and `new_session`.
 The client filters the actions that it cannot run and ignores unknown or duplicate values.
