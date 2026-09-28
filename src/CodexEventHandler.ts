@@ -178,6 +178,7 @@ const STRING_CODEX_ERROR_CATEGORIES = {
     sessionBudgetExceeded: "budget_exhausted",
     usageLimitExceeded: "quota_exhausted",
     rateLimitExceeded: "rate_limited",
+    flexUnavailable: "provider_error",
     serverOverloaded: "overloaded",
     cyberPolicy: "policy_denied",
     misalignmentPolicyViolation: "policy_denied",

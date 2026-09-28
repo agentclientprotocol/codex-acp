@@ -350,6 +350,7 @@ describe("CodexEventHandler - auth error events", () => {
         ["limit", {responseStreamDisconnected: {httpStatusCode: 429}}],
         ["limit", "usageLimitExceeded"],
         ["service", "serverOverloaded"],
+        ["service", "flexUnavailable"],
         ["limit", "contextWindowExceeded"],
         ["limit", "sessionBudgetExceeded"],
         ["request", "cyberPolicy"],
