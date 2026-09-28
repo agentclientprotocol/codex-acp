@@ -41,7 +41,7 @@ function turnStore(stored: Turn[], pageSize = 2) {
  * starts at that item. An ascending read starts at the oldest item.
  */
 function itemStore(turns: Turn[], pageSize = 2) {
-    const entries = turns.flatMap(turn => turn.items.map(item => ({turnId: turn.id, item})));
+    const entries = turns.flatMap(turn => turn.items.map(item => ({turnId: turn.id, item, startedAtMs: null, completedAtMs: null})));
     return async ({turnId, cursor, limit, sortDirection}: ThreadItemsListParams) => {
         const scoped = entries.filter(entry => !turnId || entry.turnId === turnId);
         if (sortDirection === "desc") {
