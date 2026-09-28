@@ -1404,7 +1404,6 @@ function createTurnSandboxPolicy(
     return {
         ...sandboxPolicy,
         writableRoots: uniqueStrings([...sandboxPolicy.writableRoots, ...additionalDirectories]),
-        // Each turn sends an explicit policy, which otherwise masks the session config.
         networkAccess: typeof networkAccess === "boolean" ? networkAccess : sandboxPolicy.networkAccess,
     };
 }

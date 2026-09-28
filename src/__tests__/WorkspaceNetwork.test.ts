@@ -7,8 +7,14 @@ import {createCodexMockTestFixture} from './acp-test-utils';
 const completedTurn = {
     threadId: 'session',
     turn: {
-        id: 'turn', items: [], status: 'completed' as const, error: null,
-        itemsView: 'notLoaded' as const, startedAt: null, completedAt: null, durationMs: null,
+        id: 'turn',
+        items: [],
+        status: 'completed' as const,
+        error: null,
+        itemsView: 'notLoaded' as const,
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
     },
 };
 
@@ -27,12 +33,21 @@ describe('workspace network configuration', () => {
         });
         await client.sendPrompt(
             {sessionId: 'session', prompt: [{type: 'text', text: 'Hello'}]},
-            AgentMode.Agent, ModelId.create('test-model', 'medium'), null, false, '', ['/workspace/extra'],
+            AgentMode.Agent,
+            ModelId.create('test-model', 'medium'),
+            null,
+            false,
+            '',
+            ['/workspace/extra'],
         );
         expect(runTurn.mock.calls[0]![0]).toMatchObject({
             approvalPolicy: AgentMode.Agent.approvalPolicy,
             approvalsReviewer: AgentMode.Agent.approvalsReviewer,
-            sandboxPolicy: {...AgentMode.Agent.sandboxPolicy, writableRoots: ['/workspace/extra'], networkAccess: expected},
+            sandboxPolicy: {
+                ...AgentMode.Agent.sandboxPolicy,
+                writableRoots: ['/workspace/extra'],
+                networkAccess: expected,
+            },
         });
         expect(AgentMode.Agent.sandboxPolicy).toHaveProperty('networkAccess', false);
     });
@@ -44,7 +59,12 @@ describe('workspace network configuration', () => {
         const client = new CodexAcpClient(server, {sandbox_workspace_write: {network_access: false}});
         await client.sendPrompt(
             {sessionId: 'session', prompt: [{type: 'text', text: 'Hello'}]},
-            AgentMode.AgentFullAccess, ModelId.create('test-model', 'medium'), null, false, '', [],
+            AgentMode.AgentFullAccess,
+            ModelId.create('test-model', 'medium'),
+            null,
+            false,
+            '',
+            [],
         );
         expect(runTurn.mock.calls[0]![0].sandboxPolicy).toEqual(AgentMode.AgentFullAccess.sandboxPolicy);
     });
