@@ -47,6 +47,27 @@ describeE2E("E2E read-only mode file permission tests", () => {
     });
 });
 
+describeE2E("E2E continue-on-reject file permission tests", () => {
+    let fixture: SpawnedAgentFixture;
+
+    beforeEach(async () => {
+        fixture = await createAuthenticatedFixture(AgentMode.ReadOnly, undefined, {continueOnReject: true});
+    });
+
+    afterEach(async () => {
+        await fixture.dispose();
+    });
+
+    it("continues the turn when a workspace file edit is declined", async () => {
+        fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.Decline));
+        const filePath = newFilePathIn(fixture.workspaceDir);
+        const turn = await askAgentToEditFile(fixture, filePath);
+
+        expect(turn.response.stopReason, turn.diagnostics()).toBe("end_turn");
+        expect(fs.existsSync(filePath), turn.diagnostics()).toBe(false);
+    });
+});
+
 describeE2E("E2E workspace access mode file permission tests", () => {
     let fixture: SpawnedAgentFixture;
 

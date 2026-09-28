@@ -47,7 +47,11 @@ export function expectNoPermissionRequests(fixture: SpawnedAgentFixture, session
     expectPermissionRequests(fixture, sessionId, { edit: 0, execute: 0 });
 }
 
-export async function createAuthenticatedFixture(initialMode?: AgentMode, mcpServers?: acp.McpServerStdio[]): Promise<SpawnedAgentFixture> {
+export async function createAuthenticatedFixture(
+    initialMode?: AgentMode,
+    mcpServers?: acp.McpServerStdio[],
+    clientCapabilitiesMeta?: Record<string, unknown>,
+): Promise<SpawnedAgentFixture> {
     const apiKey = requireLiveApiKey();
     const extraEnv = initialMode ? {INITIAL_AGENT_MODE: initialMode.id} : undefined;
     return await createSpawnedFixture(async (connection, authMethods) => {
@@ -68,7 +72,7 @@ export async function createAuthenticatedFixture(initialMode?: AgentMode, mcpSer
         if (authenticationStatus["type"] !== "api-key") {
             throw new Error(`Unexpected authentication status: ${JSON.stringify(authenticationStatus)}`);
         }
-    }, extraEnv, mcpServers);
+    }, extraEnv, mcpServers, clientCapabilitiesMeta);
 }
 
 export async function createGatewayFixture(
@@ -97,7 +101,7 @@ export async function createGatewayFixture(
     });
 }
 
-function buildClientCapabilities(): acp.ClientCapabilities {
+function buildClientCapabilities(extraMeta?: Record<string, unknown>): acp.ClientCapabilities {
     return {
         fs: {
             readTextFile: true,
@@ -111,6 +115,7 @@ function buildClientCapabilities(): acp.ClientCapabilities {
         },
         _meta: {
             "terminal-auth": true,
+            ...extraMeta,
         },
     };
 }
@@ -121,11 +126,12 @@ async function createSpawnedFixture(
     authenticate: Authenticator,
     extraEnv?: NodeJS.ProcessEnv,
     mcpServers?: acp.McpServerStdio[],
+    clientCapabilitiesMeta?: Record<string, unknown>,
 ): Promise<SpawnedAgentFixture> {
     return await createSpawnedAgentFixture(async (connection) => {
         const initializeResponse = await connection.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: buildClientCapabilities(),
+            clientCapabilities: buildClientCapabilities(clientCapabilitiesMeta),
             clientInfo: {
                 name: "vitest",
                 version: "1.0.0",
