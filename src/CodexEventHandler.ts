@@ -975,10 +975,6 @@ export class CodexEventHandler {
                 this.createTurnErrorData(params.error),
             );
         }
-        // The prompt error carries the message of such a failure, so the transcript does not repeat it.
-        if (this.failure !== null && params.error.additionalDetails === null) {
-            return null;
-        }
         return createAgentTextMessageChunk(`${params.error.message}\n\n`);
     }
 

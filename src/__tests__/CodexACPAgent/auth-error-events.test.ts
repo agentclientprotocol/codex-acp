@@ -841,8 +841,8 @@ describe("CodexEventHandler - auth error events", () => {
     );
 });
 
-describe("CodexEventHandler - error text once", () => {
-    it("does not repeat the prompt error message as agent text", async () => {
+describe("CodexEventHandler - usage limit text", () => {
+    it("sends the message as agent text and fails the prompt, as origin/main does", async () => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: "limited-session",
             account: {type: "apiKey"},
@@ -854,21 +854,7 @@ describe("CodexEventHandler - error text once", () => {
         });
 
         expect(result).toMatchObject({data: {message: "Usage limits were exceeded"}});
-        expect(JSON.stringify(updates)).not.toContain("Usage limits were exceeded");
-    });
-
-    it("keeps the message as agent text when the prompt error carries other details", async () => {
-        const {updates} = await runPromptWithError(createTestSessionState({
-            sessionId: "details-session",
-            account: {type: "apiKey"},
-        }), {
-            message: "Provider returned 500",
-            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: 500}},
-            additionalDetails: "HTTP status 500",
-            misalignment: null,
-        });
-
-        expect(JSON.stringify(updates)).toContain("Provider returned 500");
+        expect(JSON.stringify(updates)).toContain("Usage limits were exceeded");
     });
 });
 
