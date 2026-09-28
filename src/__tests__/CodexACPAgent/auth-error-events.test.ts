@@ -862,13 +862,13 @@ describe("CodexEventHandler - error text once", () => {
             sessionId: "details-session",
             account: {type: "apiKey"},
         }), {
-            message: "Provider returned 401",
-            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: 401}},
-            additionalDetails: "HTTP status 401",
+            message: "Provider returned 500",
+            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: 500}},
+            additionalDetails: "HTTP status 500",
             misalignment: null,
         });
 
-        expect(JSON.stringify(updates)).toContain("Provider returned 401");
+        expect(JSON.stringify(updates)).toContain("Provider returned 500");
     });
 });
 
