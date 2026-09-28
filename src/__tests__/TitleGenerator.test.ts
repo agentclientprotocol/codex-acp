@@ -1,14 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import {TitleGenerator} from "../TitleGenerator";
 import type {CodexAppServerClient} from "../CodexAppServerClient";
-
-function deferred<T>(): {promise: Promise<T>; resolve: (value: T) => void} {
-    let resolve: (value: T) => void = () => {};
-    const promise = new Promise<T>(innerResolve => {
-        resolve = innerResolve;
-    });
-    return {promise, resolve};
-}
+import {deferred} from "./acp-test-utils";
 
 function createGenerator(client: Partial<CodexAppServerClient>) {
     return new TitleGenerator(client as CodexAppServerClient, "thread-id", "/test/cwd", () => "unset");
@@ -75,5 +68,22 @@ describe("TitleGenerator.waitForIdle", () => {
         generator.onTurnCompleted("hello");
 
         await expect(generator.waitForIdle(5_000)).resolves.toBeUndefined();
+    });
+});
+
+describe("TitleGenerator prompt", () => {
+    it("sends only the start of a long first message to the title model", async () => {
+        const runTurn = vi.fn().mockResolvedValue({turn: {items: []}});
+        const generator = createGenerator({
+            threadStart: vi.fn().mockResolvedValue({thread: {id: "ephemeral"}}),
+            runTurn,
+        } as unknown as Partial<CodexAppServerClient>);
+
+        // The cut falls between the two halves of the emoji.
+        generator.onTurnCompleted(`${"a".repeat(3_999)}\u{1F600}${"b".repeat(200_000)}`);
+        await generator.waitForIdle(1_000);
+
+        const text: string = runTurn.mock.calls[0]![0].input[0].text;
+        expect(text.endsWith(`User's first message:\n${"a".repeat(3_999)}`)).toBe(true);
     });
 });

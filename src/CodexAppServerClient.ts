@@ -58,6 +58,10 @@ import type {
     ThreadReadResponse,
     ThreadTurnsListParams,
     ThreadTurnsListResponse,
+    ThreadItem,
+    ThreadItemsListParams,
+    ThreadItemsListResponse,
+    Turn,
     ThreadResumeParams,
     ThreadResumeResponse,
     ThreadSettings,
@@ -146,6 +150,18 @@ const ToolRequestUserInputRequest = new RequestType<
 >('item/tool/requestUserInput');
 
 const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
+
+/** The number of turns in one page of a full history read. */
+const HISTORY_PAGE_TURNS = 5;
+
+/** The number of items in one page of a history replay. */
+const HISTORY_PAGE_ITEMS = 100;
+
+/**
+ * The longest wait for one page of history. A page takes milliseconds, so a page that takes this long is lost:
+ * the load fails and the session closes instead of waiting forever.
+ */
+const HISTORY_PAGE_TIMEOUT_MS = 60_000;
 
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
@@ -282,6 +298,7 @@ export class CodexAppServerClient {
         this.notificationHandlers.delete(threadId);
         this.approvalHandlers.delete(threadId);
         this.elicitationHandlers.delete(threadId);
+        this.threadSettings.delete(threadId);
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
@@ -620,6 +637,56 @@ export class CodexAppServerClient {
         return await this.sendRequest({method: "thread/turns/list", params});
     }
 
+    async threadItemsList(params: ThreadItemsListParams): Promise<ThreadItemsListResponse> {
+        return await this.sendRequest({method: "thread/items/list", params});
+    }
+
+    /** The turns of a thread in pages, from the first page. See {@link historyPages}. */
+    threadTurnPages({threadId, ...params}: Omit<ThreadTurnsListParams, "cursor">): AsyncGenerator<Turn[]> {
+        return historyPages(threadId, "thread/turns/list", cursor => this.threadTurnsList({threadId, cursor, ...params}));
+    }
+
+    /**
+     * The items of a thread, or of one turn, oldest first, in pages.
+     *
+     * A caller can send each page and drop it, so the history is never in
+     * memory at once, even for a turn with thousands of items. The pages end
+     * at the item of `lastItemCursor`, an `itemsBackwardsCursor` of
+     * thread/resume. Without it, they end at the newest item when the read
+     * starts, so an item that arrives during the read is not in the pages.
+     */
+    async *threadItemPages(
+        threadId: string,
+        options: {lastItemCursor?: string | null; turnId?: string} = {},
+    ): AsyncGenerator<ThreadItem[]> {
+        const turnId = options.turnId ?? null;
+        const last = await withHistoryTimeout(this.threadItemsList({
+            threadId,
+            turnId,
+            cursor: options.lastItemCursor ?? null,
+            limit: 1,
+            sortDirection: "desc",
+        }), "thread/items/list", threadId);
+        const lastItemId = last.data[0]?.item.id;
+        if (lastItemId === undefined) return;
+        const pages = historyPages(threadId, "thread/items/list", cursor => this.threadItemsList({
+            threadId,
+            turnId,
+            cursor,
+            limit: HISTORY_PAGE_ITEMS,
+            sortDirection: "asc",
+        }));
+        for await (const page of pages) {
+            const items = page.map(entry => entry.item);
+            const lastIndex = items.findIndex(item => item.id === lastItemId);
+            if (lastIndex >= 0) {
+                yield items.slice(0, lastIndex + 1);
+                return;
+            }
+            yield items;
+        }
+    }
+
     async threadReadWithHistory(threadId: string): Promise<ThreadReadResponse> {
         const response = await this.threadRead({threadId});
         // Legacy stores reconstruct the rollout on each read; paging would repeat
@@ -627,34 +694,37 @@ export class CodexAppServerClient {
         if (response.thread.historyMode === "legacy") {
             return await this.threadRead({threadId, includeTurns: true});
         }
-        const turns = await this.threadReadHistory(threadId);
+        const turns: Turn[] = [];
+        for await (const page of this.threadHistoryPages(threadId)) {
+            turns.push(...page);
+        }
         return {...response, thread: {...response.thread, turns}};
     }
 
-    async threadReadHistory(threadId: string, initialCursor: string | null = null): Promise<ThreadReadResponse["thread"]["turns"]> {
-        const turns: ThreadReadResponse["thread"]["turns"] = [];
-        const seenCursors = new Set<string>();
-        if (initialCursor !== null) seenCursors.add(initialCursor);
-        let cursor: string | null = initialCursor;
-        do {
-            const page = await this.threadTurnsList({
-                threadId,
-                cursor,
-                limit: 50,
-                sortDirection: "desc",
-                itemsView: "full",
-            });
-            turns.push(...page.data);
-            cursor = page.nextCursor;
-            if (cursor !== null) {
-                if (seenCursors.has(cursor)) {
-                    throw new Error("Codex returned a repeated thread history cursor");
-                }
-                seenCursors.add(cursor);
+    /**
+     * The turns of a thread, oldest first, in pages of full turns. The pages
+     * end at the newest turn when the read starts, so a turn that arrives
+     * during the read is not in the pages.
+     */
+    private async *threadHistoryPages(threadId: string): AsyncGenerator<Turn[]> {
+        const last = await withHistoryTimeout(this.threadTurnsList({
+            threadId,
+            cursor: null,
+            limit: 1,
+            sortDirection: "desc",
+            itemsView: "notLoaded",
+        }), "thread/turns/list", threadId);
+        const lastTurnId = last.data[0]?.id;
+        if (lastTurnId === undefined) return;
+        const pages = this.threadTurnPages({threadId, limit: HISTORY_PAGE_TURNS, sortDirection: "asc", itemsView: "full"});
+        for await (const page of pages) {
+            const lastIndex = page.findIndex(turn => turn.id === lastTurnId);
+            if (lastIndex >= 0) {
+                yield page.slice(0, lastIndex + 1);
+                return;
             }
-        } while (cursor !== null);
-        // Only reverse turns: items within each full turn are already chronological.
-        return turns.reverse();
+            yield page;
+        }
     }
 
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
@@ -1241,4 +1311,43 @@ function extractTurnRouting(notification: ServerNotification): { threadId: strin
         return {threadId, turnId: params.turn.id};
     }
     return {threadId, turnId: null};
+}
+
+/**
+ * The pages of a history list, from the first page. A page request fails when Codex does not answer
+ * within {@link HISTORY_PAGE_TIMEOUT_MS}. The read fails when Codex returns a cursor a second time.
+ */
+async function* historyPages<T>(
+    threadId: string,
+    method: string,
+    requestPage: (cursor: string | null) => Promise<{data: T[]; nextCursor: string | null}>,
+): AsyncGenerator<T[]> {
+    const seenCursors = new Set<string>();
+    let cursor: string | null = null;
+    do {
+        const page: {data: T[]; nextCursor: string | null} = await withHistoryTimeout(requestPage(cursor), method, threadId);
+        yield page.data;
+        cursor = page.nextCursor;
+        if (cursor !== null) {
+            if (seenCursors.has(cursor)) {
+                throw new Error("Codex returned a repeated thread history cursor");
+            }
+            seenCursors.add(cursor);
+        }
+    } while (cursor !== null);
+}
+
+/** The page, or an error when Codex does not answer within {@link HISTORY_PAGE_TIMEOUT_MS}. */
+async function withHistoryTimeout<T>(page: Promise<T>, method: string, threadId: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(
+            `Codex did not answer ${method} for thread ${threadId} within ${HISTORY_PAGE_TIMEOUT_MS / 1000} s`,
+        )), HISTORY_PAGE_TIMEOUT_MS);
+    });
+    try {
+        return await Promise.race([page, timeout]);
+    } finally {
+        clearTimeout(timer);
+    }
 }

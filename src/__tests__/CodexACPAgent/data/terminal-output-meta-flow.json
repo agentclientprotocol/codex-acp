@@ -74,10 +74,6 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-terminal-output",
         "status": "completed",
-        "rawOutput": {
-          "formatted_output": "Applying migrations\n\nyes\nDone\n",
-          "exit_code": 0
-        },
         "_meta": {
           "terminal_exit": {
             "exit_code": 0,

@@ -9,6 +9,10 @@ const TITLE_MODEL = "gpt-5.6-luna";
 // long generateAndPersist waits for the echo before giving up on it.
 const RENAME_ECHO_TIMEOUT_MS = 5_000;
 
+// The start of the first message is enough for a title. A pasted log or dump must not
+// cost its whole size in tokens or go past the context of the title model.
+const TITLE_SOURCE_MAX_CHARS = 4_000;
+
 const TITLE_OUTPUT_SCHEMA = {
     type: "object",
     properties: { title: { type: "string" } },
@@ -119,7 +123,7 @@ export class TitleGenerator {
             threadId: epThread.id,
             input: [{
                 type: "text",
-                text: `${SYSTEM_PROMPT}\n\nUser's first message:\n${userPromptText}`,
+                text: `${SYSTEM_PROMPT}\n\nUser's first message:\n${titleSource(userPromptText)}`,
                 text_elements: [],
             }],
             outputSchema: TITLE_OUTPUT_SCHEMA,
@@ -161,4 +165,11 @@ function extractTitle(turn: Turn): string | null {
         }
     }
     return null;
+}
+
+/** The start of `text`, at most {@link TITLE_SOURCE_MAX_CHARS} long. It does not split a surrogate pair. */
+function titleSource(text: string): string {
+    if (text.length <= TITLE_SOURCE_MAX_CHARS) return text;
+    const end = /[\uD800-\uDBFF]/.test(text[TITLE_SOURCE_MAX_CHARS - 1]!) ? TITLE_SOURCE_MAX_CHARS - 1 : TITLE_SOURCE_MAX_CHARS;
+    return text.slice(0, end);
 }

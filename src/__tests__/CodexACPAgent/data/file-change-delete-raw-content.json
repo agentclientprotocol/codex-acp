@@ -6,8 +6,8 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-delete-raw",
-        "title": "Editing files",
         "kind": "edit",
+        "title": "Editing files",
         "status": "completed",
         "content": [
           {
@@ -16,17 +16,7 @@
             "newText": "",
             "path": "/test/project/RawDeleteFile.kt",
             "_meta": {
-              "kind": "delete",
-              "jetbrains": {
-                "air": {
-                  "version": 1,
-                  "diffStats": {
-                    "version": 1,
-                    "added": 0,
-                    "removed": 3
-                  }
-                }
-              }
+              "kind": "delete"
             }
           }
         ]

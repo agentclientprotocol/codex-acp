@@ -3,6 +3,7 @@ import type { SessionState } from '../../CodexAcpServer';
 import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications, type CodexMockTestFixture } from '../acp-test-utils';
 import { AgentMode } from "../../AgentMode";
+import { ClientCapabilities } from '../../tool-calls/ClientCapabilities';
 
 describe('CodexEventHandler - terminal output events', () => {
     let mockFixture: CodexMockTestFixture;
@@ -110,7 +111,7 @@ describe('CodexEventHandler - terminal output events', () => {
         );
     });
 
-    it('should stream terminal interaction stdin as terminal output delta', async () => {
+    it('should send terminal interaction stdin as terminal input, not as output', async () => {
         const terminalInteractionNotification: ServerNotification = {
             method: 'item/commandExecution/terminalInteraction',
             params: {
@@ -132,7 +133,7 @@ describe('CodexEventHandler - terminal output events', () => {
     it('should send one delta when command completion has no streamed output', async () => {
         const deltaSessionState = createTestSessionState({
             sessionId,
-            terminalOutputDeltaSupported: true,
+            clientCapabilities: ClientCapabilities.from({_meta: {terminal_output_delta: true, jetbrains: {air: {version: 1}}}}),
         });
         const commandCompletedNotification: ServerNotification = {
             method: 'item/completed',
@@ -228,7 +229,7 @@ describe('CodexEventHandler - terminal output events', () => {
     it('should handle full terminal output flow: start -> delta -> complete', async () => {
         const deltaSessionState = createTestSessionState({
             sessionId,
-            terminalOutputDeltaSupported: true,
+            clientCapabilities: ClientCapabilities.from({_meta: {terminal_output_delta: true}}),
         });
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
@@ -304,7 +305,7 @@ describe('CodexEventHandler - terminal output events', () => {
             sessionId,
             currentModelId: 'model-id[effort]',
             agentMode: AgentMode.DEFAULT_AGENT_MODE,
-            terminalOutputMode: 'terminal_output',
+            clientCapabilities: ClientCapabilities.from({_meta: {terminal_output: true}}),
         });
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
@@ -389,7 +390,7 @@ describe('CodexEventHandler - terminal output events', () => {
             sessionId,
             currentModelId: 'model-id[effort]',
             agentMode: AgentMode.DEFAULT_AGENT_MODE,
-            terminalOutputMode: 'terminal_output',
+            clientCapabilities: ClientCapabilities.from({_meta: {terminal_output: true}}),
         });
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
@@ -448,12 +449,12 @@ describe('CodexEventHandler - terminal output events', () => {
         );
     });
 
-    it('should keep parsed non-terminal command output on legacy delta metadata', async () => {
+    it('should send no output of a file read to AIR', async () => {
         const terminalOutputSessionState = createTestSessionState({
             sessionId,
             currentModelId: 'model-id[effort]',
             agentMode: AgentMode.DEFAULT_AGENT_MODE,
-            terminalOutputMode: 'terminal_output',
+            clientCapabilities: ClientCapabilities.from({_meta: {jetbrains: {air: {version: 1}}}}),
         });
         const commandStartNotification: ServerNotification = {
             method: 'item/started',

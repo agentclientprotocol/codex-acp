@@ -21,16 +21,7 @@
           {
             "name": "plan",
             "description": "Turn plan mode on.",
-            "input": null,
-            "_meta": {
-              "commandAction": {
-                "kind": "setConfigOption",
-                "configId": "collaboration_mode",
-                "value": "plan",
-                "resetValue": "default",
-                "presentation": "state"
-              }
-            }
+            "input": null
           },
           {
             "name": "mcp",
@@ -78,12 +69,6 @@
             "description": "Set a goal to keep pursuing.",
             "input": {
               "hint": "[<objective>|clear|pause|resume]"
-            },
-            "_meta": {
-              "commandAction": {
-                "kind": "prefixPrompt",
-                "presentation": "state"
-              }
             }
           },
           {
@@ -99,29 +84,6 @@
             "input": null
           }
         ]
-      }
-    }
-  ]
-}
-{
-  "method": "sessionUpdate",
-  "args": [
-    {
-      "sessionId": "session-1",
-      "update": {
-        "sessionUpdate": "session_info_update",
-        "_meta": {
-          "goal": {
-            "objective": "Keep the restored migration green",
-            "status": "paused",
-            "tokenBudget": null,
-            "tokensUsed": 42,
-            "timeUsedSeconds": 46,
-            "createdAt": 1710000000000,
-            "updatedAt": 1710000046000,
-            "controlMethod": "_session/goal"
-          }
-        }
       }
     }
   ]
@@ -257,11 +219,6 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "item-cmd-1",
-        "status": "completed",
-        "rawOutput": {
-          "formatted_output": "Added.txt\nREADME.md\n",
-          "exit_code": 0
-        },
         "_meta": {
           "terminal_output_delta": {
             "data": "Added.txt\nREADME.md\n",
@@ -285,8 +242,8 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-file-1",
-        "title": "Editing files",
         "kind": "edit",
+        "title": "Editing files",
         "status": "completed",
         "content": [
           {
@@ -295,17 +252,7 @@
             "newText": "Hello\nWorld\n",
             "path": "/test/project/Added.txt",
             "_meta": {
-              "kind": "add",
-              "jetbrains": {
-                "air": {
-                  "version": 1,
-                  "diffStats": {
-                    "version": 1,
-                    "added": 2,
-                    "removed": 0
-                  }
-                }
-              }
+              "kind": "add"
             }
           }
         ]
@@ -344,15 +291,24 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-dyn-1",
+        "name": "list_apps",
         "kind": "execute",
         "title": "list_apps",
         "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Done"
+            }
+          }
+        ],
         "rawInput": {
           "arguments": {
             "includeDisabled": false
           }
-        },
-        "name": "list_apps"
+        }
       }
     }
   ]
@@ -365,8 +321,8 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-image-view-1",
-        "kind": "read",
         "name": "view_image",
+        "kind": "read",
         "title": "View Image /test/project/input.png",
         "status": "completed",
         "content": [
@@ -440,12 +396,7 @@
         "toolCallId": "item-context-compaction-1",
         "kind": "think",
         "title": "Compact conversation",
-        "status": "completed",
-        "_meta": {
-          "contextCompaction": {
-            "version": 1
-          }
-        }
+        "status": "completed"
       }
     }
   ]
@@ -457,23 +408,14 @@
       "sessionId": "session-1",
       "update": {
         "sessionUpdate": "tool_call",
-        "title": "Start subagent test_audit",
-        "kind": "other",
         "toolCallId": "item-subagent-1",
+        "kind": "other",
+        "title": "Start subagent test_audit",
         "status": "completed",
         "rawInput": {
           "agentThreadId": "thread-child-1",
           "agentPath": "/root/test_audit",
           "activityKind": "started"
-        },
-        "_meta": {
-          "codex": {
-            "subagent": {
-              "threadId": "thread-child-1",
-              "path": "/root/test_audit",
-              "activity": "started"
-            }
-          }
         }
       }
     }

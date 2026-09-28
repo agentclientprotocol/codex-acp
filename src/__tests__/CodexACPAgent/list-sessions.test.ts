@@ -97,10 +97,25 @@ describe("CodexACPAgent - list sessions", () => {
                 "appServer",
                 "unknown",
             ],
+            // Codex answers from the state DB instead of scanning every rollout file.
+            useStateDbOnly: true,
         }));
         await expect(JSON.stringify(response, null, 2)).toMatchFileSnapshot(
             "data/list-sessions.json"
         );
+    });
+
+    it("sends one thread/list request for an empty page", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        codexAppServerClient.threadList = vi.fn().mockResolvedValue({data: [], nextCursor: null});
+        codexAppServerClient.threadLoadedList = vi.fn().mockResolvedValue({data: [], nextCursor: null});
+
+        const response = await fixture.getCodexAcpAgent().listSessions({cwd: "/repo/project", cursor: null});
+
+        expect(response.sessions).toEqual([]);
+        expect(codexAppServerClient.threadList).toHaveBeenCalledTimes(1);
     });
 
     it("normalizes Windows cwd filters before comparing absolute paths", async () => {
