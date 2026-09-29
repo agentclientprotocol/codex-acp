@@ -1,0 +1,35 @@
+{
+  "stopReason": "end_turn",
+  "usage": {
+    "totalTokens": 1200,
+    "inputTokens": 600,
+    "outputTokens": 200,
+    "thoughtTokens": 50,
+    "cachedReadTokens": 400
+  },
+  "_meta": {
+    "quota": {
+      "token_count": {
+        "totalTokens": 1200,
+        "inputTokens": 600,
+        "cachedInputTokens": 400,
+        "outputTokens": 200,
+        "reasoningOutputTokens": 50
+      },
+      "model_usage": [
+        {
+          "model": "gpt-5",
+          "token_count": {
+            "totalTokens": 1200,
+            "inputTokens": 600,
+            "cachedInputTokens": 400,
+            "outputTokens": 200,
+            "reasoningOutputTokens": 50
+          }
+        }
+      ]
+    }
+  },
+  "state": "idle",
+  "sessionUpdate": "state_update"
+}

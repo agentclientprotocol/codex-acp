@@ -1,0 +1,27 @@
+{
+  "plan": {},
+  "session": {
+    "compaction": {},
+    "notices": {}
+  },
+  "elicitation": {
+    "form": {},
+    "url": {}
+  },
+  "auth": {
+    "terminal": true,
+    "_meta": {
+      "gateway": true
+    }
+  },
+  "_meta": {
+    "jetbrains": {
+      "air": {
+        "version": 1,
+        "capabilities": [
+          "nativeSubagentSessions"
+        ]
+      }
+    }
+  }
+}

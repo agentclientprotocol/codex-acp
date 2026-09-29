@@ -20,6 +20,7 @@ import {CodexEventHandler} from "../CodexEventHandler";
 import type {AccountUpdatedNotification} from "../app-server/v2";
 import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTerminalTasks";
 import {CodexSessionCompactions} from "../CodexSessionCompactions";
+import {CodexSessionToolCalls} from "../CodexSessionToolCalls";
 import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
 import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 
@@ -266,6 +267,8 @@ export interface CodexMockTestFixture extends TestFixture {
     sendServerRequest<T>(method: string, params: unknown): Promise<T>,
     setPermissionResponse(response: RequestPermissionResponse | Promise<RequestPermissionResponse>): void,
     setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void,
+    /** Raw `options` (e.g. `cancellationSignal`) passed to `connection.request()` calls for the given ACP method. */
+    getAcpRequestOptions(method: string): any[],
 }
 
 /**
@@ -305,8 +308,12 @@ export function createCodexMockTestFixture(
     // Create ACP connection with configurable permission response
     const acpConnectionEvents: MethodCallEvent[] = [];
     const acpEventHandlers: ((event: MethodCallEvent) => void)[] = [];
+    // Raw `request()` options (e.g. `cancellationSignal`) are stripped by `normalizeAcpConnectionEvent`
+    // before landing in `acpConnectionEvents`; capture them separately so tests can assert on them.
+    const acpRequestOptions: {method: string; options: any}[] = [];
     const returnValues = new Map<string, (args: any[]) => any>();
     returnValues.set('request', (args) => {
+        acpRequestOptions.push({method: args[0], options: args[2]});
         if (args[0] === acp.methods.client.session.requestPermission) {
             return permissionState.response;
         }
@@ -364,6 +371,9 @@ export function createCodexMockTestFixture(
         setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void {
             elicitationState.response = response;
         },
+        getAcpRequestOptions(method: string): any[] {
+            return acpRequestOptions.filter(entry => entry.method === method).map(entry => entry.options);
+        },
     };
 }
 
@@ -404,6 +414,8 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
     const sessionId = overrides?.sessionId ?? "session-id";
     return {
         currentTurnId: null,
+        interruptTurnId: null,
+        codexReportedRunningTurnId: null,
         lastTokenUsage: null,
         totalTokenUsage: null,
         modelContextWindow: null,
@@ -426,8 +438,10 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         goalRevision: 0,
         sessionTitle: null,
         sessionTitleSource: "unknown",
+        awaitingClientLoad: false,
         compactions: new CodexSessionCompactions(),
         toolCallReports: new ToolCallReports(),
+        openToolCalls: new CodexSessionToolCalls(),
         subagents: new CodexSubagentEventRouter(
             sessionId,
             false,
