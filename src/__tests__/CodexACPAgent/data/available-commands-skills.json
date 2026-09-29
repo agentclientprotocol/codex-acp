@@ -11,12 +11,17 @@
             "description": "Turn plan mode on.",
             "input": null,
             "_meta": {
-              "commandAction": {
-                "kind": "setConfigOption",
-                "configId": "collaboration_mode",
-                "value": "plan",
-                "resetValue": "default",
-                "presentation": "state"
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "commandAction": {
+                    "kind": "setConfigOption",
+                    "configId": "collaboration_mode",
+                    "value": "plan",
+                    "resetValue": "default",
+                    "presentation": "state"
+                  }
+                }
               }
             }
           },
@@ -68,9 +73,14 @@
               "hint": "[<objective>|clear|pause|resume]"
             },
             "_meta": {
-              "commandAction": {
-                "kind": "prefixPrompt",
-                "presentation": "state"
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "commandAction": {
+                    "kind": "prefixPrompt",
+                    "presentation": "state"
+                  }
+                }
               }
             }
           },

@@ -1,0 +1,30 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-legacy-notices",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Warning: Legacy warning\n\n"
+        }
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-legacy-notices",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Config warning: Legacy configuration warning\n\nConfiguration details\n\n"
+        }
+      }
+    }
+  }
+]

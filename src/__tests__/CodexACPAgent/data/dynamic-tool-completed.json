@@ -6,7 +6,17 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "dyn-tool-123",
-        "status": "completed"
+        "name": "list_apps",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Done"
+            }
+          }
+        ]
       }
     }
   ]

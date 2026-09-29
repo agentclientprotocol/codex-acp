@@ -11,8 +11,11 @@
           "text": "Checking the relevant event mapping."
         },
         "_meta": {
-          "codex": {
-            "phase": "commentary"
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "commentary"
+            }
           }
         }
       }
@@ -32,8 +35,11 @@
           "text": "Yes, here is the answer."
         },
         "_meta": {
-          "codex": {
-            "phase": "final_answer"
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "final_answer"
+            }
           }
         }
       }

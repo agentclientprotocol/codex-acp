@@ -1,6 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import {
     createCodexMockTestFixture,
+    createTestEventHandler,
     createTestModel,
     createTestSessionState,
     mockPromptTurn,
@@ -14,7 +15,6 @@ import {
 } from "../../AuthStatusMeta";
 import {ModelId} from "../../ModelId";
 import {PROTOCOL_VERSION} from "@agentclientprotocol/sdk";
-import {CodexEventHandler} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import type {Account, AccountUpdatedNotification} from "../../app-server/v2";
 
@@ -417,15 +417,9 @@ describe("authStatus extension", () => {
                 notify: vi.fn(async () => {}),
                 request: vi.fn(),
             } as unknown as AcpClientConnection;
-            const handler = new CodexEventHandler(
-                connection,
-                createTestSessionState(),
-                false,
-                false,
-                "epoch",
-                undefined,
-                (notification: AccountUpdatedNotification) => received.push(notification),
-            );
+            const handler = createTestEventHandler(connection, createTestSessionState(), {
+                onAccountUpdated: (notification: AccountUpdatedNotification) => received.push(notification),
+            });
 
             await handler.handleNotification({
                 method: "account/updated",
