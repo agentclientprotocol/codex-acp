@@ -359,6 +359,7 @@ describe("CodexEventHandler - auth error events", () => {
         ["service", "internalServerError"],
         ["service", "threadRollbackFailed"],
         ["service", "sandboxError"],
+        ["service", "tooManyDenials"],
         ["service", "other"],
         ["connection", {httpConnectionFailed: {httpStatusCode: null}}],
         ["connection", {responseStreamConnectionFailed: {httpStatusCode: 503}}],

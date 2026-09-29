@@ -43,6 +43,9 @@ function turnStore(stored: Turn[], pageSize = 2) {
 function itemStore(turns: Turn[], pageSize = 2) {
     const entries = turns.flatMap(turn => turn.items.map(item => ({turnId: turn.id, item, startedAtMs: null, completedAtMs: null})));
     return async ({turnId, cursor, limit, sortDirection}: ThreadItemsListParams) => {
+        if (cursor !== null && typeof cursor === "object") {
+            throw new Error("This history fixture only supports opaque string cursors");
+        }
         const scoped = entries.filter(entry => !turnId || entry.turnId === turnId);
         if (sortDirection === "desc") {
             const index = cursor === null || cursor === undefined

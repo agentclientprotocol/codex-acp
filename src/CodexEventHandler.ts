@@ -161,6 +161,7 @@ const STRING_CODEX_ERROR_CATEGORIES = {
     serverOverloaded: "overloaded",
     cyberPolicy: "policy_denied",
     misalignmentPolicyViolation: "policy_denied",
+    tooManyDenials: "provider_error",
     internalServerError: "internal_error",
     unauthorized: "auth_required",
     badRequest: "bad_request",
