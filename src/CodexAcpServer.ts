@@ -162,6 +162,7 @@ import {
     clientSupportsAirCapability,
     JETBRAINS_META_KEY,
 } from "./AirExtension";
+import {turnConfigurationReceiptEnabled} from "./TurnConfigurationReceipt";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
 import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdate} from "./CodexSessionCompactions";
@@ -3024,7 +3025,11 @@ export class CodexAcpServer {
         const promptTurns = new Map<string, PendingPromptTurnConfiguration>();
         const modelReroutes = new Map<string, TurnModelReroute[]>();
         const turnKey = (threadId: string, turnId: string): string => `${threadId}\u0000${turnId}`;
+        const turnConfigurationReceipt = turnConfigurationReceiptEnabled(this.clientCapabilities);
         const recordTurnStarted = (threadId: string, turnId: string, modelId: ModelId | null): void => {
+            if (!turnConfigurationReceipt) {
+                return;
+            }
             promptTurns.set(turnKey(threadId, turnId), {
                 threadId,
                 turnId,
@@ -3101,7 +3106,7 @@ export class CodexAcpServer {
             await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
                     await observeInteraction(event);
-                    if (event.method === "model/rerouted") {
+                    if (turnConfigurationReceipt && event.method === "model/rerouted") {
                         const key = turnKey(event.params.threadId, event.params.turnId);
                         const reroutes = modelReroutes.get(key) ?? [];
                         reroutes.push({

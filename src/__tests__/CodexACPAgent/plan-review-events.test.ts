@@ -58,12 +58,16 @@ describe("CodexACPAgent - plan review", () => {
             implementationStart?: Promise<TurnStartResponse>;
             permissionResponse?: acp.RequestPermissionResponse | Promise<acp.RequestPermissionResponse>;
             initialModelId?: string;
+            turnConfigurationReceipt?: boolean;
         } = {},
     ) {
         // The plan review of these tests is the AIR shape.
         const clientCapabilities: acp.ClientCapabilities = {
             plan: {},
-            _meta: {jetbrains: {air: {version: 1, capabilities: options.typedFailures ? ["sessionFailure"] : []}}},
+            _meta: {
+                jetbrains: {air: {version: 1, capabilities: options.typedFailures ? ["sessionFailure"] : []}},
+                ...(options.turnConfigurationReceipt ? {codex: {turnConfiguration: true}} : {}),
+            },
         };
         await fixture.getCodexAcpAgent().initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
@@ -240,6 +244,7 @@ describe("CodexACPAgent - plan review", () => {
             {
                 initialModelId: "gpt-5.6-sol[xhigh]",
                 permissionResponse: permission.promise,
+                turnConfigurationReceipt: true,
             },
         );
 

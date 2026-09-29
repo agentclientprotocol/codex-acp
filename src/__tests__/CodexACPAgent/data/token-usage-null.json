@@ -5,23 +5,6 @@
     "quota": {
       "token_count": null,
       "model_usage": []
-    },
-    "codex": {
-      "turnConfiguration": {
-        "version": 1,
-        "turns": [
-          {
-            "threadId": "test-session-id",
-            "turnId": "turn-id",
-            "requested": {
-              "model": "model-id",
-              "effort": "effort"
-            },
-            "threadSettings": null,
-            "modelReroutes": []
-          }
-        ]
-      }
     }
   }
 }
