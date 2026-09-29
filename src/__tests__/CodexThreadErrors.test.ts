@@ -2,6 +2,7 @@ import {describe, expect, it} from "vitest";
 import {
     isInvalidThreadIdError,
     isMissingRolloutError,
+    isThreadActiveWriterError,
     isThreadNotLoadedError,
     isUnknownThreadError,
 } from "../CodexThreadErrors";
@@ -17,6 +18,8 @@ const invalidSessionId = new Error(
     "invalid session id: invalid character: expected an optional prefix of `urn:uuid:` followed by [0-9a-fA-F-], found `t` at 1"
 );
 const unrelated = new Error("stream disconnected before completion");
+// Codex 0.158, `thread/resume` while another app-server holds the thread's writer lock.
+const activeWriter = new Error("thread 01a0637c-5b99-7242-9064-04545d605fdb already has an active writer");
 
 describe("CodexThreadErrors", () => {
     it("recognises a thread whose rollout was never materialized", () => {
@@ -34,6 +37,18 @@ describe("CodexThreadErrors", () => {
         expect(isInvalidThreadIdError(invalidThreadId)).toBe(true);
         expect(isInvalidThreadIdError(invalidSessionId)).toBe(true);
         expect(isInvalidThreadIdError(missingRollout)).toBe(false);
+    });
+
+    it("recognises a thread that another Codex app-server has loaded", () => {
+        expect(isThreadActiveWriterError(activeWriter)).toBe(true);
+        expect(isThreadActiveWriterError({code: -32600, message: activeWriter.message})).toBe(true);
+        expect(isThreadActiveWriterError(
+            new Error("thread/resume failed: thread abc already has an active writer (pid 1)"),
+        )).toBe(true);
+        expect(isThreadActiveWriterError("session already has an active writer")).toBe(false);
+        expect(isThreadActiveWriterError(missingRollout)).toBe(false);
+        expect(isThreadActiveWriterError(unrelated)).toBe(false);
+        expect(isUnknownThreadError(activeWriter)).toBe(false);
     });
 
     it("treats every 'no persisted thread' shape as an unknown thread", () => {

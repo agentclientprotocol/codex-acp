@@ -7,6 +7,8 @@
  * predicate keeps the match anchored on the stable part of the phrasing.
  */
 
+import {RequestError} from "@agentclientprotocol/sdk";
+
 function errorText(err: unknown): string {
     if (err instanceof Error) return err.message;
     if (typeof err === "string") return err;
@@ -61,4 +63,27 @@ export function isNoActiveTurnError(err: unknown): boolean {
  */
 export function isUnknownThreadError(err: unknown): boolean {
     return isMissingRolloutError(err) || isThreadNotLoadedError(err) || isInvalidThreadIdError(err);
+}
+
+/**
+ * `thread/resume` answers this when another Codex app-server -- the Codex
+ * app, the CLI or an IDE extension -- has the thread loaded. That process
+ * holds an exclusive lock on the thread's rollout until it unloads the
+ * thread, which can be later than the moment its tab closes. The match is
+ * not anchored, so a wrapped message still counts.
+ */
+export function isThreadActiveWriterError(err: unknown): boolean {
+    return /\bthread \S+ already has an active writer\b/.test(errorText(err));
+}
+
+/**
+ * The ACP error for a thread that another Codex client has loaded. The
+ * `reason` field is stable, so a client can recognise the case without
+ * parsing the message.
+ */
+export function threadActiveWriterRequestError(threadId: string, err: unknown): RequestError {
+    return RequestError.invalidRequest(
+        {reason: "thread_active_writer", threadId, details: errorText(err)},
+        "This Codex session is in use by another Codex client (the Codex app, the CLI or an IDE extension). Close the session there or quit that client, then try again.",
+    );
 }

@@ -61,7 +61,12 @@ import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUt
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
-import {isMissingRolloutError, isUnknownThreadError} from "./CodexThreadErrors";
+import {
+    isMissingRolloutError,
+    isThreadActiveWriterError,
+    isUnknownThreadError,
+    threadActiveWriterRequestError,
+} from "./CodexThreadErrors";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 
 /**
@@ -546,6 +551,9 @@ export class CodexAcpClient {
      * so `thread/read` answers for it and gives back the same state resume
      * would have. A thread id Codex has genuinely never seen fails both calls,
      * and the original resume error is what the caller sees.
+     *
+     * A thread that another Codex client has loaded fails with a clear ACP
+     * error instead of the raw Codex message.
      */
     private async resumeThread(params: ThreadResumeParams): Promise<ResumedThread> {
         try {
@@ -561,6 +569,7 @@ export class CodexAcpClient {
                 collaborationMode: response.collaborationMode?.mode ?? null,
             };
         } catch (err) {
+            if (isThreadActiveWriterError(err)) throw threadActiveWriterRequestError(params.threadId, err);
             if (!isMissingRolloutError(err)) throw err;
             let response;
             try {
