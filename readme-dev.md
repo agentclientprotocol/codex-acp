@@ -12,6 +12,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
+- `TURN_CONFIGURATION_RECEIPT` - `true`/`1` sends the [turn configuration receipt](docs/turn-configuration-receipt.md) to every client, `false`/`0` to none. Unset, only clients that declare it get it.
 
 ### Quick start
 

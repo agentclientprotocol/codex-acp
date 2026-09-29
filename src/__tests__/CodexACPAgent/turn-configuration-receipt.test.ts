@@ -1,14 +1,49 @@
-import {beforeEach, describe, expect, it, vi} from "vitest";
+import * as acp from "@agentclientprotocol/sdk";
+import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import {createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture} from "../acp-test-utils";
+import {TURN_CONFIGURATION_RECEIPT_ENV} from "../../TurnConfigurationReceipt";
 
 describe("PromptResponse turn configuration receipt", () => {
     let fixture: CodexMockTestFixture;
     const sessionId = "test-session-id";
 
-    beforeEach(() => {
+    beforeEach(async () => {
         fixture = createCodexMockTestFixture();
         vi.clearAllMocks();
+        await declareReceipt(true);
     });
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
+    async function declareReceipt(declared: boolean): Promise<void> {
+        await fixture.getCodexAcpAgent().initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: declared ? {_meta: {codex: {turnConfiguration: true}}} : {},
+        });
+    }
+
+    async function promptOnce(): Promise<acp.PromptResponse> {
+        const agent = fixture.getCodexAcpAgent();
+        const appServer = fixture.getCodexAppServerClient();
+        const turn = {id: "turn-id", items: [], status: "inProgress" as const, error: null};
+
+        vi.spyOn(appServer, "turnStart").mockResolvedValue({turn} as never);
+        vi.spyOn(appServer, "awaitTurnCompleted").mockResolvedValue({
+            threadId: sessionId,
+            turn: {...turn, status: "completed" as const},
+        } as never);
+        vi.spyOn(agent, "getSessionState").mockReturnValue(createTestSessionState({
+            sessionId,
+            currentModelId: "gpt-5.6-terra[medium]",
+        }));
+
+        return await agent.prompt({
+            sessionId,
+            prompt: [{type: "text", text: "test prompt"}],
+        });
+    }
 
     it("reports requested model settings, observed thread settings, and reroutes", async () => {
         const agent = fixture.getCodexAcpAgent();
@@ -141,5 +176,32 @@ describe("PromptResponse turn configuration receipt", () => {
                 }],
             },
         });
+    });
+
+    it("sends no receipt to a client that did not declare it", async () => {
+        await declareReceipt(false);
+
+        const response = await promptOnce();
+
+        expect(response._meta).toEqual({quota: {token_count: null, model_usage: []}});
+    });
+
+    it.each(["true", "1"])("sends the receipt to every client when the environment sets %s", async (value) => {
+        vi.stubEnv(TURN_CONFIGURATION_RECEIPT_ENV, value);
+        await declareReceipt(false);
+
+        const response = await promptOnce();
+
+        expect(response._meta?.["codex"]).toMatchObject({
+            turnConfiguration: {version: 1, turns: [{turnId: "turn-id"}]},
+        });
+    });
+
+    it.each(["false", "0"])("sends no receipt to a declaring client when the environment sets %s", async (value) => {
+        vi.stubEnv(TURN_CONFIGURATION_RECEIPT_ENV, value);
+
+        const response = await promptOnce();
+
+        expect(response._meta).toEqual({quota: {token_count: null, model_usage: []}});
     });
 });

@@ -1,7 +1,36 @@
 # Turn configuration receipt
 
-`codex-acp` returns transport-level model configuration evidence in each
-`PromptResponse` that started at least one Codex turn:
+`codex-acp` can return transport-level model configuration evidence in each
+`PromptResponse` that started at least one Codex turn. The receipt is opt-in:
+a client that does not ask for it gets the same `PromptResponse` as before.
+
+## Activation
+
+A client asks for the receipt in the `initialize` request:
+
+```json
+{
+  "clientCapabilities": {
+    "_meta": {
+      "codex": {
+        "turnConfiguration": true
+      }
+    }
+  }
+}
+```
+
+The adapter reads the declaration once, in `initialize`. Any other value
+enables nothing.
+
+The `TURN_CONFIGURATION_RECEIPT` environment variable overrides the
+declaration for every client of the adapter process: `true` or `1` always sends
+the receipt, `false` or `0` never sends it. Use it for a client that cannot
+declare capabilities.
+
+## Shape
+
+An enabled receipt looks like this:
 
 ```json
 {
