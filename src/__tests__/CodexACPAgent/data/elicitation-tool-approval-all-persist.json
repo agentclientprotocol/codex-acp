@@ -7,6 +7,15 @@
         "toolCallId": "elicitation:test-session-id:tool-server:1",
         "kind": "execute",
         "status": "pending",
+        "title": "MCP tool call approval",
+        "rawInput": {
+          "serverName": "tool-server",
+          "description": "Allow tool call?",
+          "schema": {
+            "type": "object",
+            "properties": {}
+          }
+        },
         "content": [
           {
             "type": "content",
@@ -15,42 +24,47 @@
               "text": "Allow tool call?"
             }
           }
-        ],
-        "rawInput": {
-          "serverName": "tool-server",
-          "schema": {
-            "type": "object",
-            "properties": {}
-          }
-        }
+        ]
       },
       "_meta": "_meta",
       "options": [
         {
           "optionId": "allow_once",
           "name": "Allow",
-          "kind": "allow_once",
-          "_meta": "_meta"
+          "kind": "allow_once"
         },
         {
           "optionId": "allow_session",
           "name": "Allow for this session",
-          "kind": "allow_always",
-          "_meta": "_meta"
+          "kind": "allow_always"
         },
         {
           "optionId": "allow_always",
           "name": "Always allow",
-          "kind": "allow_always",
-          "_meta": "_meta"
+          "kind": "allow_always"
         },
         {
           "optionId": "cancel",
           "name": "Cancel",
-          "kind": "reject_once",
-          "_meta": "_meta"
+          "kind": "reject_once"
         }
       ]
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "elicitation:test-session-id:tool-server:1",
+        "status": "completed",
+        "rawOutput": {
+          "action": "accept"
+        }
+      }
     }
   ]
 }

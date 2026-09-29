@@ -1,13 +1,12 @@
 import type {ServerNotification} from "../app-server";
 import type {ThreadItem} from "../app-server/v2";
-import {ACPSessionConnection, type UpdateSessionEvent} from "../ACPSessionConnection";
+import type {ACPSessionConnection} from "../ACPSessionConnection";
 import {logger} from "../Logger";
-import {
-    createCollabAgentToolCallCompleteUpdate,
-    createCollabAgentToolCallUpdate,
-    createSubAgentActivityUpdate,
-} from "../CodexToolCallMapper";
+import {CollabAgentReporter} from "../tool-calls/reporters/CollabAgentReporter";
+import {SubagentActivityReporter} from "../tool-calls/reporters/SubagentActivityReporter";
+import type {ToolFacts} from "../tool-calls/ToolFacts";
 import type {SubagentState} from "./AcpSubagents";
+import {PendingNotificationBuffer} from "./PendingNotificationBuffer";
 import {isRootAgentPath, nameFromAgentPath, normalizeAgentPath} from "./CodexAgentPath";
 
 type NativeSubagent = {
@@ -25,32 +24,42 @@ type PendingSubagent = {
     parentThreadId: string;
     parentSessionId: string;
     task: string;
-    buffered: ServerNotification[];
-    droppedBufferedNotifications: number;
+    buffered: PendingNotificationBuffer;
+};
+
+/** A spawn that ended before it materialized. It keeps only what a reopen needs, not the buffered updates. */
+type EndedSpawn = {
+    parentThreadId: string;
+    task: string;
 };
 
 export type ClosingChildSession = {
     threadId: string;
     sessionId: string;
+    state: SubagentState;
 };
 
 /** Owns native lifecycle, child routing, waiting, and legacy activity deduplication. */
 export class CodexSubagentEventRouter {
     private static readonly DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
-    private static readonly MAX_PENDING_NOTIFICATIONS = 256;
 
     private readonly children = new Map<string, NativeSubagent>();
     private readonly pendingSpawns = new Map<string, PendingSubagent>();
-    private readonly terminalPendingSpawns = new Map<string, PendingSubagent>();
+    private readonly terminalPendingSpawns = new Map<string, EndedSpawn>();
     private readonly waiters = new Set<() => void>();
     private readonly materializationWaiters = new Map<string, Set<(sessionId: string | null) => void>>();
     private readonly replayQueue: ServerNotification[] = [];
     private readonly activeLegacyActivities = new Set<string>();
 
+    /**
+     * @param onChildSessionEnded runs when a native child session ends, so that the owner can release
+     *   the state that it keeps per child session.
+     */
     constructor(
         private readonly rootSessionId: string,
         private readonly supported: boolean,
         private readonly session: ACPSessionConnection,
+        private readonly onChildSessionEnded: (sessionId: string) => void,
     ) {}
 
     async handle(notification: ServerNotification): Promise<boolean> {
@@ -76,15 +85,7 @@ export class CodexSubagentEventRouter {
         }
         const notificationThreadId = (notification.params as {threadId?: unknown}).threadId;
         if (typeof notificationThreadId === "string" && this.pendingSpawns.has(notificationThreadId)) {
-            const pending = this.pendingSpawns.get(notificationThreadId)!;
-            if (pending.buffered.length === CodexSubagentEventRouter.MAX_PENDING_NOTIFICATIONS) {
-                pending.buffered.shift();
-                pending.droppedBufferedNotifications += 1;
-                if (pending.droppedBufferedNotifications === 1) {
-                    logger.log(`Pending subagent ${notificationThreadId} exceeded the notification buffer; dropping oldest updates`);
-                }
-            }
-            pending.buffered.push(notification);
+            this.pendingSpawns.get(notificationThreadId)!.buffered.push(notification);
             return true;
         }
         if (notification.method !== "item/started" && notification.method !== "item/completed") {
@@ -114,7 +115,8 @@ export class CodexSubagentEventRouter {
         }
         if (item.type !== "collabAgentToolCall") return false;
 
-        if (item.tool === "resumeAgent" || item.tool === "sendInput") {
+        // These tools start a turn of an idle child. A `sendMessage` only queues the message and starts no turn.
+        if (item.tool === "resumeAgent" || item.tool === "sendInput" || item.tool === "followupTask") {
             for (const [childThreadId, state] of Object.entries(item.agentsStates)) {
                 if (state?.status === "running" || state?.status === "pendingInit") {
                     await this.reopen(childThreadId);
@@ -146,8 +148,7 @@ export class CodexSubagentEventRouter {
                     parentThreadId,
                     parentSessionId,
                     task: item.prompt?.trim() || "Delegated task",
-                    buffered: [],
-                    droppedBufferedNotifications: 0,
+                    buffered: new PendingNotificationBuffer(childSessionId),
                 });
                 representedSpawn = true;
             }
@@ -188,20 +189,25 @@ export class CodexSubagentEventRouter {
     closingChildSessions(notification: ServerNotification): ClosingChildSession[] {
         if (!this.supported) return [];
         if (notification.method === "turn/completed") {
-            if (terminalStateFromTurn(notification.params.turn.status) === undefined) return [];
-            return this.closingChildSession(notification.params.threadId);
+            const state = terminalStateFromTurn(notification.params.turn.status);
+            if (state === undefined) return [];
+            if (notification.params.threadId === this.rootSessionId && state !== "completed") {
+                return [...this.children.keys()].flatMap(threadId => this.closingChildSession(threadId, state));
+            }
+            return this.closingChildSession(notification.params.threadId, state);
         }
         if (notification.method !== "item/started" && notification.method !== "item/completed") return [];
         const item = notification.params.item;
         if (item.type === "subAgentActivity") {
-            return item.kind === "interrupted" ? this.closingChildSession(item.agentThreadId) : [];
+            return item.kind === "interrupted" ? this.closingChildSession(item.agentThreadId, "cancelled") : [];
         }
         if (item.type !== "collabAgentToolCall") return [];
 
         const closing = new Map<string, ClosingChildSession>();
         for (const [threadId, state] of Object.entries(item.agentsStates)) {
-            if (!state || terminalStateOf(state.status) === undefined) continue;
-            for (const child of this.closingChildSession(threadId)) closing.set(threadId, child);
+            const terminalState = state && terminalStateOf(state.status);
+            if (!terminalState) continue;
+            for (const child of this.closingChildSession(threadId, terminalState)) closing.set(threadId, child);
         }
         return [...closing.values()];
     }
@@ -222,38 +228,36 @@ export class CodexSubagentEventRouter {
         });
     }
 
-    legacyActivityStarted(item: ThreadItem & {type: "subAgentActivity"}): UpdateSessionEvent {
+    legacyActivityStarted(item: ThreadItem & {type: "subAgentActivity"}): ToolFacts {
         this.activeLegacyActivities.add(item.id);
-        return createSubAgentActivityUpdate(item, "in_progress", "tool_call");
+        return SubagentActivityReporter.activity(item, "in_progress", "start");
     }
 
-    legacyCollaborationStarted(item: ThreadItem & {type: "collabAgentToolCall"}): UpdateSessionEvent {
-        return createCollabAgentToolCallUpdate(item);
+    legacyCollaborationStarted(item: ThreadItem & {type: "collabAgentToolCall"}): ToolFacts {
+        return CollabAgentReporter.started(item);
     }
 
-    legacyCollaborationCompleted(item: ThreadItem & {type: "collabAgentToolCall"}): UpdateSessionEvent {
-        return createCollabAgentToolCallCompleteUpdate(item);
+    legacyCollaborationCompleted(item: ThreadItem & {type: "collabAgentToolCall"}): ToolFacts {
+        return CollabAgentReporter.completed(item);
     }
 
-    legacyActivityCompleted(item: ThreadItem & {type: "subAgentActivity"}): UpdateSessionEvent {
-        const sessionUpdate = this.activeLegacyActivities.delete(item.id)
-            ? "tool_call_update"
-            : "tool_call";
-        return createSubAgentActivityUpdate(item, "completed", sessionUpdate);
+    legacyActivityCompleted(item: ThreadItem & {type: "subAgentActivity"}): ToolFacts {
+        const report = this.activeLegacyActivities.delete(item.id) ? "update" : "start";
+        return SubagentActivityReporter.activity(item, "completed", report);
     }
 
+    /** The caller finalizes pending child updates before closing timed-out sessions. */
     async wait(
         signal: AbortSignal,
         timeoutMs = CodexSubagentEventRouter.DEFAULT_WAIT_TIMEOUT_MS,
-    ): Promise<void> {
+    ): Promise<"settled" | "aborted" | "timed_out"> {
         const deadline = Date.now() + timeoutMs;
         while (this.hasOutstanding()) {
-            if (signal.aborted) return;
+            if (signal.aborted) return "aborted";
             const remainingMs = deadline - Date.now();
             if (remainingMs <= 0) {
                 logger.log(`Timed out waiting for subagents in session ${this.rootSessionId}; marking them failed`);
-                await this.finishOutstanding("failed");
-                return;
+                return "timed_out";
             }
             const changed = await new Promise<boolean>((resolve) => {
                 const timeout = setTimeout(() => {
@@ -276,10 +280,10 @@ export class CodexSubagentEventRouter {
             });
             if (!changed) {
                 logger.log(`Timed out waiting for subagents in session ${this.rootSessionId}; marking them failed`);
-                await this.finishOutstanding("failed");
-                return;
+                return "timed_out";
             }
         }
+        return "settled";
     }
 
     async finishOutstanding(state: SubagentState): Promise<void> {
@@ -298,10 +302,10 @@ export class CodexSubagentEventRouter {
                 || this.terminalPendingSpawns.has(threadId));
     }
 
-    private closingChildSession(threadId: string): ClosingChildSession[] {
+    private closingChildSession(threadId: string, state: SubagentState): ClosingChildSession[] {
         const child = this.children.get(threadId);
         return child && child.terminalState === undefined
-            ? [{threadId, sessionId: child.sessionId}]
+            ? [{threadId, sessionId: child.sessionId, state}]
             : [];
     }
 
@@ -330,7 +334,8 @@ export class CodexSubagentEventRouter {
             generation: 1,
         });
         this.pendingSpawns.delete(childSessionId);
-        this.replayQueue.push(...(pending?.buffered ?? []));
+        // A loop, not push(...): a spread of a large buffer exceeds the argument limit and throws.
+        for (const notification of pending?.buffered.take() ?? []) this.replayQueue.push(notification);
         this.resolveMaterialization(childSessionId, childSessionId);
     }
 
@@ -338,7 +343,10 @@ export class CodexSubagentEventRouter {
         const pending = this.pendingSpawns.get(childSessionId);
         if (!pending) return;
         this.pendingSpawns.delete(childSessionId);
-        this.terminalPendingSpawns.set(childSessionId, pending);
+        // The child ended before Codex reported its activity, so it is not shown. The record keeps no buffer,
+        // so its buffered updates are dropped.
+        this.terminalPendingSpawns.set(childSessionId, {parentThreadId: pending.parentThreadId, task: pending.task});
+        this.onChildSessionEnded(childSessionId);
         this.resolveMaterialization(childSessionId, null);
         this.notifyWaiters();
     }
@@ -358,6 +366,7 @@ export class CodexSubagentEventRouter {
             if (child.terminalState === state) delete child.terminalState;
             throw error;
         }
+        this.onChildSessionEnded(child.sessionId);
         this.notifyWaiters();
     }
 

@@ -13,6 +13,10 @@ the agent registry.
 There is no manual release button, and versions are never typed in by hand: the
 version is an output of the commit history, not an input.
 
+Other pushes to `main` trigger preview publishing directly, without waiting for
+CI or release-please — see [Preview releases](#preview-releases) for exclusions
+and queue behavior. There is no staging branch.
+
 ## Releasing
 
 ```sh
@@ -43,6 +47,103 @@ Once the workflow finishes, confirm both outputs landed:
 gh release view "v<version>"
 npm view "@agentclientprotocol/codex-acp@<version>"
 ```
+
+## Preview releases
+
+Each eligible push to `main` triggers a preview from the exact pushed commit in
+the same workflow. Release commits are excluded as described below. There is no
+GitHub release — only an npm publish under the `preview` dist-tag, a `v<version>`
+tag on the commit it came from, and the same
+agent registry update a stable release dispatches, since the registry has its own
+handling for preview versions.
+
+`publish-npm-preview` installs dependencies, computes and applies the preview
+version in the working tree, then publishes to npm. The `prepublishOnly` hook
+builds the bundle before publication. After publishing, `publish-tag-preview`
+creates the tag and `trigger-registry-update` dispatches the registry update
+independently; neither waits for the other. Before dispatching, the registry job
+polls npm for the exact published version for up to 12.5 minutes, including
+downloading its tarball, so the registry never checks while npm is still
+propagating the package. The registry job is shared with the stable path. A tag
+failure can be retried on its own with **Re-run failed jobs**, leaving the
+successful npm publish untouched.
+
+Previews start directly on push, without waiting for the
+[`CI`](../.github/workflows/ci.yml) workflow or the `release-please` job. The
+preview job does not run typecheck, unit tests or e2e tests. Stable publishing
+still requires the `verify` job to pass.
+
+The publish step runs `npm publish --access public --tag preview` and sets
+`published=true` only after it succeeds. Both downstream jobs use that output
+to proceed with preview tagging and the registry availability check. This is a
+real publish, with no dry-run stage; the later dry run downloads the published
+tarball to verify it has propagated.
+
+A stable and a preview dispatch can never collide — a release merge publishes
+stable and skips the preview, every other push does the reverse — so the registry
+sees exactly one dispatch per published version.
+
+```sh
+npx -y @agentclientprotocol/codex-acp@preview
+npm view @agentclientprotocol/codex-acp dist-tags
+git ls-remote --tags origin 'refs/tags/*preview*'
+```
+
+The version is the `package.json` version with the patch incremented, plus
+`-preview.N`: with `main` at 1.7.0 the previews are `1.7.1-preview.1`,
+`1.7.1-preview.2`, and so on. `N` restarts at 1 whenever release-please moves
+`package.json`, which keeps the sequence monotonic whichever way the next release
+goes — a patch release makes the next base 1.7.2, a minor makes it 1.8.1, and
+both sort above every `1.7.1-preview.*`.
+
+`1.7.1-preview.4` is **not** a promise that 1.7.1 will ship. The base is a
+patch bump because that is the only choice depending solely on `package.json`,
+which release-please only ever increases. Using release-please's predicted next
+version would read better but that prediction moves mid-flight: a `fix:` opens a
+1.7.1 release PR, a later `feat:` moves it to 1.8.0, and `N` would reset under
+previews that were already published.
+
+`N` comes from [`scripts/next-preview-version.mjs`](../scripts/next-preview-version.mjs),
+which takes the larger of two sources. The npm registry says what is taken — npm
+versions are immutable and stay reserved even after `npm unpublish`, so reusing
+one is a hard failure — but it is CDN-served and can lag a publish by minutes.
+The git tags this job writes are strongly consistent and cover that window. The
+job publishes before it tags, so a version can exist on npm without a tag but
+never the reverse; that is why a registry read failure aborts the run rather than
+falling back to the tags alone.
+
+Preview publish jobs are serialized by a concurrency group with
+`cancel-in-progress: false`. GitHub keeps only one run pending per group, so a
+third push arriving while one preview runs and another waits drops the waiting
+one — that commit simply gets no preview.
+
+`latest` stays put because the job passes `npm publish --tag preview`. Without
+it npm would move `latest` onto the preview: `--tag` defaults to `latest` even
+for a semver prerelease. Right after a release the `preview` dist-tag can name a
+version _below_ `latest` until the next push lands; that is cosmetic.
+
+Automatic previews are skipped when the head commit's author name is
+`acp-release-bot[bot]` or its message starts with `chore(main): release `.
+Either match is enough to identify a release commit, and the cost of a
+miss is one wasted version number plus a `preview` tag briefly pointing at
+already-released code — `latest` is untouched. The preview job has no dependency
+on `release-please`, so it uses the commit metadata without waiting for that
+job's outputs.
+
+To publish a preview by hand from a specific commit or branch:
+
+```sh
+gh workflow run publish.yml --ref main \
+  -f channel=preview -f ref=<commit-or-branch> -f publish_npm=false
+```
+
+Manual previews use the requested ref and bypass the automatic release-commit
+exclusions. The `publish_npm` input applies only to stable publishing; setting it
+to `false` does not disable preview publication.
+
+`--ref main` is required: the `release` environment only accepts protected
+branches and `v*` tags, so a dispatch from anywhere else is rejected before the
+job starts.
 
 ## How the version is chosen
 
@@ -76,6 +177,14 @@ explicit decision to release a major.
 Note that `config-file` only takes effect while the workflow does **not** pass a
 `release-type` input to the action — with `release-type` set, the action ignores
 the config entirely. The release type is declared inside the config instead.
+
+`release-type` also switches release-please from `Manifest.fromManifest` to
+`Manifest.fromConfig`, which is a second and sharper reason never to set it. On
+the manifest path the previous release is found by an exact string match against
+the version in [`.release-please-manifest.json`](../.release-please-manifest.json),
+which is why the `v<x>-preview.<n>` tags are invisible to it. On the config path
+release-please instead sorts every candidate tag and release descending and takes
+the highest — and there the preview tags _would_ be candidates.
 
 Because the config is what is read, it also has to say
 `"include-component-in-tag": false`. Left at its default, release-please derives a
@@ -124,6 +233,31 @@ npm versions are immutable. If the package already published and only the
 registry update failed, pass `-f publish_npm=false` so the run skips verification
 and publishing and only re-dispatches the registry update.
 
+### A preview published but the commit was not tagged
+
+Only the publish is irreversible, so re-run just the tag job:
+
+```sh
+gh run rerun <run-id> --failed
+```
+
+Or **Re-run failed jobs** on the run in the web or mobile UI. This re-runs
+`publish-tag-preview` alone and leaves the successful publish untouched, which
+matters because re-publishing an immutable npm version would fail.
+
+If the re-run reports that it received no version or commit, the run's carried
+over job outputs are gone and it cannot tag anything safely. Do it by hand
+instead, taking the version from the publish job's log:
+
+```sh
+gh api "repos/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/git/refs" \
+  -f ref="refs/tags/v<version>" -f sha="<commit-sha>"
+```
+
+Either way nothing is broken in the meantime: the next preview still picks the
+right `N` once the registry CDN catches up. The tag is how that number is known
+immediately.
+
 ## Credentials and repository settings
 
 | Secret                                                        | Used for                                                          |
@@ -134,6 +268,12 @@ and publishing and only re-dispatches the registry update.
 
 Publishing to npm uses OIDC trusted publishing, so there is no npm token. The
 release-please, publish and registry jobs run in the `release` environment.
+
+npm binds a trusted publisher to one repository, one **workflow filename** and
+one environment, and a package may only have one such binding. That is why
+preview publishing is another job inside `publish.yml` rather than a workflow of
+its own: a separate file would fail to authenticate, and registering it would
+cost the stable path its publisher.
 
 Because those jobs are now triggered by pushes to `main` rather than by a `v*`
 tag, the `release` environment's deployment branch policy has to allow the `main`
