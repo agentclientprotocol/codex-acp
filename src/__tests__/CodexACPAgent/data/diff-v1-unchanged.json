@@ -1,0 +1,34 @@
+[
+  {
+    "toolCallId": "item-v1",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "path": "/workspace/v1-new-name.ts",
+        "oldText": "old code line\n",
+        "newText": "new code line\n",
+        "_meta": {
+          "kind": "update"
+        },
+        "type": "diff"
+      },
+      {
+        "path": "/workspace/v1-added.ts",
+        "oldText": null,
+        "newText": "new\n",
+        "_meta": {
+          "kind": "add"
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call"
+  },
+  {
+    "toolCallId": "item-v1",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]

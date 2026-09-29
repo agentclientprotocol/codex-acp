@@ -1,0 +1,32 @@
+[
+  {
+    "toolCallId": "item-delete",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "changes": [
+          {
+            "path": "/workspace/deleted.ts",
+            "operation": "delete"
+          }
+        ],
+        "patch": {
+          "format": "git_patch",
+          "text": "diff --git a/workspace/deleted.ts b/workspace/deleted.ts\ndeleted file mode 100644\n--- a/workspace/deleted.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-export const gone = true;\n\\ No newline at end of file\n"
+        },
+        "_meta": {
+          "kind": "delete"
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "item-delete",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "toolCallId": "item-edit",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "changes": [
+          {
+            "path": "/workspace/edit.ts",
+            "operation": "modify"
+          }
+        ],
+        "patch": {
+          "format": "git_patch",
+          "text": "diff --git a/workspace/edit.ts b/workspace/edit.ts\n--- a/workspace/edit.ts\n+++ b/workspace/edit.ts\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
+        },
+        "_meta": {
+          "kind": "update"
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "item-edit",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]

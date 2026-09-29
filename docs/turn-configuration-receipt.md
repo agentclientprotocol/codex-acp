@@ -28,6 +28,9 @@ declaration for every client of the adapter process: `true` or `1` always sends
 the receipt, `false` or `0` never sends it. Use it for a client that cannot
 declare capabilities.
 
+Under ACP v2 the prompt is answered before the turn runs, so the receipt rides
+in the `_meta` of the `idle` state update that ends the turn, next to `quota`.
+
 ## Shape
 
 An enabled receipt looks like this:

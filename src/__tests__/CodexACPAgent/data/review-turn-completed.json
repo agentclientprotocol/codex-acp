@@ -1,0 +1,22 @@
+{
+  "updates": [
+    {
+      "sessionUpdate": "agent_message_chunk",
+      "messageId": "agent-message",
+      "content": {
+        "type": "text",
+        "text": "Looks good."
+      }
+    }
+  ],
+  "response": {
+    "stopReason": "end_turn",
+    "usage": null,
+    "_meta": {
+      "quota": {
+        "token_count": null,
+        "model_usage": []
+      }
+    }
+  }
+}

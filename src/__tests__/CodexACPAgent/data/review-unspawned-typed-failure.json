@@ -1,0 +1,28 @@
+{
+  "updates": [],
+  "response": {
+    "stopReason": "end_turn",
+    "usage": null,
+    "_meta": {
+      "quota": {
+        "token_count": null,
+        "model_usage": []
+      },
+      "jetbrains": {
+        "air": {
+          "version": 1,
+          "sessionFailure": {
+            "id": "review-parent-turn:error",
+            "revision": 1,
+            "category": "service",
+            "severity": "error",
+            "title": "/test/cwd is not a git repository",
+            "actions": [
+              "retry"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

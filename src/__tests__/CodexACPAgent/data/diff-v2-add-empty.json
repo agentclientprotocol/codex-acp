@@ -1,0 +1,32 @@
+[
+  {
+    "toolCallId": "item-add-empty",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "changes": [
+          {
+            "path": "/workspace/empty.ts",
+            "operation": "add"
+          }
+        ],
+        "patch": {
+          "format": "git_patch",
+          "text": "diff --git a/workspace/empty.ts b/workspace/empty.ts\nnew file mode 100644\n"
+        },
+        "_meta": {
+          "kind": "add"
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "item-add-empty",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]
