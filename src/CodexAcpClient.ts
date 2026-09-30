@@ -28,6 +28,7 @@ import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
+import {readSessionIsolation, type SessionIsolation} from "./SessionIsolation";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {type AcpMcpServer, type WithAcpMcpServers, getMcpServerName, normalizeMcpServer, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
@@ -138,7 +139,7 @@ export class CodexAcpClient {
     private configPath: string | null = null;
 
 
-    constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
+    constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string, readonly isolation: SessionIsolation = readSessionIsolation()) {
         this.codexClient = codexClient;
         this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
@@ -590,6 +591,9 @@ export class CodexAcpClient {
     }
 
     async resumeSession(request: WithAcpMcpServers<acp.ResumeSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadata> {
+        if (this.isolation.ephemeral) {
+            throw RequestError.invalidParams(undefined, "Ephemeral sessions cannot resume a saved thread");
+        }
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -631,6 +635,9 @@ export class CodexAcpClient {
     }
 
     async loadSession(request: WithAcpMcpServers<acp.LoadSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+        if (this.isolation.ephemeral) {
+            throw RequestError.invalidParams(undefined, "Ephemeral sessions cannot resume a saved thread");
+        }
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -711,6 +718,7 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const response = await this.codexClient.threadStart({
+            ...(this.isolation.ephemeral ? {ephemeral: true} : {}),
             config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,

@@ -35,6 +35,18 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
     const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "supportedReasoningEfforts", "reasoningEffort", "model", "readOnlyAccess", "approvalsReviewer"];
 
+    it('starts ephemeral writable sessions and rejects saved-session loading', async () => {
+        vi.stubEnv("CODEX_EPHEMERAL", "1");
+        const isolatedFixture = createTestFixture();
+        const client = isolatedFixture.getCodexAcpClient();
+        await client.initialize({protocolVersion: 1});
+        await client.newSession({cwd: "/tmp/fixture", mcpServers: []});
+        const events = isolatedFixture.getCodexConnectionEvents([]);
+        expect(events).toContainEqual(expect.objectContaining({method: "thread/start", params: expect.objectContaining({ephemeral: true, cwd: "/tmp/fixture"})}));
+        await expect(client.loadSession({sessionId: "saved", cwd: "/tmp/fixture", mcpServers: []})).rejects.toThrow("Ephemeral");
+        await expect(client.resumeSession({sessionId: "saved", cwd: "/tmp/fixture", mcpServers: []})).rejects.toThrow("Ephemeral");
+    });
+
     it('should throw error without authentication', async () => {
         const authFixture = createTestFixture();
         const codexAcpAgent = authFixture.getCodexAcpAgent();

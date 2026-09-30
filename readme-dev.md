@@ -6,6 +6,8 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
 - `OPENAI_API_KEY` - fallback API key used when the API-key auth method is selected.
 - `CODEX_PATH` - run a specific Codex executable instead of the bundled package dependency.
+- `CODEX_EPHEMERAL` - set to `1` to start nonpersistent Codex threads. Saved-session load and resume are rejected.
+- `CODEX_IGNORE_USER_CONFIG` - set to `1` to use a temporary private Codex home. Only `auth.json` is copied; project configuration and workspace instructions still apply. The home is removed after the app server closes.
 - `CODEX_CONFIG` - JSON object merged into the Codex session config.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.

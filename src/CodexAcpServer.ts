@@ -581,6 +581,9 @@ export class CodexAcpServer {
                     // Presence means "this agent pushes `_auth/status_update`". It
                     // never carries a payload, and the client never asks for one.
                     [AUTH_STATUS_META_KEY]: authStatusCapability(),
+                    ...(this.codexAcpClient.isolation.ephemeral || this.codexAcpClient.isolation.ignoreUserConfig
+                        ? {codex: {isolation: this.codexAcpClient.isolation}}
+                        : {}),
                 },
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),

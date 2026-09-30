@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import {prepareIsolatedHome} from "./SessionIsolation";
 import {startCodexConnection} from "./CodexJsonRpcConnection";
 import {CodexAcpServer, type CodexProcessState} from "./CodexAcpServer";
 import {createJsonStream} from "./StdUtils";
@@ -35,10 +36,17 @@ if (process.argv[2] === "login") {
             process.exit(1);
         });
 } else {
-    startAcpServer();
+    startAcpServer().catch((error) => {
+        console.error("Codex ACP startup failed:", error.message);
+        process.exit(1);
+    });
 }
 
-function startAcpServer() {
+async function startAcpServer() {
+    const isolated = await prepareIsolatedHome();
+    // Replacement app servers must use the same isolated home.
+    if (isolated.env["CODEX_HOME"]) process.env["CODEX_HOME"] = isolated.env["CODEX_HOME"];
+
     const codexPath = process.env["CODEX_PATH"];
     const configString = process.env["CODEX_CONFIG"];
     const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
@@ -64,6 +72,17 @@ function startAcpServer() {
         modelProvider,
         stderr: "",
     };
+    process.once("exit", isolated.cleanupSync);
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+        process.once(signal, () => {
+            const child = codexProcessState.connection.process;
+            const exit = () => process.exit(signal === "SIGINT" ? 130 : 143);
+            if (child.exitCode !== null || child.signalCode !== null) return exit();
+            child.once("close", exit);
+            child.kill(signal);
+            setTimeout(() => { child.kill("SIGKILL"); exit(); }, 2000).unref();
+        });
+    }
 
     process.stdin.on("close", () => {
         codexProcessState.connection.process.stdin.end();
