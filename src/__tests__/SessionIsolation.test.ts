@@ -1,6 +1,7 @@
 import {afterEach, describe, expect, it} from "vitest";
 import {mkdtemp, readFile, readdir, rm, stat, writeFile} from "node:fs/promises";
 import {join} from "node:path";
+import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {prepareIsolatedHome, readSessionIsolation} from "../SessionIsolation";
 
@@ -43,4 +44,16 @@ describe("session isolation", () => {
         expect(isolated.env["OPENAI_API_KEY"]).toBe("fixture");
         expect(await readdir(isolated.env["CODEX_HOME"]!)).toEqual([]);
     });
+    it("removes the isolated home when startup configuration is invalid", async () => {
+        const original = await mkdtemp(join(tmpdir(), "acp-isolation-startup-"));
+        cleanup.push(() => rm(original, {recursive: true, force: true}));
+        const result = spawnSync(process.execPath, ["--import", "tsx", "src/index.ts"], {
+            env: {...process.env, TMPDIR: original, CODEX_HOME: original, CODEX_IGNORE_USER_CONFIG: "1", CODEX_CONFIG: "invalid-json"},
+            timeout: 15_000,
+        });
+        expect(result.status).toBe(1);
+        expect(result.stderr.toString()).toContain("Codex ACP startup failed");
+        expect((await readdir(original)).filter(name => name.startsWith("codex-acp-isolated-"))).toEqual([]);
+    });
+
 });

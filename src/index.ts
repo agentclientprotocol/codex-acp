@@ -44,6 +44,7 @@ if (process.argv[2] === "login") {
 
 async function startAcpServer() {
     const isolated = await prepareIsolatedHome();
+    process.once("exit", isolated.cleanupSync);
     // Replacement app servers must use the same isolated home.
     if (isolated.env["CODEX_HOME"]) process.env["CODEX_HOME"] = isolated.env["CODEX_HOME"];
 
@@ -72,7 +73,6 @@ async function startAcpServer() {
         modelProvider,
         stderr: "",
     };
-    process.once("exit", isolated.cleanupSync);
     for (const signal of ["SIGINT", "SIGTERM"] as const) {
         process.once(signal, () => {
             const child = codexProcessState.connection.process;
