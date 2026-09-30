@@ -4,6 +4,59 @@ import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
+    it("replays Desktop attachments as resources in the original user message", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        const texts = [
+            '\n# Files pasted by the user:\n\n## "Error log": /workspace/pasted-text.txt\n\n## My request:\nFix job\\_id\n',
+            '# Files pasted by the user:\n\n## "Request": /workspace/request.txt\n\nPasted text contains the user\'s request.\n\n## My request:\n\n',
+            '# Files mentioned by the user:\n\n## unknown: relative.txt\n\n## My request:\nKeep this text',
+            '# Files mentioned by the user:\n\n## screenshot.png: /workspace/screen #1.png\nImage attachment: true\n\n## My request:\nCompare',
+        ];
+        const thread = {
+            id: "attachment-history", historyMode: "legacy", turns: [{
+                id: "turn-1", itemsView: "full", status: "completed", items: texts.map((text, index) => ({
+                    type: "userMessage", id: `user-${index}`, clientId: null,
+                    content: [
+                        ...(index === 3 ? [{type: "localImage", path: "/workspace/screen #1.png"}] : []),
+                        {type: "text", text, text_elements: []},
+                        ...(index === 3 ? [{type: "localImage", path: "/workspace/other.png"}] : []),
+                    ],
+                })),
+            }],
+        } as unknown as Thread;
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread, model: model.id, modelProvider: "openai", cwd: "/workspace",
+            approvalPolicy: "never", sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread});
+
+        await agent.initialize({protocolVersion: 1, clientCapabilities: {}});
+        await agent.loadSession({sessionId: thread.id, cwd: "/workspace", mcpServers: []});
+
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(updates.map(update => ({messageId: update.messageId, content: update.content}))).toEqual([
+            {messageId: "user-0", content: {type: "resource_link", name: "Error log", uri: "file:///workspace/pasted-text.txt"}},
+            {messageId: "user-0", content: {type: "text", text: "Fix job\\_id\n"}},
+            {messageId: "user-1", content: {type: "resource_link", name: "Request", uri: "file:///workspace/request.txt"}},
+            {messageId: "user-2", content: {type: "text", text: texts[2]}},
+            {messageId: "user-3", content: {type: "resource_link", name: "screenshot.png", uri: "file:///workspace/screen%20%231.png"}},
+            {messageId: "user-3", content: {type: "text", text: "Compare"}},
+            {messageId: "user-3", content: {type: "text", text: "[@other.png](file:///workspace/other.png)"}},
+        ]);
+    });
+
     it("replays native child history and disconnects an orphan", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();

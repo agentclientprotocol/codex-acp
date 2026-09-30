@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
+import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
@@ -2377,8 +2378,12 @@ export class CodexAcpServer {
     private createUserMessageUpdates(item: ThreadItem & { type: "userMessage" }): UpdateSessionEvent[] {
         const updates: UpdateSessionEvent[] = [];
         const messageId = item.id;
-        for (const input of item.content) {
-            const blocks = this.userInputToContentBlocks(input);
+        const contentBlocks = item.content.map(input => this.userInputToContentBlocks(input));
+        const attachmentUris = new Set(contentBlocks.flat().flatMap(block =>
+            block.type === "resource_link" ? [block.uri] : []));
+        for (const [index, input] of item.content.entries()) {
+            if (input.type === "localImage" && attachmentUris.has(attachmentFileUri(input.path) ?? "")) continue;
+            const blocks = contentBlocks[index]!;
             for (const block of blocks) {
                 updates.push(createUserMessageChunk(block, messageId));
             }
@@ -2428,7 +2433,8 @@ export class CodexAcpServer {
     private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
         switch (input.type) {
             case "text":
-                return input.text.length > 0 ? [{ type: "text", text: input.text }] : [];
+                return desktopAttachmentHistory(input.text)
+                    ?? (input.text.length > 0 ? [{ type: "text", text: input.text }] : []);
             case "image":
                 return [{
                     type: "text",
