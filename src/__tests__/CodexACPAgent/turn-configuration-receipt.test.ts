@@ -24,7 +24,7 @@ describe("PromptResponse turn configuration receipt", () => {
         });
     }
 
-    async function promptOnce(): Promise<acp.PromptResponse> {
+    async function promptOnce(status: "completed" | "interrupted" = "completed"): Promise<acp.PromptResponse> {
         const agent = fixture.getCodexAcpAgent();
         const appServer = fixture.getCodexAppServerClient();
         const turn = {id: "turn-id", items: [], status: "inProgress" as const, error: null};
@@ -32,7 +32,7 @@ describe("PromptResponse turn configuration receipt", () => {
         vi.spyOn(appServer, "turnStart").mockResolvedValue({turn} as never);
         vi.spyOn(appServer, "awaitTurnCompleted").mockResolvedValue({
             threadId: sessionId,
-            turn: {...turn, status: "completed" as const},
+            turn: {...turn, status},
         } as never);
         vi.spyOn(agent, "getSessionState").mockReturnValue(createTestSessionState({
             sessionId,
@@ -175,6 +175,15 @@ describe("PromptResponse turn configuration receipt", () => {
                     modelReroutes: [],
                 }],
             },
+        });
+    });
+
+    it("keeps the receipt for a started turn that was interrupted", async () => {
+        const response = await promptOnce("interrupted");
+
+        expect(response.stopReason).toBe("cancelled");
+        expect(response._meta?.["codex"]).toMatchObject({
+            turnConfiguration: {version: 1, turns: [{turnId: "turn-id", requested: {model: "gpt-5.6-terra", effort: "medium"}}]},
         });
     });
 
