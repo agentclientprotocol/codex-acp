@@ -1,9 +1,8 @@
 /**
- * Builds unified Git patches from the diffs that Codex reports.
+ * Builds the unified Git patches of the AIR diff patch extension.
  *
- * The ACP v2 diff and the AIR diff patch extension carry these patches.
  * Each builder returns `null` when it cannot build a patch with at least one valid hunk.
- * For AIR, the caller then sends the standard ACP diff.
+ * The caller then sends the standard ACP diff.
  */
 
 /** The largest diff or patch text that the adapter sends. The adapter sends no diff for a larger Codex diff. */
@@ -34,20 +33,6 @@ export function createUpdateGitPatch(oldPath: string, newPath: string, diff: str
     return limited(`${headers.join("\n")}\n${hunks}`);
 }
 
-/** Builds a patch for a moved file whose text did not change. It has no hunks. */
-export function createRenameGitPatch(oldPath: string, newPath: string): string | null {
-    const oldName = gitPath(oldPath);
-    const newName = gitPath(newPath);
-    if (oldName === newName) return null;
-    return limited([
-        `diff --git ${quotedGitName("a/", oldName)} ${quotedGitName("b/", newName)}`,
-        "similarity index 100%",
-        `rename from ${quotedGitName("", oldName)}`,
-        `rename to ${quotedGitName("", newName)}`,
-        "",
-    ].join("\n"));
-}
-
 /** Builds a whole-file patch for an added file. */
 export function createAddedFileGitPatch(filePath: string, text: string): string | null {
     return createWholeFilePatch(filePath, text, "added");
@@ -56,16 +41,6 @@ export function createAddedFileGitPatch(filePath: string, text: string): string 
 /** Builds a whole-file patch for a deleted file. */
 export function createDeletedFileGitPatch(filePath: string, text: string): string | null {
     return createWholeFilePatch(filePath, text, "deleted");
-}
-
-/** Builds a patch for an added or a deleted empty file. It has no hunks. */
-export function createEmptyFileGitPatch(filePath: string, change: "added" | "deleted"): string {
-    const name = gitPath(filePath);
-    return [
-        `diff --git ${quotedGitName("a/", name)} ${quotedGitName("b/", name)}`,
-        `${change === "added" ? "new" : "deleted"} file mode ${REGULAR_FILE_MODE}`,
-        "",
-    ].join("\n");
 }
 
 function createWholeFilePatch(filePath: string, text: string, change: "added" | "deleted"): string | null {

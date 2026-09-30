@@ -61,7 +61,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
                 )),
                 options: decisions.map(({option}) => option),
                 ...requestPermissionMeta(
-                    this.renderer.capabilities,
+                    this.renderer.capabilities.airClient,
                     params.networkApprovalContext ? CODEX_NETWORK_PERMISSION_TITLE : CODEX_COMMAND_PERMISSION_TITLE,
                     params.reason,
                 ),
@@ -84,7 +84,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
                 )),
                 options: decisions.map(({option}) => option),
                 ...requestPermissionMeta(
-                    this.renderer.capabilities,
+                    this.renderer.capabilities.airClient,
                     CODEX_FILE_CHANGE_PERMISSION_TITLE,
                     params.reason,
                 ),
@@ -110,7 +110,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
                 )),
                 options: permissionProfileOptions(),
                 ...requestPermissionMeta(
-                    this.renderer.capabilities,
+                    this.renderer.capabilities.airClient,
                     CODEX_ADDITIONAL_PERMISSIONS_TITLE,
                     params.reason,
                 ),
@@ -131,9 +131,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
     }
 
     private selectedDecision<T>(response: acp.RequestPermissionResponse, decisions: DecisionOption<T>[]): T | undefined {
-        // A v2 client may answer with a custom outcome instead of "cancelled"; only "selected"
-        // carries an `optionId` (ACP-ENUM-203).
-        if (response.outcome.outcome !== "selected") return undefined;
+        if (response.outcome.outcome === "cancelled") return undefined;
         const optionId = response.outcome.optionId;
         return decisions.find(({option}) => option.optionId === optionId)?.decision;
     }
@@ -142,7 +140,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         permissions: RequestPermissionProfile,
         response: acp.RequestPermissionResponse,
     ): PermissionsRequestApprovalResponse {
-        if (response.outcome.outcome !== "selected") return this.rejectPermissionsResponse();
+        if (response.outcome.outcome === "cancelled") return this.rejectPermissionsResponse();
         switch (response.outcome.optionId) {
             case ApprovalOptionId.AllowPermissionsForTurn:
                 return this.grantedPermissionsResponse(permissions, "turn", false);

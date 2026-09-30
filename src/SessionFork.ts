@@ -6,7 +6,6 @@ import type {ModeKind} from "./app-server/ModeKind";
 import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model, ThreadForkParams} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
-import type {AcpMcpServer, WithAcpMcpServers} from "./McpServerConfig";
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
@@ -14,7 +13,7 @@ export type SessionForkDependencies = {
     createSessionConfig(
         cwd: string,
         additionalDirectories: string[],
-        mcpServers: AcpMcpServer[],
+        mcpServers: acp.McpServer[],
     ): Promise<NonNullable<ThreadForkParams["config"]>>;
     getResumeModelProvider(): Promise<string>;
     fetchAvailableModels(): Promise<Model[]>;
@@ -23,7 +22,7 @@ export type SessionForkDependencies = {
 };
 
 export async function forkSession(
-    request: WithAcpMcpServers<acp.ForkSessionRequest>,
+    request: acp.ForkSessionRequest,
     additionalDirectories: string[],
     dependencies: SessionForkDependencies,
 ): Promise<SessionMetadata> {
@@ -56,7 +55,7 @@ export async function forkSession(
 }
 
 async function resolveForkTurnId(
-    request: Pick<acp.ForkSessionRequest, "sessionId" | "_meta">,
+    request: acp.ForkSessionRequest,
     codexClient: CodexAppServerClient,
 ): Promise<string | undefined> {
     const forkPoint = readAirForkPoint(request._meta);

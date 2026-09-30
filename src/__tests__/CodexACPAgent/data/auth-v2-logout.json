@@ -1,8 +1,0 @@
-{
-  "logout": {},
-  "codexRequests": [
-    {
-      "method": "account/logout"
-    }
-  ]
-}

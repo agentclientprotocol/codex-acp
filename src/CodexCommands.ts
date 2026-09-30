@@ -21,22 +21,17 @@ type ParsedSlashCommand = {
 };
 
 export type CommandHandleResult =
-    | { handled: false }
+    | { handled: false, prompt?: acp.ContentBlock[] }
     | { handled: true, turnCompleted?: TurnCompletedNotification };
 
-export type PromptKind =
-    | { kind: "prompt" }
-    | { kind: "localCommand", name: string }
-    | { kind: "codexTurnCommand", name: string };
+export const GOAL_CONTINUATION_PROMPT: acp.ContentBlock[] = [{
+    type: "text",
+    text: "Continue working toward the active goal.",
+}];
 
 export type CommandHandleOptions = {
     onTurnStartPending?: () => void;
     onTurnStarted?: (turnId: string, threadId: string) => void;
-    /**
-     * Fired once Codex accepts a command that runs a turn but records no user message
-     * (`/compact`, `/goal`), so a v2 caller can insert its own live-only one right away.
-     */
-    onCommandAccepted?: () => void;
     setConfigOption?: (configId: string, value: string) => Promise<void>;
 };
 
@@ -224,42 +219,6 @@ export class CodexCommands {
         };
     }
 
-    /**
-     * Tells ahead of time how `tryHandleCommand` will handle a prompt: as a regular prompt, as a
-     * command handled locally without a Codex turn, or as a command that runs a Codex turn.
-     * Keep in sync with `tryHandleCommand`.
-     */
-    classifyPrompt(prompt: acp.ContentBlock[]): PromptKind {
-        const command = this.parseCommand(prompt);
-        if (command === null || command.name.startsWith("$")) return {kind: "prompt"};
-        switch (command.name) {
-            case "plan":
-            case "status":
-            case "rename":
-            case "logout":
-            case "skills":
-            case "mcp":
-                return {kind: "localCommand", name: command.name};
-            case "compact":
-            case "review":
-                return {kind: "codexTurnCommand", name: command.name};
-            case "review-branch":
-            case "review-commit":
-                return command.rest.length === 0
-                    ? {kind: "localCommand", name: command.name}
-                    : {kind: "codexTurnCommand", name: command.name};
-            case "goal": {
-                const argument = command.rest.trim().toLowerCase();
-                if (argument.length === 0 || argument === "pause" || argument === "clear" || argument.length > 4000) {
-                    return {kind: "localCommand", name: command.name};
-                }
-                return {kind: "codexTurnCommand", name: command.name};
-            }
-            default:
-                return {kind: "prompt"};
-        }
-    }
-
     async tryHandleCommand(
         prompt: acp.ContentBlock[],
         sessionState: SessionState,
@@ -288,7 +247,6 @@ export class CodexCommands {
                 const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.runCompact(
                     sessionId,
                     (turnId) => options.onTurnStarted?.(turnId, sessionId),
-                    options.onCommandAccepted,
                 ));
                 return { handled: true, ...(turnCompleted === undefined ? {} : {turnCompleted}) };
             }
@@ -395,7 +353,6 @@ export class CodexCommands {
             (turnId, threadId) => {
                 this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
             },
-            options.onCommandAccepted,
         ));
     }
 
@@ -422,8 +379,6 @@ export class CodexCommands {
                     (turnId) => {
                         this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
                     },
-                    undefined,
-                    options.onCommandAccepted,
                 )));
             case "clear":
                 await this.runWithProcessCheck(() => this.codexAcpClient.clearGoal(sessionId));
@@ -443,8 +398,6 @@ export class CodexCommands {
             (turnId) => {
                 this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
             },
-            undefined,
-            options.onCommandAccepted,
         )));
     }
 
@@ -462,11 +415,8 @@ export class CodexCommands {
     }
 
     private createGoalCommandResult(turnCompleted: TurnCompletedNotification | null): CommandHandleResult {
-        // No matching turn observed within `runGoalSet`'s 1 s grace window. Codex auto-continues
-        // active goals itself; don't start a synthetic continuation turn here (that also skipped
-        // the goal-status check, so it fired even when the goal had stopped, e.g. budgetLimited).
         if (turnCompleted === null) {
-            return { handled: true };
+            return { handled: false, prompt: GOAL_CONTINUATION_PROMPT };
         }
         return {
             handled: true,

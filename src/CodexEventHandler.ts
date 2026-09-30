@@ -34,7 +34,7 @@ import type {
 import {toTokenCount} from "./TokenCount";
 import { stripShellPrefix } from "./CommandUtils";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
-import {CommandReporter, commandUsesTerminal} from "./tool-calls/reporters/CommandReporter";
+import {CommandReporter} from "./tool-calls/reporters/CommandReporter";
 import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
 import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
 import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
@@ -177,30 +177,6 @@ const STRUCTURED_CODEX_ERROR_CATEGORIES = {
     responseTooManyFailedAttempts: "transport_lost",
     activeTurnNotSteerable: "provider_error",
 } satisfies Record<StructuredCodexErrorKind, CodexFailureKind>;
-
-/**
- * Item types that render as a plain `tool_call`/`tool_call_update` and have no outstanding-item
- * tracker of their own (`contextCompaction` has `CodexSessionCompactions`; `collabAgentToolCall`/
- * `subAgentActivity` have `CodexSubagentEventRouter`). Used to track which open items a provider
- * restart's close-out needs to fail.
- */
-const PLAIN_TOOL_CALL_ITEM_TYPES = new Set<ThreadItem["type"]>([
-    "fileChange",
-    "commandExecution",
-    "mcpToolCall",
-    "dynamicToolCall",
-    "webSearch",
-    "imageView",
-    "imageGeneration",
-]);
-
-/** Prompt failures whose text the client has already received as an agent message. */
-const failuresShownAsMessages = new WeakSet<RequestError>();
-
-/** Whether a prompt failure's text has already been sent to the client as an agent message. */
-export function failureWasShownAsMessage(error: unknown): boolean {
-    return error instanceof RequestError && failuresShownAsMessages.has(error);
-}
 
 export class CodexEventHandler {
 
@@ -511,15 +487,11 @@ export class CodexEventHandler {
             case "item/plan/delta":
                 this.completeRetryIncidentOnTurnProgress();
                 return this.plans.delta(notification.params.itemId, notification.params.delta);
-            case "item/started": {
+            case "item/started":
                 this.completeRetryIncidentOnTurnProgress();
-                const update = await this.createItemEvent(notification.params);
-                this.trackOpenToolCall(notification.params.item);
-                return update;
-            }
+                return await this.createItemEvent(notification.params);
             case "item/completed":
                 this.completeRetryIncidentOnTurnProgress();
-                this.sessionState.openToolCalls.complete(notification.params.item.id);
                 return await this.completeItemEvent(notification.params);
             case "turn/plan/updated":
                 this.completeRetryIncidentOnTurnProgress();
@@ -543,21 +515,14 @@ export class CodexEventHandler {
             case "error":
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
-                this.sessionState.interruptTurnId = notification.params.turn.id;
-                // A review's child turn starts under its own id, while the review's items, errors and
-                // completion keep the parent id already set from the `review/start` response.
-                this.sessionState.currentTurnId ??= notification.params.turn.id;
+                this.sessionState.currentTurnId = notification.params.turn.id;
                 await this.flushPendingErrors();
                 return null;
             case "turn/completed":
                 await this.plans.flush();
                 this.plans.clearTurn();
                 this.sessionState.currentTurnId = null;
-                this.sessionState.interruptTurnId = null;
                 this.sessionState.toolCallReports.releaseOpen(this.subagents.notificationSessionId(notification));
-                // An item that missed its item/completed (e.g. dropped by a provider restart
-                // mid-turn) must not linger past its own turn and get failed by a later restart.
-                this.sessionState.openToolCalls.clear();
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
@@ -593,7 +558,7 @@ export class CodexEventHandler {
             case "item/mcpToolCall/progress":
                 this.completeRetryIncidentOnTurnProgress();
                 // AIR does not show MCP progress.
-                if (this.renderer.capabilities.airToolCallContract) return null;
+                if (this.renderer.capabilities.airClient) return null;
                 return this.renderer.render(McpToolReporter.progress(
                     notification.params.itemId,
                     notification.params.message,
@@ -805,7 +770,7 @@ export class CodexEventHandler {
             case "fileChange":
                 return this.renderer.render(FileChangeReporter.started(
                     event.item,
-                    this.sessionState.clientCapabilities.diffPatchFormat,
+                    this.sessionState.clientCapabilities.air.diffPatch,
                 ));
             case "commandExecution":
                 return this.renderer.render(this.commands.started(event.item));
@@ -940,12 +905,6 @@ export class CodexEventHandler {
         );
     }
 
-    private trackOpenToolCall(item: ThreadItem): void {
-        if (!PLAIN_TOOL_CALL_ITEM_TYPES.has(item.type)) return;
-        const hasTerminal = item.type === "commandExecution" && commandUsesTerminal(item);
-        this.sessionState.openToolCalls.start(item.id, hasTerminal);
-    }
-
     private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {
         const plan: PlanEntry[] = event.plan.map(value => ({
                 status: value.status == "inProgress" ? "in_progress" : value.status,
@@ -1016,9 +975,6 @@ export class CodexEventHandler {
             this.failure = RequestError.internalError(
                 this.createTurnErrorData(params.error),
             );
-        }
-        if (this.failure !== null) {
-            failuresShownAsMessages.add(this.failure);
         }
         return createAgentTextMessageChunk(`${params.error.message}\n\n`);
     }

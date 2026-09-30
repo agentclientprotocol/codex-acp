@@ -37,7 +37,7 @@ export class CommandReporter {
     private readonly standardStreamedCommands = new Set<string>();
 
     started(item: CommandItem): ToolFacts {
-        if (commandUsesTerminal(item)) {
+        if (usesTerminal(item)) {
             this.nonTerminalCommands.delete(item.id);
             this.terminalCommands.add(item.id);
         } else {
@@ -148,7 +148,7 @@ export class CommandReporter {
                 commandEnd: {
                     output: item.aggregatedOutput ?? "",
                     exitCode: item.exitCode,
-                    terminal: commandUsesTerminal(item),
+                    terminal: usesTerminal(item),
                     streamed: false,
                 },
             },
@@ -156,8 +156,7 @@ export class CommandReporter {
     }
 }
 
-/** A shell command shows a terminal. A single read, search or list command does not. */
-export function commandUsesTerminal(item: CommandItem): boolean {
+function usesTerminal(item: CommandItem): boolean {
     const action = singleAction(item.commandActions);
     return action === undefined || action.type === "unknown";
 }
@@ -216,7 +215,7 @@ function completionFacts(
         ...(name === undefined ? {} : {name}),
         status: toTerminalToolStatus(item.status),
     };
-    if (!commandUsesTerminal(item)) {
+    if (!usesTerminal(item)) {
         const viewedFile = singleAction(item.commandActions)?.type === "read";
         return output.length === 0 || viewedFile ? facts : {...facts, opaqueResult: output};
     }
