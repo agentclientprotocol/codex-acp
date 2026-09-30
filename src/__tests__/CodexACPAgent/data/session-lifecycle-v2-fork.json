@@ -99,7 +99,6 @@
           }
         },
         "cwd": "/workspace",
-        "modelProvider": "openai",
         "threadId": "thread-1"
       }
     },
