@@ -39,7 +39,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.stubEnv("CODEX_EPHEMERAL", "1");
         const isolatedFixture = createTestFixture();
         const client = isolatedFixture.getCodexAcpClient();
-        await client.initialize({protocolVersion: 1});
+        await client.initialize({clientInfo: {name: "isolation-test", version: "1"}});
         await client.newSession({cwd: "/tmp/fixture", mcpServers: []});
         const events = isolatedFixture.getCodexConnectionEvents([]);
         expect(events).toContainEqual(expect.objectContaining({method: "thread/start", params: expect.objectContaining({ephemeral: true, cwd: "/tmp/fixture"})}));
