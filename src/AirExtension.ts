@@ -30,6 +30,7 @@ export const AIR_RAW_INPUT_RENDERING_KEY = "rawInputRendering";
 export const AIR_PLAN_CONTENT_DELTA_KEY = "planContentDelta";
 export const AIR_CONTENT_DELTA_KEY = "contentDelta";
 export const AIR_SUBAGENT_KEY = "subagent";
+export const AIR_CUSTOM_ANSWER_KEY = "customAnswer";
 export const AIR_EXTENSION_VERSION = 1;
 
 /** Merge one AIR payload into metadata while preserving other object namespaces. */

@@ -1001,6 +1001,50 @@ describe('Elicitation Events', () => {
             await promptPromise;
         });
 
+        it.each([
+            { answer: 'Inspect flaky logs', expected: ['None of the above', 'user_note: Inspect flaky logs'] },
+            { answer: 'Run tests', expected: ['Run tests'] },
+        ])('should mark the note as the AIR custom answer and map $answer to Codex answers', async ({ answer, expected }) => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+                _meta: { jetbrains: { air: { version: 1, capabilities: [] } } },
+            });
+            fixture.setElicitationResponse({
+                action: 'accept',
+                content: { next_step: answer },
+            });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'request-user-input-1',
+                autoResolutionMs: null,
+                isBlocking: true,
+                questions: [{
+                    id: 'next_step',
+                    header: 'Next step',
+                    question: 'What should I do next?',
+                    isOther: true,
+                    isSecret: false,
+                    options: [
+                        { label: 'Run tests', description: 'Run the focused test suite.' },
+                        { label: 'Stop', description: 'Stop and report current status.' },
+                    ],
+                }],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+            expect(response).toEqual({
+                answers: { next_step: { answers: expected } },
+            });
+            await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+                'data/elicitation-user-input-air-custom-answer.json',
+            );
+
+            completeTurn();
+            await promptPromise;
+        });
+
         it.each(['before', 'after'] as const)(
             'should preserve questions with note field IDs when they appear %s the choice',
             async (order) => {
