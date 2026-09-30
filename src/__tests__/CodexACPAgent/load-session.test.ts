@@ -1,9 +1,58 @@
 import { describe, it, expect, vi } from "vitest";
 import type * as acp from "@agentclientprotocol/sdk";
 import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
-import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
+import type { Model, Thread, ThreadGoal, UserInput } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
+    it("preserves every native user input kind during history replay", async () => {
+        const cases: Array<{input: UserInput, content: acp.ContentBlock}> = [
+            {input: {type: "text", text: "Request", text_elements: []}, content: {type: "text", text: "Request"}},
+            {input: {type: "image", url: "https://example.com/image.png"}, content: {type: "text", text: "[@image](https://example.com/image.png)"}},
+            {input: {type: "image", fileId: "saved-image"}, content: {type: "text", text: "image:saved-image"}},
+            {input: {type: "localImage", path: "/workspace/image #1.png"}, content: {type: "resource_link", name: "image #1.png", uri: "file:///workspace/image%20%231.png"}},
+            {input: {type: "audio", url: "https://example.com/audio.wav"}, content: {type: "text", text: "[@audio](https://example.com/audio.wav)"}},
+            {input: {type: "localAudio", path: "/workspace/audio.wav"}, content: {type: "resource_link", name: "audio.wav", uri: "file:///workspace/audio.wav"}},
+            {input: {type: "mention", name: "Document", path: "/workspace/document.pdf"}, content: {type: "resource_link", name: "Document", uri: "file:///workspace/document.pdf"}},
+            {input: {type: "mention", name: "", path: "/workspace/document.pdf"}, content: {type: "resource_link", name: "document.pdf", uri: "file:///workspace/document.pdf"}},
+            {input: {type: "mention", name: "File URI", path: "file:///workspace/document%20one.pdf"}, content: {type: "resource_link", name: "File URI", uri: "file:///workspace/document%20one.pdf"}},
+            {input: {type: "mention", name: "Issue", path: "https://example.com/issue"}, content: {type: "text", text: "[@Issue](https://example.com/issue)"}},
+            {input: {type: "skill", name: "Review", path: "/workspace/SKILL.md"}, content: {type: "text", text: "skill:Review (/workspace/SKILL.md)"}},
+            {input: {type: "localImage", path: "image.png"}, content: {type: "text", text: "[@image.png](image.png)"}},
+            {input: {type: "localAudio", path: "audio.wav"}, content: {type: "text", text: "[@audio.wav](audio.wav)"}},
+            {input: {type: "mention", name: "Relative file", path: "document.pdf"}, content: {type: "text", text: "[@Relative file](document.pdf)"}},
+        ];
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        const thread = {
+            id: "native-input-history", historyMode: "legacy", turns: [{
+                id: "turn-1", itemsView: "full", status: "completed", items: cases.map(({input}, index) => ({
+                    type: "userMessage", id: `native-${index}`, clientId: null, content: [input],
+                })),
+            }],
+        } as unknown as Thread;
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread, model: model.id, modelProvider: "openai", cwd: "/workspace",
+            approvalPolicy: "never", sandbox: {type: "dangerFullAccess"}, reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread});
+        await agent.initialize({protocolVersion: 1, clientCapabilities: {}});
+        await agent.loadSession({sessionId: thread.id, cwd: "/workspace", mcpServers: []});
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(updates.map(update => ({messageId: update.messageId, content: update.content}))).toEqual(
+            cases.map(({content}, index) => ({messageId: `native-${index}`, content})),
+        );
+    });
+
     it("replays Desktop attachments as resources in the original user message", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
@@ -25,7 +74,11 @@ describe("CodexACPAgent - loadSession", () => {
                 id: "turn-1", itemsView: "full", status: "completed", items: texts.map((text, index) => ({
                     type: "userMessage", id: `user-${index}`, clientId: null,
                     content: [
-                        ...(index === 3 ? [{type: "localImage", path: "/workspace/screen #1.png"}] : []),
+                        ...(index === 3 ? [
+                            {type: "localImage", path: "/workspace/screen #1.png"},
+                            {type: "localAudio", path: "/workspace/screen #1.png"},
+                            {type: "mention", name: "Same image", path: "/workspace/screen #1.png"},
+                        ] : []),
                         {type: "text", text, text_elements: []},
                         ...(index === 3 ? [{type: "localImage", path: "/workspace/other.png"}] : []),
                     ],
@@ -53,7 +106,7 @@ describe("CodexACPAgent - loadSession", () => {
             {messageId: "user-2", content: {type: "text", text: texts[2]}},
             {messageId: "user-3", content: {type: "resource_link", name: "screenshot.png", uri: "file:///workspace/screen%20%231.png"}},
             {messageId: "user-3", content: {type: "text", text: "Compare"}},
-            {messageId: "user-3", content: {type: "text", text: "[@other.png](file:///workspace/other.png)"}},
+            {messageId: "user-3", content: {type: "resource_link", name: "other.png", uri: "file:///workspace/other.png"}},
         ]);
     });
 

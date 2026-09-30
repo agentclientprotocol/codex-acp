@@ -32,6 +32,27 @@ describe("Desktop attachment history", () => {
         ]);
     });
 
+    it("restores combined envelopes with a multiline title and a file URI", () => {
+        expect(desktopAttachmentHistory('# Files pasted by the user:\n\n## "Line one\\nLine two \\"quoted\\"": /workspace/pasted-text.txt\n\n# Files mentioned by the user:\n\n## report.pdf: file:///workspace/report%20one.pdf\n\n## My request:\nRead both')).toEqual([
+            {type: "resource_link", name: 'Line one\nLine two "quoted"', uri: "file:///workspace/pasted-text.txt"},
+            {type: "resource_link", name: "report.pdf", uri: "file:///workspace/report%20one.pdf"},
+            {type: "text", text: "Read both"},
+        ]);
+    });
+
+    it("restores a UNC file path", () => {
+        expect(desktopAttachmentHistory('# Files mentioned by the user:\n\n## report.pdf: \\\\server\\share\\report one.pdf\n\n## My request:\nRead it')).toEqual([
+            {type: "resource_link", name: "report.pdf", uri: "file://server/share/report%20one.pdf"},
+            {type: "text", text: "Read it"},
+        ]);
+    });
+
+    it("restores an image-only message", () => {
+        expect(desktopAttachmentHistory('# Files mentioned by the user:\n\n## image.png: /workspace/image.png\nImage attachment: true\n\n## My request:\n')).toEqual([
+            {type: "resource_link", name: "image.png", uri: "file:///workspace/image.png"},
+        ]);
+    });
+
     it.each([
         "Ordinary request\n## My request:\nKeep it",
         '# Files pasted by the user:\n\n## "request": relative.txt\n\n## My request:\nKeep it',

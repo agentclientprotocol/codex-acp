@@ -2379,10 +2379,15 @@ export class CodexAcpServer {
         const updates: UpdateSessionEvent[] = [];
         const messageId = item.id;
         const contentBlocks = item.content.map(input => this.userInputToContentBlocks(input));
-        const attachmentUris = new Set(contentBlocks.flat().flatMap(block =>
-            block.type === "resource_link" ? [block.uri] : []));
+        const attachmentUris = new Set(contentBlocks.flatMap((blocks, index) =>
+            item.content[index]?.type === "text"
+                ? blocks.flatMap(block => block.type === "resource_link" ? [block.uri] : [])
+                : []));
         for (const [index, input] of item.content.entries()) {
-            if (input.type === "localImage" && attachmentUris.has(attachmentFileUri(input.path) ?? "")) continue;
+            const nativePath = input.type === "localImage" || input.type === "localAudio" || input.type === "mention"
+                ? input.path
+                : (input.type === "image" || input.type === "audio") && "url" in input ? input.url : null;
+            if (nativePath !== null && attachmentUris.has(attachmentFileUri(nativePath) ?? "")) continue;
             const blocks = contentBlocks[index]!;
             for (const block of blocks) {
                 updates.push(createUserMessageChunk(block, messageId));
@@ -2442,17 +2447,20 @@ export class CodexAcpServer {
                         ? this.formatUriAsLink("image", input.url)
                         : `image:${input.fileId}`,
                 }];
-            case "localImage": {
-                const uri = input.path.startsWith("file://") ? input.path : `file://${input.path}`;
-                return [{ type: "text", text: this.formatUriAsLink(null, uri) }];
+            case "localImage":
+            case "localAudio":
+            case "mention": {
+                const uri = attachmentFileUri(input.path);
+                const fileName = input.path.split(/[\\/]/).pop() || input.type;
+                const name = input.type === "mention" && input.name.trim().length > 0 ? input.name : fileName;
+                return uri !== null
+                    ? [{type: "resource_link", name, uri}]
+                    : [{type: "text", text: this.formatUriAsLink(name, input.path)}];
             }
             case "skill":
                 return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
             case "audio":
-            case "localAudio":
-            case "mention":
-                // These inputs are not currently represented in ACP history replay.
-                return [];
+                return [{type: "text", text: this.formatUriAsLink("audio", input.url)}];
         }
     }
 
