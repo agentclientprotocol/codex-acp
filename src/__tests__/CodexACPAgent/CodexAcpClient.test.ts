@@ -19,6 +19,7 @@ import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, 
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 import {GOAL_CONTROL_METHOD} from "../../AcpExtensions";
+import {ClientCapabilities} from "../../tool-calls/ClientCapabilities";
 import type {McpStartupResult} from "../../mcp/McpStartupTracker";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
@@ -1802,6 +1803,38 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-skills.json");
+    });
+
+    it('sends the skill path only to AIR', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+
+        vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills").mockResolvedValue({
+            data: [{
+                cwd: "/workspace",
+                skills: [{
+                    name: "build",
+                    description: "Build the project",
+                    path: "/workspace/.agents/skills/build/SKILL.md",
+                    scope: "repo",
+                    enabled: true,
+                    pluginId: null
+                }],
+                errors: []
+            }]
+        });
+
+        // @ts-expect-error - exercising private helper
+        await codexAcpAgent.availableCommands.publish(createTestSessionState({
+            sessionId: "session-id",
+            cwd: "/workspace",
+            clientCapabilities: ClientCapabilities.from({}),
+        }));
+
+        const update = mockFixture.getAcpConnectionEvents([])
+            .find(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "available_commands_update");
+        const skill = update?.args[0].update.availableCommands.find((command: acp.AvailableCommand) => command.name === "$build");
+        expect(skill).toEqual({name: "$build", description: "Build the project", input: null});
     });
 
     it('publishes the commands again after a turn only when the skills changed', async () => {

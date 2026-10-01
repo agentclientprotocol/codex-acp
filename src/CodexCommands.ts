@@ -1,7 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type {AvailableCommand} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
-import {AIR_COMMAND_ACTION_KEY, airOnlyMeta} from "./AirExtension";
+import {AIR_COMMAND_ACTION_KEY, AIR_SKILL_PATH_KEY, airOnlyMeta} from "./AirExtension";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, SkillsListParams, TurnCompletedNotification} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
@@ -118,10 +118,13 @@ export class CodexCommands {
                 const name = `$${skill.name}`;
                 if (commands.has(name)) continue;
                 const description = skill.shortDescription ?? skill.description ?? skill.name;
+                // Only AIR gets the SKILL.md path, in `_meta.jetbrains.air.skillPath`. A click on the skill chip opens it.
+                const meta = airOnlyMeta(airClient, AIR_SKILL_PATH_KEY, skill.path);
                 commands.set(name, {
                     name,
                     description,
                     input: null,
+                    ...(meta ? {_meta: meta} : {}),
                 });
             }
         }

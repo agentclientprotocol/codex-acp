@@ -24,6 +24,7 @@ export const AIR_MESSAGE_PHASE_KEY = "phase";
 export const AIR_GOAL_KEY = "goal";
 export const AIR_KIND_KEY = "kind";
 export const AIR_COMMAND_ACTION_KEY = "commandAction";
+export const AIR_SKILL_PATH_KEY = "skillPath";
 export const AIR_PERMISSION_KEY = "permission";
 export const AIR_CONTEXT_COMPACTION_KEY = "contextCompaction";
 export const AIR_RAW_INPUT_RENDERING_KEY = "rawInputRendering";

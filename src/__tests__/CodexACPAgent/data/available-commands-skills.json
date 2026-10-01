@@ -101,7 +101,15 @@
           {
             "name": "$build",
             "description": "Build",
-            "input": null
+            "input": null,
+            "_meta": {
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "skillPath": "/workspace"
+                }
+              }
+            }
           }
         ]
       }
