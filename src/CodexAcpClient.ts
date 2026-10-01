@@ -1068,7 +1068,10 @@ export class CodexAcpClient {
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             approvalsReviewer: agentMode.approvalsReviewer,
-            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(
+                applyConfiguredNetworkAccess(agentMode.sandboxPolicy, this.config),
+                additionalDirectories,
+            ),
             summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
@@ -1396,6 +1399,33 @@ function forceGitRootTurnDiffPaths(config: JsonObject): JsonObject {
             ...features,
             cwd_relative_turn_diffs: false,
         },
+    };
+}
+
+/**
+ * Honor an explicit `sandbox_workspace_write.network_access` boolean from
+ * CODEX_CONFIG on workspace-write turns. Other policy types and absent or
+ * non-boolean config leave the mode policy untouched.
+ */
+function applyConfiguredNetworkAccess(
+    sandboxPolicy: SandboxPolicy,
+    config: JsonObject,
+): SandboxPolicy {
+    if (sandboxPolicy.type !== "workspaceWrite") {
+        return sandboxPolicy;
+    }
+
+    const sandboxConfig = isJsonObject(config["sandbox_workspace_write"])
+        ? config["sandbox_workspace_write"]
+        : undefined;
+    const networkAccess = sandboxConfig?.["network_access"];
+    if (typeof networkAccess !== "boolean") {
+        return sandboxPolicy;
+    }
+
+    return {
+        ...sandboxPolicy,
+        networkAccess,
     };
 }
 
