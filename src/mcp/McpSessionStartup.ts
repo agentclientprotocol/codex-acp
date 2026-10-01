@@ -71,7 +71,13 @@ export class McpSessionStartup {
         }
         const awaitTimeoutMs = options.awaitTimeoutMs;
         if (awaitTimeoutMs !== undefined && awaitTimeoutMs > 0) {
-            return this.awaitStartup(sessionId, pendingStartup, awaitTimeoutMs, options.publish);
+            const startupWait = raceMcpStartupTimeout(pendingStartup.startup, awaitTimeoutMs);
+            // These handlers run before the caller resumes, because the caller awaits the same promise after them.
+            void startupWait.then(
+                () => this.publishOrAbort(sessionId, pendingStartup, options.publish),
+                () => this.forget(sessionId, pendingStartup),
+            );
+            return startupWait;
         }
         this.publishOrAbort(sessionId, pendingStartup, options.publish);
         return null;
@@ -87,28 +93,17 @@ export class McpSessionStartup {
         return this.pendingSessions.has(sessionId);
     }
 
-    private async awaitStartup(
-        sessionId: string,
-        pendingStartup: PendingMcpStartupSession,
-        awaitTimeoutMs: number,
-        publish: boolean,
-    ): Promise<void> {
-        try {
-            await raceMcpStartupTimeout(pendingStartup.startup, awaitTimeoutMs);
-        } catch (err) {
-            if (this.pendingSessions.get(sessionId) === pendingStartup) {
-                this.pendingSessions.delete(sessionId);
-            }
-            throw err;
-        }
-        this.publishOrAbort(sessionId, pendingStartup, publish);
-    }
-
     private publishOrAbort(sessionId: string, pendingStartup: PendingMcpStartupSession, publish: boolean): void {
         if (publish) {
             this.publishAsync(sessionId);
         } else {
             pendingStartup.abort.abort();
+        }
+    }
+
+    private forget(sessionId: string, pendingStartup: PendingMcpStartupSession): void {
+        if (this.pendingSessions.get(sessionId) === pendingStartup) {
+            this.pendingSessions.delete(sessionId);
         }
     }
 
@@ -151,9 +146,7 @@ export class McpSessionStartup {
                 logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
             }
         } finally {
-            if (this.pendingSessions.get(sessionId) === pendingStartup) {
-                this.pendingSessions.delete(sessionId);
-            }
+            this.forget(sessionId, pendingStartup);
         }
     }
 
@@ -161,15 +154,13 @@ export class McpSessionStartup {
         sessionId: string,
         mcpStartup: McpStartupResult,
         signal: AbortSignal,
-        requestedServers?: Set<string>
+        requestedServers: Set<string>,
     ): Promise<void> {
-        const filteredStartup = requestedServers
-            ? {
-                ready: mcpStartup.ready.filter(server => requestedServers.has(server)),
-                failed: mcpStartup.failed.filter(server => requestedServers.has(server.server)),
-                cancelled: mcpStartup.cancelled.filter(server => requestedServers.has(server)),
-            }
-            : mcpStartup;
+        const filteredStartup = {
+            ready: mcpStartup.ready.filter(server => requestedServers.has(server)),
+            failed: mcpStartup.failed.filter(server => requestedServers.has(server.server)),
+            cancelled: mcpStartup.cancelled.filter(server => requestedServers.has(server)),
+        };
 
         const failuresAfterOauth: typeof filteredStartup.failed = [];
         const readyAfterOauth = [...filteredStartup.ready];
