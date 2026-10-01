@@ -26,7 +26,7 @@ import type {PermissionPromptContext} from "./permissions/lifecycle";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
 import {ElicitationReporter} from "./tool-calls/reporters/ElicitationReporter";
 import {isRecord, normalizeJsonObject, normalizeJsonValue, recordOrNull} from "./permissions/json";
-import {AIR_CUSTOM_ANSWER_KEY, isAirClient, withAirMeta} from "./AirExtension";
+import {AIR_CUSTOM_ANSWER_KEY, LEGACY_AIR_CUSTOM_ANSWER_KEY, isAirClient, withAirMeta} from "./AirExtension";
 type AcpBackedMcpElicitationParams = Extract<
     McpServerElicitationRequestParams,
     { mode: "form" } | { mode: "url" }
@@ -455,7 +455,9 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 properties[userInputNoteFieldId(question.id, questionIds)] = {
                     type: "string",
                     title: "Additional answer or note",
-                    _meta: airClient ? withAirMeta(noteMeta, AIR_CUSTOM_ANSWER_KEY, true) : noteMeta,
+                    _meta: airClient
+                        ? withAirMeta({...noteMeta, [LEGACY_AIR_CUSTOM_ANSWER_KEY]: true}, AIR_CUSTOM_ANSWER_KEY, true)
+                        : noteMeta,
                 };
             }
         }

@@ -186,7 +186,7 @@ The adapter sends these keys only to AIR. "AIR" in the gate column means that th
 | `phase` | `agent_message_chunk._meta.jetbrains.air` | Codex message phase string | AIR |
 | `kind` | session mode `_meta.jetbrains.air` and `mode` config option value `_meta.jetbrains.air` | `standard`, `auto_review`, or `full_access` | AIR |
 | `commandAction` | available command `_meta.jetbrains.air` | command action object | AIR |
-| `customAnswer` | `request_user_input` note field of an elicitation schema, `_meta.jetbrains.air` | `true` | AIR |
+| `customAnswer` | `request_user_input` note field of an elicitation schema, `_meta.jetbrains.air` | `true` | AIR. The same field also carries the root key `_meta._askUserQuestionCustomAnswer: true`, because released AIR versions read only that key. |
 
 ## JetBrains shared keys
 

@@ -41,6 +41,7 @@
                 "role": "user_note",
                 "isSecret": false
               },
+              "_askUserQuestionCustomAnswer": true,
               "jetbrains": {
                 "air": {
                   "version": 1,

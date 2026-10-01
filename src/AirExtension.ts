@@ -31,6 +31,11 @@ export const AIR_PLAN_CONTENT_DELTA_KEY = "planContentDelta";
 export const AIR_CONTENT_DELTA_KEY = "contentDelta";
 export const AIR_SUBAGENT_KEY = "subagent";
 export const AIR_CUSTOM_ANSWER_KEY = "customAnswer";
+/**
+ * The root `_meta` spelling of {@link AIR_CUSTOM_ANSWER_KEY} that released AIR versions read.
+ * Remove it when the ACP registry no longer serves AIR versions that read only this spelling.
+ */
+export const LEGACY_AIR_CUSTOM_ANSWER_KEY = "_askUserQuestionCustomAnswer";
 export const AIR_EXTENSION_VERSION = 1;
 
 /** Merge one AIR payload into metadata while preserving other object namespaces. */
