@@ -106,7 +106,7 @@
               "jetbrains": {
                 "air": {
                   "version": 1,
-                  "skillPath": "/workspace"
+                  "skillPath": "/workspace/.agents/skills/build/SKILL.md"
                 }
               }
             }

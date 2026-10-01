@@ -1782,7 +1782,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     name: "build",
                     description: "Build the project",
                     shortDescription: "Build",
-                    path: "/workspace",
+                    path: "/workspace/.agents/skills/build/SKILL.md",
                     scope: "user",
                     enabled: true,
                     pluginId: null

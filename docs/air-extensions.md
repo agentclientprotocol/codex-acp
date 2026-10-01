@@ -187,7 +187,7 @@ The adapter sends these keys only to AIR. "AIR" in the gate column means that th
 | `phase` | `agent_message_chunk._meta.jetbrains.air` | Codex message phase string | AIR |
 | `kind` | session mode `_meta.jetbrains.air` and `mode` config option value `_meta.jetbrains.air` | `standard`, `auto_review`, or `full_access` | AIR |
 | `commandAction` | available command `_meta.jetbrains.air` | command action object | AIR |
-| `skillPath` | available command `_meta.jetbrains.air` of a `$skill` command | absolute path of the skill's `SKILL.md` | AIR |
+| `skillPath` | available command `_meta.jetbrains.air` of a `$skill` command | OS-native absolute path of the skill's `SKILL.md`, not a URI | AIR |
 | `customAnswer` | `request_user_input` note field of an elicitation schema, `_meta.jetbrains.air` | `true` | AIR. The same field also carries the root key `_meta._askUserQuestionCustomAnswer: true`, because released AIR versions read only that key. |
 
 ## JetBrains shared keys
@@ -994,6 +994,7 @@ The adapter sends these keys only to AIR:
   - `/plan` has `{kind: "setConfigOption", configId, value, resetValue, presentation: "state"}`. It switches the collaboration mode to plan.
   - `/goal` has `{kind: "prefixPrompt", presentation: "state"}`.
 - A `$skill` command carries `_meta.jetbrains.air.skillPath`, the absolute path of its `SKILL.md` from `skills/list`.
+  The path is an OS-native absolute path, such as `C:\repo\SKILL.md` on Windows. It is not a URI.
   AIR opens this file on a click on the skill chip.
 
 ## Removed keys
