@@ -86,6 +86,36 @@ describe("cleanErrorMessage", () => {
         expect(cleanErrorMessage("Bad flag, e.g. --foo is unknown. Use i.e. the default. Third sentence."))
             .toBe("Bad flag, e.g. --foo is unknown. Use i.e. the default.");
     });
+
+    it("does not end a sentence at a list number or at etc.", () => {
+        expect(cleanErrorMessage("Step 1. Open it! Then ()")).toBe("Step 1. Open it! Then ()");
+        expect(cleanErrorMessage("Bad flags a, b, etc. are unknown. Use the defaults. Third sentence."))
+            .toBe("Bad flags a, b, etc. are unknown. Use the defaults.");
+    });
+
+    it("cleans a long error with many segments fast", () => {
+        const text = Array.from({length: 20000}, (_, index) => `part ${index} x`).join(": ");
+        const start = performance.now();
+
+        const cleaned = cleanErrorMessage(text);
+
+        expect(performance.now() - start).toBeLessThan(500);
+        expect(cleaned.startsWith("part 0 x: part 1 x")).toBe(true);
+        expect(cleaned.endsWith("…")).toBe(true);
+    });
+
+    it("keeps the text with :: that is not a Rust type path", () => {
+        expect(cleanErrorMessage("connect to fe80::abcd failed")).toBe("connect to fe80::abcd failed");
+        expect(cleanErrorMessage("bad value 'a::b' in config")).toBe("bad value 'a::b' in config");
+        expect(cleanErrorMessage("Can't locate Foo::Bar in @INC")).toBe("Can't locate Foo::Bar in @INC");
+    });
+
+    it("keeps an HTTP status and removes a JSON-RPC code", () => {
+        expect(cleanErrorMessage("server returned status: 401")).toBe("server returned status: 401");
+        expect(cleanErrorMessage("HTTP error: 503")).toBe("HTTP error: 503");
+        expect(cleanErrorMessage("JSON-RPC error: 401: Unauthorized")).toBe("Unauthorized");
+        expect(cleanErrorMessage("request failed: -32601: Method not found")).toBe("request failed: Method not found");
+    });
 });
 
 describe("formatStatus", () => {
@@ -226,5 +256,10 @@ describe("inlineCode", () => {
 
     it("shows an empty name as unnamed", () => {
         expect(inlineCode("")).toBe("(unnamed)");
+    });
+
+    it("puts a name with a line break on one line", () => {
+        expect(inlineCode("a\n# H")).toBe("`a # H`");
+        expect(formatStatus([entry({name: "a\n# H", status: null})], new Map())).toContain("\n- `a # H`");
     });
 });

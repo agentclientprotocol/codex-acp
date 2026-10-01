@@ -140,26 +140,45 @@ const MAX_ERROR_LENGTH = 160;
 
 const MAX_ERROR_SENTENCES = 2;
 
+/**
+ * The maximum length of the raw error text that the cleanup reads.
+ * The cleanup compares each segment with the earlier ones, so a long text without a limit blocks the event loop.
+ */
+const MAX_INPUT_LENGTH = 2000;
+
+const JSON_RPC_WRAPPER = /^json-rpc error$/i;
+
+const NUMERIC_CODE = /^-?\d+$/;
+
 /** The error chain segments that only wrap the real message. */
 const WRAPPER_SEGMENTS = [
     /^tool discovery failed$/i,
     /^mcp startup failed$/i,
     /^handshaking with mcp server failed$/i,
-    /^json-rpc error$/i,
+    JSON_RPC_WRAPPER,
     /^startup error$/i,
     /^error$/i,
     /^mcp client for .+ failed to start$/i,
-    /^-?\d+$/,
+    // A JSON-RPC error code. An HTTP status, such as `401`, stays.
+    /^-32\d{3}$/,
 ];
 
-/**
- * Finds a Rust type path, such as `crate::module::Type`, with an optional `Transport [` prefix.
- * The lookbehind skips an IPv6 address, such as `[::1]` or `[fe80::1]`, and a URL.
- */
-const TYPE_PATH = /(?:\b[A-Z]\w*\s*\[\s*|(?<![\w[:./-]))[A-Za-z_]\w*(?:::[A-Za-z_]\w*)+/g;
+const IDENTIFIER = String.raw`[A-Za-z_]\w*`;
 
-/** Splits the text after a sentence end, but not after `e.g.` or `i.e.`. */
-const SENTENCE_END = /(?<=[.!?])(?<!\b(?:e\.g|i\.e)\.)\s+/i;
+/**
+ * Finds a Rust type path, such as `crate::module::Type`.
+ * A path in a `Transport [` prefix can have two parts. Other paths need three parts or generic arguments.
+ * Thus a short path of another language, such as the Perl `Foo::Bar`, and an IPv6 address, such as `fe80::abcd`, stay.
+ * The lookbehind skips an IPv6 address in a URL, such as `[fe80::1]`, and a quoted value, such as `'a::b'`.
+ */
+const TYPE_PATH = new RegExp(
+    String.raw`(?:\b[A-Z]\w*\s*\[\s*${IDENTIFIER}(?:::${IDENTIFIER})+`
+    + String.raw`|(?<![\w[:./'"\`-])${IDENTIFIER}(?:(?:::${IDENTIFIER}){2,}|::${IDENTIFIER}(?=<)))(?![\w:])`,
+    "g",
+);
+
+/** Splits the text after a sentence end, but not after `e.g.`, `i.e.`, `etc.`, or a list number, such as `Step 1.`. */
+const SENTENCE_END = /(?<=[.!?])(?<!\b(?:e\.g|i\.e|etc|\d{1,3})\.)\s+/i;
 
 /**
  * Removes the Rust type paths and their generic arguments.
@@ -211,11 +230,15 @@ function genericsEnd(text: string, start: number): number {
  * When nothing remains, it returns the shortened raw text.
  */
 export function cleanErrorMessage(text: string): string {
-    const oneLine = text.replace(/\s+/g, " ").trim();
+    const oneLine = text.slice(0, MAX_INPUT_LENGTH).replace(/\s+/g, " ").trim();
     const kept: string[] = [];
+    let afterJsonRpcWrapper = false;
     for (const rawSegment of oneLine.split(": ")) {
         const segment = removeTypePaths(rawSegment.trim());
-        if (segment.length === 0 || WRAPPER_SEGMENTS.some(pattern => pattern.test(segment))) {
+        // The code after a `JSON-RPC error` wrapper is a JSON-RPC code, also outside the reserved range.
+        const isJsonRpcCode = afterJsonRpcWrapper && NUMERIC_CODE.test(segment);
+        afterJsonRpcWrapper = JSON_RPC_WRAPPER.test(segment);
+        if (segment.length === 0 || isJsonRpcCode || WRAPPER_SEGMENTS.some(pattern => pattern.test(segment))) {
             continue;
         }
         const withoutEllipsis = withoutTrailingEllipsis(segment);
@@ -264,10 +287,12 @@ export const UNNAMED_SERVER = "(unnamed)";
 
 /**
  * Formats a server name as inline code. The fence is one backtick longer than the longest backtick run in the name.
+ * Each whitespace run becomes one space, so that a line break in the name cannot start a new markdown block.
  * A name that starts or ends with a backtick or a space gets a space on each side, so that the markdown keeps it as is.
  * An empty name shows as `(unnamed)`.
  */
-export function inlineCode(text: string): string {
+export function inlineCode(name: string): string {
+    const text = name.replace(/\s+/g, " ");
     if (text.length === 0) {
         return UNNAMED_SERVER;
     }
