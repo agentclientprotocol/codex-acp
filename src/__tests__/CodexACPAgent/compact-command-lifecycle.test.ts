@@ -108,6 +108,7 @@ describe("compact command lifecycle", () => {
     it.skipIf(process.platform === "win32")("rejects a compact wait when the Codex process exits", async () => {
         // The real connection path: the process exit disposes the vscode-jsonrpc connection and fires no close event.
         const dir = mkdtempSync(path.join(tmpdir(), "codex-acp-compact-exit-"));
+        let codex: ReturnType<typeof startCodexConnection> | undefined;
         try {
             const fakeCodex = path.join(dir, "codex");
             // The fake Codex acknowledges thread/compact/start and then never completes the compaction.
@@ -120,7 +121,7 @@ describe("compact command lifecycle", () => {
                 "",
             ].join("\n"));
             chmodSync(fakeCodex, 0o755);
-            const codex = startCodexConnection(fakeCodex);
+            codex = startCodexConnection(fakeCodex);
             const appServer = new CodexAppServerClient(codex.connection);
             const start = vi.spyOn(appServer, "threadCompactStart");
 
@@ -130,6 +131,7 @@ describe("compact command lifecycle", () => {
 
             await expect(pending).rejects.toThrow("Codex connection closed during compaction.");
         } finally {
+            codex?.process.kill();
             rmSync(dir, {recursive: true, force: true});
         }
     });
