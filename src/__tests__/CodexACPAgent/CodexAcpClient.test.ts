@@ -20,6 +20,7 @@ import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 import {GOAL_CONTROL_METHOD} from "../../AcpExtensions";
 import type {McpStartupResult} from "../../CodexAppServerClient";
+import {CodexAcpClient, type JsonObject} from "../../CodexAcpClient";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -1304,6 +1305,57 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             writableRoots: ["/workspace/extra"],
         });
         expect(turnStartSpy.mock.calls[0]![0].approvalsReviewer).toBe("auto_review");
+    });
+
+    async function sendPromptWithConfig(config: JsonObject, agentMode: AgentMode) {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+        const runTurnSpy = vi.spyOn(codexAppServerClient, "runTurn").mockResolvedValue({
+            threadId: "session-id",
+            turn: { id: "turn-id", items: [], status: "completed", error: null },
+        } as any);
+        const client = new CodexAcpClient(codexAppServerClient, config);
+
+        await client.sendPrompt(
+            { sessionId: "session-id", prompt: [{ type: "text", text: "Hello" }] },
+            agentMode,
+            ModelId.create("test-model", "medium"),
+            null,
+            false,
+            "/workspace",
+            [],
+        );
+
+        return runTurnSpy.mock.calls[0]![0].sandboxPolicy;
+    }
+
+    it('applies configured sandbox network access on workspace-write turns', async () => {
+        const policy = await sendPromptWithConfig(
+            { sandbox_workspace_write: { network_access: true } },
+            AgentMode.Agent,
+        );
+        expect(policy).toMatchObject({ type: "workspaceWrite", networkAccess: true });
+    });
+
+    it('applies configured network_access false on workspace-write turns', async () => {
+        const policy = await sendPromptWithConfig(
+            { sandbox_workspace_write: { network_access: false } },
+            AgentMode.Agent,
+        );
+        expect(policy).toMatchObject({ type: "workspaceWrite", networkAccess: false });
+    });
+
+    it('keeps the mode network restriction when network access is not configured', async () => {
+        const policy = await sendPromptWithConfig({}, AgentMode.Agent);
+        expect(policy).toMatchObject({ type: "workspaceWrite", networkAccess: false });
+    });
+
+    it('ignores network access config on non-workspace-write policies', async () => {
+        const policy = await sendPromptWithConfig(
+            { sandbox_workspace_write: { network_access: true } },
+            AgentMode.ReadOnly,
+        );
+        expect(policy).toEqual({ type: "readOnly", networkAccess: false });
     });
 
     function loadNotifications(){
