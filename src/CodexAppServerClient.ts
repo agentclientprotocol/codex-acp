@@ -535,7 +535,10 @@ export class CodexAppServerClient {
         });
         // The request acknowledgement can still be pending when the connection closes.
         void completed.catch(() => {});
-        const closed = this.connection.onClose?.(() => rejectCompleted(new Error("Codex connection closed during compaction.")));
+        // The process exit disposes the connection and does not close it, so both events end the wait.
+        const rejectClosed = () => rejectCompleted(new Error("Codex connection closed during compaction."));
+        const closed = this.connection.onClose?.(rejectClosed);
+        const disposed = this.connection.onDispose?.(rejectClosed);
         const completeCompaction = (event: CompactionCompletedNotification) => {
             if (compactTurnId !== null && event.params.turnId !== compactTurnId) return;
             resolveCompleted(event);
@@ -562,6 +565,7 @@ export class CodexAppServerClient {
             releaseRoutingCapture();
             releaseCompactionCapture();
             closed?.dispose();
+            disposed?.dispose();
         }
     }
 
