@@ -8,6 +8,7 @@ import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./CodexAuthMethod";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 import {createMcpServerSignIn, type McpServerSignIn} from "./mcp/McpServerSignIn";
+import {getRequestedMcpServerNames, McpSessionStartup, parseMcpStartupAwaitTimeoutMs} from "./mcp/McpSessionStartup";
 import {
     CodexAcpClient,
     type JsonObject,
@@ -17,7 +18,6 @@ import {
     type UrlElicitationRequester
 } from "./CodexAcpClient";
 import {CodexAppServerClient} from "./CodexAppServerClient";
-import type {McpStartupResult} from "./mcp/McpStartupTracker";
 import {isNoActiveTurnError} from "./CodexThreadErrors";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -57,7 +57,6 @@ import {CodexCommands, GOAL_CONTINUATION_PROMPT} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
-import {sanitizeMcpServerName} from "./McpServerName";
 import type {ToolCallReports} from "./ToolCallReports";
 import {ToolCallReportingConnection} from "./ToolCallReportingConnection";
 import {
@@ -90,7 +89,6 @@ import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
 import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
 import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationReporter";
 import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
-import {McpStartupReporter} from "./tool-calls/reporters/McpStartupReporter";
 import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
 import {PlanReviewReporter} from "./tool-calls/reporters/PlanReviewReporter";
 import {SubagentActivityReporter} from "./tool-calls/reporters/SubagentActivityReporter";
@@ -254,13 +252,6 @@ interface ActiveAuthState {
     authConfigured: boolean;
 }
 
-interface PendingMcpStartupSession {
-    requestedServers: Set<string>;
-    startup: Promise<McpStartupResult>;
-    /** Stops the startup wait and the sign-in of the startup report. */
-    abort: AbortController;
-}
-
 interface PendingTurnStart {
     promise: Promise<string | null>;
     resolve: (turnId: string | null) => void;
@@ -305,7 +296,7 @@ export class CodexAcpServer {
     private currentAuthStatus: AuthStatus | null;
 
     private readonly sessions: Map<string, SessionState>;
-    private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
+    private readonly mcpSessionStartup: McpSessionStartup;
     private readonly pendingTurnStarts: Map<string, PendingTurnStart>;
     private readonly activePrompts: Map<string, ActivePrompt>;
     private readonly steeringQueues: Map<string, SteeringQueue>;
@@ -328,7 +319,6 @@ export class CodexAcpServer {
         codexProcessState?: CodexProcessState,
     ) {
         this.sessions = new Map();
-        this.pendingMcpStartupSessions = new Map();
         this.pendingTurnStarts = new Map();
         this.activePrompts = new Map();
         this.steeringQueues = new Map();
@@ -344,6 +334,14 @@ export class CodexAcpServer {
             this.connection,
             () => this.codexAcpClient,
             () => this.clientCapabilities,
+        );
+        this.mcpSessionStartup = new McpSessionStartup(
+            this.connection,
+            () => this.codexAcpClient,
+            (operation) => this.runWithProcessCheck(operation),
+            this.mcpServerSignIn,
+            () => this.capabilities,
+            (sessionId) => this.sessions.has(sessionId) && !this.sessionIsClosing(sessionId),
         );
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.codexProcessState = codexProcessState ?? null;
@@ -758,34 +756,21 @@ export class CodexAcpServer {
 
         const canPublishSessionUpdates = operation !== "fork";
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
-            const pendingStartup = this.createPendingMcpStartupSession(
-                sessionId,
-                requestedMcpServers,
-                mcpServerStartupVersion,
-            );
-            if (canPublishSessionUpdates) {
-                this.pendingMcpStartupSessions.set(sessionId, pendingStartup);
-            }
-            const startupAwaitTimeoutMs = parseMcpStartupAwaitTimeoutMs(request._meta);
-            if (startupAwaitTimeoutMs !== undefined && startupAwaitTimeoutMs > 0) {
+            // A fork publishes no startup report, so nothing waits for the rest of the startup.
+            const startupWait = this.mcpSessionStartup.begin(sessionId, requestedMcpServers, mcpServerStartupVersion, {
+                publish: canPublishSessionUpdates,
+                awaitTimeoutMs: parseMcpStartupAwaitTimeoutMs(request._meta),
+            });
+            if (startupWait !== null) {
                 try {
-                    await raceMcpStartupTimeout(pendingStartup.startup, startupAwaitTimeoutMs);
+                    await startupWait;
                 } catch (err) {
-                    if (this.pendingMcpStartupSessions.get(sessionId) === pendingStartup) {
-                        this.pendingMcpStartupSessions.delete(sessionId);
-                    }
                     // The session is installed already. A failed wait closes it, so the client never gets a half-open session.
                     await this.closeSession({sessionId}).catch(closeError => {
                         logger.error(`Failed to close session ${sessionId} after a failed MCP startup wait`, closeError);
                     });
                     throw err;
                 }
-            }
-            if (canPublishSessionUpdates) {
-                this.publishMcpStartupStatusAsync(sessionId);
-            } else {
-                // A fork publishes no startup report, so nothing waits for the rest of the startup.
-                pendingStartup.abort.abort();
             }
         }
 
@@ -982,8 +967,7 @@ export class CodexAcpServer {
         } finally {
             if (this.getSessionGeneration(params.sessionId) === closeGeneration) {
                 this.sessions.delete(params.sessionId);
-                this.pendingMcpStartupSessions.get(params.sessionId)?.abort.abort();
-                this.pendingMcpStartupSessions.delete(params.sessionId);
+                this.mcpSessionStartup.close(params.sessionId);
                 this.codexAcpClient.appServerClient.mcpStartup.forgetThread(params.sessionId);
                 this.pendingTurnStarts.delete(params.sessionId);
                 this.activePrompts.delete(params.sessionId);
@@ -1020,7 +1004,7 @@ export class CodexAcpServer {
 
     private hasLocalSession(sessionId: string): boolean {
         return this.sessions.has(sessionId)
-            || this.pendingMcpStartupSessions.has(sessionId)
+            || this.mcpSessionStartup.isPending(sessionId)
             || this.pendingTurnStarts.has(sessionId)
             || this.activePrompts.has(sessionId)
             || this.hasPendingSessionOpen(sessionId)
@@ -2062,11 +2046,7 @@ export class CodexAcpServer {
         subscribed = false;
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
-            this.pendingMcpStartupSessions.set(
-                sessionId,
-                this.createPendingMcpStartupSession(sessionId, requestedMcpServers, mcpServerStartupVersion),
-            );
-            this.publishMcpStartupStatusAsync(sessionId);
+            this.mcpSessionStartup.begin(sessionId, requestedMcpServers, mcpServerStartupVersion, {publish: true});
         }
 
         await this.publishAvailableCommands(sessionState, requestedSessionGeneration);
@@ -2527,95 +2507,6 @@ export class CodexAcpServer {
         // explicitly provided mcpServers in the request.
         logger.log("Skipping MCP server recovery for load/resume without explicit mcpServers");
         return [];
-    }
-
-    private publishMcpStartupStatusAsync(sessionId: string): void {
-        void this.doPublishMcpStartupStatus(sessionId);
-    }
-
-    private createPendingMcpStartupSession(
-        sessionId: string,
-        mcpServers: Array<acp.McpServer>,
-        afterVersion: number,
-    ): PendingMcpStartupSession {
-        const requestedServers = new Set(getRequestedMcpServerNames(mcpServers));
-        const abort = new AbortController();
-        const startup = this.runWithProcessCheck(() => this.codexAcpClient.awaitMcpServerStartup(
-            Array.from(requestedServers),
-            afterVersion,
-            {threadId: sessionId, signal: abort.signal},
-        ));
-        // An abort can reject the startup before a caller awaits it.
-        void startup.catch(() => {});
-        return {requestedServers, startup, abort};
-    }
-
-    private async doPublishMcpStartupStatus(sessionId: string): Promise<void> {
-        const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
-        if (!pendingStartup) {
-            return;
-        }
-
-        try {
-            const mcpStartup = await pendingStartup.startup;
-            if (!this.sessions.has(sessionId)
-                || this.sessionIsClosing(sessionId)
-                || this.pendingMcpStartupSessions.get(sessionId) !== pendingStartup) {
-                return;
-            }
-            await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.abort.signal, pendingStartup.requestedServers);
-        } catch (err) {
-            if (!pendingStartup.abort.signal.aborted) {
-                logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
-            }
-        } finally {
-            if (this.pendingMcpStartupSessions.get(sessionId) === pendingStartup) {
-                this.pendingMcpStartupSessions.delete(sessionId);
-            }
-        }
-    }
-
-    private async publishMcpStartupStatus(
-        sessionId: string,
-        mcpStartup: McpStartupResult,
-        signal: AbortSignal,
-        requestedServers?: Set<string>
-    ): Promise<void> {
-        const filteredStartup = requestedServers
-            ? {
-                ready: mcpStartup.ready.filter(server => requestedServers.has(server)),
-                failed: mcpStartup.failed.filter(server => requestedServers.has(server.server)),
-                cancelled: mcpStartup.cancelled.filter(server => requestedServers.has(server)),
-            }
-            : mcpStartup;
-
-        const failuresAfterOauth: typeof filteredStartup.failed = [];
-        const readyAfterOauth = [...filteredStartup.ready];
-        for (const failure of filteredStartup.failed) {
-            const signIn = failure.failureReason === "reauthenticationRequired"
-                ? await this.mcpServerSignIn(sessionId, failure.server, signal)
-                : "unsupported";
-            if (signIn === "signedIn") {
-                readyAfterOauth.push(failure.server);
-            } else {
-                failuresAfterOauth.push(failure);
-            }
-        }
-        if (signal.aborted) {
-            return;
-        }
-
-        const renderer = new AcpToolCallRenderer(this.capabilities);
-        for (const facts of McpStartupReporter.failures({
-            ...filteredStartup,
-            ready: readyAfterOauth,
-            failed: failuresAfterOauth,
-        })) {
-            await this.connection.notify(acp.methods.client.session.update, {
-                sessionId,
-                update: renderer.render(facts),
-            });
-        }
     }
 
     private trackActivePrompt(sessionId: string): ActivePrompt {
@@ -3471,47 +3362,6 @@ export class CodexAcpServer {
         // After turnInterrupt(), Codex will send turn/completed, which naturally completes awaitTurnCompleted().
         await this.interruptSessionTurn(sessionState, "Cancel", false);
     }
-}
-
-function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
-    return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(server.name))));
-}
-
-const MCP_STARTUP_AWAIT_TIMEOUT_META_KEY = "mcpStartupAwaitTimeoutMs";
-
-function parseMcpStartupAwaitTimeoutMs(meta: Record<string, unknown> | null | undefined): number | undefined {
-    const value = meta?.[MCP_STARTUP_AWAIT_TIMEOUT_META_KEY];
-    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-// Resolves once `startup` settles, or once `timeoutMs` elapses, whichever comes first.
-// A startup rejection is only propagated if it happens before the timeout.
-function raceMcpStartupTimeout(startup: Promise<McpStartupResult>, timeoutMs: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const timer = setTimeout(() => {
-            if (!settled) {
-                settled = true;
-                resolve();
-            }
-        }, timeoutMs);
-        startup.then(
-            () => {
-                if (!settled) {
-                    settled = true;
-                    clearTimeout(timer);
-                    resolve();
-                }
-            },
-            (err) => {
-                if (!settled) {
-                    settled = true;
-                    clearTimeout(timer);
-                    reject(err);
-                }
-            },
-        );
-    });
 }
 
 /** A close of the session stopped the read of its history during `session/load`. */
