@@ -1,6 +1,6 @@
 import {describe, expect, it, vi} from "vitest";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
-import type {McpStartupResult} from "../../CodexAppServerClient";
+import type {McpStartupResult} from "../../mcp/McpStartupTracker";
 
 describe("ACP session fork", () => {
     it("creates and installs a forked session", async () => {
@@ -78,12 +78,39 @@ describe("ACP session fork", () => {
         );
 
         await vi.waitFor(() => {
-            expect(awaitMcpStartupSpy).toHaveBeenCalledWith(["fork-mcp"], expect.any(Number));
+            expect(awaitMcpStartupSpy).toHaveBeenCalledWith(["fork-mcp"], expect.any(Number), {threadId: "fork-id", signal: expect.any(AbortSignal)});
         });
         expect(forkSettled).toBe(false);
 
         mcpStartup.resolve({ready: ["fork-mcp"], failed: [], cancelled: []});
         await expect(forkPromise).resolves.toMatchObject({sessionId: "fork-id", modes: expect.any(Object)});
+    });
+
+    it("leaves no MCP startup wait after a fork without the startup wait", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+
+        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(client, "forkSession").mockResolvedValue({
+            sessionId: "fork-id",
+            currentModelId: "gpt-5[medium]",
+            models: [createTestModel({id: "gpt-5"})],
+            collaborationMode: "default",
+            currentServiceTier: null,
+            additionalDirectories: [],
+        });
+
+        await agent.forkSession({
+            sessionId: "source-id",
+            cwd: "/workspace",
+            mcpServers: [{name: "fork-mcp", command: "npx", args: ["fork"], env: []}],
+        });
+
+        const tracker = client.appServerClient.mcpStartup as unknown as {waiters: unknown[]};
+        expect(tracker.waiters).toHaveLength(0);
     });
 });
 

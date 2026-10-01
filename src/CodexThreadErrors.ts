@@ -37,6 +37,14 @@ export function isThreadNotLoadedError(err: unknown): boolean {
 }
 
 /**
+ * `mcpServerStatus/list` answers this for a thread id that is well-formed but
+ * unknown to the app-server process.
+ */
+export function isThreadNotFoundError(err: unknown): boolean {
+    return errorText(err).includes("thread not found:");
+}
+
+/**
  * Codex thread ids are UUIDs, so anything else is rejected before lookup. ACP
  * session ids are opaque strings, so a client is free to send an id Codex
  * cannot even parse.

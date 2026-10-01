@@ -38,10 +38,19 @@ There is no built-in default timeout: an omitted field means do not wait
 
 ## Behavior after the request completes
 
-The adapter never blocks `session/new` or `session/resume` on MCP startup: the request completes as soon as the session
-is created, before any requested MCP server reaches a terminal state. Startup itself is never cancelled or interrupted;
-the adapter keeps tracking every requested server in the background and still publishes `session_info_update` MCP status
-notifications for `session/new` and `session/resume` sessions as servers finish starting.
+Without the field, the adapter does not block `session/new` or `session/resume` on MCP startup. The request completes
+as soon as the session is created. With the field, the wait ends when the startup completes or at the timeout,
+whichever comes first. The adapter never cancels the startup.
+It keeps tracking every requested server in the background.
+
+When the requested servers reach a terminal state, the adapter reports each of them that failed or was cancelled.
+Each report is a `session/update` with a new `tool_call` in the `failed` status and the title `mcp__<server>__startup`.
+A server that starts successfully gets no report. When a server fails because it needs authentication and the client
+supports URL elicitation, the adapter first starts the MCP OAuth sign-in. It reports the server only if the sign-in fails.
+The `session/new`, `session/resume`, and `session/load` sessions get these reports. The `session/fork` sessions do not.
+
+To see the live status of every MCP server, send the `/mcp` command. `/mcp reconnect` reloads the MCP configuration and
+restarts the servers that failed, stopped, or changed.
 
 ## Compatibility
 

@@ -7,6 +7,7 @@ import {PermissionLifecycleContext} from "./permissions/lifecycle";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./CodexAuthMethod";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
+import {createMcpServerSignIn, type McpServerSignIn} from "./mcp/McpServerSignIn";
 import {
     CodexAcpClient,
     type JsonObject,
@@ -15,7 +16,8 @@ import {
     type SessionMetadataWithThread,
     type UrlElicitationRequester
 } from "./CodexAcpClient";
-import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClient";
+import {CodexAppServerClient} from "./CodexAppServerClient";
+import type {McpStartupResult} from "./mcp/McpStartupTracker";
 import {isNoActiveTurnError} from "./CodexThreadErrors";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -255,6 +257,8 @@ interface ActiveAuthState {
 interface PendingMcpStartupSession {
     requestedServers: Set<string>;
     startup: Promise<McpStartupResult>;
+    /** Stops the startup wait and the sign-in of the startup report. */
+    abort: AbortController;
 }
 
 interface PendingTurnStart {
@@ -285,6 +289,7 @@ export interface CodexProcessState {
 export class CodexAcpServer {
     private codexAcpClient: CodexAcpClient;
     private readonly connection: AcpClientConnection;
+    private readonly mcpServerSignIn: McpServerSignIn;
     private readonly reportingConnection: ToolCallReportingConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
@@ -335,6 +340,11 @@ export class CodexAcpServer {
         this.reportingConnection = new ToolCallReportingConnection(connection);
         this.connection = this.reportingConnection.asClientConnection();
         this.codexAcpClient = codexAcpClient;
+        this.mcpServerSignIn = createMcpServerSignIn(
+            this.connection,
+            () => this.codexAcpClient,
+            () => this.clientCapabilities,
+        );
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.codexProcessState = codexProcessState ?? null;
         this.captureStderr();
@@ -355,7 +365,8 @@ export class CodexAcpServer {
             this.connection,
             client,
             (operation) => this.runWithProcessCheck(operation),
-            () => this.refreshAuthState(null)
+            () => this.refreshAuthState(null),
+            this.mcpServerSignIn,
         );
     }
 
@@ -748,6 +759,7 @@ export class CodexAcpServer {
         const canPublishSessionUpdates = operation !== "fork";
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             const pendingStartup = this.createPendingMcpStartupSession(
+                sessionId,
                 requestedMcpServers,
                 mcpServerStartupVersion,
             );
@@ -771,6 +783,9 @@ export class CodexAcpServer {
             }
             if (canPublishSessionUpdates) {
                 this.publishMcpStartupStatusAsync(sessionId);
+            } else {
+                // A fork publishes no startup report, so nothing waits for the rest of the startup.
+                pendingStartup.abort.abort();
             }
         }
 
@@ -967,7 +982,9 @@ export class CodexAcpServer {
         } finally {
             if (this.getSessionGeneration(params.sessionId) === closeGeneration) {
                 this.sessions.delete(params.sessionId);
+                this.pendingMcpStartupSessions.get(params.sessionId)?.abort.abort();
                 this.pendingMcpStartupSessions.delete(params.sessionId);
+                this.codexAcpClient.appServerClient.mcpStartup.forgetThread(params.sessionId);
                 this.pendingTurnStarts.delete(params.sessionId);
                 this.activePrompts.delete(params.sessionId);
                 this.steeringQueues.delete(params.sessionId);
@@ -2047,7 +2064,7 @@ export class CodexAcpServer {
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.pendingMcpStartupSessions.set(
                 sessionId,
-                this.createPendingMcpStartupSession(requestedMcpServers, mcpServerStartupVersion),
+                this.createPendingMcpStartupSession(sessionId, requestedMcpServers, mcpServerStartupVersion),
             );
             this.publishMcpStartupStatusAsync(sessionId);
         }
@@ -2517,16 +2534,20 @@ export class CodexAcpServer {
     }
 
     private createPendingMcpStartupSession(
+        sessionId: string,
         mcpServers: Array<acp.McpServer>,
         afterVersion: number,
     ): PendingMcpStartupSession {
         const requestedServers = new Set(getRequestedMcpServerNames(mcpServers));
-        return {
-            requestedServers,
-            startup: this.runWithProcessCheck(() =>
-                this.codexAcpClient.awaitMcpServerStartup(Array.from(requestedServers), afterVersion)
-            ),
-        };
+        const abort = new AbortController();
+        const startup = this.runWithProcessCheck(() => this.codexAcpClient.awaitMcpServerStartup(
+            Array.from(requestedServers),
+            afterVersion,
+            {threadId: sessionId, signal: abort.signal},
+        ));
+        // An abort can reject the startup before a caller awaits it.
+        void startup.catch(() => {});
+        return {requestedServers, startup, abort};
     }
 
     private async doPublishMcpStartupStatus(sessionId: string): Promise<void> {
@@ -2542,9 +2563,11 @@ export class CodexAcpServer {
                 || this.pendingMcpStartupSessions.get(sessionId) !== pendingStartup) {
                 return;
             }
-            await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.requestedServers);
+            await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.abort.signal, pendingStartup.requestedServers);
         } catch (err) {
-            logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
+            if (!pendingStartup.abort.signal.aborted) {
+                logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
+            }
         } finally {
             if (this.pendingMcpStartupSessions.get(sessionId) === pendingStartup) {
                 this.pendingMcpStartupSessions.delete(sessionId);
@@ -2555,6 +2578,7 @@ export class CodexAcpServer {
     private async publishMcpStartupStatus(
         sessionId: string,
         mcpStartup: McpStartupResult,
+        signal: AbortSignal,
         requestedServers?: Set<string>
     ): Promise<void> {
         const filteredStartup = requestedServers
@@ -2568,22 +2592,17 @@ export class CodexAcpServer {
         const failuresAfterOauth: typeof filteredStartup.failed = [];
         const readyAfterOauth = [...filteredStartup.ready];
         for (const failure of filteredStartup.failed) {
-            if (failure.failureReason !== "reauthenticationRequired"
-                || !clientSupportsUrlElicitation(this.clientCapabilities)) {
-                failuresAfterOauth.push(failure);
-                continue;
-            }
-            try {
-                const authenticated = await this.authenticateMcpServer(sessionId, failure.server);
-                if (authenticated) {
-                    readyAfterOauth.push(failure.server);
-                } else {
-                    failuresAfterOauth.push(failure);
-                }
-            } catch (error) {
-                logger.error(`Failed to authenticate MCP server ${failure.server}`, error);
+            const signIn = failure.failureReason === "reauthenticationRequired"
+                ? await this.mcpServerSignIn(sessionId, failure.server, signal)
+                : "unsupported";
+            if (signIn === "signedIn") {
+                readyAfterOauth.push(failure.server);
+            } else {
                 failuresAfterOauth.push(failure);
             }
+        }
+        if (signal.aborted) {
+            return;
         }
 
         const renderer = new AcpToolCallRenderer(this.capabilities);
@@ -2597,35 +2616,6 @@ export class CodexAcpServer {
                 update: renderer.render(facts),
             });
         }
-    }
-
-    private async authenticateMcpServer(sessionId: string, serverName: string): Promise<boolean> {
-        const elicitationId = `mcp-oauth-${randomUUID()}`;
-        const completed = this.codexAcpClient.awaitMcpServerOauthLoginCompleted(serverName, sessionId);
-        const login = await this.codexAcpClient.mcpServerOauthLogin({
-            name: serverName,
-            threadId: sessionId,
-        });
-        const elicitation = Promise.resolve(this.connection.request(
-            acp.methods.client.elicitation.create,
-            {
-                mode: "url",
-                sessionId,
-                message: `Authenticate with MCP server ${serverName}`,
-                url: login.authorizationUrl,
-                elicitationId,
-            },
-        ));
-        const first = await Promise.race([
-            completed.then(result => ({type: "completed" as const, result})),
-            elicitation.then(response => ({type: "elicitation" as const, response})),
-        ]);
-        if (first.type === "elicitation" && !acp.CreateElicitationResponse.isAccept(first.response)) {
-            return false;
-        }
-        const result = first.type === "completed" ? first.result : await completed;
-        await this.connection.notify(acp.methods.client.elicitation.complete, {elicitationId});
-        return result.success;
     }
 
     private trackActivePrompt(sessionId: string): ActivePrompt {
@@ -2969,6 +2959,7 @@ export class CodexAcpServer {
             }
 
             const commandPromise = this.availableCommands.tryHandleCommand(params.prompt, sessionState, {
+                signal: activePrompt.signal,
                 onTurnStartPending: () => {
                     sessionState.lastTokenUsage = null;
                     ensurePendingTurnStart();

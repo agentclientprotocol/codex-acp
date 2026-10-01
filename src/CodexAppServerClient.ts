@@ -1,4 +1,6 @@
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
+import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
+import {McpStartupTracker} from "./mcp/McpStartupTracker";
 import type {
     ClientRequest,
     InitializeParams,
@@ -22,9 +24,7 @@ import type {
     McpServerElicitationRequestResponse,
     McpServerOauthLoginParams,
     McpServerOauthLoginResponse,
-    McpServerOauthLoginCompletedNotification,
-    McpServerStartupFailureReason,
-    McpServerStartupState,
+    McpServerRefreshResponse,
     McpServerStatusUpdatedNotification,
     ModelListParams,
     ModelListResponse,
@@ -107,18 +107,6 @@ export interface ElicitationHandler {
     handleUserInput(params: ToolRequestUserInputParams): Promise<ToolRequestUserInputResponse>;
 }
 
-export type McpStartupFailure = {
-    server: string;
-    error: string;
-    failureReason?: McpServerStartupFailureReason;
-};
-
-export type McpStartupResult = {
-    ready: Array<string>;
-    failed: Array<McpStartupFailure>;
-    cancelled: Array<string>;
-};
-
 const CommandExecutionApprovalRequest = new RequestType<
     CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse,
@@ -171,9 +159,8 @@ export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
     private elicitationHandlers = new Map<string, ElicitationHandler>();
-    private mcpServerStartupVersion = 0;
-    private readonly mcpServerStartupStates = new Map<string, McpServerStartupSnapshot>();
-    private readonly mcpServerStartupResolvers: Array<McpServerStartupResolver> = [];
+    readonly mcpStartup = new McpStartupTracker();
+    readonly mcpOauthCompletions = new McpOauthCompletions();
     private readonly pendingTurnCompletionResolvers = new Map<string, Map<string, (event: TurnCompletedNotification) => void>>();
     private readonly pendingCompactionCompletionResolvers = new Map<string, Set<(event: CompactionCompletedNotification) => void>>();
     private readonly turnCompletionCaptures = new Map<string, Set<(event: TurnCompletedNotification) => void>>();
@@ -186,17 +173,16 @@ export class CodexAppServerClient {
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
+        // The process exit disposes the connection and does not close it, so both events end the MCP waits.
+        this.connection.onClose?.(() => this.disposeMcpWaits());
+        this.connection.onDispose?.(() => this.disposeMcpWaits());
         this.connection.onUnhandledNotification((data) => {
             const serverNotification = data as ServerNotification;
             if (isMcpServerStatusUpdatedNotification(serverNotification)) {
-                this.mcpServerStartupVersion += 1;
-                this.mcpServerStartupStates.set(serverNotification.params.name, {
-                    status: serverNotification.params.status,
-                    error: serverNotification.params.error,
-                    failureReason: serverNotification.params.failureReason ?? null,
-                    version: this.mcpServerStartupVersion,
-                });
-                this.resolveMcpServerStartupResolvers();
+                this.mcpStartup.record(serverNotification.params);
+            }
+            if (serverNotification.method === "mcpServer/oauthLogin/completed") {
+                this.mcpOauthCompletions.complete(serverNotification.params);
             }
             if (isTurnCompletedNotification(serverNotification)) {
                 this.recordTurnCompleted(serverNotification.params);
@@ -763,27 +749,12 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "mcpServerStatus/list", params });
     }
 
-    async mcpServerOauthLogin(params: McpServerOauthLoginParams): Promise<McpServerOauthLoginResponse> {
-        return await this.sendRequest({ method: "mcpServer/oauth/login", params });
+    async mcpServerReload(): Promise<McpServerRefreshResponse> {
+        return await this.sendRequest({ method: "config/mcpServer/reload", params: undefined });
     }
 
-    async awaitMcpServerOauthLoginCompleted(
-        name: string,
-        threadId: string,
-    ): Promise<McpServerOauthLoginCompletedNotification> {
-        return await new Promise((resolve) => {
-            let disposable: {dispose(): void} | undefined;
-            disposable = this.connection.onNotification(
-                "mcpServer/oauthLogin/completed",
-                (event: McpServerOauthLoginCompletedNotification) => {
-                    if (event.name !== name || event.threadId !== threadId) {
-                        return;
-                    }
-                    disposable?.dispose();
-                    resolve(event);
-                },
-            );
-        });
+    async mcpServerOauthLogin(params: McpServerOauthLoginParams): Promise<McpServerOauthLoginResponse> {
+        return await this.sendRequest({ method: "mcpServer/oauth/login", params });
     }
 
     async accountLogin(params: LoginAccountParams): Promise<LoginAccountResponse> {
@@ -800,30 +771,6 @@ export class CodexAppServerClient {
 
     async configRead(params: ConfigReadParams): Promise<ConfigReadResponse> {
         return await this.sendRequest({ method: "config/read", params: params });
-    }
-
-    getMcpServerStartupVersion(): number {
-        return this.mcpServerStartupVersion;
-    }
-
-    async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
-        const uniqueServerNames = Array.from(new Set(serverNames.map(serverName => serverName.trim()).filter(serverName => serverName.length > 0)));
-        if (uniqueServerNames.length === 0) {
-            return { ready: [], failed: [], cancelled: [] };
-        }
-
-        const result = this.tryBuildMcpStartupResult(uniqueServerNames, afterVersion);
-        if (result !== null) {
-            return result;
-        }
-
-        return await new Promise((resolve) => {
-            this.mcpServerStartupResolvers.push({
-                serverNames: uniqueServerNames,
-                afterVersion,
-                resolve,
-            });
-        });
     }
 
     async accountRead(params: GetAccountParams): Promise<GetAccountResponse> {
@@ -1135,50 +1082,9 @@ export class CodexAppServerClient {
         };
     }
 
-    private resolveMcpServerStartupResolvers(): void {
-        const pendingResolvers: Array<McpServerStartupResolver> = [];
-        for (const resolver of this.mcpServerStartupResolvers) {
-            const result = this.tryBuildMcpStartupResult(resolver.serverNames, resolver.afterVersion);
-            if (result !== null) {
-                resolver.resolve(result);
-            } else {
-                pendingResolvers.push(resolver);
-            }
-        }
-        this.mcpServerStartupResolvers.splice(0, this.mcpServerStartupResolvers.length, ...pendingResolvers);
-    }
-
-    private tryBuildMcpStartupResult(serverNames: Array<string>, afterVersion: number): McpStartupResult | null {
-        const ready: Array<string> = [];
-        const failed: Array<McpStartupFailure> = [];
-        const cancelled: Array<string> = [];
-
-        for (const serverName of serverNames) {
-            const state = this.mcpServerStartupStates.get(serverName);
-            if (!state || state.version <= afterVersion) {
-                return null;
-            }
-
-            switch (state.status) {
-                case "starting":
-                    return null;
-                case "ready":
-                    ready.push(serverName);
-                    break;
-                case "failed":
-                    failed.push({
-                        server: serverName,
-                        error: state.error ?? "unknown MCP startup error",
-                        ...(state.failureReason === null ? {} : {failureReason: state.failureReason}),
-                    });
-                    break;
-                case "cancelled":
-                    cancelled.push(serverName);
-                    break;
-            }
-        }
-
-        return { ready, failed, cancelled };
+    private disposeMcpWaits(): void {
+        this.mcpStartup.dispose();
+        this.mcpOauthCompletions.dispose();
     }
 
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
@@ -1225,19 +1131,6 @@ export interface ExperimentalThreadSettingsUpdateParams {
         };
     };
 }
-
-type McpServerStartupSnapshot = {
-    status: McpServerStartupState;
-    error: string | null;
-    failureReason: McpServerStartupFailureReason | null;
-    version: number;
-};
-
-type McpServerStartupResolver = {
-    serverNames: Array<string>;
-    afterVersion: number;
-    resolve: (result: McpStartupResult) => void;
-};
 
 function isMcpServerStatusUpdatedNotification(notification: ServerNotification): notification is {
     method: "mcpServer/startupStatus/updated";

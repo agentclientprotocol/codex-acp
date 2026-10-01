@@ -26,8 +26,27 @@ describe('MCP session configuration', { timeout: 40_000 }, () => {
         fixture.clearAcpConnectionDump();
         await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "/mcp"}]});
         const transportDump = fixture.getAcpConnectionDump([]);
-        expect(transportDump).contain("Configured MCP servers:");
-        expect(transportDump).contain("- test-mcp");
+        expect(transportDump).contain("**MCP servers:** 1 (");
+        // The server can still be starting, because the session does not wait for the MCP startup.
+        expect(transportDump).toMatch(/\*\*(Connected|Connecting|Not started)\*\*\\n- `test-mcp`/);
+    });
+
+    it('should reconnect the session mcp servers', async () => {
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        const mcpServer: McpServerStdio = {
+            name: "test-mcp", command: "./node_modules/.bin/mcp-hello-world", args: ["example"], env: [{name:"example", value: "example"}]
+        };
+
+        const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: [mcpServer]});
+        fixture.clearAcpConnectionDump();
+        await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "/mcp reconnect test-mcp"}]});
+        const transportDump = fixture.getAcpConnectionDump([]);
+        expect(transportDump).contain("Reloaded the MCP configuration");
+        expect(transportDump).not.contain("still starting");
+        expect(transportDump).contain("**Connected**\\n- `test-mcp`: ");
     });
 
 });

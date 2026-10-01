@@ -19,7 +19,7 @@ import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, 
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 import {GOAL_CONTROL_METHOD} from "../../AcpExtensions";
-import type {McpStartupResult} from "../../CodexAppServerClient";
+import type {McpStartupResult} from "../../mcp/McpStartupTracker";
 
 describe('ACP server test', { timeout: 40_000 }, () => {
 
@@ -959,7 +959,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         const startupPromise = codexAcpClient.awaitMcpServerStartup(
             ["alpha", "beta"],
-            codexAppServerClient.getMcpServerStartupVersion()
+            codexAppServerClient.mcpStartup.version(),
+            {threadId: "thread-id"},
         );
 
         mockFixture.sendServerNotification({
@@ -1102,7 +1103,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         );
 
         await vi.waitFor(() => {
-            expect(awaitMcpStartupSpy).toHaveBeenCalledWith(["resume-mcp"], expect.any(Number));
+            expect(awaitMcpStartupSpy).toHaveBeenCalledWith(["resume-mcp"], expect.any(Number), {threadId: "resume-id", signal: expect.any(AbortSignal)});
         });
         expect(resumeSettled).toBe(false);
 

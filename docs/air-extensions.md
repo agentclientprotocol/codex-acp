@@ -58,6 +58,7 @@ Only these differences are allowed:
   ACP defines no merge for `_meta` keys, so the `_meta` of each report keeps every key that the adapter sent before.
 - Bug fixes: a unique MCP startup tool call id, the result of a dynamic tool in `content`,
   no output after a tool call ended, and a terminal status for a replayed image generation.
+- Feature changes for every client: the `/mcp` command has a new description and an input hint.
 - The client gets no AIR-only key.
   That is no `_meta.jetbrains.air` key and none of the earlier keys in [Removed keys](#removed-keys).
 - The output of a command arrives once, in the chunks or in `content`, as [Zed conventions](#zed-conventions) describe.

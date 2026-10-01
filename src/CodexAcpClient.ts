@@ -13,8 +13,8 @@ import type {
     ApprovalHandler,
     CodexAppServerClient,
     ElicitationHandler,
-    McpStartupResult,
 } from "./CodexAppServerClient";
+import type {McpServerStartupWaitOptions, McpStartupResult} from "./mcp/McpStartupTracker";
 import open from "open";
 import type {Disposable} from "vscode-jsonrpc";
 import type {
@@ -34,6 +34,7 @@ import type {
     AccountUpdatedNotification,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
+    ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
     McpServerOauthLoginCompletedNotification,
     McpServerOauthLoginParams,
@@ -837,12 +838,16 @@ export class CodexAcpClient {
         await this.codexClient.runGoalClear({threadId: sessionId});
     }
 
-    async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
-        return await this.codexClient.awaitMcpServerStartup(serverNames, afterVersion);
+    async awaitMcpServerStartup(
+        serverNames: Array<string>,
+        afterVersion: number,
+        options: McpServerStartupWaitOptions,
+    ): Promise<McpStartupResult> {
+        return await this.codexClient.mcpStartup.await(serverNames, afterVersion, options);
     }
 
     getMcpServerStartupVersion(): number {
-        return this.codexClient.getMcpServerStartupVersion();
+        return this.codexClient.mcpStartup.version();
     }
 
     private async createSessionConfig(
@@ -1142,8 +1147,13 @@ export class CodexAcpClient {
         });
     }
 
-    async listMcpServers(): Promise<ListMcpServerStatusResponse> {
-        return this.codexClient.listMcpServerStatus({});
+    async listMcpServers(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
+        return this.codexClient.listMcpServerStatus(params);
+    }
+
+    /** Reloads the MCP configuration. Codex reconnects the servers of every loaded thread that failed, closed, or changed. */
+    async reloadMcpServers(): Promise<void> {
+        await this.codexClient.mcpServerReload();
     }
 
     async mcpServerOauthLogin(
@@ -1155,8 +1165,9 @@ export class CodexAcpClient {
     async awaitMcpServerOauthLoginCompleted(
         name: string,
         threadId: string,
+        signal?: AbortSignal,
     ): Promise<McpServerOauthLoginCompletedNotification> {
-        return await this.codexClient.awaitMcpServerOauthLoginCompleted(name, threadId);
+        return await this.codexClient.mcpOauthCompletions.await(name, threadId, signal);
     }
 
     async listSessions(request: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {

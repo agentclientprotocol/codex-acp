@@ -75,8 +75,8 @@ url = "https://example.com/mcp"
         });
 
         const transportDump = fixture.getAcpConnectionDump([]);
-        expect(transportDump).contain("Configured MCP servers:");
-        expect(transportDump).contain("- shared-mcp");
+        expect(transportDump).contain("**MCP servers:** ");
+        expect(transportDump).contain("- `shared-mcp`");
     });
 
     it('should preserve a project url-based MCP when ACP passes a command-type MCP with the same name', async () => {

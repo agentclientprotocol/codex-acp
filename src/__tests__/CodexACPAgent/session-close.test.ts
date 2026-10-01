@@ -8,7 +8,7 @@ import {
 } from "../acp-test-utils";
 import type {CodexAcpServer} from "../../CodexAcpServer";
 import type {CodexAcpClient, SessionMetadata} from "../../CodexAcpClient";
-import type {McpStartupResult} from "../../CodexAppServerClient";
+import type {McpStartupResult} from "../../mcp/McpStartupTracker";
 import type {TurnStartResponse} from "../../app-server/v2";
 import type {McpServer} from "@agentclientprotocol/sdk";
 
@@ -201,7 +201,7 @@ describe("ACP session close", () => {
 
         const newSessionPromise = codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: [mcpServer]});
         await vi.waitFor(() => {
-            expect(codexAcpClient.awaitMcpServerStartup).toHaveBeenCalledWith(["broken-mcp"], expect.any(Number));
+            expect(codexAcpClient.awaitMcpServerStartup).toHaveBeenCalledWith(["broken-mcp"], expect.any(Number), {threadId: "session-id", signal: expect.any(AbortSignal)});
         });
         fixture.clearAcpConnectionDump();
 
@@ -222,6 +222,66 @@ describe("ACP session close", () => {
 
         unsubscribe.resolve(undefined);
         await closePromise;
+    });
+
+    it("stops the MCP startup wait and forgets the startup states of the closed session", async () => {
+        const {fixture, codexAcpAgent, codexAcpClient} = await createSession({
+            mcpServers: [{name: "slow-mcp", command: "npx", args: ["slow"], env: []}],
+        });
+        const tracker = codexAcpClient.appServerClient.mcpStartup as unknown as {
+            waiters: unknown[],
+            states: Map<string, Map<string | null, unknown>>,
+        };
+        fixture.sendServerNotification({
+            method: "mcpServer/startupStatus/updated",
+            params: {threadId: sessionId, name: "slow-mcp", status: "starting", error: null, failureReason: null},
+        });
+        fixture.sendServerNotification({
+            method: "mcpServer/startupStatus/updated",
+            params: {threadId: null, name: "global-mcp", status: "ready", error: null, failureReason: null},
+        });
+        expect(tracker.waiters).toHaveLength(1);
+
+        await codexAcpAgent.closeSession({sessionId});
+        await waitForMicrotasks();
+
+        expect(tracker.waiters).toHaveLength(0);
+        expect([...tracker.states.keys()]).toEqual(["global-mcp"]);
+        expect(fixture.getAcpConnectionEvents([])).toEqual([]);
+    });
+
+    it("closes the sign-in of the startup report and reports nothing when the session closes", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        await codexAcpAgent.initialize({protocolVersion: 1, clientCapabilities: {elicitation: {url: {}}}});
+        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId,
+            currentModelId: "model-id[medium]",
+            models: [createTestModel()],
+            collaborationMode: "default",
+            currentServiceTier: null,
+            additionalDirectories: [],
+        });
+        vi.spyOn(codexAcpClient, "mcpServerOauthLogin").mockResolvedValue({authorizationUrl: "https://example.com/oauth"});
+        fixture.setElicitationResponse(new Promise(() => {}));
+        await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: [{name: "linear", command: "npx", args: [], env: []}]});
+        fixture.clearAcpConnectionDump();
+
+        fixture.sendServerNotification({
+            method: "mcpServer/startupStatus/updated",
+            params: {threadId: sessionId, name: "linear", status: "failed", error: "expired", failureReason: "reauthenticationRequired"},
+        });
+        await vi.waitFor(() => {
+            expect(fixture.getAcpConnectionEvents([]).map(event => event.method)).toEqual(["createElicitation"]);
+        });
+        await codexAcpAgent.closeSession({sessionId});
+        await waitForMicrotasks();
+
+        expect(fixture.getAcpConnectionEvents([]).map(event => event.method)).toEqual(["createElicitation", "completeElicitation"]);
     });
 
     it("rejects an in-flight resume that completes after close", async () => {
