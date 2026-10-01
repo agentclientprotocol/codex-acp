@@ -1805,7 +1805,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/available-commands-skills.json");
     });
 
-    it('sends the skill path only to AIR', async () => {
+    it('sends the skill path to AIR and not to other clients', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
 
@@ -1835,6 +1835,15 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             .find(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "available_commands_update");
         const skill = update?.args[0].update.availableCommands.find((command: acp.AvailableCommand) => command.name === "$build");
         expect(skill).toEqual({name: "$build", description: "Build the project", input: null});
+
+        // @ts-expect-error - exercising private helper
+        await codexAcpAgent.availableCommands.publish(createTestSessionState({sessionId: "air-session-id", cwd: "/workspace"}));
+
+        const airUpdate = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "available_commands_update")
+            .at(-1);
+        const airSkill = airUpdate?.args[0].update.availableCommands.find((command: acp.AvailableCommand) => command.name === "$build");
+        expect(airSkill?._meta).toEqual({jetbrains: {air: {version: 1, skillPath: "/workspace/.agents/skills/build/SKILL.md"}}});
     });
 
     it('publishes the commands again after a turn only when the skills changed', async () => {
