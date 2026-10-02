@@ -160,6 +160,30 @@ describe("paginated thread history", () => {
         }
     });
 
+    it("requests the next item page while the caller uses a page, and no page after the resume boundary", async () => {
+        const fixture = createCodexMockTestFixture();
+        const appServer = fixture.getCodexAppServerClient();
+        const turn = messageTurn("large");
+        turn.items = Array.from({length: 9}, (_, index) => ({...turn.items[1]!, id: `message-${index}`}));
+        const pages = vi.spyOn(appServer, "threadItemsList").mockImplementation(itemStore([turn], 3));
+        const requestedPages = () => pages.mock.calls.map(([params]) => `${params.sortDirection}:${params.cursor ?? "start"}`);
+
+        const reader = appServer.threadItemPages("history", {lastItemCursor: "item:message-4"})[Symbol.asyncIterator]();
+        const first = await reader.next();
+        // The caller holds the first page. The second page is already requested.
+        expect(requestedPages()).toEqual(["desc:item:message-4", "asc:start", "asc:asc:3"]);
+        const second = await reader.next();
+        const end = await reader.next();
+
+        expect([first.value, second.value].map(page => page?.map((item: ThreadItem) => item.id))).toEqual([
+            ["message-0", "message-1", "message-2"],
+            ["message-3", "message-4"],
+        ]);
+        expect(end.done).toBe(true);
+        // The second page holds the boundary item, so the third page is never requested.
+        expect(requestedPages()).toEqual(["desc:item:message-4", "asc:start", "asc:asc:3"]);
+    });
+
     it("pages the items of one large turn", async () => {
         const fixture = createCodexMockTestFixture();
         const appServer = fixture.getCodexAppServerClient();

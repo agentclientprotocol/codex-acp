@@ -665,7 +665,7 @@ export class CodexAppServerClient {
             cursor,
             limit: HISTORY_PAGE_ITEMS,
             sortDirection: "asc",
-        }));
+        }), page => page.some(entry => entry.item.id === lastItemId));
         for await (const page of pages) {
             const items = page.map(entry => entry.item);
             const lastIndex = items.findIndex(item => item.id === lastItemId);
@@ -1213,23 +1213,38 @@ function extractTurnRouting(notification: ServerNotification): { threadId: strin
 /**
  * The pages of a history list, from the first page. A page request fails when Codex does not answer
  * within {@link HISTORY_PAGE_TIMEOUT_MS}. The read fails when Codex returns a cursor a second time.
+ *
+ * With `endsHistory`, the next page is requested while the caller uses a page, so at most two pages are in memory.
+ * No page is requested after the page that `endsHistory` accepts. Without it, a page is requested when the caller asks.
  */
 async function* historyPages<T>(
     threadId: string,
     method: string,
     requestPage: (cursor: string | null) => Promise<{data: T[]; nextCursor: string | null}>,
+    endsHistory?: (page: T[]) => boolean,
 ): AsyncGenerator<T[]> {
+    type Page = {data: T[]; nextCursor: string | null};
+    const request = (cursor: string | null): Promise<Page> => {
+        const page = withHistoryTimeout(requestPage(cursor), method, threadId);
+        // A caller that stops early never reads the next page. Its failure is not an unhandled rejection.
+        page.catch(() => {});
+        return page;
+    };
     const seenCursors = new Set<string>();
     let cursor: string | null = null;
+    let next: Promise<Page> | null = null;
     do {
-        const page: {data: T[]; nextCursor: string | null} = await withHistoryTimeout(requestPage(cursor), method, threadId);
-        yield page.data;
+        const page: Page = await (next ?? request(cursor));
+        next = null;
         cursor = page.nextCursor;
-        if (cursor !== null) {
-            if (seenCursors.has(cursor)) {
-                throw new Error("Codex returned a repeated thread history cursor");
-            }
+        const repeated = cursor !== null && seenCursors.has(cursor);
+        if (cursor !== null && !repeated) {
             seenCursors.add(cursor);
+            if (endsHistory && !endsHistory(page.data)) next = request(cursor);
+        }
+        yield page.data;
+        if (repeated) {
+            throw new Error("Codex returned a repeated thread history cursor");
         }
     } while (cursor !== null);
 }

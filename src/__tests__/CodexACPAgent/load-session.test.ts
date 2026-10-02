@@ -592,12 +592,14 @@ describe("CodexACPAgent - loadSession", () => {
         appServer.threadItemsList = vi.fn()
             .mockResolvedValueOnce({data: [message("last")], nextCursor: null, backwardsCursor: null})
             .mockResolvedValueOnce({data: [message("first")], nextCursor: "page-2", backwardsCursor: null})
+            .mockResolvedValueOnce({data: [message("second")], nextCursor: "page-3", backwardsCursor: null})
+            // The adapter reads this page while it sends the page before it.
             .mockImplementationOnce(async () => {
                 closed = agent.closeSession({sessionId: "session-1"});
                 await closed;
-                return {data: [message("second")], nextCursor: "page-3", backwardsCursor: null};
+                return {data: [message("third")], nextCursor: "page-4", backwardsCursor: null};
             })
-            .mockResolvedValue({data: [message("more")], nextCursor: "page-3", backwardsCursor: null});
+            .mockResolvedValue({data: [message("more")], nextCursor: "page-4", backwardsCursor: null});
         const closeSpy = vi.spyOn(client, "closeSession").mockResolvedValue(undefined as never);
 
         await agent.initialize({protocolVersion: 1});
@@ -606,13 +608,14 @@ describe("CodexACPAgent - loadSession", () => {
         await closed;
 
         // The page that the close interrupted is the last page read. The load does not close the session again.
-        expect(appServer.threadItemsList).toHaveBeenCalledTimes(3);
+        expect(appServer.threadItemsList).toHaveBeenCalledTimes(4);
         expect(closeSpy).toHaveBeenCalledTimes(1);
         const texts = JSON.stringify(fixture.getAcpConnectionEvents([])
             .filter(event => event.method === "sessionUpdate")
             .map(event => event.args[0]));
         expect(texts).toContain("first");
         expect(texts).not.toContain("second");
+        expect(texts).not.toContain("third");
     });
 
     it("should not recover session mcp servers during loadSession when request omits them", async () => {
