@@ -1,8 +1,5 @@
-/**
- * The maximum length of a session title that the adapter publishes, the ellipsis included.
- * AIR ignores a longer agent title.
- */
-export const MAX_SESSION_TITLE_LENGTH = 160;
+/** The maximum length of a session title that the adapter publishes, the ellipsis included. */
+export const MAX_SESSION_TITLE_LENGTH = 256;
 
 /**
  * Collapses the whitespace of [title] and cuts it to [MAX_SESSION_TITLE_LENGTH] characters with a trailing ellipsis.

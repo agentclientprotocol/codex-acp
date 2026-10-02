@@ -19,7 +19,7 @@ describe("normalizeSessionTitle", () => {
         const title = normalizeSessionTitle("a".repeat(25_023));
 
         expect(title).toBe(`${"a".repeat(MAX_SESSION_TITLE_LENGTH - 1)}…`);
-        expect(title).toHaveLength(160);
+        expect(title).toHaveLength(MAX_SESSION_TITLE_LENGTH);
     });
 
     it("does not split a surrogate pair at the cut", () => {
