@@ -34,6 +34,7 @@ import type {
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
+import {normalizeSessionTitle} from "./SessionTitle";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
 import {
     COLLABORATION_MODE_CONFIG_ID,
@@ -2223,7 +2224,7 @@ export class CodexAcpServer {
         thread: Thread,
         firstItems: ThreadItem[],
     ): Promise<void> {
-        const explicitTitle = this.normalizeSessionTitle(thread.name);
+        const explicitTitle = normalizeSessionTitle(thread.name);
         if (explicitTitle) {
             sessionState.sessionTitle = explicitTitle;
             sessionState.sessionTitleSource = "explicit";
@@ -2236,14 +2237,14 @@ export class CodexAcpServer {
         }
 
         const historyTitle = this.findFirstUserMessageTitle(firstItems)
-            ?? this.normalizeSessionTitle(thread.preview);
+            ?? normalizeSessionTitle(thread.preview);
         await this.publishFallbackSessionTitle(sessionState, historyTitle);
     }
 
     private findFirstUserMessageTitle(items: ThreadItem[]): string | null {
         for (const item of items) {
             if (item.type !== "userMessage") continue;
-            const title = this.normalizeSessionTitle(item.content
+            const title = normalizeSessionTitle(item.content
                 .filter((input): input is Extract<UserInput, {type: "text"}> => input.type === "text")
                 .map(input => input.text)
                 .join(" "));
@@ -2310,15 +2311,10 @@ export class CodexAcpServer {
     }
 
     private createPromptFallbackTitle(prompt: acp.ContentBlock[]): string | null {
-        return this.normalizeSessionTitle(prompt
+        return normalizeSessionTitle(prompt
             .filter((block): block is Extract<acp.ContentBlock, {type: "text"}> => block.type === "text")
             .map(block => block.text)
             .join(" "));
-    }
-
-    private normalizeSessionTitle(title: string | null | undefined): string | null {
-        const normalized = title?.replace(/\s+/g, " ").trim() ?? "";
-        return normalized.length > 0 ? normalized : null;
     }
 
     private async createHistoryUpdates(item: ThreadItem, sessionState: SessionState): Promise<UpdateSessionEvent[]> {
