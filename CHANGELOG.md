@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.1.1...v2.2.0) (2026-10-02)
+
+
+### Features
+
+* show live MCP server status and reconnect from /mcp ([#579](https://github.com/agentclientprotocol/codex-acp/issues/579)) ([ca1d971](https://github.com/agentclientprotocol/codex-acp/commit/ca1d97173ad37b471d5a4e5847725a4657d34e29))
+
 ## [2.1.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.1.0...v2.1.1) (2026-10-01)
 
 
