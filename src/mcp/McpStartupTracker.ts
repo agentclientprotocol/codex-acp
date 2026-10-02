@@ -60,7 +60,7 @@ export class McpStartupTracker {
             states = new Map();
             this.states.set(params.name, states);
         }
-        states.set(params.threadId, {
+        states.set(params.threadId ?? null, {
             status: params.status,
             error: params.error,
             failureReason: params.failureReason ?? null,

@@ -68,6 +68,17 @@ describe("McpStartupTracker", () => {
         expect(stateThreads(tracker)).toEqual({fs: ["open-thread"], global: [null]});
     });
 
+    it("counts an event without a thread id as global", async () => {
+        const tracker = new McpStartupTracker();
+        const startup = tracker.await(["fs"], tracker.version(), {threadId: "thread-id"});
+
+        const {threadId: _, ...withoutThreadId} = startupStatus("fs", null);
+        tracker.record(withoutThreadId as Parameters<McpStartupTracker["record"]>[0]);
+
+        await expect(startup).resolves.toEqual({ready: ["fs"], failed: [], cancelled: []});
+        expect(stateThreads(tracker)).toEqual({fs: [null]});
+    });
+
     it("removes an aborted wait", async () => {
         const tracker = new McpStartupTracker();
         const abort = new AbortController();
