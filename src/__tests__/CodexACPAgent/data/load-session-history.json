@@ -27,7 +27,7 @@
             "name": "mcp",
             "description": "Show the status of the MCP servers, or reconnect them.",
             "input": {
-              "hint": "[reconnect [server]]"
+              "hint": "[reconnect]"
             }
           },
           {

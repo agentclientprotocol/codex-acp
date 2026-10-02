@@ -176,7 +176,7 @@ describe("/mcp command", () => {
         await runMcp(mockFixture, "/mcp restart");
 
         expect(list).not.toHaveBeenCalled();
-        expect(messageText(mockFixture)).toBe('Command "/mcp" accepts no arguments, or `reconnect [server]`.');
+        expect(messageText(mockFixture)).toBe('Command "/mcp" accepts no arguments, or `reconnect`.');
     });
 
     it("reloads the MCP configuration, waits for the startup, and shows the new status", async () => {
@@ -209,34 +209,6 @@ describe("/mcp command", () => {
         await runMcp(mockFixture, "/mcp reconnect");
 
         expect(messageText(mockFixture)).toContain("**Failed**\n- `fs`: spawn ENOENT");
-    });
-
-    it("explains that a reconnect of one server reloads all MCP servers", async () => {
-        const {mockFixture} = setupPromptTestSession({sessionId});
-        mockStatusPages(mockFixture, {data: [server({name: "fs"}), server({name: "docs"})], nextCursor: null});
-        const reload = vi.spyOn(mockFixture.getCodexAppServerClient(), "mcpServerReload").mockImplementation(async () => {
-            mockFixture.sendServerNotification(startupStatus("fs", "ready"));
-            mockFixture.sendServerNotification(startupStatus("docs", "ready"));
-            return {};
-        });
-
-        await runMcp(mockFixture, "/mcp reconnect fs");
-
-        expect(reload).toHaveBeenCalledTimes(1);
-        expect(messageText(mockFixture)).toContain(
-            "Codex cannot reconnect a single server. The reload applies to all MCP servers, not only `fs`.",
-        );
-    });
-
-    it("rejects an unknown server name and lists the known servers", async () => {
-        const {mockFixture} = setupPromptTestSession({sessionId});
-        mockStatusPages(mockFixture, {data: [server({name: "fs"}), server({name: "docs"})], nextCursor: null});
-        const reload = vi.spyOn(mockFixture.getCodexAppServerClient(), "mcpServerReload");
-
-        await runMcp(mockFixture, "/mcp reconnect github");
-
-        expect(reload).not.toHaveBeenCalled();
-        expect(messageText(mockFixture)).toBe("Unknown MCP server `github`. Known servers: `fs`, `docs`.");
     });
 
     it("does not reload when no MCP servers are configured", async () => {
@@ -422,16 +394,16 @@ describe("/mcp command", () => {
         expect(text).toContain("**Needs authentication**\n- `linear`: not signed in\n");
     });
 
-    it("rejects a reconnect with more than one server", async () => {
+    it("rejects a reconnect with an argument", async () => {
         const {mockFixture} = setupPromptTestSession({sessionId});
-        const list = mockStatusPages(mockFixture, {data: [server({name: "a"}), server({name: "b"})], nextCursor: null});
+        const list = mockStatusPages(mockFixture, {data: [server({name: "fs"})], nextCursor: null});
         const reload = vi.spyOn(mockFixture.getCodexAppServerClient(), "mcpServerReload");
 
-        await runMcp(mockFixture, "/mcp reconnect a b");
+        await runMcp(mockFixture, "/mcp reconnect fs");
 
         expect(list).not.toHaveBeenCalled();
         expect(reload).not.toHaveBeenCalled();
-        expect(messageText(mockFixture)).toBe('Command "/mcp" accepts no arguments, or `reconnect [server]`.');
+        expect(messageText(mockFixture)).toBe('Command "/mcp" accepts no arguments, or `reconnect`.');
     });
 
     it("accepts the subcommand in any case, as the command name", async () => {

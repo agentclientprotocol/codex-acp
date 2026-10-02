@@ -18,7 +18,7 @@ import {
 /** The maximum time that `/mcp reconnect` waits for the MCP servers to start. */
 export const MCP_RECONNECT_STARTUP_TIMEOUT_MS = 30_000;
 
-export const MCP_COMMAND_INPUT_HINT = "[reconnect [server]]";
+export const MCP_COMMAND_INPUT_HINT = "[reconnect]";
 
 /** The MCP servers of a session. `live` is false when the list has no live status of the session thread. */
 type McpServerList = {
@@ -33,7 +33,7 @@ type ReloadResult = {
     list: McpServerList;
 };
 
-/** Runs `/mcp` and `/mcp reconnect [server]`, and returns the markdown answer. */
+/** Runs `/mcp` and `/mcp reconnect`, and returns the markdown answer. */
 export class McpCommand {
     private readonly codexAcpClient: CodexAcpClient;
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
@@ -56,26 +56,19 @@ export class McpCommand {
             const list = await this.listServers(sessionState);
             return signal?.aborted ? null : formatStatus(list.servers, new Map());
         }
-        if (args[0]!.toLowerCase() === "reconnect" && args.length <= 2) {
-            return await this.reconnect(sessionState, args[1] ?? null, signal);
+        if (args.length === 1 && args[0]!.toLowerCase() === "reconnect") {
+            return await this.reconnect(sessionState, signal);
         }
-        return `Command "/mcp" accepts no arguments, or \`reconnect [server]\`.`;
+        return `Command "/mcp" accepts no arguments, or \`reconnect\`.`;
     }
 
-    private async reconnect(sessionState: SessionState, serverName: string | null, signal?: AbortSignal): Promise<string | null> {
+    private async reconnect(sessionState: SessionState, signal?: AbortSignal): Promise<string | null> {
         const before = await this.listServers(sessionState);
         if (before.servers.length === 0) {
             return NO_SERVERS_MESSAGE;
         }
-        if (serverName !== null && !before.servers.some(server => server.name === serverName)) {
-            const knownNames = before.servers.map(server => inlineCode(server.name)).join(", ");
-            return `Unknown MCP server ${inlineCode(serverName)}. Known servers: ${knownNames}.`;
-        }
 
         const notes: string[] = [];
-        if (serverName !== null) {
-            notes.push(`Codex cannot reconnect a single server. The reload applies to all MCP servers, not only ${inlineCode(serverName)}.`);
-        }
 
         let reload = await this.reloadAndWait(sessionState, signal);
         if (reload.error !== null) {

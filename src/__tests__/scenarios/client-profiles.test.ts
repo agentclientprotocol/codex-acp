@@ -124,7 +124,7 @@ describe("clients that are not AIR, compared with the baseline", () => {
         const mcp = {
             name: "mcp",
             description: "Show the status of the MCP servers, or reconnect them.",
-            input: {hint: "[reconnect [server]]"},
+            input: {hint: "[reconnect]"},
         };
         expect(withFeatureChanges([commands([status, baselineMcp])])).toEqual([commands([status, mcp])]);
         expect(withFeatureChanges([commands([status, otherMcp])])).toEqual([commands([status, otherMcp])]);

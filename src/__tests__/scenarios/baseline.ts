@@ -130,7 +130,7 @@ const BASELINE_MCP_COMMAND = {name: "mcp", description: "List configured Model C
 const MCP_COMMAND = {
     name: "mcp",
     description: "Show the status of the MCP servers, or reconnect them.",
-    input: {hint: "[reconnect [server]]"},
+    input: {hint: "[reconnect]"},
 };
 
 /**

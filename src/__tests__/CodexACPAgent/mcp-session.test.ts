@@ -42,7 +42,7 @@ describe('MCP session configuration', { timeout: 40_000 }, () => {
 
         const newSessionResponse = await codexAcpAgent.newSession({cwd: "", mcpServers: [mcpServer]});
         fixture.clearAcpConnectionDump();
-        await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "/mcp reconnect test-mcp"}]});
+        await codexAcpAgent.prompt({sessionId: newSessionResponse.sessionId, prompt: [{type: "text", text: "/mcp reconnect"}]});
         const transportDump = fixture.getAcpConnectionDump([]);
         expect(transportDump).contain("Reloaded the MCP configuration");
         expect(transportDump).not.contain("still starting");
