@@ -24,19 +24,30 @@ import type {McpStartupResult} from "../../CodexAppServerClient";
 describe('ACP server test', { timeout: 40_000 }, () => {
 
     let fixture: TestFixture;
+    let realFixtures: TestFixture[];
+    function createRealFixture(): TestFixture {
+        const created = createTestFixture();
+        realFixtures.push(created);
+        return created;
+    }
     beforeEach(() => {
-        fixture = createTestFixture();
+        realFixtures = [];
+        fixture = createRealFixture();
         vi.clearAllMocks();
     });
 
-    afterEach(() => {
-        vi.unstubAllEnvs();
+    afterEach(async () => {
+        try {
+            await Promise.all(realFixtures.map(fixture => fixture.dispose()));
+        } finally {
+            vi.unstubAllEnvs();
+        }
     });
 
     const ignoredFields = ["thread", "cwd", "id", "createdAt", "path", "threadId", "userAgent", "sandbox",  "conversationId", "origins", "supportedReasoningEfforts", "reasoningEffort", "model", "readOnlyAccess", "approvalsReviewer"];
 
     it('should throw error without authentication', async () => {
-        const authFixture = createTestFixture();
+        const authFixture = createRealFixture();
         const codexAcpAgent = authFixture.getCodexAcpAgent();
 
         await codexAcpAgent.initialize({protocolVersion: 1});
@@ -58,7 +69,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('should authenticate with key', async () => {
-        const keyFixture = createTestFixture();
+        const keyFixture = createRealFixture();
         const codexAcpAgent = keyFixture.getCodexAcpAgent();
 
         await codexAcpAgent.initialize({protocolVersion: 1});
@@ -133,7 +144,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('should authenticate with CODEX_API_KEY from the environment', async () => {
-        const envFixture = createTestFixture();
+        const envFixture = createRealFixture();
         const codexAcpAgent = envFixture.getCodexAcpAgent();
         vi.stubEnv(CODEX_API_KEY_ENV_VAR, "CODEX_ENV_TOKEN");
         vi.stubEnv(OPENAI_API_KEY_ENV_VAR, "OPENAI_ENV_TOKEN");
@@ -162,7 +173,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('should fall back to OPENAI_API_KEY from the environment', async () => {
-        const envFixture = createTestFixture();
+        const envFixture = createRealFixture();
         const codexAcpAgent = envFixture.getCodexAcpAgent();
         vi.stubEnv(CODEX_API_KEY_ENV_VAR, "");
         vi.stubEnv(OPENAI_API_KEY_ENV_VAR, "OPENAI_ENV_TOKEN");
@@ -191,7 +202,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('should report a clear error when the selected API key env var is missing', async () => {
-        const envFixture = createTestFixture();
+        const envFixture = createRealFixture();
         const codexAcpAgent = envFixture.getCodexAcpAgent();
         vi.stubEnv(CODEX_API_KEY_ENV_VAR, "");
         vi.stubEnv(OPENAI_API_KEY_ENV_VAR, "");
@@ -324,7 +335,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('should authenticate with a gateway', async () => {
-        const gatewayFixture = createTestFixture();
+        const gatewayFixture = createRealFixture();
         const codexAcpAgent = gatewayFixture.getCodexAcpAgent();
 
         await codexAcpAgent.initialize({
@@ -362,7 +373,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
     });
 
     it('should show account in /status for api key auth and hide it for gateway auth', async () => {
-        const authFixture = createTestFixture();
+        const authFixture = createRealFixture();
         const codexAcpAgent = authFixture.getCodexAcpAgent();
 
         await codexAcpAgent.initialize({
