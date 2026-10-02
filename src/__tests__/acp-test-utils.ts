@@ -281,6 +281,7 @@ export function createCodexMockTestFixture(
 ): CodexMockTestFixture {
     let unhandledNotificationHandler: ((notification: any) => void) | null = null;
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
+    const disposeListeners = new Set<() => void>();
 
     // State for controlling permission responses
     const permissionState: { response: RequestPermissionResponse | Promise<RequestPermissionResponse> } = {
@@ -299,6 +300,12 @@ export function createCodexMockTestFixture(
         onRequest: (type: { method: string }, handler: (params: unknown) => Promise<unknown>) => {
             requestHandlers.set(type.method, handler);
         },
+        // As in vscode-jsonrpc, `dispose()` fires `onDispose`. The exit of the Codex process disposes the connection.
+        onDispose: (listener: () => void) => {
+            disposeListeners.add(listener);
+            return {dispose: () => disposeListeners.delete(listener)};
+        },
+        dispose: () => [...disposeListeners].forEach(listener => listener()),
         end: () => {},
     } as unknown as MessageConnection;
 

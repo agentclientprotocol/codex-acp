@@ -37,6 +37,14 @@ export function isThreadNotLoadedError(err: unknown): boolean {
 }
 
 /**
+ * `mcpServerStatus/list` answers this for a thread id that is well-formed but
+ * unknown to the app-server process.
+ */
+export function isThreadNotFoundError(err: unknown): boolean {
+    return errorText(err).includes("thread not found:");
+}
+
+/**
  * Codex thread ids are UUIDs, so anything else is rejected before lookup. ACP
  * session ids are opaque strings, so a client is free to send an id Codex
  * cannot even parse.
@@ -86,4 +94,78 @@ export function threadActiveWriterRequestError(threadId: string, err: unknown): 
         {reason: "thread_active_writer", threadId, details: errorText(err)},
         "This Codex session is in use by another Codex client (the Codex app, the CLI or an IDE extension). Close the session there or quit that client, then try again.",
     );
+}
+
+/** The JSON-RPC code of an app-server internal error. */
+const INTERNAL_ERROR_CODE = -32603;
+
+/**
+ * The `account/read` errors of the app-server workspace routing discovery that say nothing about the login.
+ * The texts come from `WorkspaceRoutingError` in codex-rs/app-server `account_processor/workspace_routing.rs`
+ * (rust-v0.159.1). The discovery runs only for a ChatGPT login that the app-server already holds.
+ * It makes a network call to the ChatGPT backend (`accounts/check`).
+ *
+ * - `DiscoveryFailed` covers every failure of `accounts/check` except a 401: no connection, a network policy
+ *   denial, a bad JSON answer, and every other HTTP status. The text has no status, so a 403 of a deactivated
+ *   account or of a removed workspace also matches. The session then opens, and the first turn fails with
+ *   the real error of the backend.
+ * - `DiscoveryTimeout` is the 15 s limit of the whole read. It also covers the config load, the wait for
+ *   another discovery of the same account, and the token refresh after a 401. The config load is local and
+ *   fast, the other two are network calls.
+ *
+ * Two texts of the enum are not in the set. `DiscoveryCancelled` comes only from a closed semaphore, and the
+ * app-server never closes it. `Shutdown` comes from an app-server that stops, so it is not a network failure.
+ */
+const ACCOUNT_READ_UNAVAILABLE_MESSAGES = new Set([
+    "workspace routing discovery failed",
+    "workspace routing discovery timed out",
+]);
+
+/**
+ * The `account/read` errors that say that the login does not work, so the user must log in again.
+ * - `DiscoveryUnauthorized`: the backend refused the token with 401, also after a token refresh.
+ * - `MissingWorkspace`: the selected workspace of the login is not in the accounts of the user.
+ * - `MissingAccountId`: the ChatGPT login has no account id.
+ */
+const ACCOUNT_READ_AUTH_FAILURE_MESSAGES = new Set([
+    "workspace routing discovery unauthorized (401)",
+    "selected workspace missing from routing discovery",
+    "workspace routing requires a ChatGPT account id",
+]);
+
+/** The `account/read` error when another client logged in or out while the read ran (`AccountChanged`). */
+const ACCOUNT_READ_ACCOUNT_CHANGED_MESSAGE = "account changed during workspace routing discovery";
+
+/** The text of an app-server internal error, or `null` for another error. */
+function internalErrorText(err: unknown): string | null {
+    if (err === null || typeof err !== "object" || (err as {code?: unknown}).code !== INTERNAL_ERROR_CODE) {
+        return null;
+    }
+    return errorText(err);
+}
+
+/**
+ * True when `account/read` failed without an answer about the login, because the ChatGPT backend did not answer.
+ * Such a failure does not mean "not logged in". It also tells that the app-server holds a ChatGPT login,
+ * because only such a login runs the discovery. The app-server sends the error as an internal error with only
+ * the text of the routing error, so the match needs the code and the whole message. Another phrasing does not
+ * match, and the error then stays an error, as before.
+ */
+export function isAccountReadUnavailableError(err: unknown): boolean {
+    const text = internalErrorText(err);
+    return text !== null && ACCOUNT_READ_UNAVAILABLE_MESSAGES.has(text);
+}
+
+/**
+ * True when `account/read` failed because the login does not work, see {@link ACCOUNT_READ_AUTH_FAILURE_MESSAGES}.
+ * The agent then needs a new login, as for a missing login.
+ */
+export function isAccountReadAuthFailureError(err: unknown): boolean {
+    const text = internalErrorText(err);
+    return text !== null && ACCOUNT_READ_AUTH_FAILURE_MESSAGES.has(text);
+}
+
+/** True when `account/read` failed because another client logged in or out while the read ran. */
+export function isAccountReadAccountChangedError(err: unknown): boolean {
+    return internalErrorText(err) === ACCOUNT_READ_ACCOUNT_CHANGED_MESSAGE;
 }

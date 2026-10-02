@@ -123,6 +123,32 @@ function withBugFixes(scenario: string, messages: RecordedMessage[]): RecordedMe
     });
 }
 
+/** The `/mcp` command that the baseline sends in `available_commands_update`. */
+const BASELINE_MCP_COMMAND = {name: "mcp", description: "List configured Model Context Protocol (MCP) tools.", input: null};
+
+/** The `/mcp` command that shows the live status of the MCP servers and reconnects them. */
+const MCP_COMMAND = {
+    name: "mcp",
+    description: "Show the status of the MCP servers, or reconnect them.",
+    input: {hint: "[reconnect]"},
+};
+
+/**
+ * The feature changes of the compatibility rule that change the messages of the scenarios:
+ * the `/mcp` command has a new description and an input hint.
+ * Only a command that equals the baseline `/mcp` command changes.
+ */
+export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage[] {
+    const baselineMcp = JSON.stringify(canonical(BASELINE_MCP_COMMAND));
+    return messages.map(message => {
+        const update = sessionUpdate(message);
+        if (update === undefined || update["sessionUpdate"] !== "available_commands_update") return message;
+        const commands = (update["availableCommands"] as unknown[]).map(command =>
+            JSON.stringify(canonical(command)) === baselineMcp ? MCP_COMMAND : command);
+        return {...message, params: {...(message.params as Json), update: {...update, availableCommands: commands}}};
+    });
+}
+
 const OUTPUT_CHUNK_KEYS = ["terminal_output", "terminal_output_delta"];
 
 /**
@@ -187,7 +213,7 @@ export function withOutputOnce(messages: RecordedMessage[]): RecordedMessage[] {
 
 /** The baseline messages with the allowed differences applied, except the merge of the tool call reports. */
 export function expectedFromBaseline(scenario: string, baseline: RecordedMessage[]): RecordedMessage[] {
-    return withBugFixes(scenario, withoutAirOnlyMessages(baseline));
+    return withFeatureChanges(withBugFixes(scenario, withoutAirOnlyMessages(baseline)));
 }
 
 /**

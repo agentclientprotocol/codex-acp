@@ -9,6 +9,7 @@ import type {
 } from "./CodexAcpServer";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
+import {normalizeSessionTitle} from "./SessionTitle";
 import type {
     AccountRateLimitsUpdatedNotification,
     AccountUpdatedNotification,
@@ -528,14 +529,14 @@ export class CodexEventHandler {
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
             case "thread/name/updated":
-                this.sessionState.sessionTitle = notification.params.threadName ?? null;
+                this.sessionState.sessionTitle = normalizeSessionTitle(notification.params.threadName);
                 this.sessionState.sessionTitleSource = notification.params.threadName == null
                     ? "unset"
                     : "explicit";
                 this.sessionState.titleGen?.observeRename();
                 return {
                     sessionUpdate: "session_info_update",
-                    title: notification.params.threadName ?? null,
+                    title: this.sessionState.sessionTitle,
                 };
             case "thread/status/changed":
                 return this.createCodexSessionInfoUpdate({

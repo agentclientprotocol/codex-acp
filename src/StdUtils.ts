@@ -1,5 +1,5 @@
 import {StringDecoder} from "node:string_decoder";
-import {Readable, Writable} from "node:stream";
+import {finished, Readable, Writable} from "node:stream";
 import {Emitter} from "vscode-jsonrpc/node";
 import type {DataCallback, Disposable, Message, MessageReader, MessageWriter, PartialMessageInfo} from "vscode-jsonrpc/node";
 import * as acp from "@agentclientprotocol/sdk";
@@ -69,10 +69,48 @@ export function createJSONRPCReader(readable: Readable): MessageReader {
     }
 }
 
-export function createJsonStream(readable: Readable, writable: Writable){
-    const input = Writable.toWeb(writable);
-    const output = Readable.toWeb(readable) as ReadableStream<Uint8Array>;
-    return acp.ndJsonStream(input, output);
+export function createJsonStream(readable: Readable, writable: Writable): acp.Stream {
+    const writeLine = createLineWriter(writable);
+    // The SDK writes only its parse error replies to this stream.
+    const errorReplies = new WritableStream<Uint8Array>({write: chunk => writeLine(chunk)});
+    const input = Readable.toWeb(readable) as ReadableStream<Uint8Array>;
+    const stream = acp.ndJsonStream(errorReplies, input);
+    // The SDK encodes each message with TextEncoder and writes it through a web stream adapter.
+    // A string write to the Node stream encodes it in native code, and is faster for a large history.
+    const messages = new WritableStream<acp.AnyMessage>({
+        write: message => writeLine(JSON.stringify(message) + "\n"),
+    });
+    return {readable: stream.readable, writable: messages};
+}
+
+/**
+ * Returns a function that writes one line to `writable`, with the same contract as `Writable.toWeb`.
+ *
+ * The promise waits for `drain` when the stream buffer is full, so a large history keeps the backpressure.
+ * After an error, an end or a close of the stream, each write rejects, so the ACP connection closes.
+ */
+export function createLineWriter(writable: Writable): (line: string | Uint8Array) => Promise<void> {
+    let failure: Error | undefined;
+    const waiting = new Set<{resolve: () => void; reject: (error: Error) => void}>();
+    const stopWatching = finished(writable, error => {
+        stopWatching();
+        // `finished` no longer listens, so a later error must not become an uncaught exception.
+        writable.on("error", () => {});
+        writable.off("drain", onDrain);
+        failure = error ?? new Error("The output stream ended");
+        for (const waiter of waiting) waiter.reject(failure);
+        waiting.clear();
+    });
+    const onDrain = () => {
+        for (const waiter of waiting) waiter.resolve();
+        waiting.clear();
+    };
+    writable.on("drain", onDrain);
+    return line => {
+        if (failure !== undefined) return Promise.reject(failure);
+        if (writable.write(line)) return Promise.resolve();
+        return new Promise((resolve, reject) => waiting.add({resolve, reject}));
+    };
 }
 
 /**
@@ -110,5 +148,21 @@ class LineSplitter {
             this.parts = [];
             this.onLine(line);
         }
+    }
+}
+
+/**
+ * The value of `promise`, or `"pending"` when it does not settle within `ms`.
+ * A rejection before the timeout rejects. A later rejection is ignored.
+ */
+export async function settledWithin<T>(promise: Promise<T>, ms: number): Promise<T | "pending"> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<"pending">(resolve => {
+        timer = setTimeout(() => resolve("pending"), Math.max(0, ms));
+    });
+    try {
+        return await Promise.race([promise, timeout]);
+    } finally {
+        clearTimeout(timer);
     }
 }

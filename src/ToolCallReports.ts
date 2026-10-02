@@ -71,7 +71,11 @@ export class ToolCallReports {
     private recordStart(key: string, update: ToolCallReport): ToolCallReport {
         this.finishedToolCalls.delete(key);
         const fields = new Map<string, string>();
-        for (const [name, value] of reportedFields(update, this.compareMeta)) {
+        // A start with a terminal status, for example in a history replay, keeps only the small fields.
+        // `finish` drops the other fields at once, so the adapter does not stringify them.
+        const terminal = update.status === "completed" || update.status === "failed";
+        const only = terminal ? FINISHED_FIELDS : undefined;
+        for (const [name, value] of reportedFields(update, this.compareMeta && !terminal, only)) {
             fields.set(name, value);
         }
         this.openToolCalls.set(key, fields);
@@ -97,7 +101,9 @@ export class ToolCallReports {
     ): ToolCallReport | null {
         const prepared: Record<string, unknown> = {...update};
         const meta = isRecord(update._meta) ? {...update._meta} : undefined;
-        for (const [name, value] of reportedFields(update, this.compareMeta)) {
+        // With `recorded`, `fields` holds only the `recorded` fields and no `_meta` key.
+        // So no other field can be unchanged, and the adapter does not stringify it.
+        for (const [name, value] of reportedFields(update, this.compareMeta && recorded === undefined, recorded)) {
             if (fields.get(name) === value) {
                 if (name.startsWith(META_FIELD_PREFIX)) {
                     delete meta?.[name.slice(META_FIELD_PREFIX.length)];
@@ -154,10 +160,11 @@ export class ToolCallReports {
     }
 }
 
-function reportedFields(update: ToolCallReport, withMeta: boolean): Array<[string, string]> {
+function reportedFields(update: ToolCallReport, withMeta: boolean, only?: ReadonlySet<string>): Array<[string, string]> {
     const fields: Array<[string, string]> = [];
     const record = update as Record<string, unknown>;
     for (const name of COMPARED_FIELDS) {
+        if (only !== undefined && !only.has(name)) continue;
         const value = record[name];
         if (value !== undefined) fields.push([name, JSON.stringify(value)]);
     }

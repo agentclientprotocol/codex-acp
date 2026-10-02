@@ -138,7 +138,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart")
             .mockRejectedValue(new Error("stop after capturing config"));
 
@@ -175,7 +175,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart")
             .mockRejectedValue(new Error("stop after capturing config"));
 

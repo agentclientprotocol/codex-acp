@@ -58,6 +58,7 @@ Only these differences are allowed:
   ACP defines no merge for `_meta` keys, so the `_meta` of each report keeps every key that the adapter sent before.
 - Bug fixes: a unique MCP startup tool call id, the result of a dynamic tool in `content`,
   no output after a tool call ended, and a terminal status for a replayed image generation.
+- Feature changes for every client: the `/mcp` command has a new description and an input hint.
 - The client gets no AIR-only key.
   That is no `_meta.jetbrains.air` key and none of the earlier keys in [Removed keys](#removed-keys).
 - The output of a command arrives once, in the chunks or in `content`, as [Zed conventions](#zed-conventions) describe.
@@ -186,6 +187,7 @@ The adapter sends these keys only to AIR. "AIR" in the gate column means that th
 | `phase` | `agent_message_chunk._meta.jetbrains.air` | Codex message phase string | AIR |
 | `kind` | session mode `_meta.jetbrains.air` and `mode` config option value `_meta.jetbrains.air` | `standard`, `auto_review`, or `full_access` | AIR |
 | `commandAction` | available command `_meta.jetbrains.air` | command action object | AIR |
+| `skillPath` | available command `_meta.jetbrains.air` of a `$skill` command | OS-native absolute path of the skill's `SKILL.md`, not a URI | AIR |
 | `customAnswer` | `request_user_input` note field of an elicitation schema, `_meta.jetbrains.air` | `true` | AIR. The same field also carries the root key `_meta._askUserQuestionCustomAnswer: true`, because released AIR versions read only that key. |
 
 ## JetBrains shared keys
@@ -991,6 +993,9 @@ The adapter sends these keys only to AIR:
 - An available command can carry `_meta.jetbrains.air.commandAction`:
   - `/plan` has `{kind: "setConfigOption", configId, value, resetValue, presentation: "state"}`. It switches the collaboration mode to plan.
   - `/goal` has `{kind: "prefixPrompt", presentation: "state"}`.
+- A `$skill` command carries `_meta.jetbrains.air.skillPath`, the absolute path of its `SKILL.md` from `skills/list`.
+  The path is an OS-native absolute path, such as `C:\repo\SKILL.md` on Windows. It is not a URI.
+  AIR opens this file on a click on the skill chip.
 
 ## Removed keys
 

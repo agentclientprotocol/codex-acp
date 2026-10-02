@@ -27,8 +27,10 @@
           },
           {
             "name": "mcp",
-            "description": "List configured Model Context Protocol (MCP) tools.",
-            "input": null
+            "description": "Show the status of the MCP servers, or reconnect them.",
+            "input": {
+              "hint": "[reconnect]"
+            }
           },
           {
             "name": "skills",

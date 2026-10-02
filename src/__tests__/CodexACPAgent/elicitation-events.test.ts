@@ -734,7 +734,7 @@ describe('Elicitation Events', () => {
                 success: true,
             });
 
-            await expect((agent as any).authenticateMcpServer(sessionId, 'linear')).resolves.toBe(true);
+            await expect((agent as any).mcpServerSignIn(sessionId, 'linear')).resolves.toBe('signedIn');
 
             expect(oauthLogin).toHaveBeenCalledWith({name: 'linear', threadId: sessionId});
             const events = fixture.getAcpConnectionEvents([]);
