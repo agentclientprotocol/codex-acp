@@ -97,6 +97,24 @@ describe('CodexACPAgent - initialize', () => {
         });
     });
 
+    it('advertises the goal extension to a non-AIR client that opts in', async () => {
+        const result = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {goal: {}}},
+        });
+
+        expect(result._meta).toEqual({
+            steering: {
+                supported: true,
+            },
+            goal: {
+                version: 1,
+                controlMethod: "_session/goal",
+                actions: ["set", "pause", "resume", "clear"],
+            },
+        });
+    });
+
     it('should advertise gateway auth when the client opts into gateway auth metadata', async () => {
         const params: acp.InitializeRequest = {
             protocolVersion: acp.PROTOCOL_VERSION,
