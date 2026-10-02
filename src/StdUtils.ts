@@ -150,3 +150,19 @@ class LineSplitter {
         }
     }
 }
+
+/**
+ * The value of `promise`, or `"pending"` when it does not settle within `ms`.
+ * A rejection before the timeout rejects. A later rejection is ignored.
+ */
+export async function settledWithin<T>(promise: Promise<T>, ms: number): Promise<T | "pending"> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<"pending">(resolve => {
+        timer = setTimeout(() => resolve("pending"), Math.max(0, ms));
+    });
+    try {
+        return await Promise.race([promise, timeout]);
+    } finally {
+        clearTimeout(timer);
+    }
+}

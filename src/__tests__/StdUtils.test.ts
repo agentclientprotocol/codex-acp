@@ -1,6 +1,6 @@
 import {PassThrough, Writable} from "node:stream";
-import {describe, expect, it} from "vitest";
-import {createJsonStream, createJSONRPCReader, createLineWriter} from "../StdUtils";
+import {describe, expect, it, vi} from "vitest";
+import {createJsonStream, createJSONRPCReader, createLineWriter, settledWithin} from "../StdUtils";
 
 function read(chunks: Buffer[]): Promise<unknown[]> {
     const stream = new PassThrough();
@@ -159,5 +159,23 @@ describe("createJsonStream", () => {
 
         expect(await settled(waiting)).toBe("rejected: write EPIPE");
         expect(await settled(writer.write({jsonrpc: "2.0", id: 1, result: {}}))).toBe("rejected: write EPIPE");
+    });
+});
+
+describe("settledWithin", () => {
+    it("returns the value, or pending at the timeout, and rejects only before the timeout", async () => {
+        vi.useFakeTimers();
+        try {
+            await expect(settledWithin(Promise.resolve("done"), 100)).resolves.toBe("done");
+            await expect(settledWithin(Promise.reject(new Error("early")), 100)).rejects.toThrow("early");
+
+            let rejectLate!: (error: Error) => void;
+            const late = settledWithin(new Promise((_, reject) => { rejectLate = reject; }), 100);
+            await vi.advanceTimersByTimeAsync(100);
+            rejectLate(new Error("late"));
+            await expect(late).resolves.toBe("pending");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

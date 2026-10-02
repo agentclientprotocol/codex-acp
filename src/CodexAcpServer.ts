@@ -64,6 +64,7 @@ import {CodexCommands, GOAL_CONTINUATION_PROMPT} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
+import {settledWithin} from "./StdUtils";
 import type {ToolCallReports} from "./ToolCallReports";
 import {ToolCallReportingConnection} from "./ToolCallReportingConnection";
 import {
@@ -279,19 +280,6 @@ type KnownAccount = GetAccountResponse | "unavailable" | null;
 /** True for the `auth_required` error that {@link CodexAcpServer.checkAuthorization} throws. */
 function isAuthRequiredError(error: unknown): boolean {
     return error instanceof RequestError && error.code === RequestError.authRequired().code;
-}
-
-/** The value of `promise`, or `"pending"` when it does not settle within `ms`. A rejection rejects. */
-async function settledWithin<T>(promise: Promise<T>, ms: number): Promise<T | "pending"> {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<"pending">(resolve => {
-        timer = setTimeout(() => resolve("pending"), Math.max(0, ms));
-    });
-    try {
-        return await Promise.race([promise, timeout]);
-    } finally {
-        clearTimeout(timer);
-    }
 }
 
 interface PendingTurnStart {

@@ -3,6 +3,7 @@ import type {AcpClientConnection} from "../ACPSessionConnection";
 import type {CodexAcpClient} from "../CodexAcpClient";
 import {logger} from "../Logger";
 import {sanitizeMcpServerName} from "../McpServerName";
+import {settledWithin} from "../StdUtils";
 import {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
 import type {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 import {McpStartupReporter} from "../tool-calls/reporters/McpStartupReporter";
@@ -71,7 +72,7 @@ export class McpSessionStartup {
         }
         const awaitTimeoutMs = options.awaitTimeoutMs;
         if (awaitTimeoutMs !== undefined && awaitTimeoutMs > 0) {
-            const startupWait = raceMcpStartupTimeout(pendingStartup.startup, awaitTimeoutMs);
+            const startupWait = settledWithin(pendingStartup.startup, awaitTimeoutMs).then(() => undefined);
             // These handlers run before the caller resumes, because the caller awaits the same promise after them.
             void startupWait.then(
                 () => this.publishOrAbort(sessionId, pendingStartup, options.publish),
@@ -201,34 +202,4 @@ const MCP_STARTUP_AWAIT_TIMEOUT_META_KEY = "mcpStartupAwaitTimeoutMs";
 export function parseMcpStartupAwaitTimeoutMs(meta: Record<string, unknown> | null | undefined): number | undefined {
     const value = meta?.[MCP_STARTUP_AWAIT_TIMEOUT_META_KEY];
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-// Resolves once `startup` settles, or once `timeoutMs` elapses, whichever comes first.
-// A startup rejection is only propagated if it happens before the timeout.
-function raceMcpStartupTimeout(startup: Promise<McpStartupResult>, timeoutMs: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const timer = setTimeout(() => {
-            if (!settled) {
-                settled = true;
-                resolve();
-            }
-        }, timeoutMs);
-        startup.then(
-            () => {
-                if (!settled) {
-                    settled = true;
-                    clearTimeout(timer);
-                    resolve();
-                }
-            },
-            (err) => {
-                if (!settled) {
-                    settled = true;
-                    clearTimeout(timer);
-                    reject(err);
-                }
-            },
-        );
-    });
 }
