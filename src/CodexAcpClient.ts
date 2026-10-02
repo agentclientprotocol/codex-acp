@@ -107,6 +107,14 @@ export type CreateUrlElicitationRequest = Extract<acp.CreateElicitationRequest, 
  */
 export type UrlElicitationRequest = Omit<CreateUrlElicitationRequest, "mode" | "requestId">;
 
+/** The answer of {@link CodexAcpClient.readAuthRequirement}. */
+export interface AuthRequirement {
+    /** Whether the agent needs a login before it opens a session. */
+    required: boolean;
+    /** The account read that gave the answer, or `null` when the adapter did not read the account. */
+    account: GetAccountResponse | null;
+}
+
 export interface UrlElicitationRequester {
     elicitUrl(request: UrlElicitationRequest): Promise<acp.CreateElicitationResponse>;
     completeElicitation(): Promise<void>;
@@ -351,17 +359,18 @@ export class CodexAcpClient {
         await accountUpdatedPromise;
     }
 
-    async authRequired(): Promise<Boolean> {
+    /** Reads whether the agent needs a login, with the account read that gave the answer. */
+    async readAuthRequirement(): Promise<AuthRequirement> {
         if (this.gatewayConfig != null) {
             // The authentication is already in progress:
             // the gateway config is set during the authentication request processing.
             // We assume that custom model providers will handle authentication themselves,
             // so Codex will not need to require it.
-            return false;
+            return {required: false, account: null};
         }
 
-        const response = await this.codexClient.accountRead({refreshToken: false})
-        return response.requiresOpenaiAuth && !response.account;
+        const response = await this.codexClient.accountRead({refreshToken: false});
+        return {required: response.requiresOpenaiAuth && !response.account, account: response};
     }
 
     /**

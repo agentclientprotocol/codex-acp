@@ -57,7 +57,7 @@ function createFixture() {
     const fixture = createCodexMockTestFixture();
     const client = fixture.getCodexAcpClient();
     const appServer = fixture.getCodexAppServerClient();
-    client.authRequired = vi.fn().mockResolvedValue(false);
+    client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
     client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
     client.listSkills = vi.fn().mockResolvedValue({data: []});
     appServer.listModels = vi.fn().mockResolvedValue({data: [createTestModel()], nextCursor: null});

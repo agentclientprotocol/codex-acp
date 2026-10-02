@@ -25,6 +25,7 @@ import type {InputModality, ReasoningEffort, ServerNotification} from "./app-ser
 import type {
     Account,
     AccountUpdatedNotification,
+    GetAccountResponse,
     Model,
     ReasoningEffortOption,
     Thread,
@@ -543,10 +544,14 @@ export class CodexAcpServer {
         }
     }
 
-    async checkAuthorization(){
-        const authNeeded = await this.runWithProcessCheck(() => this.codexAcpClient.authRequired());
-        logger.log("Auth requirement checked", {authRequired: authNeeded});
-        if (authNeeded) {
+    /**
+     * Logs in with the default auth request, or throws `auth_required`, when the agent needs a login.
+     * Returns the account read that found no login needed, or `null` when there was no read or a login ran.
+     */
+    async checkAuthorization(): Promise<GetAccountResponse | null> {
+        const requirement = await this.runWithProcessCheck(() => this.codexAcpClient.readAuthRequirement());
+        logger.log("Auth requirement checked", {authRequired: requirement.required});
+        if (requirement.required) {
             if (this.defaultAuthRequest) {
                 logger.log("Authenticating with default auth request...", {
                     authRequest: this.defaultAuthRequest
@@ -557,7 +562,9 @@ export class CodexAcpServer {
                 logger.log("Authentication required but no default auth request provided, return to IDE");
                 throw RequestError.authRequired();
             }
+            return null;
         }
+        return requirement.account;
     }
 
     async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
@@ -789,7 +796,11 @@ export class CodexAcpServer {
         return [sessionId, sessionModelState, sessionModeState];
     }
 
-    private async getAuthStateForProvider(authProvider: string | null): Promise<ActiveAuthState> {
+    /** Reads the account of `authProvider` and pushes the auth status. `knownAccount` is an account read that the caller already has. */
+    private async getAuthStateForProvider(
+        authProvider: string | null,
+        knownAccount: GetAccountResponse | null = null,
+    ): Promise<ActiveAuthState> {
         if (!this.authProviderUsesOpenAiAccount(authProvider)) {
             await this.publishAuthStatus(authProvider, null);
             return {
@@ -797,7 +808,7 @@ export class CodexAcpServer {
                 authConfigured: true,
             };
         }
-        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        const accountResponse = knownAccount ?? await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
         await this.publishAuthStatus(authProvider, accountResponse.account);
         return {
             account: accountResponse.account,
@@ -1961,7 +1972,14 @@ export class CodexAcpServer {
         history: AsyncIterable<ThreadItem[]>;
     }> {
         const requestedSessionGeneration = this.beginSessionOpen(request.sessionId);
-        await this.checkAuthorization();
+        // The account read can wait for a network call of the app-server, so it runs while
+        // `thread/resume` reads the rollout. A login with the default auth request can change
+        // the provider of the resume, so the login keeps the order.
+        const authorization = this.defaultAuthRequest
+            ? Promise.resolve(await this.checkAuthorization())
+            : this.checkAuthorization();
+        // The load awaits the result below. This stops an unhandled rejection while `thread/resume` runs.
+        authorization.catch(() => {});
         const requestedMcpServers = request.mcpServers ?? [];
         const mcpServerStartupVersion = requestedMcpServers.length > 0
             ? this.codexAcpClient.getMcpServerStartupVersion()
@@ -1970,12 +1988,20 @@ export class CodexAcpServer {
         logger.log(`Load existing session: ${request.sessionId}...`);
         let subscribed = false;
         let sessionMetadata: SessionMetadataWithThread;
+        let knownAccount: GetAccountResponse | null;
         try {
-            sessionMetadata = await this.runWithProcessCheck(() =>
-                this.codexAcpClient.loadSession(request, () => {
-                    subscribed = true;
-                })
-            );
+            try {
+                sessionMetadata = await this.runWithProcessCheck(() =>
+                    this.codexAcpClient.loadSession(request, () => {
+                        subscribed = true;
+                    })
+                );
+            } catch (err) {
+                // The auth error comes first, as it did when the check ran before `thread/resume`.
+                await authorization;
+                throw err;
+            }
+            knownAccount = await authorization;
         } catch (err) {
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
@@ -1987,7 +2013,7 @@ export class CodexAcpServer {
         const authProvider = sessionMetadata.modelProvider ?? this.codexAcpClient.getModelProvider();
         let authState: ActiveAuthState;
         try {
-            authState = await this.getAuthStateForProvider(authProvider);
+            authState = await this.getAuthStateForProvider(authProvider, knownAccount);
         } catch (err) {
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);

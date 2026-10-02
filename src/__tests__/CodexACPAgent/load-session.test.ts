@@ -25,7 +25,7 @@ describe("CodexACPAgent - loadSession", () => {
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
-        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
@@ -58,7 +58,7 @@ describe("CodexACPAgent - loadSession", () => {
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
-        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
@@ -115,7 +115,7 @@ describe("CodexACPAgent - loadSession", () => {
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
-        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
@@ -302,7 +302,7 @@ describe("CodexACPAgent - loadSession", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
             account: null,
             requiresOpenaiAuth: false,
@@ -537,7 +537,7 @@ describe("CodexACPAgent - loadSession", () => {
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
-        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
@@ -572,7 +572,7 @@ describe("CodexACPAgent - loadSession", () => {
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
-        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
@@ -624,7 +624,7 @@ describe("CodexACPAgent - loadSession", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
             account: null,
             requiresOpenaiAuth: false,
@@ -716,7 +716,7 @@ describe("CodexACPAgent - loadSession", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
             account: null,
             requiresOpenaiAuth: false,

@@ -66,7 +66,7 @@ async function createPromptableSession(fixture: CodexMockTestFixture): Promise<s
     const agent = fixture.getCodexAcpAgent();
     const client = fixture.getCodexAcpClient();
     const model = createTestModel();
-    vi.spyOn(client, "authRequired").mockResolvedValue(false);
+    vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
     vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
     vi.spyOn(client, "newSession").mockResolvedValue({
         sessionId: "turn-session",

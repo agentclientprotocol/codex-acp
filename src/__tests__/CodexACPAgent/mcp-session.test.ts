@@ -17,7 +17,7 @@ describe('MCP session configuration', { timeout: 40_000 }, () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
 
-        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        fixture.getCodexAcpClient().readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         const mcpServer: McpServerStdio = {
             name: "test-mcp", command: "./node_modules/.bin/mcp-hello-world", args: ["example"], env: [{name:"example", value: "example"}]
         };
@@ -35,7 +35,7 @@ describe('MCP session configuration', { timeout: 40_000 }, () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
 
-        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        fixture.getCodexAcpClient().readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         const mcpServer: McpServerStdio = {
             name: "test-mcp", command: "./node_modules/.bin/mcp-hello-world", args: ["example"], env: [{name:"example", value: "example"}]
         };

@@ -54,7 +54,7 @@ url = "https://example.com/mcp"
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
 
-        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        fixture.getCodexAcpClient().readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
 
         const conflictingMcp: McpServerStdio = {
             name: "shared-mcp",
@@ -82,7 +82,7 @@ url = "https://example.com/mcp"
     it('should preserve a project url-based MCP when ACP passes a command-type MCP with the same name', async () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
-        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        fixture.getCodexAcpClient().readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
 
         const conflictingMcp = {
             name: "project-mcp",
@@ -102,7 +102,7 @@ url = "https://example.com/mcp"
         const codexAcpAgent = fixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({protocolVersion: 1});
 
-        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        fixture.getCodexAcpClient().readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
 
         const conflictingMcp: McpServerStdio = {
             name: "shared-mcp",

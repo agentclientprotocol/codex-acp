@@ -9,7 +9,7 @@ describe("ACP session fork", () => {
         const client = fixture.getCodexAcpClient();
         const model = createTestModel({id: "gpt-5"});
 
-        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         const forkSpy = vi.spyOn(client, "forkSession").mockResolvedValue({
@@ -51,7 +51,7 @@ describe("ACP session fork", () => {
         const client = fixture.getCodexAcpClient();
         const mcpStartup = deferred<McpStartupResult>();
 
-        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(client, "forkSession").mockResolvedValue({
@@ -91,7 +91,7 @@ describe("ACP session fork", () => {
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
 
-        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(client, "forkSession").mockResolvedValue({
