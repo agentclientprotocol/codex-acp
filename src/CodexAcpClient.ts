@@ -28,6 +28,7 @@ import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
+import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {normalizeSessionTitle} from "./SessionTitle";
 import type {
@@ -220,8 +221,7 @@ export class CodexAcpClient {
     }
 
     private async authenticateWithChatGpt(): Promise<Boolean> {
-        const accountResponse = await this.codexClient.accountRead({refreshToken: true});
-        if (accountResponse.account?.type === "chatgpt") {
+        if (await this.hasWorkingChatGptLogin()) {
             return true;
         }
         const loginCompletedPromise = this.awaitNextLoginCompleted();
@@ -233,9 +233,33 @@ export class CodexAcpClient {
         return result.success;
     }
 
+    /**
+     * Reads with a token refresh whether the agent has a ChatGPT login that a new login does not need to replace.
+     *
+     * An unavailable read answers `true`: only a ChatGPT login runs the routing discovery that failed, see
+     * {@link isAccountReadUnavailableError}, and a new login cannot run without the network either.
+     * A read that failed because the login does not work answers `false`, so a new login replaces it, see
+     * {@link isAccountReadAuthFailureError}. Another error rejects.
+     */
+    private async hasWorkingChatGptLogin(): Promise<boolean> {
+        try {
+            const accountResponse = await this.codexClient.accountRead({refreshToken: true});
+            return accountResponse.account?.type === "chatgpt";
+        } catch (error) {
+            if (isAccountReadUnavailableError(error)) {
+                logger.log("Account read unavailable, so the stored ChatGPT login stays", {error: String(error)});
+                return true;
+            }
+            if (isAccountReadAuthFailureError(error)) {
+                logger.log("The stored ChatGPT login does not work, so a new login starts", {error: String(error)});
+                return false;
+            }
+            throw error;
+        }
+    }
+
     private async authenticateWithChatGptDeviceCode(urlElicitationRequester?: UrlElicitationRequester): Promise<Boolean> {
-        const accountResponse = await this.codexClient.accountRead({refreshToken: true});
-        if (accountResponse.account?.type === "chatgpt") {
+        if (await this.hasWorkingChatGptLogin()) {
             return true;
         }
         if (!urlElicitationRequester) {

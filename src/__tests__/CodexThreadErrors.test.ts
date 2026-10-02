@@ -1,6 +1,8 @@
 import {describe, expect, it} from "vitest";
 import {ResponseError} from "vscode-jsonrpc/node";
 import {
+    isAccountReadAccountChangedError,
+    isAccountReadAuthFailureError,
     isAccountReadUnavailableError,
     isInvalidThreadIdError,
     isMissingRolloutError,
@@ -68,28 +70,50 @@ describe("CodexThreadErrors", () => {
     });
 });
 
-describe("isAccountReadUnavailableError", () => {
-    // The texts of the routing errors in codex-rs/app-server account_processor/workspace_routing.rs (rust-v0.159.1).
+describe("account read classifiers", () => {
+    // The texts of `WorkspaceRoutingError` in codex-rs/app-server account_processor/workspace_routing.rs (rust-v0.159.1).
     it.each([
         "workspace routing discovery failed",
         "workspace routing discovery timed out",
-        "workspace routing discovery cancelled",
-        "workspace routing discovery cancelled during shutdown",
-    ])("matches the internal error %s", message => {
-        expect(isAccountReadUnavailableError(new ResponseError(-32603, message))).toBe(true);
+    ])("treats the internal error %s as unavailable", message => {
+        const error = new ResponseError(-32603, message);
+        expect(isAccountReadUnavailableError(error)).toBe(true);
+        expect(isAccountReadAuthFailureError(error)).toBe(false);
+        expect(isAccountReadAccountChangedError(error)).toBe(false);
     });
 
     it.each([
-        // The backend refused the token, so this is an auth error.
-        new ResponseError(-32603, "workspace routing discovery unauthorized (401)"),
-        new ResponseError(-32603, "selected workspace missing from routing discovery"),
+        "workspace routing discovery unauthorized (401)",
+        "selected workspace missing from routing discovery",
+        "workspace routing requires a ChatGPT account id",
+    ])("treats the internal error %s as an auth failure", message => {
+        const error = new ResponseError(-32603, message);
+        expect(isAccountReadAuthFailureError(error)).toBe(true);
+        expect(isAccountReadUnavailableError(error)).toBe(false);
+    });
+
+    it("treats the account change as its own case", () => {
+        const error = new ResponseError(-32603, "account changed during workspace routing discovery");
+        expect(isAccountReadAccountChangedError(error)).toBe(true);
+        expect(isAccountReadUnavailableError(error)).toBe(false);
+        expect(isAccountReadAuthFailureError(error)).toBe(false);
+    });
+
+    it.each([
+        // The app-server never closes the semaphore of this error, and a shutdown is not a network failure.
+        new ResponseError(-32603, "workspace routing discovery cancelled"),
+        new ResponseError(-32603, "workspace routing discovery cancelled during shutdown"),
+        new ResponseError(-32603, "duplicate workspace in routing discovery"),
         new ResponseError(-32600, "workspace routing discovery failed"),
+        new ResponseError(-32600, "workspace routing discovery unauthorized (401)"),
         new ResponseError(-32603, "account/read: workspace routing discovery failed"),
         new Error("workspace routing discovery failed"),
-        "workspace routing discovery failed",
+        "workspace routing discovery unauthorized (401)",
         null,
         undefined,
-    ])("does not match %s", error => {
+    ])("does not classify %s", error => {
         expect(isAccountReadUnavailableError(error)).toBe(false);
+        expect(isAccountReadAuthFailureError(error)).toBe(false);
+        expect(isAccountReadAccountChangedError(error)).toBe(false);
     });
 });

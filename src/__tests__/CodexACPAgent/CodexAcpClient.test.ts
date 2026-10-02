@@ -96,10 +96,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         );
         expect(transportMethods).toEqual([
             "account/login/start",
+            // The auth state refresh of authenticate. No session is open, so it only pushes the auth status.
             "account/read",
             "account/updated",
-            // Reads the connection auth identity for the `auth/status_update` push
-            // when no session is open yet.
             // The auth check of session/new. The session open reuses this read, so it reads the account once.
             "account/read",
             "thread/start",
