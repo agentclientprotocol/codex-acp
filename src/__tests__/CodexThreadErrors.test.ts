@@ -1,5 +1,7 @@
 import {describe, expect, it} from "vitest";
+import {ResponseError} from "vscode-jsonrpc/node";
 import {
+    isAccountReadUnavailableError,
     isInvalidThreadIdError,
     isMissingRolloutError,
     isThreadActiveWriterError,
@@ -63,5 +65,31 @@ describe("CodexThreadErrors", () => {
         expect(isUnknownThreadError(missingRollout.message)).toBe(true);
         expect(isUnknownThreadError(undefined)).toBe(false);
         expect(isUnknownThreadError(null)).toBe(false);
+    });
+});
+
+describe("isAccountReadUnavailableError", () => {
+    // The texts of the routing errors in codex-rs/app-server account_processor/workspace_routing.rs (rust-v0.159.1).
+    it.each([
+        "workspace routing discovery failed",
+        "workspace routing discovery timed out",
+        "workspace routing discovery cancelled",
+        "workspace routing discovery cancelled during shutdown",
+    ])("matches the internal error %s", message => {
+        expect(isAccountReadUnavailableError(new ResponseError(-32603, message))).toBe(true);
+    });
+
+    it.each([
+        // The backend refused the token, so this is an auth error.
+        new ResponseError(-32603, "workspace routing discovery unauthorized (401)"),
+        new ResponseError(-32603, "selected workspace missing from routing discovery"),
+        new ResponseError(-32600, "workspace routing discovery failed"),
+        new ResponseError(-32603, "account/read: workspace routing discovery failed"),
+        new Error("workspace routing discovery failed"),
+        "workspace routing discovery failed",
+        null,
+        undefined,
+    ])("does not match %s", error => {
+        expect(isAccountReadUnavailableError(error)).toBe(false);
     });
 });

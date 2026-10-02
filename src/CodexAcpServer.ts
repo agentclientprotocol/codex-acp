@@ -10,6 +10,7 @@ import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 import {createMcpServerSignIn, type McpServerSignIn} from "./mcp/McpServerSignIn";
 import {getRequestedMcpServerNames, McpSessionStartup, parseMcpStartupAwaitTimeoutMs} from "./mcp/McpSessionStartup";
 import {
+    type AuthRequirement,
     CodexAcpClient,
     type JsonObject,
     OPENAI_PROVIDER_ID,
@@ -18,7 +19,7 @@ import {
     type UrlElicitationRequester
 } from "./CodexAcpClient";
 import {CodexAppServerClient} from "./CodexAppServerClient";
-import {isNoActiveTurnError} from "./CodexThreadErrors";
+import {isAccountReadUnavailableError, isNoActiveTurnError} from "./CodexThreadErrors";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
@@ -241,6 +242,14 @@ const TITLE_GENERATION_SETTLE_TIMEOUT_MS = 10_000;
  */
 const NO_ACTIVE_TURN_RETRY_DELAYS_MS = [25, 50, 100, 200, 400];
 
+/**
+ * How long after its start `session/load` waits for the account read when `thread/resume` is done.
+ * A read that needs no network call ends well before this time, so a missing login still fails the load.
+ * A slower read waits for the ChatGPT backend, which the app-server waits for up to 15 s.
+ * Such a read cannot find a missing login, so the load answers without it, see `applyLateAccountRead`.
+ */
+const ACCOUNT_READ_LOAD_GRACE_MS = 1_000;
+
 function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
     return clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY);
 }
@@ -252,6 +261,25 @@ function clientSupportsAgentFileChangeReports(capabilities: acp.ClientCapabiliti
 interface ActiveAuthState {
     account: Account | null;
     authConfigured: boolean;
+}
+
+/**
+ * An account read that a session open already has. `null` means no read.
+ * `"unavailable"` means a read that failed without an answer about the login, see {@link isAccountReadUnavailableError}.
+ */
+type KnownAccount = GetAccountResponse | "unavailable" | null;
+
+/** The value of `promise`, or `"pending"` when it does not settle within `ms`. A rejection rejects. */
+async function settledWithin<T>(promise: Promise<T>, ms: number): Promise<T | "pending"> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<"pending">(resolve => {
+        timer = setTimeout(() => resolve("pending"), Math.max(0, ms));
+    });
+    try {
+        return await Promise.race([promise, timeout]);
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 interface PendingTurnStart {
@@ -296,6 +324,8 @@ export class CodexAcpServer {
     private booleanConfigOptionsSupported: boolean;
     /** Last `authStatus` pushed to the client; used to suppress duplicates. */
     private currentAuthStatus: AuthStatus | null;
+    /** The account of the last account read of a session open. A session keeps it when a read is unavailable. */
+    private lastReadAccount: Account | null = null;
 
     private readonly sessions: Map<string, SessionState>;
     private readonly mcpSessionStartup: McpSessionStartup;
@@ -547,9 +577,19 @@ export class CodexAcpServer {
     /**
      * Logs in with the default auth request, or throws `auth_required`, when the agent needs a login.
      * Returns the account read that found no login needed, or `null` when there was no read or a login ran.
+     * Returns `"unavailable"` when the read failed without an answer about the login, see
+     * {@link isAccountReadUnavailableError}. The session open then continues: a missing login fails the
+     * resume or the first turn with the real error.
      */
-    async checkAuthorization(): Promise<GetAccountResponse | null> {
-        const requirement = await this.runWithProcessCheck(() => this.codexAcpClient.readAuthRequirement());
+    async checkAuthorization(): Promise<KnownAccount> {
+        let requirement: AuthRequirement;
+        try {
+            requirement = await this.runWithProcessCheck(() => this.codexAcpClient.readAuthRequirement());
+        } catch (error) {
+            if (!isAccountReadUnavailableError(error)) throw error;
+            logger.log("Account read unavailable, the login state is unknown", {error: String(error)});
+            return "unavailable";
+        }
         logger.log("Auth requirement checked", {authRequired: requirement.required});
         if (requirement.required) {
             if (this.defaultAuthRequest) {
@@ -666,7 +706,7 @@ export class CodexAcpServer {
         const requestedSessionGeneration = operation === "resume"
             ? this.beginSessionOpen(existingSessionRequest.sessionId)
             : null;
-        await this.checkAuthorization();
+        const knownAccount = await this.checkAuthorization();
         const requestedMcpServers = request.mcpServers ?? [];
         const mcpServerStartupVersion = requestedMcpServers.length > 0
             ? this.codexAcpClient.getMcpServerStartupVersion()
@@ -702,7 +742,7 @@ export class CodexAcpServer {
         const authProvider = sessionMetadata.modelProvider ?? this.codexAcpClient.getModelProvider();
         let authState: ActiveAuthState;
         try {
-            authState = await this.getAuthStateForProvider(authProvider);
+            authState = await this.getAuthStateForProvider(authProvider, knownAccount);
         } catch (err) {
             if (resumeSubscribed && requestedSessionGeneration !== null) {
                 await this.cleanupStaleSessionOpen(sessionId, requestedSessionGeneration);
@@ -796,10 +836,17 @@ export class CodexAcpServer {
         return [sessionId, sessionModelState, sessionModeState];
     }
 
-    /** Reads the account of `authProvider` and pushes the auth status. `knownAccount` is an account read that the caller already has. */
+    /**
+     * Reads the account of `authProvider` and pushes the auth status. `knownAccount` is an account read that
+     * the caller already has.
+     *
+     * When the read is unavailable, the adapter pushes no status, so the client keeps the last status.
+     * A `none` status would be false here: AIR shows a login request for it. The session keeps the
+     * account of the last read.
+     */
     private async getAuthStateForProvider(
         authProvider: string | null,
-        knownAccount: GetAccountResponse | null = null,
+        knownAccount: KnownAccount = null,
     ): Promise<ActiveAuthState> {
         if (!this.authProviderUsesOpenAiAccount(authProvider)) {
             await this.publishAuthStatus(authProvider, null);
@@ -808,12 +855,52 @@ export class CodexAcpServer {
                 authConfigured: true,
             };
         }
-        const accountResponse = knownAccount ?? await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        const accountResponse = knownAccount === "unavailable"
+            ? null
+            : knownAccount ?? await this.readAccountIfAvailable();
+        if (accountResponse === null) {
+            logger.log("No account read, so the auth status stays as it was");
+            return {
+                account: this.lastReadAccount,
+                authConfigured: true,
+            };
+        }
+        this.lastReadAccount = accountResponse.account;
         await this.publishAuthStatus(authProvider, accountResponse.account);
         return {
             account: accountResponse.account,
             authConfigured: accountResponse.account !== null || !accountResponse.requiresOpenaiAuth,
         };
+    }
+
+    /** Reads the account, or returns `null` when the read failed without an answer about the login. */
+    private async readAccountIfAvailable(): Promise<GetAccountResponse | null> {
+        try {
+            return await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        } catch (error) {
+            if (!isAccountReadUnavailableError(error)) throw error;
+            logger.log("Account read unavailable, the login state is unknown", {error: String(error)});
+            return null;
+        }
+    }
+
+    /**
+     * Applies the account read of a load that answered before the read ended.
+     * A read that found no login needed sets the account of the session and pushes the auth status.
+     * When the read found that the agent needs a login, a new read pushes the `none` status.
+     * The client then shows a login request, as it does for an `auth_required` error of the load.
+     */
+    private applyLateAccountRead(sessionState: SessionState, authorization: Promise<KnownAccount>): void {
+        void authorization.then(
+            async knownAccount => {
+                if (knownAccount === "unavailable") return;
+                const authState = await this.getAuthStateForProvider(sessionState.authProvider, knownAccount);
+                if (this.sessions.get(sessionState.sessionId) !== sessionState) return;
+                sessionState.account = authState.account;
+                sessionState.authConfigured = authState.authConfigured;
+            },
+            () => this.publishAuthStatusRead(),
+        ).catch(error => logger.log("Failed to apply a late account read", {error: String(error)}));
     }
 
     private authProviderUsesOpenAiAccount(authProvider: string | null): boolean {
@@ -1972,6 +2059,7 @@ export class CodexAcpServer {
         history: AsyncIterable<ThreadItem[]>;
     }> {
         const requestedSessionGeneration = this.beginSessionOpen(request.sessionId);
+        const loadStartedAt = performance.now();
         // The account read can wait for a network call of the app-server, so it runs while
         // `thread/resume` reads the rollout. A login with the default auth request can change
         // the provider of the resume, so the login keeps the order.
@@ -1988,7 +2076,7 @@ export class CodexAcpServer {
         logger.log(`Load existing session: ${request.sessionId}...`);
         let subscribed = false;
         let sessionMetadata: SessionMetadataWithThread;
-        let knownAccount: GetAccountResponse | null;
+        let knownAccount: KnownAccount | "pending";
         try {
             try {
                 sessionMetadata = await this.runWithProcessCheck(() =>
@@ -2001,7 +2089,7 @@ export class CodexAcpServer {
                 await authorization;
                 throw err;
             }
-            knownAccount = await authorization;
+            knownAccount = await settledWithin(authorization, ACCOUNT_READ_LOAD_GRACE_MS - (performance.now() - loadStartedAt));
         } catch (err) {
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
@@ -2013,7 +2101,7 @@ export class CodexAcpServer {
         const authProvider = sessionMetadata.modelProvider ?? this.codexAcpClient.getModelProvider();
         let authState: ActiveAuthState;
         try {
-            authState = await this.getAuthStateForProvider(authProvider, knownAccount);
+            authState = await this.getAuthStateForProvider(authProvider, knownAccount === "pending" ? "unavailable" : knownAccount);
         } catch (err) {
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
@@ -2070,6 +2158,9 @@ export class CodexAcpServer {
             () => sessionState.sessionTitleSource,
         );
         this.installSessionState(sessionState);
+        if (knownAccount === "pending") {
+            this.applyLateAccountRead(sessionState, authorization);
+        }
         subscribed = false;
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {

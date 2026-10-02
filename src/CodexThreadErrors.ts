@@ -95,3 +95,32 @@ export function threadActiveWriterRequestError(threadId: string, err: unknown): 
         "This Codex session is in use by another Codex client (the Codex app, the CLI or an IDE extension). Close the session there or quit that client, then try again.",
     );
 }
+
+/** The JSON-RPC code of an app-server internal error. */
+const INTERNAL_ERROR_CODE = -32603;
+
+/**
+ * The `account/read` errors of the app-server workspace routing discovery that say nothing about the login.
+ * The discovery runs only for a ChatGPT login that the app-server already holds. It makes a network call
+ * to the ChatGPT backend, so it fails when the backend is down or not reachable.
+ * `workspace routing discovery unauthorized (401)` is not in the set: the backend refused the token.
+ */
+const ACCOUNT_READ_UNAVAILABLE_MESSAGES = new Set([
+    "workspace routing discovery failed",
+    "workspace routing discovery timed out",
+    "workspace routing discovery cancelled",
+    "workspace routing discovery cancelled during shutdown",
+]);
+
+/**
+ * True when `account/read` failed without an answer about the login, because the ChatGPT backend did not answer.
+ * Such a failure does not mean "not logged in". The app-server sends it as an internal error with only the text
+ * of the routing error, so the match needs the code and the whole message. Another phrasing does not match,
+ * and the error then stays an error, as before.
+ */
+export function isAccountReadUnavailableError(err: unknown): boolean {
+    if (err === null || typeof err !== "object" || (err as {code?: unknown}).code !== INTERNAL_ERROR_CODE) {
+        return false;
+    }
+    return ACCOUNT_READ_UNAVAILABLE_MESSAGES.has(errorText(err));
+}

@@ -100,11 +100,11 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             "account/updated",
             // Reads the connection auth identity for the `auth/status_update` push
             // when no session is open yet.
+            // The auth check of session/new. The session open reuses this read, so it reads the account once.
             "account/read",
             "thread/start",
             "model/list",
             "thread/started",
-            "account/read",
             "skills/list",
         ]);
         expect(loginRequest).toEqual({
