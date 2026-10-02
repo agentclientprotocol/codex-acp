@@ -338,7 +338,11 @@ export class CodexEventHandler {
 
     async handleFailedTurn(turn: Turn): Promise<void> {
         if (turn.status === "failed" && this.isAuthenticationRequiredError(turn.error?.codexErrorInfo ?? null)) {
-            this.failure = RequestError.authRequired();
+            this.failure = turn.error === null
+                || !this.sessionState.authConfigured
+                || turn.error.message === "Sign in to continue"
+                ? RequestError.authRequired()
+                : RequestError.authRequired(this.createTurnErrorData(turn.error), turn.error.message);
             return;
         }
         const activeFailure = this.sessionState.sessionFailure;
@@ -935,7 +939,13 @@ export class CodexEventHandler {
         // or chat message would show the same refusal as a false session error.
         if (this.isAuthenticationRequiredError(error)) {
             if (!params.willRetry && params.turnId === this.sessionState.currentTurnId) {
-                this.failure = RequestError.authRequired();
+                this.failure = this.sessionState.authConfigured
+                    && params.error.message !== "Sign in to continue"
+                    ? RequestError.authRequired(
+                        this.createTurnErrorData(params.error),
+                        params.error.message,
+                    )
+                    : RequestError.authRequired();
             }
             return null;
         }
