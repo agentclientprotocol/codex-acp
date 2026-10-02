@@ -140,132 +140,34 @@ const MAX_ERROR_LENGTH = 160;
 
 const MAX_ERROR_SENTENCES = 2;
 
-/**
- * The maximum length of the raw error text that the cleanup reads.
- * The cleanup compares each segment with the earlier ones, so a long text without a limit blocks the event loop.
- */
+/** The maximum length of the raw error text that the cleanup reads. */
 const MAX_INPUT_LENGTH = 2000;
 
-const JSON_RPC_WRAPPER = /^json-rpc error$/i;
-
-const NUMERIC_CODE = /^-?\d+$/;
-
-/** The error chain segments that only wrap the real message. */
-const WRAPPER_SEGMENTS = [
-    /^tool discovery failed$/i,
-    /^mcp startup failed$/i,
-    /^handshaking with mcp server failed$/i,
-    JSON_RPC_WRAPPER,
-    /^startup error$/i,
-    /^error$/i,
-    /^mcp client for .+ failed to start$/i,
-    // A JSON-RPC error code. An HTTP status, such as `401`, stays.
-    /^-32\d{3}$/,
-];
-
-const IDENTIFIER = String.raw`[A-Za-z_]\w*`;
+/** An error chain segment that only wraps the real message. A JSON-RPC error code is also a wrapper. An HTTP status, such as `401`, stays. */
+const WRAPPER_SEGMENT = /^(?:tool discovery failed|mcp startup failed|handshaking with mcp server failed|json-rpc error|startup error|error|mcp client for .+ failed to start|-32\d{3})$/i;
 
 /**
- * Finds a Rust type path, such as `crate::module::Type`.
- * A path in a `Transport [` prefix can have two parts. Other paths need three parts or generic arguments.
- * Thus a short path of another language, such as the Perl `Foo::Bar`, and an IPv6 address, such as `fe80::abcd`, stay.
- * The lookbehind skips an IPv6 address in a URL, such as `[fe80::1]`, and a quoted value, such as `'a::b'`.
+ * A Rust type path with three or more parts, and the rest of its word, such as `[crate::module::Type<Inner>]`.
+ * A short path, such as the Perl `Foo::Bar`, and an IPv6 address, such as `fe80::abcd`, stay.
  */
-const TYPE_PATH = new RegExp(
-    String.raw`(?:\b[A-Z]\w*\s*\[\s*${IDENTIFIER}(?:::${IDENTIFIER})+`
-    + String.raw`|(?<![\w[:./'"\`-])${IDENTIFIER}(?:(?:::${IDENTIFIER}){2,}|::${IDENTIFIER}(?=<)))(?![\w:])`,
-    "g",
-);
-
-/** Splits the text after a sentence end, but not after `e.g.`, `i.e.`, `etc.`, or a list number, such as `Step 1.`. */
-const SENTENCE_END = /(?<=[.!?])(?<!\b(?:e\.g|i\.e|etc|\d{1,3})\.)\s+/i;
-
-/**
- * Removes the Rust type paths and their generic arguments.
- * When the generic arguments have no end, because Codex shortened the text, it removes the rest of the segment.
- */
-function removeTypePaths(segment: string): string {
-    let result = "";
-    let position = 0;
-    TYPE_PATH.lastIndex = 0;
-    for (let match = TYPE_PATH.exec(segment); match !== null; match = TYPE_PATH.exec(segment)) {
-        result += segment.slice(position, match.index);
-        let end = match.index + match[0].length;
-        if (segment[end] === "<") {
-            end = genericsEnd(segment, end);
-            if (end < 0) {
-                return result.trim();
-            }
-        }
-        if (match[0].includes("[")) {
-            const bracket = /^\s*]/.exec(segment.slice(end));
-            end += bracket === null ? 0 : bracket[0].length;
-        }
-        position = end;
-        TYPE_PATH.lastIndex = end;
-    }
-    return (result + segment.slice(position)).replace(/\s+/g, " ").trim();
-}
-
-/** Returns the index after the `>` that closes the `<` at `start`, or -1 when the text has no such `>`. */
-function genericsEnd(text: string, start: number): number {
-    let depth = 0;
-    for (let index = start; index < text.length; index++) {
-        if (text[index] === "<") {
-            depth++;
-        } else if (text[index] === ">") {
-            depth--;
-            if (depth === 0) {
-                return index + 1;
-            }
-        }
-    }
-    return -1;
-}
+const TYPE_PATH = /\S*\w::\w+::\S*/g;
 
 /**
  * Makes an MCP error chain short and readable, on one line.
- * It removes the wrapper segments, the numeric codes, the Rust type paths, and the repeated messages.
+ * It removes the wrapper segments and the Rust type paths.
  * It keeps at most two sentences and about 160 characters.
  * When nothing remains, it returns the shortened raw text.
  */
 export function cleanErrorMessage(text: string): string {
     const oneLine = text.slice(0, MAX_INPUT_LENGTH).replace(/\s+/g, " ").trim();
-    const kept: string[] = [];
-    let afterJsonRpcWrapper = false;
-    for (const rawSegment of oneLine.split(": ")) {
-        const segment = removeTypePaths(rawSegment.trim());
-        // The code after a `JSON-RPC error` wrapper is a JSON-RPC code, also outside the reserved range.
-        const isJsonRpcCode = afterJsonRpcWrapper && NUMERIC_CODE.test(segment);
-        afterJsonRpcWrapper = JSON_RPC_WRAPPER.test(segment);
-        if (segment.length === 0 || isJsonRpcCode || WRAPPER_SEGMENTS.some(pattern => pattern.test(segment))) {
-            continue;
-        }
-        const withoutEllipsis = withoutTrailingEllipsis(segment);
-        if (kept.some(previous => previous.startsWith(withoutEllipsis))) {
-            continue;
-        }
-        // A segment that repeats an earlier one and adds more text replaces it, such as `timeout: timeout after 30s`.
-        const repeated = kept.findIndex(previous => startsWithWords(segment, withoutTrailingEllipsis(previous)));
-        if (repeated >= 0) {
-            kept.splice(repeated, 1);
-        }
-        kept.push(segment);
-    }
-    if (kept.length === 0) {
+    const message = oneLine.split(": ")
+        .map(segment => segment.replace(TYPE_PATH, "").replace(/\s+/g, " ").trim())
+        .filter(segment => segment.length > 0 && !WRAPPER_SEGMENT.test(segment))
+        .join(": ");
+    if (message.length === 0) {
         return shorten(oneLine);
     }
-    const sentences = kept.join(": ").split(SENTENCE_END);
-    return shorten(sentences.slice(0, MAX_ERROR_SENTENCES).join(" "));
-}
-
-function withoutTrailingEllipsis(text: string): string {
-    return text.replace(/(?:\.\.\.|…)$/, "").trim();
-}
-
-/** True when `text` starts with `prefix` and the prefix ends at a word end. */
-function startsWithWords(text: string, prefix: string): boolean {
-    return prefix.length > 0 && text.startsWith(prefix) && (text.length === prefix.length || /\W/.test(text[prefix.length]!));
+    return shorten(message.split(/(?<=[.!?])\s+/).slice(0, MAX_ERROR_SENTENCES).join(" "));
 }
 
 /** Shortens the text by code points, so that the cut never splits a surrogate pair. */

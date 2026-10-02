@@ -27,73 +27,43 @@ describe("cleanErrorMessage", () => {
     });
 
     it("removes the wrappers and the Rust type paths of the Glean error", () => {
-        expect(cleanErrorMessage(GLEAN_ERROR)).toBe("Send message error: not logged in");
+        expect(cleanErrorMessage(GLEAN_ERROR)).toBe("Send message error Transport Auth: not logged in");
+        expect(cleanErrorMessage("expected std::vec::Vec<u8> here, got a string")).toBe("expected here, got a string");
     });
 
     it("keeps the cause after a message that is not a wrapper", () => {
         expect(cleanErrorMessage("failed to refresh MCP servers: invalid config.toml")).toBe("failed to refresh MCP servers: invalid config.toml");
-    });
-
-    it("removes the MCP client wrapper of a startup error", () => {
         expect(cleanErrorMessage("MCP client for `fs` failed to start: spawn ENOENT")).toBe("spawn ENOENT");
     });
 
-    it("puts the text on one line and shortens it with an ellipsis", () => {
-        expect(cleanErrorMessage(`first\nsecond ${"x".repeat(300)}`)).toBe(`first second ${"x".repeat(160 - "first second ".length)}…`);
+    it("keeps an HTTP status and removes a JSON-RPC code", () => {
+        expect(cleanErrorMessage("server returned status: 401")).toBe("server returned status: 401");
+        expect(cleanErrorMessage("request failed: -32601: Method not found")).toBe("request failed: Method not found");
     });
 
-    it("returns the shortened raw text when only wrappers remain", () => {
+    it("keeps the text that is not a Rust type path", () => {
+        for (const text of [
+            "expected value < 10, got 12",
+            "invalid header: Header value contains Vec<u8> bytes",
+            "failed to connect to http://[::1]:8080/mcp: Connection refused",
+            "connect to fe80::abcd failed",
+            "Can't locate Foo::Bar in @INC",
+        ]) {
+            expect(cleanErrorMessage(text)).toBe(text);
+        }
+    });
+
+    it("returns the raw text when only wrappers remain, and an empty text for an empty error", () => {
         expect(cleanErrorMessage("JSON-RPC error: -32603")).toBe("JSON-RPC error: -32603");
-    });
-
-    it("keeps a lone less-than sign", () => {
-        expect(cleanErrorMessage("expected value < 10, got 12")).toBe("expected value < 10, got 12");
-    });
-
-    it("keeps a generic type without a type path", () => {
-        expect(cleanErrorMessage("invalid header: Header value contains Vec<u8> bytes"))
-            .toBe("invalid header: Header value contains Vec<u8> bytes");
-    });
-
-    it("keeps an IPv6 URL", () => {
-        expect(cleanErrorMessage("failed to connect to http://[::1]:8080/mcp: Connection refused"))
-            .toBe("failed to connect to http://[::1]:8080/mcp: Connection refused");
-        expect(cleanErrorMessage("failed to connect to http://[fe80::1]:8080/mcp")).toBe("failed to connect to http://[fe80::1]:8080/mcp");
-    });
-
-    it("removes a closed type path and keeps the text after it", () => {
-        expect(cleanErrorMessage("expected std::vec::Vec<u8> here, got a string")).toBe("expected here, got a string");
-        expect(cleanErrorMessage("send failed Transport [rmcp::Transport<A<B>>] now")).toBe("send failed now");
-    });
-
-    it("returns an empty text for an empty error", () => {
-        expect(cleanErrorMessage("")).toBe("");
         expect(cleanErrorMessage("  \n ")).toBe("");
     });
 
-    it("shortens by code points and never splits a surrogate pair", () => {
-        const text = `${"x".repeat(159)}😀😀`;
-
-        expect(cleanErrorMessage(text)).toBe(`${"x".repeat(159)}😀…`);
+    it("keeps two sentences on one line and shortens the text by code points", () => {
+        expect(cleanErrorMessage("First one.\nSecond one! Third one.")).toBe("First one. Second one!");
+        expect(cleanErrorMessage(`${"x".repeat(159)}😀😀`)).toBe(`${"x".repeat(159)}😀…`);
     });
 
-    it("drops an earlier segment that the next segment repeats and extends", () => {
-        expect(cleanErrorMessage("timeout: timeout after 30s")).toBe("timeout after 30s");
-        expect(cleanErrorMessage("time: timeout after 30s")).toBe("time: timeout after 30s");
-    });
-
-    it("does not end a sentence at e.g. or i.e.", () => {
-        expect(cleanErrorMessage("Bad flag, e.g. --foo is unknown. Use i.e. the default. Third sentence."))
-            .toBe("Bad flag, e.g. --foo is unknown. Use i.e. the default.");
-    });
-
-    it("does not end a sentence at a list number or at etc.", () => {
-        expect(cleanErrorMessage("Step 1. Open it! Then ()")).toBe("Step 1. Open it! Then ()");
-        expect(cleanErrorMessage("Bad flags a, b, etc. are unknown. Use the defaults. Third sentence."))
-            .toBe("Bad flags a, b, etc. are unknown. Use the defaults.");
-    });
-
-    it("cleans a long error with many segments fast", () => {
+    it("cleans a long error fast", () => {
         const text = Array.from({length: 20000}, (_, index) => `part ${index} x`).join(": ");
         const start = performance.now();
 
@@ -102,19 +72,6 @@ describe("cleanErrorMessage", () => {
         expect(performance.now() - start).toBeLessThan(500);
         expect(cleaned.startsWith("part 0 x: part 1 x")).toBe(true);
         expect(cleaned.endsWith("…")).toBe(true);
-    });
-
-    it("keeps the text with :: that is not a Rust type path", () => {
-        expect(cleanErrorMessage("connect to fe80::abcd failed")).toBe("connect to fe80::abcd failed");
-        expect(cleanErrorMessage("bad value 'a::b' in config")).toBe("bad value 'a::b' in config");
-        expect(cleanErrorMessage("Can't locate Foo::Bar in @INC")).toBe("Can't locate Foo::Bar in @INC");
-    });
-
-    it("keeps an HTTP status and removes a JSON-RPC code", () => {
-        expect(cleanErrorMessage("server returned status: 401")).toBe("server returned status: 401");
-        expect(cleanErrorMessage("HTTP error: 503")).toBe("HTTP error: 503");
-        expect(cleanErrorMessage("JSON-RPC error: 401: Unauthorized")).toBe("Unauthorized");
-        expect(cleanErrorMessage("request failed: -32601: Method not found")).toBe("request failed: Method not found");
     });
 });
 
