@@ -50,7 +50,9 @@ describe('_session/steering', () => {
     });
 
     it('reports injected when the input joins the active turn', async () => {
-        const {mockFixture, sessionState, turnCompleted} = startActiveTurn();
+        const {mockFixture, sessionState, turnCompleted} = startActiveTurn({
+            supportedInputModalities: ["text", "image", "audio"],
+        });
         const turnSteerSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnSteer")
             .mockResolvedValue({turnId: "turn-id"});
 
@@ -64,13 +66,19 @@ describe('_session/steering', () => {
 
         await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
             sessionId: "session-id",
-            prompt: [{type: "text", text: "also keep backward compatibility"}],
+            prompt: [
+                {type: "text", text: "also keep backward compatibility"},
+                {type: "audio", mimeType: "audio/webm", data: "T2dnUw=="},
+            ],
         })).resolves.toEqual({outcome: "injected"});
 
         expect(turnSteerSpy).toHaveBeenCalledWith({
             threadId: "session-id",
             expectedTurnId: "turn-id",
-            input: [{type: "text", text: "also keep backward compatibility", text_elements: []}],
+            input: [
+                {type: "text", text: "also keep backward compatibility", text_elements: []},
+                {type: "audio", url: "data:audio/webm;base64,T2dnUw=="},
+            ],
         });
 
         turnCompleted.resolve({
@@ -229,6 +237,26 @@ describe('_session/steering', () => {
 
         expect(error).toBeInstanceOf(RequestError);
         expect((error as RequestError).data).toContain("does not support image input");
+        expect(turnSteerSpy).not.toHaveBeenCalled();
+    });
+
+    it('rejects audio input when the model does not support it', async () => {
+        const {mockFixture} = startActiveTurn({supportedInputModalities: ["text", "image"]});
+        const turnSteerSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnSteer");
+
+        const audio: acp.ContentBlock = {
+            type: "audio",
+            mimeType: "audio/wav",
+            data: "UklGRg==",
+        };
+
+        const error = await mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
+            sessionId: "session-id",
+            prompt: [audio],
+        }).catch((err: unknown) => err);
+
+        expect(error).toBeInstanceOf(RequestError);
+        expect((error as RequestError).data).toContain("does not support audio input");
         expect(turnSteerSpy).not.toHaveBeenCalled();
     });
 });
