@@ -13,8 +13,8 @@ import type {
     ApprovalHandler,
     CodexAppServerClient,
     ElicitationHandler,
-    McpStartupResult,
 } from "./CodexAppServerClient";
+import type {McpServerStartupWaitOptions, McpStartupResult} from "./mcp/McpStartupTracker";
 import open from "open";
 import type {Disposable} from "vscode-jsonrpc";
 import type {
@@ -28,12 +28,15 @@ import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
+import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
 import {sanitizeMcpServerName} from "./McpServerName";
+import {normalizeSessionTitle} from "./SessionTitle";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
+    ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
     McpServerOauthLoginCompletedNotification,
     McpServerOauthLoginParams,
@@ -61,7 +64,12 @@ import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUt
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
-import {isMissingRolloutError, isUnknownThreadError} from "./CodexThreadErrors";
+import {
+    isMissingRolloutError,
+    isThreadActiveWriterError,
+    isUnknownThreadError,
+    threadActiveWriterRequestError,
+} from "./CodexThreadErrors";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 
 /**
@@ -99,6 +107,14 @@ export type CreateUrlElicitationRequest = Extract<acp.CreateElicitationRequest, 
  * supplies the rest (`mode`, `requestId`) when sending `elicitation/create`.
  */
 export type UrlElicitationRequest = Omit<CreateUrlElicitationRequest, "mode" | "requestId">;
+
+/** The answer of {@link CodexAcpClient.readAuthRequirement}. */
+export interface AuthRequirement {
+    /** Whether the agent needs a login before it opens a session. */
+    required: boolean;
+    /** The account read that gave the answer, or `null` when the adapter did not read the account. */
+    account: GetAccountResponse | null;
+}
 
 export interface UrlElicitationRequester {
     elicitUrl(request: UrlElicitationRequest): Promise<acp.CreateElicitationResponse>;
@@ -205,8 +221,7 @@ export class CodexAcpClient {
     }
 
     private async authenticateWithChatGpt(): Promise<Boolean> {
-        const accountResponse = await this.codexClient.accountRead({refreshToken: true});
-        if (accountResponse.account?.type === "chatgpt") {
+        if (await this.hasWorkingChatGptLogin()) {
             return true;
         }
         const loginCompletedPromise = this.awaitNextLoginCompleted();
@@ -218,9 +233,33 @@ export class CodexAcpClient {
         return result.success;
     }
 
+    /**
+     * Reads with a token refresh whether the agent has a ChatGPT login that a new login does not need to replace.
+     *
+     * An unavailable read answers `true`: only a ChatGPT login runs the routing discovery that failed, see
+     * {@link isAccountReadUnavailableError}, and a new login cannot run without the network either.
+     * A read that failed because the login does not work answers `false`, so a new login replaces it, see
+     * {@link isAccountReadAuthFailureError}. Another error rejects.
+     */
+    private async hasWorkingChatGptLogin(): Promise<boolean> {
+        try {
+            const accountResponse = await this.codexClient.accountRead({refreshToken: true});
+            return accountResponse.account?.type === "chatgpt";
+        } catch (error) {
+            if (isAccountReadUnavailableError(error)) {
+                logger.log("Account read unavailable, so the stored ChatGPT login stays", {error: String(error)});
+                return true;
+            }
+            if (isAccountReadAuthFailureError(error)) {
+                logger.log("The stored ChatGPT login does not work, so a new login starts", {error: String(error)});
+                return false;
+            }
+            throw error;
+        }
+    }
+
     private async authenticateWithChatGptDeviceCode(urlElicitationRequester?: UrlElicitationRequester): Promise<Boolean> {
-        const accountResponse = await this.codexClient.accountRead({refreshToken: true});
-        if (accountResponse.account?.type === "chatgpt") {
+        if (await this.hasWorkingChatGptLogin()) {
             return true;
         }
         if (!urlElicitationRequester) {
@@ -344,17 +383,18 @@ export class CodexAcpClient {
         await accountUpdatedPromise;
     }
 
-    async authRequired(): Promise<Boolean> {
+    /** Reads whether the agent needs a login, with the account read that gave the answer. */
+    async readAuthRequirement(): Promise<AuthRequirement> {
         if (this.gatewayConfig != null) {
             // The authentication is already in progress:
             // the gateway config is set during the authentication request processing.
             // We assume that custom model providers will handle authentication themselves,
             // so Codex will not need to require it.
-            return false;
+            return {required: false, account: null};
         }
 
-        const response = await this.codexClient.accountRead({refreshToken: false})
-        return response.requiresOpenaiAuth && !response.account;
+        const response = await this.codexClient.accountRead({refreshToken: false});
+        return {required: response.requiresOpenaiAuth && !response.account, account: response};
     }
 
     /**
@@ -546,6 +586,9 @@ export class CodexAcpClient {
      * so `thread/read` answers for it and gives back the same state resume
      * would have. A thread id Codex has genuinely never seen fails both calls,
      * and the original resume error is what the caller sees.
+     *
+     * A thread that another Codex client has loaded fails with a clear ACP
+     * error instead of the raw Codex message.
      */
     private async resumeThread(params: ThreadResumeParams): Promise<ResumedThread> {
         try {
@@ -561,6 +604,7 @@ export class CodexAcpClient {
                 collaborationMode: response.collaborationMode?.mode ?? null,
             };
         } catch (err) {
+            if (isThreadActiveWriterError(err)) throw threadActiveWriterRequestError(params.threadId, err);
             if (!isMissingRolloutError(err)) throw err;
             let response;
             try {
@@ -828,12 +872,16 @@ export class CodexAcpClient {
         await this.codexClient.runGoalClear({threadId: sessionId});
     }
 
-    async awaitMcpServerStartup(serverNames: Array<string>, afterVersion: number): Promise<McpStartupResult> {
-        return await this.codexClient.awaitMcpServerStartup(serverNames, afterVersion);
+    async awaitMcpServerStartup(
+        serverNames: Array<string>,
+        afterVersion: number,
+        options: McpServerStartupWaitOptions,
+    ): Promise<McpStartupResult> {
+        return await this.codexClient.mcpStartup.await(serverNames, afterVersion, options);
     }
 
     getMcpServerStartupVersion(): number {
-        return this.codexClient.getMcpServerStartupVersion();
+        return this.codexClient.mcpStartup.version();
     }
 
     private async createSessionConfig(
@@ -1133,8 +1181,13 @@ export class CodexAcpClient {
         });
     }
 
-    async listMcpServers(): Promise<ListMcpServerStatusResponse> {
-        return this.codexClient.listMcpServerStatus({});
+    async listMcpServers(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
+        return this.codexClient.listMcpServerStatus(params);
+    }
+
+    /** Reloads the MCP configuration. Codex reconnects the servers of every loaded thread that failed, closed, or changed. */
+    async reloadMcpServers(): Promise<void> {
+        await this.codexClient.mcpServerReload();
     }
 
     async mcpServerOauthLogin(
@@ -1146,8 +1199,9 @@ export class CodexAcpClient {
     async awaitMcpServerOauthLoginCompleted(
         name: string,
         threadId: string,
+        signal?: AbortSignal,
     ): Promise<McpServerOauthLoginCompletedNotification> {
-        return await this.codexClient.awaitMcpServerOauthLoginCompleted(name, threadId);
+        return await this.codexClient.mcpOauthCompletions.await(name, threadId, signal);
     }
 
     async listSessions(request: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
@@ -1181,7 +1235,7 @@ export class CodexAcpClient {
         const mapThreadToSession = (thread: Thread) => ({
             sessionId: thread.id,
             cwd: thread.cwd,
-            title: (thread.name ?? thread.preview) || null,
+            title: normalizeSessionTitle(thread.name ?? thread.preview),
             updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
         });
 

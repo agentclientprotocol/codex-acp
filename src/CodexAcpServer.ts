@@ -1,11 +1,14 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
+import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./CodexAuthMethod";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
+import {createMcpServerSignIn, type McpServerSignIn} from "./mcp/McpServerSignIn";
+import {getRequestedMcpServerNames, McpSessionStartup, parseMcpStartupAwaitTimeoutMs} from "./mcp/McpSessionStartup";
 import {
     CodexAcpClient,
     type JsonObject,
@@ -14,14 +17,20 @@ import {
     type SessionMetadataWithThread,
     type UrlElicitationRequester
 } from "./CodexAcpClient";
-import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClient";
-import {isNoActiveTurnError} from "./CodexThreadErrors";
+import {CodexAppServerClient} from "./CodexAppServerClient";
+import {
+    isAccountReadAccountChangedError,
+    isAccountReadAuthFailureError,
+    isAccountReadUnavailableError,
+    isNoActiveTurnError,
+} from "./CodexThreadErrors";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
 import type {
     Account,
     AccountUpdatedNotification,
+    GetAccountResponse,
     Model,
     ReasoningEffortOption,
     Thread,
@@ -31,6 +40,7 @@ import type {
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
+import {normalizeSessionTitle} from "./SessionTitle";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
 import {
     COLLABORATION_MODE_CONFIG_ID,
@@ -54,7 +64,7 @@ import {CodexCommands, GOAL_CONTINUATION_PROMPT} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
-import {sanitizeMcpServerName} from "./McpServerName";
+import {settledWithin} from "./StdUtils";
 import type {ToolCallReports} from "./ToolCallReports";
 import {ToolCallReportingConnection} from "./ToolCallReportingConnection";
 import {
@@ -62,6 +72,7 @@ import {
     AUTH_STATUS_UPDATE_METHOD,
     authStatusCapability,
     type AuthStatus,
+    type AuthenticationStatusResponse,
     GOAL_CONTROL_ACTIONS,
     GOAL_CONTROL_METHOD,
     GOAL_EXTENSION_VERSION,
@@ -87,7 +98,6 @@ import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
 import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
 import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationReporter";
 import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
-import {McpStartupReporter} from "./tool-calls/reporters/McpStartupReporter";
 import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
 import {PlanReviewReporter} from "./tool-calls/reporters/PlanReviewReporter";
 import {SubagentActivityReporter} from "./tool-calls/reporters/SubagentActivityReporter";
@@ -125,6 +135,7 @@ import {
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import {nameFromAgentPath} from "./subagents/CodexAgentPath";
 import {
+    accountFromUpdated,
     fromAccount,
     fromAccountUpdated,
     gatewayStatus,
@@ -241,6 +252,15 @@ const TITLE_GENERATION_SETTLE_TIMEOUT_MS = 10_000;
  */
 const NO_ACTIVE_TURN_RETRY_DELAYS_MS = [25, 50, 100, 200, 400];
 
+/**
+ * How long after its start `session/load` waits for the account read when `thread/resume` is done or failed.
+ * A missing login needs no network call, so the read answers fast and the load fails with `auth_required`.
+ * A ChatGPT login waits for the ChatGPT backend, which the app-server waits for up to 15 s.
+ * Such a read can still find a login that does not work, for example a revoked token (401).
+ * The load then answers without the read, and `applyLateAccountRead` reports the answer later.
+ */
+const ACCOUNT_READ_LOAD_GRACE_MS = 1_000;
+
 function clientSupportsTypedSessionFailures(capabilities: acp.ClientCapabilities | null): boolean {
     return clientSupportsAirCapability(capabilities, AIR_SESSION_FAILURE_KEY);
 }
@@ -254,9 +274,15 @@ interface ActiveAuthState {
     authConfigured: boolean;
 }
 
-interface PendingMcpStartupSession {
-    requestedServers: Set<string>;
-    startup: Promise<McpStartupResult>;
+/**
+ * An account read that a session open already has. `null` means no read.
+ * `"unavailable"` means a read that failed without an answer about the login, see {@link isAccountReadUnavailableError}.
+ */
+type KnownAccount = GetAccountResponse | "unavailable" | null;
+
+/** True for the `auth_required` error that {@link CodexAcpServer.checkAuthorization} throws. */
+function isAuthRequiredError(error: unknown): boolean {
+    return error instanceof RequestError && error.code === RequestError.authRequired().code;
 }
 
 interface PendingTurnStart {
@@ -287,6 +313,7 @@ export interface CodexProcessState {
 export class CodexAcpServer {
     private codexAcpClient: CodexAcpClient;
     private readonly connection: AcpClientConnection;
+    private readonly mcpServerSignIn: McpServerSignIn;
     private readonly reportingConnection: ToolCallReportingConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
@@ -301,9 +328,19 @@ export class CodexAcpServer {
     private booleanConfigOptionsSupported: boolean;
     /** Last `authStatus` pushed to the client; used to suppress duplicates. */
     private currentAuthStatus: AuthStatus | null;
+    /**
+     * The last known account of the agent. Every successful account read and every `account/updated` sets it,
+     * and a logout clears it. A session open takes it when the account read is unavailable.
+     */
+    private lastReadAccount: Account | null = null;
+    /**
+     * Counts the calls of {@link setAuthStatus}, also the calls that push nothing. A late account read
+     * compares it with the value at the start of the read: a change means a newer status.
+     */
+    private authStatusVersion = 0;
 
     private readonly sessions: Map<string, SessionState>;
-    private readonly pendingMcpStartupSessions: Map<string, PendingMcpStartupSession>;
+    private readonly mcpSessionStartup: McpSessionStartup;
     private readonly pendingTurnStarts: Map<string, PendingTurnStart>;
     private readonly activePrompts: Map<string, ActivePrompt>;
     private readonly steeringQueues: Map<string, SteeringQueue>;
@@ -327,7 +364,6 @@ export class CodexAcpServer {
         pricingProvider: PricingProvider = new OpenAiPricingProvider(),
     ) {
         this.sessions = new Map();
-        this.pendingMcpStartupSessions = new Map();
         this.pendingTurnStarts = new Map();
         this.activePrompts = new Map();
         this.steeringQueues = new Map();
@@ -339,6 +375,19 @@ export class CodexAcpServer {
         this.reportingConnection = new ToolCallReportingConnection(connection);
         this.connection = this.reportingConnection.asClientConnection();
         this.codexAcpClient = codexAcpClient;
+        this.mcpServerSignIn = createMcpServerSignIn(
+            this.connection,
+            () => this.codexAcpClient,
+            () => this.clientCapabilities,
+        );
+        this.mcpSessionStartup = new McpSessionStartup(
+            this.connection,
+            () => this.codexAcpClient,
+            (operation) => this.runWithProcessCheck(operation),
+            this.mcpServerSignIn,
+            () => this.capabilities,
+            (sessionId) => this.sessions.has(sessionId) && !this.sessionIsClosing(sessionId),
+        );
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.codexProcessState = codexProcessState ?? null;
         this.captureStderr();
@@ -360,7 +409,8 @@ export class CodexAcpServer {
             this.connection,
             client,
             (operation) => this.runWithProcessCheck(operation),
-            () => this.refreshAuthState(null)
+            () => this.refreshAuthState(null),
+            this.mcpServerSignIn,
         );
     }
 
@@ -454,7 +504,7 @@ export class CodexAcpServer {
         }
         switch (methodRequest.method) {
             case "authentication/status":
-                return await this.runWithProcessCheck(() => this.codexAcpClient.getAuthenticationStatus());
+                return await this.readAuthenticationStatus();
             case "authentication/logout": {
                 await this.logout({});
                 return {};
@@ -538,10 +588,43 @@ export class CodexAcpServer {
         }
     }
 
-    async checkAuthorization(){
-        const authNeeded = await this.runWithProcessCheck(() => this.codexAcpClient.authRequired());
-        logger.log("Auth requirement checked", {authRequired: authNeeded});
-        if (authNeeded) {
+    /**
+     * Answers `authentication/status`.
+     *
+     * An unavailable account read still tells that the agent has a ChatGPT login, because only such a login
+     * runs the routing discovery, see {@link isAccountReadUnavailableError}. The answer is then `chat-gpt` with
+     * the email of the last known account, or an empty email. A read that failed because the login does not
+     * work answers `unauthenticated`, see {@link isAccountReadAuthFailureError}. Another error rejects.
+     */
+    private async readAuthenticationStatus(): Promise<AuthenticationStatusResponse> {
+        try {
+            return await this.runWithProcessCheck(() => this.codexAcpClient.getAuthenticationStatus());
+        } catch (error) {
+            if (isAccountReadUnavailableError(error)) {
+                logger.log("Account read unavailable, so the authentication status uses the last known account", {error: String(error)});
+                const account = this.lastReadAccount;
+                return {type: "chat-gpt", email: account?.type === "chatgpt" ? account.email ?? "" : ""};
+            }
+            if (isAccountReadAuthFailureError(error)) {
+                logger.log("The account read found that the agent needs a login", {error: String(error)});
+                return {type: "unauthenticated"};
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Logs in with the default auth request, or throws `auth_required`, when the agent needs a login.
+     * Returns the account read that found no login needed, or `null` when there was no read or a login ran.
+     * Returns `"unavailable"` when the read failed without an answer about the login, see
+     * {@link isAccountReadUnavailableError}. The session open then continues: a missing login fails the
+     * resume or the first turn with the real error.
+     */
+    async checkAuthorization(): Promise<KnownAccount> {
+        const requirement = await this.readAccountOrUnavailable(() => this.codexAcpClient.readAuthRequirement());
+        if (requirement === "unavailable") return "unavailable";
+        logger.log("Auth requirement checked", {authRequired: requirement.required});
+        if (requirement.required) {
             if (this.defaultAuthRequest) {
                 logger.log("Authenticating with default auth request...", {
                     authRequest: this.defaultAuthRequest
@@ -552,7 +635,9 @@ export class CodexAcpServer {
                 logger.log("Authentication required but no default auth request provided, return to IDE");
                 throw RequestError.authRequired();
             }
+            return null;
         }
+        return requirement.account;
     }
 
     async getOrCreateSession(request: acp.NewSessionRequest | acp.ResumeSessionRequest): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
@@ -654,7 +739,7 @@ export class CodexAcpServer {
         const requestedSessionGeneration = operation === "resume"
             ? this.beginSessionOpen(existingSessionRequest.sessionId)
             : null;
-        await this.checkAuthorization();
+        const knownAccount = await this.checkAuthorization();
         const requestedMcpServers = request.mcpServers ?? [];
         const mcpServerStartupVersion = requestedMcpServers.length > 0
             ? this.codexAcpClient.getMcpServerStartupVersion()
@@ -690,7 +775,7 @@ export class CodexAcpServer {
         const authProvider = sessionMetadata.modelProvider ?? this.codexAcpClient.getModelProvider();
         let authState: ActiveAuthState;
         try {
-            authState = await this.getAuthStateForProvider(authProvider);
+            authState = await this.getAuthStateForProvider(authProvider, knownAccount);
         } catch (err) {
             if (resumeSubscribed && requestedSessionGeneration !== null) {
                 await this.cleanupStaleSessionOpen(sessionId, requestedSessionGeneration);
@@ -758,30 +843,21 @@ export class CodexAcpServer {
 
         const canPublishSessionUpdates = operation !== "fork";
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
-            const pendingStartup = this.createPendingMcpStartupSession(
-                requestedMcpServers,
-                mcpServerStartupVersion,
-            );
-            if (canPublishSessionUpdates) {
-                this.pendingMcpStartupSessions.set(sessionId, pendingStartup);
-            }
-            const startupAwaitTimeoutMs = parseMcpStartupAwaitTimeoutMs(request._meta);
-            if (startupAwaitTimeoutMs !== undefined && startupAwaitTimeoutMs > 0) {
+            // A fork publishes no startup report, so nothing waits for the rest of the startup.
+            const startupWait = this.mcpSessionStartup.begin(sessionId, requestedMcpServers, mcpServerStartupVersion, {
+                publish: canPublishSessionUpdates,
+                awaitTimeoutMs: parseMcpStartupAwaitTimeoutMs(request._meta),
+            });
+            if (startupWait !== null) {
                 try {
-                    await raceMcpStartupTimeout(pendingStartup.startup, startupAwaitTimeoutMs);
+                    await startupWait;
                 } catch (err) {
-                    if (this.pendingMcpStartupSessions.get(sessionId) === pendingStartup) {
-                        this.pendingMcpStartupSessions.delete(sessionId);
-                    }
                     // The session is installed already. A failed wait closes it, so the client never gets a half-open session.
                     await this.closeSession({sessionId}).catch(closeError => {
                         logger.error(`Failed to close session ${sessionId} after a failed MCP startup wait`, closeError);
                     });
                     throw err;
                 }
-            }
-            if (canPublishSessionUpdates) {
-                this.publishMcpStartupStatusAsync(sessionId);
             }
         }
 
@@ -799,7 +875,18 @@ export class CodexAcpServer {
         return [sessionId, sessionModelState, sessionModeState];
     }
 
-    private async getAuthStateForProvider(authProvider: string | null): Promise<ActiveAuthState> {
+    /**
+     * Reads the account of `authProvider` and pushes the auth status. `knownAccount` is an account read that
+     * the caller already has.
+     *
+     * When the read is unavailable, the adapter pushes no status, so the client keeps the last status.
+     * A `none` status would be false here: AIR shows a login request for it. The session keeps the
+     * account of the last read.
+     */
+    private async getAuthStateForProvider(
+        authProvider: string | null,
+        knownAccount: KnownAccount = null,
+    ): Promise<ActiveAuthState> {
         if (!this.authProviderUsesOpenAiAccount(authProvider)) {
             await this.publishAuthStatus(authProvider, null);
             return {
@@ -807,12 +894,104 @@ export class CodexAcpServer {
                 authConfigured: true,
             };
         }
-        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        const accountResponse = knownAccount === "unavailable"
+            ? null
+            : knownAccount ?? await this.readAccountIfAvailable();
+        if (accountResponse === null) {
+            logger.log("No account read, so the auth status stays as it was");
+            return {
+                account: this.lastReadAccount,
+                authConfigured: true,
+            };
+        }
+        this.lastReadAccount = accountResponse.account;
         await this.publishAuthStatus(authProvider, accountResponse.account);
         return {
             account: accountResponse.account,
             authConfigured: accountResponse.account !== null || !accountResponse.requiresOpenaiAuth,
         };
+    }
+
+    /** Reads the account, or returns `null` when the read failed without an answer about the login. */
+    private async readAccountIfAvailable(): Promise<GetAccountResponse | null> {
+        const response = await this.readAccountOrUnavailable(() => this.codexAcpClient.getAccount());
+        return response === "unavailable" ? null : response;
+    }
+
+    /**
+     * Runs an account read, or returns `"unavailable"` when it failed without an answer about the login,
+     * see {@link isAccountReadUnavailableError}. Another error rejects.
+     */
+    private async readAccountOrUnavailable<T>(read: () => Promise<T>): Promise<T | "unavailable"> {
+        try {
+            return await this.runWithProcessCheck(read);
+        } catch (error) {
+            if (!isAccountReadUnavailableError(error)) throw error;
+            logger.log("Account read unavailable, the login state is unknown", {error: String(error)});
+            return "unavailable";
+        }
+    }
+
+    /**
+     * Applies the account read of a load that answered before the read ended.
+     *
+     * The answer applies only while the load is the current open of the session, and while no auth status
+     * was set after the read started. A close or a new load of the session makes the answer old.
+     * A newer status, from any source, also makes it old. An old answer changes nothing.
+     *
+     * - A read that found no login needed sets the account of the session and pushes the auth status.
+     * - A read that found that the agent needs a login (`auth_required`), or that failed because the login
+     *   does not work ({@link isAccountReadAuthFailureError}, for example a revoked token), clears the account
+     *   and pushes the `none` status at once, with no second read. The client then shows a login request,
+     *   as it does for an `auth_required` error of the load.
+     * - A read that failed because another client logged in or out reads the account again and pushes it.
+     * - An unavailable read changes nothing.
+     * - Any other failure is logged as an error and pushes nothing. It tells nothing sure about the login,
+     *   so the client keeps the last status.
+     */
+    private applyLateAccountRead(
+        sessionState: SessionState,
+        authorization: Promise<KnownAccount>,
+        authStatusVersionAtStart: number,
+    ): void {
+        const sessionIsCurrent = () => this.sessions.get(sessionState.sessionId) === sessionState;
+        const answerIsCurrent = () => {
+            if (!sessionIsCurrent()) {
+                logger.log("A late account read ended after the load closed, so it changes nothing", {sessionId: sessionState.sessionId});
+                return false;
+            }
+            if (this.authStatusVersion !== authStatusVersionAtStart) {
+                logger.log("A late account read ended after a newer auth status, so it changes nothing", {sessionId: sessionState.sessionId});
+                return false;
+            }
+            return true;
+        };
+        void authorization.then(
+            async knownAccount => {
+                if (knownAccount === "unavailable" || !answerIsCurrent()) return;
+                const authState = await this.getAuthStateForProvider(sessionState.authProvider, knownAccount);
+                if (!sessionIsCurrent()) return;
+                sessionState.account = authState.account;
+                sessionState.authConfigured = authState.authConfigured;
+            },
+            async error => {
+                if (!answerIsCurrent()) return;
+                if (isAuthRequiredError(error) || isAccountReadAuthFailureError(error)) {
+                    logger.log("A late account read found that the agent needs a login", {error: String(error)});
+                    this.lastReadAccount = null;
+                    sessionState.account = null;
+                    sessionState.authConfigured = false;
+                    await this.publishAuthStatus(sessionState.authProvider, null);
+                    return;
+                }
+                if (isAccountReadAccountChangedError(error)) {
+                    logger.log("The account changed while a late account read ran, so the adapter reads it again");
+                    await this.publishAuthStatusRead();
+                    return;
+                }
+                logger.error("A late account read failed, so the auth status stays as it was", error);
+            },
+        ).catch(error => logger.error("Failed to apply a late account read", error));
     }
 
     private authProviderUsesOpenAiAccount(authProvider: string | null): boolean {
@@ -990,7 +1169,8 @@ export class CodexAcpServer {
         } finally {
             if (this.getSessionGeneration(params.sessionId) === closeGeneration) {
                 this.sessions.delete(params.sessionId);
-                this.pendingMcpStartupSessions.delete(params.sessionId);
+                this.mcpSessionStartup.close(params.sessionId);
+                this.codexAcpClient.appServerClient.mcpStartup.forgetThread(params.sessionId);
                 this.pendingTurnStarts.delete(params.sessionId);
                 this.activePrompts.delete(params.sessionId);
                 this.steeringQueues.delete(params.sessionId);
@@ -1026,7 +1206,7 @@ export class CodexAcpServer {
 
     private hasLocalSession(sessionId: string): boolean {
         return this.sessions.has(sessionId)
-            || this.pendingMcpStartupSessions.has(sessionId)
+            || this.mcpSessionStartup.isPending(sessionId)
             || this.pendingTurnStarts.has(sessionId)
             || this.activePrompts.has(sessionId)
             || this.hasPendingSessionOpen(sessionId)
@@ -1293,12 +1473,22 @@ export class CodexAcpServer {
      * Never rejects: an unreadable source means "nothing to report", not an
      * error. The client then keeps showing the last pushed value, or "not
      * reported" when there was none.
+     *
+     * A read that failed because the login does not work, for example a revoked
+     * token, is an answer: it pushes the `none` status, see
+     * {@link isAccountReadAuthFailureError}.
      */
     private async publishAuthStatusRead(): Promise<void> {
         let authStatus: AuthStatus;
         try {
             authStatus = await this.readAgentAuthIdentity();
         } catch (error) {
+            if (isAccountReadAuthFailureError(error)) {
+                logger.log("The account read found that the agent needs a login", {error: String(error)});
+                this.lastReadAccount = null;
+                await this.setAuthStatus(fromAccount(null));
+                return;
+            }
             logger.log("Cannot determine auth status", {error: String(error)});
             return;
         }
@@ -1322,6 +1512,7 @@ export class CodexAcpServer {
             return gatewayStatus(modelProvider);
         }
         const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+        this.lastReadAccount = accountResponse.account;
         return fromAccount(accountResponse.account);
     }
 
@@ -1368,6 +1559,7 @@ export class CodexAcpServer {
      * invalidate; only a gateway logout or a provider change does.
      */
     private async applyAccountUpdated(notification: AccountUpdatedNotification): Promise<void> {
+        this.lastReadAccount = accountFromUpdated(notification, this.lastReadAccount);
         try {
             if (this.codexAcpClient.getAuthGatewayProviderName() !== null) {
                 return;
@@ -1400,6 +1592,7 @@ export class CodexAcpServer {
      * so no payload can equal it.
      */
     private async setAuthStatus(next: AuthStatus): Promise<void> {
+        this.authStatusVersion += 1;
         if (sameAuthStatus(this.currentAuthStatus, next)) {
             return;
         }
@@ -1982,7 +2175,17 @@ export class CodexAcpServer {
         history: AsyncIterable<ThreadItem[]>;
     }> {
         const requestedSessionGeneration = this.beginSessionOpen(request.sessionId);
-        await this.checkAuthorization();
+        const loadStartedAt = performance.now();
+        const graceLeftMs = () => ACCOUNT_READ_LOAD_GRACE_MS - (performance.now() - loadStartedAt);
+        const authStatusVersionAtStart = this.authStatusVersion;
+        // The account read can wait for a network call of the app-server, so it runs while
+        // `thread/resume` reads the rollout. A login with the default auth request can change
+        // the provider of the resume, so the login keeps the order.
+        const authorization = this.defaultAuthRequest
+            ? Promise.resolve(await this.checkAuthorization())
+            : this.checkAuthorization();
+        // The load awaits the result below. This stops an unhandled rejection while `thread/resume` runs.
+        authorization.catch(() => {});
         const requestedMcpServers = request.mcpServers ?? [];
         const mcpServerStartupVersion = requestedMcpServers.length > 0
             ? this.codexAcpClient.getMcpServerStartupVersion()
@@ -1991,12 +2194,21 @@ export class CodexAcpServer {
         logger.log(`Load existing session: ${request.sessionId}...`);
         let subscribed = false;
         let sessionMetadata: SessionMetadataWithThread;
+        let knownAccount: KnownAccount | "pending";
         try {
-            sessionMetadata = await this.runWithProcessCheck(() =>
-                this.codexAcpClient.loadSession(request, () => {
-                    subscribed = true;
-                })
-            );
+            try {
+                sessionMetadata = await this.runWithProcessCheck(() =>
+                    this.codexAcpClient.loadSession(request, () => {
+                        subscribed = true;
+                    })
+                );
+            } catch (err) {
+                // An auth error that is known within the grace time comes first, as it did when the check ran
+                // before `thread/resume`. A read that is still pending does not hold back the resume error.
+                await settledWithin(authorization, graceLeftMs());
+                throw err;
+            }
+            knownAccount = await settledWithin(authorization, graceLeftMs());
         } catch (err) {
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
@@ -2008,7 +2220,7 @@ export class CodexAcpServer {
         const authProvider = sessionMetadata.modelProvider ?? this.codexAcpClient.getModelProvider();
         let authState: ActiveAuthState;
         try {
-            authState = await this.getAuthStateForProvider(authProvider);
+            authState = await this.getAuthStateForProvider(authProvider, knownAccount === "pending" ? "unavailable" : knownAccount);
         } catch (err) {
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
@@ -2067,14 +2279,13 @@ export class CodexAcpServer {
             () => sessionState.sessionTitleSource,
         );
         this.installSessionState(sessionState);
+        if (knownAccount === "pending") {
+            this.applyLateAccountRead(sessionState, authorization, authStatusVersionAtStart);
+        }
         subscribed = false;
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
-            this.pendingMcpStartupSessions.set(
-                sessionId,
-                this.createPendingMcpStartupSession(requestedMcpServers, mcpServerStartupVersion),
-            );
-            this.publishMcpStartupStatusAsync(sessionId);
+            this.mcpSessionStartup.begin(sessionId, requestedMcpServers, mcpServerStartupVersion, {publish: true});
         }
 
         await this.publishAvailableCommands(sessionState, requestedSessionGeneration);
@@ -2251,7 +2462,7 @@ export class CodexAcpServer {
         thread: Thread,
         firstItems: ThreadItem[],
     ): Promise<void> {
-        const explicitTitle = this.normalizeSessionTitle(thread.name);
+        const explicitTitle = normalizeSessionTitle(thread.name);
         if (explicitTitle) {
             sessionState.sessionTitle = explicitTitle;
             sessionState.sessionTitleSource = "explicit";
@@ -2264,14 +2475,14 @@ export class CodexAcpServer {
         }
 
         const historyTitle = this.findFirstUserMessageTitle(firstItems)
-            ?? this.normalizeSessionTitle(thread.preview);
+            ?? normalizeSessionTitle(thread.preview);
         await this.publishFallbackSessionTitle(sessionState, historyTitle);
     }
 
     private findFirstUserMessageTitle(items: ThreadItem[]): string | null {
         for (const item of items) {
             if (item.type !== "userMessage") continue;
-            const title = this.normalizeSessionTitle(item.content
+            const title = normalizeSessionTitle(item.content
                 .filter((input): input is Extract<UserInput, {type: "text"}> => input.type === "text")
                 .map(input => input.text)
                 .join(" "));
@@ -2338,15 +2549,10 @@ export class CodexAcpServer {
     }
 
     private createPromptFallbackTitle(prompt: acp.ContentBlock[]): string | null {
-        return this.normalizeSessionTitle(prompt
+        return normalizeSessionTitle(prompt
             .filter((block): block is Extract<acp.ContentBlock, {type: "text"}> => block.type === "text")
             .map(block => block.text)
             .join(" "));
-    }
-
-    private normalizeSessionTitle(title: string | null | undefined): string | null {
-        const normalized = title?.replace(/\s+/g, " ").trim() ?? "";
-        return normalized.length > 0 ? normalized : null;
     }
 
     private async createHistoryUpdates(item: ThreadItem, sessionState: SessionState): Promise<UpdateSessionEvent[]> {
@@ -2403,8 +2609,17 @@ export class CodexAcpServer {
     private createUserMessageUpdates(item: ThreadItem & { type: "userMessage" }): UpdateSessionEvent[] {
         const updates: UpdateSessionEvent[] = [];
         const messageId = item.id;
-        for (const input of item.content) {
-            const blocks = this.userInputToContentBlocks(input);
+        const contentBlocks = item.content.map(input => this.userInputToContentBlocks(input));
+        const attachmentUris = new Set(contentBlocks.flatMap((blocks, index) =>
+            item.content[index]?.type === "text"
+                ? blocks.flatMap(block => block.type === "resource_link" ? [block.uri] : [])
+                : []));
+        for (const [index, input] of item.content.entries()) {
+            const nativePath = input.type === "localImage" || input.type === "localAudio" || input.type === "mention"
+                ? input.path
+                : (input.type === "image" || input.type === "audio") && "url" in input ? input.url : null;
+            if (nativePath !== null && attachmentUris.has(attachmentFileUri(nativePath) ?? "")) continue;
+            const blocks = contentBlocks[index]!;
             for (const block of blocks) {
                 updates.push(createUserMessageChunk(block, messageId));
             }
@@ -2454,7 +2669,8 @@ export class CodexAcpServer {
     private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
         switch (input.type) {
             case "text":
-                return input.text.length > 0 ? [{ type: "text", text: input.text }] : [];
+                return desktopAttachmentHistory(input.text)
+                    ?? (input.text.length > 0 ? [{ type: "text", text: input.text }] : []);
             case "image":
                 return [{
                     type: "text",
@@ -2462,17 +2678,20 @@ export class CodexAcpServer {
                         ? this.formatUriAsLink("image", input.url)
                         : `image:${input.fileId}`,
                 }];
-            case "localImage": {
-                const uri = input.path.startsWith("file://") ? input.path : `file://${input.path}`;
-                return [{ type: "text", text: this.formatUriAsLink(null, uri) }];
+            case "localImage":
+            case "localAudio":
+            case "mention": {
+                const uri = attachmentFileUri(input.path);
+                const fileName = input.path.split(/[\\/]/).pop() || input.type;
+                const name = input.type === "mention" && input.name.trim().length > 0 ? input.name : fileName;
+                return uri !== null
+                    ? [{type: "resource_link", name, uri}]
+                    : [{type: "text", text: this.formatUriAsLink(name, input.path)}];
             }
             case "skill":
                 return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
             case "audio":
-            case "localAudio":
-            case "mention":
-                // These inputs are not currently represented in ACP history replay.
-                return [];
+                return [{type: "text", text: this.formatUriAsLink("audio", input.url)}];
         }
     }
 
@@ -2522,122 +2741,6 @@ export class CodexAcpServer {
         // explicitly provided mcpServers in the request.
         logger.log("Skipping MCP server recovery for load/resume without explicit mcpServers");
         return [];
-    }
-
-    private publishMcpStartupStatusAsync(sessionId: string): void {
-        void this.doPublishMcpStartupStatus(sessionId);
-    }
-
-    private createPendingMcpStartupSession(
-        mcpServers: Array<acp.McpServer>,
-        afterVersion: number,
-    ): PendingMcpStartupSession {
-        const requestedServers = new Set(getRequestedMcpServerNames(mcpServers));
-        return {
-            requestedServers,
-            startup: this.runWithProcessCheck(() =>
-                this.codexAcpClient.awaitMcpServerStartup(Array.from(requestedServers), afterVersion)
-            ),
-        };
-    }
-
-    private async doPublishMcpStartupStatus(sessionId: string): Promise<void> {
-        const pendingStartup = this.pendingMcpStartupSessions.get(sessionId);
-        if (!pendingStartup) {
-            return;
-        }
-
-        try {
-            const mcpStartup = await pendingStartup.startup;
-            if (!this.sessions.has(sessionId)
-                || this.sessionIsClosing(sessionId)
-                || this.pendingMcpStartupSessions.get(sessionId) !== pendingStartup) {
-                return;
-            }
-            await this.publishMcpStartupStatus(sessionId, mcpStartup, pendingStartup.requestedServers);
-        } catch (err) {
-            logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
-        } finally {
-            if (this.pendingMcpStartupSessions.get(sessionId) === pendingStartup) {
-                this.pendingMcpStartupSessions.delete(sessionId);
-            }
-        }
-    }
-
-    private async publishMcpStartupStatus(
-        sessionId: string,
-        mcpStartup: McpStartupResult,
-        requestedServers?: Set<string>
-    ): Promise<void> {
-        const filteredStartup = requestedServers
-            ? {
-                ready: mcpStartup.ready.filter(server => requestedServers.has(server)),
-                failed: mcpStartup.failed.filter(server => requestedServers.has(server.server)),
-                cancelled: mcpStartup.cancelled.filter(server => requestedServers.has(server)),
-            }
-            : mcpStartup;
-
-        const failuresAfterOauth: typeof filteredStartup.failed = [];
-        const readyAfterOauth = [...filteredStartup.ready];
-        for (const failure of filteredStartup.failed) {
-            if (failure.failureReason !== "reauthenticationRequired"
-                || !clientSupportsUrlElicitation(this.clientCapabilities)) {
-                failuresAfterOauth.push(failure);
-                continue;
-            }
-            try {
-                const authenticated = await this.authenticateMcpServer(sessionId, failure.server);
-                if (authenticated) {
-                    readyAfterOauth.push(failure.server);
-                } else {
-                    failuresAfterOauth.push(failure);
-                }
-            } catch (error) {
-                logger.error(`Failed to authenticate MCP server ${failure.server}`, error);
-                failuresAfterOauth.push(failure);
-            }
-        }
-
-        const renderer = new AcpToolCallRenderer(this.capabilities);
-        for (const facts of McpStartupReporter.failures({
-            ...filteredStartup,
-            ready: readyAfterOauth,
-            failed: failuresAfterOauth,
-        })) {
-            await this.connection.notify(acp.methods.client.session.update, {
-                sessionId,
-                update: renderer.render(facts),
-            });
-        }
-    }
-
-    private async authenticateMcpServer(sessionId: string, serverName: string): Promise<boolean> {
-        const elicitationId = `mcp-oauth-${randomUUID()}`;
-        const completed = this.codexAcpClient.awaitMcpServerOauthLoginCompleted(serverName, sessionId);
-        const login = await this.codexAcpClient.mcpServerOauthLogin({
-            name: serverName,
-            threadId: sessionId,
-        });
-        const elicitation = Promise.resolve(this.connection.request(
-            acp.methods.client.elicitation.create,
-            {
-                mode: "url",
-                sessionId,
-                message: `Authenticate with MCP server ${serverName}`,
-                url: login.authorizationUrl,
-                elicitationId,
-            },
-        ));
-        const first = await Promise.race([
-            completed.then(result => ({type: "completed" as const, result})),
-            elicitation.then(response => ({type: "elicitation" as const, response})),
-        ]);
-        if (first.type === "elicitation" && !acp.CreateElicitationResponse.isAccept(first.response)) {
-            return false;
-        }
-        const result = first.type === "completed" ? first.result : await completed;
-        await this.connection.notify(acp.methods.client.elicitation.complete, {elicitationId});
-        return result.success;
     }
 
     private trackActivePrompt(sessionId: string): ActivePrompt {
@@ -2981,6 +3084,7 @@ export class CodexAcpServer {
             }
 
             const commandPromise = this.availableCommands.tryHandleCommand(params.prompt, sessionState, {
+                signal: activePrompt.signal,
                 onTurnStartPending: () => {
                     sessionState.lastTokenUsage = null;
                     ensurePendingTurnStart();
@@ -3492,47 +3596,6 @@ export class CodexAcpServer {
         // After turnInterrupt(), Codex will send turn/completed, which naturally completes awaitTurnCompleted().
         await this.interruptSessionTurn(sessionState, "Cancel", false);
     }
-}
-
-function getRequestedMcpServerNames(mcpServers: Array<acp.McpServer>): Array<string> {
-    return Array.from(new Set(mcpServers.map(server => sanitizeMcpServerName(server.name))));
-}
-
-const MCP_STARTUP_AWAIT_TIMEOUT_META_KEY = "mcpStartupAwaitTimeoutMs";
-
-function parseMcpStartupAwaitTimeoutMs(meta: Record<string, unknown> | null | undefined): number | undefined {
-    const value = meta?.[MCP_STARTUP_AWAIT_TIMEOUT_META_KEY];
-    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-// Resolves once `startup` settles, or once `timeoutMs` elapses, whichever comes first.
-// A startup rejection is only propagated if it happens before the timeout.
-function raceMcpStartupTimeout(startup: Promise<McpStartupResult>, timeoutMs: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const timer = setTimeout(() => {
-            if (!settled) {
-                settled = true;
-                resolve();
-            }
-        }, timeoutMs);
-        startup.then(
-            () => {
-                if (!settled) {
-                    settled = true;
-                    clearTimeout(timer);
-                    resolve();
-                }
-            },
-            (err) => {
-                if (!settled) {
-                    settled = true;
-                    clearTimeout(timer);
-                    reject(err);
-                }
-            },
-        );
-    });
 }
 
 /** A close of the session stopped the read of its history during `session/load`. */

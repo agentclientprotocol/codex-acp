@@ -226,6 +226,33 @@ export function fromAccountUpdated(
 }
 
 /**
+ * Maps the `account/updated` push onto the last known account of the agent. A logout gives `null`.
+ * The push carries no email, so a ChatGPT account keeps the email of `previous` when `previous` is a
+ * ChatGPT account too. The push cannot fill the other account shapes, so the other modes keep `previous`
+ * until the next account read.
+ */
+export function accountFromUpdated(notification: AccountUpdatedNotification, previous: Account | null): Account | null {
+    switch (notification.authMode) {
+        case null:
+            return null;
+        case "chatgpt":
+        case "chatgptAuthTokens": {
+            const previousChatGpt = previous?.type === "chatgpt" ? previous : null;
+            return {
+                type: "chatgpt",
+                email: previousChatGpt?.email ?? null,
+                planType: notification.planType ?? previousChatGpt?.planType ?? "unknown",
+            };
+        }
+        case "apikey":
+        case "personalAccessToken":
+            return {type: "apiKey"};
+        default:
+            return previous;
+    }
+}
+
+/**
  * Do two payloads carry the same information? Compares every rendered field,
  * so a richer read of the same login is NOT the same. Callers use it to drop a
  * push that would tell the client nothing new: the identity is read on many

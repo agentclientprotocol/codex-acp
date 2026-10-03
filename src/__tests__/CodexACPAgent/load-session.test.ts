@@ -1,15 +1,121 @@
 import { describe, it, expect, vi } from "vitest";
 import type * as acp from "@agentclientprotocol/sdk";
 import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
-import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
+import type { Model, Thread, ThreadGoal, UserInput } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
+    it("preserves every native user input kind during history replay", async () => {
+        const cases: Array<{input: UserInput, content: acp.ContentBlock}> = [
+            {input: {type: "text", text: "Request", text_elements: []}, content: {type: "text", text: "Request"}},
+            {input: {type: "image", url: "https://example.com/image.png"}, content: {type: "text", text: "[@image](https://example.com/image.png)"}},
+            {input: {type: "image", fileId: "saved-image"}, content: {type: "text", text: "image:saved-image"}},
+            {input: {type: "localImage", path: "/workspace/image #1.png"}, content: {type: "resource_link", name: "image #1.png", uri: "file:///workspace/image%20%231.png"}},
+            {input: {type: "audio", url: "https://example.com/audio.wav"}, content: {type: "text", text: "[@audio](https://example.com/audio.wav)"}},
+            {input: {type: "localAudio", path: "/workspace/audio.wav"}, content: {type: "resource_link", name: "audio.wav", uri: "file:///workspace/audio.wav"}},
+            {input: {type: "mention", name: "Document", path: "/workspace/document.pdf"}, content: {type: "resource_link", name: "Document", uri: "file:///workspace/document.pdf"}},
+            {input: {type: "mention", name: "", path: "/workspace/document.pdf"}, content: {type: "resource_link", name: "document.pdf", uri: "file:///workspace/document.pdf"}},
+            {input: {type: "mention", name: "File URI", path: "file:///workspace/document%20one.pdf"}, content: {type: "resource_link", name: "File URI", uri: "file:///workspace/document%20one.pdf"}},
+            {input: {type: "mention", name: "Issue", path: "https://example.com/issue"}, content: {type: "text", text: "[@Issue](https://example.com/issue)"}},
+            {input: {type: "skill", name: "Review", path: "/workspace/SKILL.md"}, content: {type: "text", text: "skill:Review (/workspace/SKILL.md)"}},
+            {input: {type: "localImage", path: "image.png"}, content: {type: "text", text: "[@image.png](image.png)"}},
+            {input: {type: "localAudio", path: "audio.wav"}, content: {type: "text", text: "[@audio.wav](audio.wav)"}},
+            {input: {type: "mention", name: "Relative file", path: "document.pdf"}, content: {type: "text", text: "[@Relative file](document.pdf)"}},
+        ];
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        const thread = {
+            id: "native-input-history", historyMode: "legacy", turns: [{
+                id: "turn-1", itemsView: "full", status: "completed", items: cases.map(({input}, index) => ({
+                    type: "userMessage", id: `native-${index}`, clientId: null, content: [input],
+                })),
+            }],
+        } as unknown as Thread;
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread, model: model.id, modelProvider: "openai", cwd: "/workspace",
+            approvalPolicy: "never", sandbox: {type: "dangerFullAccess"}, reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread});
+        await agent.initialize({protocolVersion: 1, clientCapabilities: {}});
+        await agent.loadSession({sessionId: thread.id, cwd: "/workspace", mcpServers: []});
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(updates.map(update => ({messageId: update.messageId, content: update.content}))).toEqual(
+            cases.map(({content}, index) => ({messageId: `native-${index}`, content})),
+        );
+    });
+
+    it("replays Desktop attachments as resources in the original user message", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        const texts = [
+            '\n# Files pasted by the user:\n\n## "Error log": /workspace/pasted-text.txt\n\n## My request:\nFix job\\_id\n',
+            '# Files pasted by the user:\n\n## "Request": /workspace/request.txt\n\nPasted text contains the user\'s request.\n\n## My request:\n\n',
+            '# Files mentioned by the user:\n\n## unknown: relative.txt\n\n## My request:\nKeep this text',
+            '# Files mentioned by the user:\n\n## screenshot.png: /workspace/screen #1.png\nImage attachment: true\n\n## My request:\nCompare',
+        ];
+        const thread = {
+            id: "attachment-history", historyMode: "legacy", turns: [{
+                id: "turn-1", itemsView: "full", status: "completed", items: texts.map((text, index) => ({
+                    type: "userMessage", id: `user-${index}`, clientId: null,
+                    content: [
+                        ...(index === 3 ? [
+                            {type: "localImage", path: "/workspace/screen #1.png"},
+                            {type: "localAudio", path: "/workspace/screen #1.png"},
+                            {type: "mention", name: "Same image", path: "/workspace/screen #1.png"},
+                        ] : []),
+                        {type: "text", text, text_elements: []},
+                        ...(index === 3 ? [{type: "localImage", path: "/workspace/other.png"}] : []),
+                    ],
+                })),
+            }],
+        } as unknown as Thread;
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread, model: model.id, modelProvider: "openai", cwd: "/workspace",
+            approvalPolicy: "never", sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread});
+
+        await agent.initialize({protocolVersion: 1, clientCapabilities: {}});
+        await agent.loadSession({sessionId: thread.id, cwd: "/workspace", mcpServers: []});
+
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(updates.map(update => ({messageId: update.messageId, content: update.content}))).toEqual([
+            {messageId: "user-0", content: {type: "resource_link", name: "Error log", uri: "file:///workspace/pasted-text.txt"}},
+            {messageId: "user-0", content: {type: "text", text: "Fix job\\_id\n"}},
+            {messageId: "user-1", content: {type: "resource_link", name: "Request", uri: "file:///workspace/request.txt"}},
+            {messageId: "user-2", content: {type: "text", text: texts[2]}},
+            {messageId: "user-3", content: {type: "resource_link", name: "screenshot.png", uri: "file:///workspace/screen%20%231.png"}},
+            {messageId: "user-3", content: {type: "text", text: "Compare"}},
+            {messageId: "user-3", content: {type: "resource_link", name: "other.png", uri: "file:///workspace/other.png"}},
+        ]);
+    });
+
     it("replays native child history and disconnects an orphan", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
-        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
@@ -196,7 +302,7 @@ describe("CodexACPAgent - loadSession", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
             account: null,
             requiresOpenaiAuth: false,
@@ -431,7 +537,7 @@ describe("CodexACPAgent - loadSession", () => {
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
-        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
@@ -466,7 +572,7 @@ describe("CodexACPAgent - loadSession", () => {
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
-        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
@@ -486,12 +592,14 @@ describe("CodexACPAgent - loadSession", () => {
         appServer.threadItemsList = vi.fn()
             .mockResolvedValueOnce({data: [message("last")], nextCursor: null, backwardsCursor: null})
             .mockResolvedValueOnce({data: [message("first")], nextCursor: "page-2", backwardsCursor: null})
+            .mockResolvedValueOnce({data: [message("second")], nextCursor: "page-3", backwardsCursor: null})
+            // The adapter reads this page while it sends the page before it.
             .mockImplementationOnce(async () => {
                 closed = agent.closeSession({sessionId: "session-1"});
                 await closed;
-                return {data: [message("second")], nextCursor: "page-3", backwardsCursor: null};
+                return {data: [message("third")], nextCursor: "page-4", backwardsCursor: null};
             })
-            .mockResolvedValue({data: [message("more")], nextCursor: "page-3", backwardsCursor: null});
+            .mockResolvedValue({data: [message("more")], nextCursor: "page-4", backwardsCursor: null});
         const closeSpy = vi.spyOn(client, "closeSession").mockResolvedValue(undefined as never);
 
         await agent.initialize({protocolVersion: 1});
@@ -500,13 +608,14 @@ describe("CodexACPAgent - loadSession", () => {
         await closed;
 
         // The page that the close interrupted is the last page read. The load does not close the session again.
-        expect(appServer.threadItemsList).toHaveBeenCalledTimes(3);
+        expect(appServer.threadItemsList).toHaveBeenCalledTimes(4);
         expect(closeSpy).toHaveBeenCalledTimes(1);
         const texts = JSON.stringify(fixture.getAcpConnectionEvents([])
             .filter(event => event.method === "sessionUpdate")
             .map(event => event.args[0]));
         expect(texts).toContain("first");
         expect(texts).not.toContain("second");
+        expect(texts).not.toContain("third");
     });
 
     it("should not recover session mcp servers during loadSession when request omits them", async () => {
@@ -515,7 +624,7 @@ describe("CodexACPAgent - loadSession", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
             account: null,
             requiresOpenaiAuth: false,
@@ -607,7 +716,7 @@ describe("CodexACPAgent - loadSession", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
             account: null,
             requiresOpenaiAuth: false,

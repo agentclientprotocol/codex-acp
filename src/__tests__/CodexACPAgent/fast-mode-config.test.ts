@@ -37,7 +37,7 @@ describe("Fast mode session config", () => {
         });
         const slowModel = createTestModel({id: "slow-model"});
 
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId: "session-id",

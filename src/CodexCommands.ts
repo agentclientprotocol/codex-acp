@@ -1,13 +1,15 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type {AvailableCommand} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
-import {AIR_COMMAND_ACTION_KEY, airOnlyMeta} from "./AirExtension";
+import {AIR_COMMAND_ACTION_KEY, AIR_SKILL_PATH_KEY, airOnlyMeta} from "./AirExtension";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, SkillsListParams, TurnCompletedNotification} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
 import {createRateLimitsMap, type RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
 import {logger} from "./Logger";
+import {MCP_COMMAND_INPUT_HINT, McpCommand} from "./mcp/McpCommand";
+import type {McpServerSignIn} from "./mcp/McpServerSignIn";
 import {createAgentTextMessageChunk} from "./ContentChunks";
 import {
     COLLABORATION_MODE_CONFIG_ID,
@@ -30,6 +32,8 @@ export const GOAL_CONTINUATION_PROMPT: acp.ContentBlock[] = [{
 }];
 
 export type CommandHandleOptions = {
+    /** Aborts when the prompt ends. A command then sends no more updates. */
+    signal?: AbortSignal;
     onTurnStartPending?: () => void;
     onTurnStarted?: (turnId: string, threadId: string) => void;
     setConfigOption?: (configId: string, value: string) => Promise<void>;
@@ -42,6 +46,7 @@ export class CodexCommands {
     private readonly codexAcpClient: CodexAcpClient;
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
     private readonly onLogout: LogoutHandler;
+    private readonly mcpCommand: McpCommand;
     /** The commands that each session got last, to skip a publish that changes nothing. */
     private readonly published = new WeakMap<SessionState, string>();
 
@@ -49,12 +54,14 @@ export class CodexCommands {
         connection: AcpClientConnection,
         codexAcpClient: CodexAcpClient,
         runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>,
-        onLogout: LogoutHandler = () => {}
+        onLogout: LogoutHandler,
+        mcpServerSignIn: McpServerSignIn,
     ) {
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
         this.runWithProcessCheck = runWithProcessCheck;
         this.onLogout = onLogout;
+        this.mcpCommand = new McpCommand(codexAcpClient, runWithProcessCheck, mcpServerSignIn);
     }
 
     /** Sends the available commands. With `onlyChanges`, it sends nothing when the commands did not change. */
@@ -111,10 +118,13 @@ export class CodexCommands {
                 const name = `$${skill.name}`;
                 if (commands.has(name)) continue;
                 const description = skill.shortDescription ?? skill.description ?? skill.name;
+                // Only AIR gets the SKILL.md path, in `_meta.jetbrains.air.skillPath`. A click on the skill chip opens it.
+                const meta = airOnlyMeta(airClient, AIR_SKILL_PATH_KEY, skill.path);
                 commands.set(name, {
                     name,
                     description,
                     input: null,
+                    ...(meta ? {_meta: meta} : {}),
                 });
             }
         }
@@ -145,8 +155,8 @@ export class CodexCommands {
             },
             {
                 name: "mcp",
-                description: "List configured Model Context Protocol (MCP) tools.",
-                input: null
+                description: "Show the status of the MCP servers, or reconnect them.",
+                input: { hint: MCP_COMMAND_INPUT_HINT }
             },
             {
                 name: "skills",
@@ -318,19 +328,10 @@ export class CodexCommands {
                 return { handled: true };
             }
             case "mcp": {
-                const servers = await this.runWithProcessCheck(() => this.codexAcpClient.listMcpServers());
-                const configuredServers = servers.data.map(server => {
-                    const toolCount = Object.keys(server.tools ?? {}).length;
-                    const resourceCount = (server.resources ?? []).length;
-                    return `- ${server.name}: ${toolCount} tools, ${resourceCount} resources, auth=${server.authStatus}`;
-                });
-                const sessionServers = sessionState.sessionMcpServers
-                    ? sessionState.sessionMcpServers.map(serverName => `- ${serverName}`)
-                    : [];
-                const lines = [...configuredServers, ...sessionServers];
-                const text = lines.length > 0
-                    ? ["Configured MCP servers:", ...lines].join("\n")
-                    : "No MCP servers configured.";
+                const text = await this.mcpCommand.run(command.rest, sessionState, options.signal);
+                if (text === null) {
+                    return { handled: true };
+                }
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 await session.update(createAgentTextMessageChunk(text));
                 return { handled: true };

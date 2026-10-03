@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.1.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.1.0...v2.1.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* preserve attachments in imported session history ([#571](https://github.com/agentclientprotocol/codex-acp/issues/571)) ([b9fc02b](https://github.com/agentclientprotocol/codex-acp/commit/b9fc02b63e3267cb4350cab774219b947dae72da))
+* send the legacy custom answer key to AIR ([#577](https://github.com/agentclientprotocol/codex-acp/issues/577)) ([56cc428](https://github.com/agentclientprotocol/codex-acp/commit/56cc4287f13453e830b0c3801fea7db2d4379044))
+* show readable service error messages ([#572](https://github.com/agentclientprotocol/codex-acp/issues/572)) ([4578615](https://github.com/agentclientprotocol/codex-acp/commit/4578615599705a7a55fe7096fa90bf3c9fc1549a))
+
+## [2.1.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.0.1...v2.1.0) (2026-10-01)
+
+
+### Features
+
+* add ACP v2 support ([#552](https://github.com/agentclientprotocol/codex-acp/issues/552)) ([ba7b216](https://github.com/agentclientprotocol/codex-acp/commit/ba7b21636190a95626631c9a9226298d41d19325))
+
+
+### Bug Fixes
+
+* mark the request_user_input note as the AIR custom answer ([#570](https://github.com/agentclientprotocol/codex-acp/issues/570)) ([2283d33](https://github.com/agentclientprotocol/codex-acp/commit/2283d33800aa2558135aaf0d4ad4041ee40260f9))
+* report a thread held by another Codex client as a clear error ([#564](https://github.com/agentclientprotocol/codex-acp/issues/564)) ([5065453](https://github.com/agentclientprotocol/codex-acp/commit/506545315e52c0593415d18b05dd2d3dbe527d32))
+* temporarily revert ACP v2 commit ba7b216 ([#573](https://github.com/agentclientprotocol/codex-acp/issues/573)) ([e46eed1](https://github.com/agentclientprotocol/codex-acp/commit/e46eed1ef4c1b64733969c66fe54197f4356db7d))
+
+## [2.0.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.0.0...v2.0.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* update codex to 0.159.0 ([#562](https://github.com/agentclientprotocol/codex-acp/issues/562)) ([9785e75](https://github.com/agentclientprotocol/codex-acp/commit/9785e75c1ffe110032b57e78ec2a2da17c2c81e2))
+* update codex to 0.159.1 ([#565](https://github.com/agentclientprotocol/codex-acp/issues/565)) ([645da2a](https://github.com/agentclientprotocol/codex-acp/commit/645da2a09f1b6fdfc6e6f28e781faf033d22a0d8))
+
 ## [2.0.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.13.1...v2.0.0) (2026-09-28)
 
 

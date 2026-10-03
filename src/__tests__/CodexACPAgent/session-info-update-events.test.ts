@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ServerNotification } from "../../app-server";
 import { setupPromptTestSession } from "../acp-test-utils";
+import { MAX_SESSION_TITLE_LENGTH } from "../../SessionTitle";
 
 describe("CodexEventHandler - session info updates", () => {
     const sessionId = "test-session-id";
@@ -22,6 +23,49 @@ describe("CodexEventHandler - session info updates", () => {
         await expect(`${mockFixture.getAcpConnectionDump([])}\n`).toMatchFileSnapshot(
             "data/session-info-update-fallback-title.json"
         );
+    });
+
+    it("cuts a long fallback session title to the limit", async () => {
+        const { mockFixture } = setupPromptTestSession({
+            sessionId,
+            sessionTitleSource: "unset",
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "a".repeat(25_023) }],
+        });
+
+        expect(mockFixture.getAcpConnectionEvents([])).toContainEqual({
+            method: "sessionUpdate",
+            args: [{ sessionId, update: { sessionUpdate: "session_info_update", title: `${"a".repeat(MAX_SESSION_TITLE_LENGTH - 1)}…` } }],
+        });
+    });
+
+    it("cuts a long thread name to the limit", async () => {
+        const { mockFixture } = setupPromptTestSession({ sessionId });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "test" }],
+        });
+
+        mockFixture.clearAcpConnectionDump();
+
+        mockFixture.sendServerNotification({
+            method: "thread/name/updated",
+            params: {
+                threadId: sessionId,
+                threadName: "b".repeat(1_000),
+            },
+        });
+
+        await vi.waitFor(() => {
+            expect(mockFixture.getAcpConnectionEvents([])).toContainEqual({
+                method: "sessionUpdate",
+                args: [{ sessionId, update: { sessionUpdate: "session_info_update", title: `${"b".repeat(MAX_SESSION_TITLE_LENGTH - 1)}…` } }],
+            });
+        });
     });
 
     it("does not replace an explicit session title with the prompt fallback", async () => {

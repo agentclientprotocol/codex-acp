@@ -346,7 +346,7 @@ describe("session compaction", () => {
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
         const model = createTestModel();
-        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(appServer, "listModels").mockResolvedValue({data: [model], nextCursor: null});

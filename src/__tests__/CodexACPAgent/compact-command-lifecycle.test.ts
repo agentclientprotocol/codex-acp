@@ -1,5 +1,10 @@
+import {chmodSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import path from "node:path";
 import {describe, expect, it, vi} from "vitest";
 import type {ServerNotification} from "../../app-server";
+import {CodexAppServerClient} from "../../CodexAppServerClient";
+import {startCodexConnection} from "../../CodexJsonRpcConnection";
 import type {Turn} from "../../app-server/v2";
 import {createCodexMockTestFixture, createTestSessionState} from "../acp-test-utils";
 
@@ -98,6 +103,37 @@ describe("compact command lifecycle", () => {
 
         await expect(pending).rejects.toThrow("Codex connection closed during compaction.");
         expect(dispose).toHaveBeenCalledOnce();
+    });
+
+    it.skipIf(process.platform === "win32")("rejects a compact wait when the Codex process exits", async () => {
+        // The real connection path: the process exit disposes the vscode-jsonrpc connection and fires no close event.
+        const dir = mkdtempSync(path.join(tmpdir(), "codex-acp-compact-exit-"));
+        let codex: ReturnType<typeof startCodexConnection> | undefined;
+        try {
+            const fakeCodex = path.join(dir, "codex");
+            // The fake Codex acknowledges thread/compact/start and then never completes the compaction.
+            writeFileSync(fakeCodex, [
+                "#!/bin/sh",
+                "read line",
+                "id=$(printf '%s' \"$line\" | sed -E 's/.*\"id\":([0-9]+).*/\\1/')",
+                "printf '{\"id\":%s,\"result\":{}}\\n' \"$id\"",
+                "exec sleep 30",
+                "",
+            ].join("\n"));
+            chmodSync(fakeCodex, 0o755);
+            codex = startCodexConnection(fakeCodex);
+            const appServer = new CodexAppServerClient(codex.connection);
+            const start = vi.spyOn(appServer, "threadCompactStart");
+
+            const pending = appServer.runCompact({threadId: sessionId});
+            await expect(start.mock.results[0]?.value).resolves.toEqual({});
+            codex.process.kill();
+
+            await expect(pending).rejects.toThrow("Codex connection closed during compaction.");
+        } finally {
+            codex?.process.kill();
+            rmSync(dir, {recursive: true, force: true});
+        }
     });
 
     it("cancels the manual compact turn and finishes the ACP prompt", async () => {

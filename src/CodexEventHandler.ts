@@ -9,6 +9,7 @@ import type {
 } from "./CodexAcpServer";
 import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
+import {normalizeSessionTitle} from "./SessionTitle";
 import type {
     AccountRateLimitsUpdatedNotification,
     AccountUpdatedNotification,
@@ -64,6 +65,7 @@ import type {SubagentState} from "./subagents/AcpSubagents";
 import {mergeRateLimitSnapshot} from "./RateLimitsMap";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "./AgentFileChangeReport";
 import {createSessionNotice} from "./SessionNotice";
+import {readableServiceErrorMessage} from "./ServiceErrorMessage";
 
 export { stripShellPrefix };
 
@@ -161,6 +163,7 @@ const STRING_CODEX_ERROR_CATEGORIES = {
     serverOverloaded: "overloaded",
     cyberPolicy: "policy_denied",
     misalignmentPolicyViolation: "policy_denied",
+    tooManyDenials: "provider_error",
     internalServerError: "internal_error",
     unauthorized: "auth_required",
     badRequest: "bad_request",
@@ -526,14 +529,14 @@ export class CodexEventHandler {
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
             case "thread/name/updated":
-                this.sessionState.sessionTitle = notification.params.threadName ?? null;
+                this.sessionState.sessionTitle = normalizeSessionTitle(notification.params.threadName);
                 this.sessionState.sessionTitleSource = notification.params.threadName == null
                     ? "unset"
                     : "explicit";
                 this.sessionState.titleGen?.observeRename();
                 return {
                     sessionUpdate: "session_info_update",
-                    title: notification.params.threadName ?? null,
+                    title: this.sessionState.sessionTitle,
                 };
             case "thread/status/changed":
                 return this.createCodexSessionInfoUpdate({
@@ -975,7 +978,7 @@ export class CodexEventHandler {
                 this.createTurnErrorData(params.error),
             );
         }
-        return createAgentTextMessageChunk(`${params.error.message}\n\n`);
+        return createAgentTextMessageChunk(`${readableServiceErrorMessage(params.error.message)}\n\n`);
     }
 
     private recordTypedSessionFailure(params: ErrorNotification): void {
@@ -1001,7 +1004,7 @@ export class CodexEventHandler {
             revision: nextSessionFailureRevision(previous, id),
             category: policy.category,
             severity,
-            title,
+            title: readableServiceErrorMessage(title),
             actions: actionsOverride ?? policy.actions,
         };
         this.failuresById.set(id, failure);
