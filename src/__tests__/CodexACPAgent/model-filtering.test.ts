@@ -14,6 +14,16 @@ describe("Model filtering", () => {
 
         const models: Model[] = [
             createTestModel({
+                id: "gpt-6.1-sol",
+                model: "gpt-6.1-sol",
+                displayName: "gpt-6.1-sol",
+                description: "Sol from the live app-server model catalog (2026-10-03).",
+                supportedReasoningEfforts: (["low", "medium", "high", "xhigh", "max", "ultra"] as const).map(
+                    reasoningEffort => ({reasoningEffort, description: `${reasoningEffort} effort.`}),
+                ),
+                defaultReasoningEffort: "medium",
+            }),
+            createTestModel({
                 id: "gpt-6-astra",
                 model: "gpt-6-astra",
                 displayName: "gpt-6-astra",

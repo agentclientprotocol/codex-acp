@@ -1,208 +1,105 @@
 #!/usr/bin/env tsx
-/**
- * Run real Codex with a prompt to test and verify code during development.
- *
- * Usage:
- *   npm run codex-test -- --prompt "Your prompt here"
- *   npm run codex-test -- -p "Hello" -c /path/to/project
- *   npm run codex-test -- -p "Hello" -o codex --json
- */
-
-import path from "node:path";
+/** Real app-server/ACP probe. Never approves a permission request. */
 import fs from "node:fs";
-import {CodexAcpClient} from "../../../../src/CodexAcpClient";
-import {type CodexConnectionEvent, CodexAppServerClient} from "../../../../src/CodexAppServerClient";
+import {parseArgs} from "node:util";
+import * as acp from "@agentclientprotocol/sdk";
+import {CodexAcpClient, type JsonObject} from "../../../../src/CodexAcpClient";
+import {CodexAppServerClient} from "../../../../src/CodexAppServerClient";
 import {startCodexConnection} from "../../../../src/CodexJsonRpcConnection";
 import {CodexAcpServer} from "../../../../src/CodexAcpServer";
-import type {AgentSideConnection} from "@agentclientprotocol/sdk";
+import type {AcpClientConnection} from "../../../../src/ACPSessionConnection";
 
-// Parse command line arguments
-function parseArgs(): { prompt: string; cwd: string; output: string; json: boolean } {
-    const args = process.argv.slice(2);
-    let prompt = "";
-    let cwd = process.cwd();
-    let output = "all";
-    let json = false;
+const {values} = parseArgs({options: {
+    prompt: {type: "string", short: "p"},
+    cwd: {type: "string", short: "c", default: process.cwd()},
+    output: {type: "string", short: "o", default: "all"},
+    json: {type: "boolean", default: false},
+    model: {type: "string", short: "m"},
+    "list-models": {type: "boolean", default: false},
+    "mcp-servers": {type: "string"},
+    help: {type: "boolean", short: "h", default: false},
+}});
 
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        if (arg === "--prompt" || arg === "-p") {
-            prompt = args[++i] || "";
-        } else if (arg === "--cwd" || arg === "-c") {
-            cwd = args[++i] || process.cwd();
-        } else if (arg === "--output" || arg === "-o") {
-            output = args[++i] || "all";
-        } else if (arg === "--json") {
-            json = true;
-        } else if (arg === "--help" || arg === "-h") {
-            console.log(`
-Usage: npm run codex-test -- [options]
-
-Options:
-  -p, --prompt <text>   Prompt to send to Codex (required)
-  -c, --cwd <path>      Working directory for the session (default: current dir)
-  -o, --output <type>   Output type: all, codex, acp, summary (default: all)
-  --json                Output events as JSON
-  -h, --help            Show this help message
-
-Examples:
-  npm run codex-test -- -p "What files are here?"
-  npm run codex-test -- -p "Read README" -c /path/to/project
-  npm run codex-test -- -p "Hello" -o codex --json
-`);
-            process.exit(0);
-        }
-    }
-
-    if (!prompt) {
-        console.error("Error: --prompt is required");
-        process.exit(1);
-    }
-
-    return { prompt, cwd, output, json };
-}
-
-type MethodCallEvent = { method: string; args: unknown[] };
-
-function createMockAcpConnection(events: MethodCallEvent[]): AgentSideConnection {
-    return new Proxy({} as AgentSideConnection, {
-        get(_, prop) {
-            return (...args: unknown[]) => {
-                events.push({ method: String(prop), args });
-                return Promise.resolve({ mock: "Mocked return" });
-            };
-        }
+if (values.help) {
+    console.log(`Usage: npm run codex-test -- [options]
+  -p, --prompt <text>       Prompt (required unless listing models)
+  -c, --cwd <path>          Session working directory
+  -o, --output <type>       all, codex, acp, summary (default: all)
+  -m, --model <id[effort]>   Exact ACP model ID from --list-models
+      --list-models        Read the live model catalog without starting a turn
+      --mcp-servers <file>  JSON array of ACP MCP server entries
+      --json               Emit JSON lines only
+  -h, --help               Show help
+Uses the bundled Codex unless CODEX_PATH is set; forwards CODEX_CONFIG.
+Permission requests are cancelled and make the run fail.`);
+} else {
+    await main().catch(error => {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
     });
 }
 
-async function main() {
-    const { prompt, cwd, output, json } = parseArgs();
-
-    // Find Codex binary
-    const pathToCodex = path.resolve(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "codex.cmd" : "codex");
-    if (!fs.existsSync(pathToCodex)) {
-        console.error(`Error: Codex binary not found at ${pathToCodex}. Did you run 'npm install'?`);
-        process.exit(1);
-    }
-
-    console.log("=".repeat(60));
-    console.log("Codex Test Runner");
-    console.log("=".repeat(60));
-    console.log(`Prompt: ${prompt}`);
-    console.log(`CWD: ${cwd}`);
-    console.log(`Output: ${output}`);
-    console.log("=".repeat(60));
-    console.log("");
-
-    // Start Codex connection
-    const codexConnection = startCodexConnection(pathToCodex);
-    const codexAppServerClient = new CodexAppServerClient(codexConnection.connection);
-
-    // Collect events
-    const codexEvents: CodexConnectionEvent[] = [];
-    const acpEvents: MethodCallEvent[] = [];
-
-    codexAppServerClient.onClientTransportEvent((event) => {
-        codexEvents.push(event);
-        if (output === "all" || output === "codex") {
-            if (json) {
-                console.log(JSON.stringify(event));
-            } else {
-                console.log(`[CODEX] ${event.type}:`, JSON.stringify(event.data, null, 2));
+async function main(): Promise<void> {
+    if (!values.prompt && !values["list-models"]) throw new Error("--prompt or --list-models is required");
+    if (!["all", "codex", "acp", "summary"].includes(values.output)) throw new Error("Invalid --output");
+    const config: unknown = JSON.parse(process.env["CODEX_CONFIG"] ?? "{}");
+    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("CODEX_CONFIG must be an object");
+    const mcpServers: acp.McpServer[] = values["mcp-servers"]
+        ? JSON.parse(fs.readFileSync(values["mcp-servers"], "utf8")) : [];
+    if (!Array.isArray(mcpServers)) throw new Error("--mcp-servers must contain an array");
+    const emit = (type: string, data: unknown) => console.log(values.json
+        ? JSON.stringify({type, data}) : `[${type}] ${JSON.stringify(data, null, 2)}`);
+    const connection = startCodexConnection(process.env["CODEX_PATH"]);
+    const client = new CodexAppServerClient(connection.connection);
+    const adapter = new CodexAcpClient(client, config as JsonObject);
+    let codexEvents = 0;
+    let acpEvents = 0;
+    let permissionRequests = 0;
+    const acpConnection: AcpClientConnection = {
+        notify: async (method: string, params: unknown) => {
+            acpEvents++;
+            if (values.output === "all" || values.output === "acp") emit("acp", {method, params});
+        },
+        request: async (method: string) => {
+            if (method === acp.methods.client.session.requestPermission) {
+                permissionRequests++;
+                emit("permission-cancelled", {method});
+                return {outcome: {outcome: "cancelled"}} as never;
             }
-        }
-    });
-
-    const acpConnection = createMockAcpConnection(acpEvents);
-    const codexAcpClient = new CodexAcpClient(codexAppServerClient);
-    const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient, undefined, () => codexConnection.process.exitCode);
-
-    // Track ACP events
-    const originalSessionUpdate = acpConnection.sessionUpdate;
-    (acpConnection as any).sessionUpdate = async (params: unknown) => {
-        acpEvents.push({ method: "sessionUpdate", args: [params] });
-        if (output === "all" || output === "acp") {
-            if (json) {
-                console.log(JSON.stringify({ method: "sessionUpdate", params }));
-            } else {
-                console.log(`[ACP] sessionUpdate:`, JSON.stringify(params, null, 2));
-            }
-        }
-        return originalSessionUpdate?.call(acpConnection, params);
+            throw new Error(`Harness does not implement client request ${method}`);
+        },
     };
-
+    const agent = new CodexAcpServer(acpConnection, adapter, undefined, () => connection.process.exitCode);
+    client.onClientTransportEvent(event => {
+        codexEvents++;
+        if (values.output === "all" || values.output === "codex") emit("codex", event);
+    });
     try {
-        // Initialize
-        console.log("\n--- Initializing ---\n");
-        await codexAcpAgent.initialize({ protocolVersion: 1 });
-
-        // Check auth
-        const authRequired = await codexAcpClient.authRequired();
-        if (authRequired) {
-            console.error("Error: Authentication required. Please login to Codex first.");
-            process.exit(1);
+        await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION});
+        const models = await adapter.fetchAvailableModels();
+        const available = models.filter(model => !model.hidden).flatMap(model =>
+            model.supportedReasoningEfforts.map(({reasoningEffort}) => ({
+                modelId: `${model.id}[${reasoningEffort}]`,
+                model: model.model,
+                isDefault: model.isDefault && reasoningEffort === model.defaultReasoningEffort,
+            })));
+        if (values["list-models"]) {
+            emit("models", available);
+            return;
         }
-
-        // Create session
-        console.log("\n--- Creating Session ---\n");
-        const sessionResponse = await codexAcpAgent.newSession({ cwd, mcpServers: [] });
-        console.log(`Session ID: ${sessionResponse.sessionId}`);
-        console.log(`Model: ${sessionResponse.models?.currentModelId}`);
-
-        // Send prompt
-        console.log("\n--- Sending Prompt ---\n");
-        const startTime = Date.now();
-        const promptResponse = await codexAcpAgent.prompt({
-            sessionId: sessionResponse.sessionId,
-            prompt: [{ type: "text", text: prompt }]
-        });
-        const duration = Date.now() - startTime;
-
-        // Summary
-        if (output === "all" || output === "summary") {
-            console.log("\n" + "=".repeat(60));
-            console.log("Summary");
-            console.log("=".repeat(60));
-            console.log(`Stop Reason: ${promptResponse.stopReason}`);
-            console.log(`Duration: ${duration}ms`);
-            console.log(`Codex Events: ${codexEvents.length}`);
-            console.log(`ACP Events: ${acpEvents.length}`);
-
-            if (promptResponse._meta?.quota?.token_count) {
-                const tc = promptResponse._meta.quota.token_count as any;
-                console.log(`\nToken Usage:`);
-                console.log(`  Input Tokens: ${tc.inputTokens}`);
-                console.log(`  Cached Input: ${tc.cachedInputTokens}`);
-                console.log(`  Output Tokens: ${tc.outputTokens}`);
-                console.log(`  Reasoning Tokens: ${tc.reasoningOutputTokens}`);
-                console.log(`  Total Tokens: ${tc.totalTokens}`);
-            }
-
-            // Event type breakdown
-            const eventTypes = new Map<string, number>();
-            for (const event of codexEvents) {
-                const key = `${event.type}:${(event.data as any)?.method || "unknown"}`;
-                eventTypes.set(key, (eventTypes.get(key) || 0) + 1);
-            }
-            console.log(`\nEvent Types:`);
-            for (const [type, count] of eventTypes) {
-                console.log(`  ${type}: ${count}`);
-            }
+        if (values.model && !available.some(model => model.modelId === values.model)) {
+            throw new Error(`Model ${values.model} is not advertised; use --list-models`);
         }
-
-        // Full response meta
-        if (output === "all") {
-            console.log("\n--- PromptResponse ---");
-            console.log(JSON.stringify(promptResponse, null, 2));
-        }
-
-    } catch (err) {
-        console.error("Error:", err);
-        process.exit(1);
+        if ((await adapter.readAuthRequirement()).required) throw new Error("Authentication required. Login to Codex first.");
+        const session = await agent.newSession({cwd: values.cwd, mcpServers, _meta: {mcpStartupAwaitTimeoutMs: 30_000}});
+        if (values.model) await agent.unstable_setSessionModel({sessionId: session.sessionId, modelId: values.model});
+        emit("session", {sessionId: session.sessionId, model: agent.getSessionState(session.sessionId).currentModelId});
+        const start = Date.now();
+        const response = await agent.prompt({sessionId: session.sessionId, prompt: [{type: "text", text: values.prompt!}]});
+        emit("summary", {response, durationMs: Date.now() - start, codexEvents, acpEvents, permissionRequests});
+        if (permissionRequests) throw new Error("Permission requests were cancelled; validation did not pass");
     } finally {
-        codexConnection.connection.end();
-        codexConnection.process.kill();
+        connection.connection.end();
+        connection.process.kill();
     }
 }
-
-main();

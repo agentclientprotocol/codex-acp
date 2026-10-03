@@ -9,8 +9,8 @@ import {removeDirectoryWithRetry, writeCodexHomeConfig} from "../../acp-test-uti
 import type {PermissionResponder} from "./permission-responders";
 import type {LegacyNewSessionResponse} from "../../../AcpExtensions";
 
-export const DEFAULT_TEST_MODEL_ID = ModelId.create("gpt-5.2", "none");
-export const OTHER_TEST_MODEL_ID = ModelId.create("gpt-5.5", "low");
+export const DEFAULT_TEST_MODEL_ID = ModelId.create("gpt-6.1-sol", "medium");
+export const OTHER_TEST_MODEL_ID = ModelId.create("gpt-6-astra", "low");
 
 export interface TestSkill {
     readonly name: string;

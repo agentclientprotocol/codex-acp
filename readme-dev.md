@@ -103,3 +103,18 @@ Command replies, review results, and terminal/retrying errors retain their exist
 failure channels. Clients advertising session compaction support continue to receive the dedicated
 compaction lifecycle instead of the legacy completion advisory.
 
+
+### Real Codex model harness
+
+`npm run codex-test -- --list-models --output summary --json` reads the live,
+paginated app-server catalog without starting a model turn. Use an exact advertised
+`id[effort]` with `--model` when running a prompt. The harness uses the bundled
+Codex version unless `CODEX_PATH` is set and forwards `CODEX_CONFIG` to sessions.
+`--mcp-servers <file>` accepts a JSON array of ACP MCP transport entries. All client
+permission requests are cancelled and cause the probe to fail; it never grants
+shell, filesystem, or MCP approval. `--json` emits JSON lines (use `npm run --silent`
+to suppress npm's banner).
+
+On 2026-10-03 the bundled 0.159.1 app-server advertised `gpt-6.1-sol[medium]` as
+the default and `gpt-6-astra[low]` as an available alternative. The live-test fixture
+uses these verified IDs; runtime model availability continues to come from Codex.

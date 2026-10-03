@@ -1,5 +1,35 @@
 [
   {
+    "modelId": "gpt-6.1-sol[low]",
+    "name": "6.1 Sol (low)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). low effort."
+  },
+  {
+    "modelId": "gpt-6.1-sol[medium]",
+    "name": "6.1 Sol (medium)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). medium effort."
+  },
+  {
+    "modelId": "gpt-6.1-sol[high]",
+    "name": "6.1 Sol (high)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). high effort."
+  },
+  {
+    "modelId": "gpt-6.1-sol[xhigh]",
+    "name": "6.1 Sol (xhigh)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). xhigh effort."
+  },
+  {
+    "modelId": "gpt-6.1-sol[max]",
+    "name": "6.1 Sol (max)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). max effort."
+  },
+  {
+    "modelId": "gpt-6.1-sol[ultra]",
+    "name": "6.1 Sol (ultra)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). ultra effort."
+  },
+  {
     "modelId": "gpt-6-astra[low]",
     "name": "6 Astra (low)",
     "description": "Astra from the app-server model catalog. low effort."
