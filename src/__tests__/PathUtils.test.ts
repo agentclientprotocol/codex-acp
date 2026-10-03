@@ -21,10 +21,24 @@ describe("PathUtils", () => {
         expect(arePathsEqual("/repo/project", "/repo/Project")).toBe(false);
     });
 
+    it("compares WSL Windows mount paths case-insensitively", () => {
+        expect(arePathsEqual(
+            "/mnt/c/Users/Me/Notes/MyVault/",
+            "/mnt/c/users/me/notes/myvault",
+        )).toBe(true);
+        expect(normalizePathForComparison("/mnt/c/Users/Me/Notes/MyVault/"))
+            .toBe("/mnt/c/users/me/notes/myvault");
+        expect(arePathBasenamesEqual(
+            "/mnt/c/Users/Me/Notes/MyVault",
+            "myvault",
+        )).toBe(true);
+    });
+
     it("detects Windows absolute paths on any host platform", () => {
         expect(isAbsolutePathLike("D:/workspace/sample-project")).toBe(true);
         expect(isAbsolutePathLike("D:\\workspace\\sample-project")).toBe(true);
         expect(isAbsolutePathLike("\\\\Server\\Share\\Project")).toBe(true);
+        expect(isAbsolutePathLike("/mnt/c/Users/Me/Notes/MyVault")).toBe(true);
         expect(isAbsolutePathLike("sample-project")).toBe(false);
     });
 
