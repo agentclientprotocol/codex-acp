@@ -3272,6 +3272,51 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(turnStartSpy).not.toHaveBeenCalled();
     });
 
+    it('forwards goal work set before the first prompt', async () => {
+        const {mockFixture, sessionState} = setupPromptFixture();
+        // @ts-expect-error - registering local session state for the extension request path
+        mockFixture.getCodexAcpAgent().sessions.set("session-id", sessionState);
+        const goal = createThreadGoal({objective: "Finish the migration", status: "active"});
+        vi.spyOn(mockFixture.getCodexAcpClient(), "setGoal")
+            .mockImplementation(async (_sessionId, _objective, _onTurnStarted, onGoalSet) => {
+                mockFixture.sendServerNotification({
+                    method: "thread/goal/updated",
+                    params: {threadId: "session-id", turnId: null, goal},
+                });
+                onGoalSet?.(goal);
+                mockFixture.sendServerNotification({
+                    method: "item/agentMessage/delta",
+                    params: {threadId: "session-id", turnId: "routed-goal-turn", itemId: "message", delta: "Working on it"},
+                });
+                return {
+                    threadId: "session-id",
+                    turn: createTurn("routed-goal-turn", "completed"),
+                };
+            });
+        mockFixture.clearAcpConnectionDump();
+
+        await expect(mockFixture.getCodexAcpAgent().extMethod(GOAL_CONTROL_METHOD, {
+            sessionId: "session-id",
+            action: "set",
+            objective: goal.objective,
+        })).resolves.toEqual({});
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications("session-id");
+
+        const updates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate" && "args" in event)
+            .map(event => event.args[0]?.update);
+        expect(updates).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                sessionUpdate: "session_info_update",
+                _meta: {jetbrains: {air: {version: 1, goal: expect.objectContaining({objective: goal.objective})}}},
+            }),
+            expect.objectContaining({
+                sessionUpdate: "agent_message_chunk",
+                content: expect.objectContaining({text: "Working on it"}),
+            }),
+        ]));
+    });
+
     it('ignores an older goal refresh that completes after a newer refresh', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
