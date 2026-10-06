@@ -78,6 +78,10 @@ export function authStatusCapability(): AuthStatusCapability {
 
 const NOT_LOGGED_IN_LABEL = "Not logged in";
 const DEFAULT_GATEWAY_LABEL = "Custom model gateway";
+/** Agent-owned `model_provider` ID that the JetBrains Air Gateway setup writes. */
+const AIR_GATEWAY_PROVIDER_ID = "wire";
+/** Same label the Junie agent reports for this gateway, so AIR shows one name. */
+const AIR_GATEWAY_LABEL = "JetBrains Air Gateway";
 
 const PLAN_DISPLAY_NAMES: Record<string, string> = {
     free: "Free",
@@ -124,6 +128,19 @@ export function gatewayStatus(providerName?: string | null): AuthStatus {
         label: DEFAULT_GATEWAY_LABEL,
         ...(detail === undefined ? {} : {detail}),
     };
+}
+
+/**
+ * Status for the agent-owned provider ID. Matching the bare `wire` ID is
+ * deliberate: it is a display-only heuristic, not proof of where the config
+ * came from, and the provider name, URL and route are not checked
+ * (see `docs/air-extensions.md`, "Auth source display").
+ */
+export function agentConfiguredProviderStatus(providerId: string | null): AuthStatus {
+    if (providerId?.trim().toLowerCase() === AIR_GATEWAY_PROVIDER_ID) {
+        return {kind: "gateway", label: AIR_GATEWAY_LABEL};
+    }
+    return gatewayStatus(providerId);
 }
 
 export function unauthenticatedStatus(): AuthStatus {
