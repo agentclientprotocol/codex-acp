@@ -835,6 +835,7 @@ export class CodexAcpServer {
             const startupWait = this.mcpSessionStartup.begin(sessionId, requestedMcpServers, mcpServerStartupVersion, {
                 publish: canPublishSessionUpdates,
                 awaitTimeoutMs: parseMcpStartupAwaitTimeoutMs(request._meta),
+                skippedServers: sessionMetadata.skippedMcpServers,
             });
             if (startupWait !== null) {
                 try {
@@ -2259,7 +2260,10 @@ export class CodexAcpServer {
         subscribed = false;
 
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
-            this.mcpSessionStartup.begin(sessionId, requestedMcpServers, mcpServerStartupVersion, {publish: true});
+            this.mcpSessionStartup.begin(sessionId, requestedMcpServers, mcpServerStartupVersion, {
+                publish: true,
+                skippedServers: sessionMetadata.skippedMcpServers,
+            });
         }
 
         await this.publishAvailableCommands(sessionState, requestedSessionGeneration);

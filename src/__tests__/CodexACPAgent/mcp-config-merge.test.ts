@@ -20,6 +20,10 @@ describe('MCP config merge across configured MCP servers and ACP request', { tim
         const globalConfig = `
 [mcp_servers.shared-mcp]
 url = "https://example.com/mcp"
+
+[mcp_servers.disabled-mcp]
+command = "./node_modules/.bin/mcp-hello-world"
+enabled = false
 `;
 
         const projectConfig = `
@@ -95,6 +99,35 @@ url = "https://example.com/mcp"
             cwd: projectPath,
             mcpServers: [conflictingMcp],
         })).resolves.toBeDefined();
+    });
+
+    it('should not wait for an ACP MCP that a disabled MCP of the same name in the config replaces', async () => {
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        fixture.getCodexAcpClient().readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+
+        const replacedMcp: McpServerStdio = {
+            name: "disabled-mcp",
+            command: "./node_modules/.bin/mcp-hello-world",
+            args: ["example"],
+            env: [],
+        };
+        const brokenMcp: McpServerStdio = {
+            name: "broken-mcp",
+            command: "./node_modules/.bin/missing-mcp-server",
+            args: [],
+            env: [],
+        };
+
+        await codexAcpAgent.newSession({
+            cwd: "",
+            mcpServers: [replacedMcp, brokenMcp],
+            _meta: {mcpStartupAwaitTimeoutMs: 60_000},
+        });
+
+        await vi.waitFor(() => {
+            expect(fixture.getAcpConnectionDump([])).toContain("MCP server `broken-mcp` failed to start");
+        });
     });
 
     it('should not filter the conflicting ACP MCP when config filtering is disabled', async () => {

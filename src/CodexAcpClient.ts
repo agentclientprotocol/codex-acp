@@ -635,9 +635,10 @@ export class CodexAcpClient {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
+        const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
         const response = await this.resumeThread({
             excludeTurns: true,
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+            config: sessionConfig.config,
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
@@ -654,6 +655,7 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            skippedMcpServers: sessionConfig.skippedMcpServers,
         }
     }
 
@@ -676,9 +678,10 @@ export class CodexAcpClient {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
+        const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
         const response = await this.resumeThread({
             excludeTurns: true,
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
+            config: sessionConfig.config,
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
@@ -711,6 +714,7 @@ export class CodexAcpClient {
             thread,
             history,
             additionalDirectories,
+            skippedMcpServers: sessionConfig.skippedMcpServers,
         };
     }
 
@@ -744,8 +748,9 @@ export class CodexAcpClient {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
+        const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers);
         const response = await this.codexClient.threadStart({
-            config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
+            config: sessionConfig.config,
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
         });
@@ -763,6 +768,7 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
+            skippedMcpServers: sessionConfig.skippedMcpServers,
         };
     }
 
@@ -888,7 +894,7 @@ export class CodexAcpClient {
         projectPath: string,
         additionalDirectories: string[],
         mcpServers: Array<McpServer>
-    ): Promise<JsonObject> {
+    ): Promise<SessionConfig> {
         const sessionRoots = [projectPath, ...additionalDirectories];
         const activeProvider = this.gatewayConfig
             ? {
@@ -911,7 +917,7 @@ export class CodexAcpClient {
         };
         const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
         if (mcpServers.length === 0) {
-            return configWithWorkspaceRoots;
+            return {config: configWithWorkspaceRoots, skippedMcpServers: []};
         }
 
         const requestedServers = mcpServers.map(mcp => ({
@@ -924,13 +930,25 @@ export class CodexAcpClient {
             const existingNames = await this.getConfigMcpServerNames(projectPath);
             serversToConfigure = requestedServers.filter(mcp => !existingNames.has(mcp.name));
         }
+        const skippedMcpServers = requestedServers
+            .filter(mcp => !serversToConfigure.includes(mcp))
+            .map(mcp => mcp.name);
+        if (skippedMcpServers.length > 0) {
+            logger.log("Skipping requested MCP servers that the Codex config already defines", {
+                projectPath,
+                skippedMcpServers,
+            });
+        }
         if (serversToConfigure.length === 0) {
-            return configWithWorkspaceRoots;
+            return {config: configWithWorkspaceRoots, skippedMcpServers};
         }
 
         return {
-            ...configWithWorkspaceRoots,
-            "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+            config: {
+                ...configWithWorkspaceRoots,
+                "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, this.createMcpSeverConfig(mcp.server)])),
+            },
+            skippedMcpServers,
         };
     }
 
@@ -1288,6 +1306,11 @@ export class CodexAcpClient {
 }
 
 export type JsonObject = { [key in string]?: JsonValue }
+
+export type SessionConfig = {
+    config: JsonObject,
+    skippedMcpServers: string[],
+}
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
     return prompt.map((block): UserInput | null => {

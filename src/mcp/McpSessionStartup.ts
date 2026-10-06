@@ -23,6 +23,8 @@ export interface McpSessionStartupOptions {
     publish: boolean;
     /** When positive, `begin` waits for the startup at most this time. */
     awaitTimeoutMs?: number | undefined;
+    /** The requested servers that the Codex config already defines. Nothing waits for them. */
+    skippedServers?: Array<string> | undefined;
 }
 
 /**
@@ -66,7 +68,7 @@ export class McpSessionStartup {
         afterVersion: number,
         options: McpSessionStartupOptions,
     ): Promise<void> | null {
-        const pendingStartup = this.createPendingSession(sessionId, mcpServers, afterVersion);
+        const pendingStartup = this.createPendingSession(sessionId, mcpServers, afterVersion, options.skippedServers ?? []);
         if (options.publish) {
             this.pendingSessions.set(sessionId, pendingStartup);
         }
@@ -116,8 +118,10 @@ export class McpSessionStartup {
         sessionId: string,
         mcpServers: Array<acp.McpServer>,
         afterVersion: number,
+        skippedServers: Array<string>,
     ): PendingMcpStartupSession {
-        const requestedServers = new Set(getRequestedMcpServerNames(mcpServers));
+        const requestedServers = new Set(getRequestedMcpServerNames(mcpServers)
+            .filter(server => !skippedServers.includes(server)));
         const abort = new AbortController();
         const startup = this.runWithProcessCheck(() => this.codexAcpClient().awaitMcpServerStartup(
             Array.from(requestedServers),
