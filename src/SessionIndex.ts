@@ -9,6 +9,7 @@
  */
 
 import type * as acp from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk";
 import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadStatus} from "./app-server/v2";
 import {AIR_META_KEY, JETBRAINS_META_KEY, withAirMeta} from "./AirExtension";
@@ -98,10 +99,14 @@ export const SESSION_INDEX_SCAN_BUDGET_PAGES = 50;
 /** The prefix of the adapter cursor of a filtered list, see {@link readSessionIndexPage}. */
 const FILTERED_CURSOR_PREFIX = "air-filtered:";
 
-/** A position in a filtered list: the Codex page, and how many kept rows of it the client already has. */
+/**
+ * A position in a filtered list: the Codex page to read again, and the last row that the client already
+ * has. The row is kept by its recency and id rather than by a count, so rows that come or go before it
+ * between two requests do not shift the next page.
+ */
 interface FilteredCursor {
     codexCursor: string | null;
-    skip: number;
+    after: {recency: number, id: string} | null;
 }
 
 /**
@@ -109,12 +114,16 @@ interface FilteredCursor {
  *
  * `keep` filters the rows after the read, for the filters that Codex cannot apply. Such a read asks Codex
  * for the largest pages and cuts the kept rows to the limit, and its cursor is the adapter's: the Codex
- * cursor of the page and the number of its kept rows that the client already has.
+ * cursor of the page and the last row that the client already has.
  *
- * A page that has no row left but has a cursor is skipped, so a page with a cursor is never empty. The
+ * A page that has no row left but has a cursor is skipped, so a page with a cursor is not empty. The
  * skipping goes on while the cursor advances, for at most {@link SESSION_INDEX_SCAN_BUDGET_PAGES} pages.
- * At the budget the answer is an empty page with the cursor where the read stopped. A cursor that Codex
- * already answered means that it does not advance, and only then the list ends early.
+ * Only a filtered list can reach that budget: it then answers an empty page with the cursor where the read
+ * stopped. A cursor that Codex already answered means that it does not advance, and only then the list
+ * ends early.
+ *
+ * @throws RequestError `invalidParams` for an adapter cursor that is malformed or belongs to the other kind
+ *   of list.
  */
 export async function readSessionIndexPage(
     threadList: (params: ThreadListParams) => Promise<ThreadListResponse>,
@@ -124,22 +133,25 @@ export async function readSessionIndexPage(
     keep?: (thread: Thread) => boolean,
 ): Promise<{threads: Thread[], nextCursor: string | null}> {
     const filtered = keep !== undefined;
-    const position = filtered ? decodeFilteredCursor(cursor) : {codexCursor: cursor, skip: 0};
+    if (!filtered && cursor?.startsWith(FILTERED_CURSOR_PREFIX)) throw invalidCursorError(cursor);
+    const position: FilteredCursor = filtered ? decodeFilteredCursor(cursor) : {codexCursor: cursor, after: null};
     const pageOptions = filtered ? {...options, limit: MAX_SESSION_INDEX_LIMIT} : options;
-    const encode = (codexCursor: string) => filtered ? encodeFilteredCursor({codexCursor, skip: 0}) : codexCursor;
+    const encode = (codexCursor: string) => filtered ? encodeFilteredCursor({codexCursor, after: null}) : codexCursor;
     const readCursors = new Set<string>();
     let pageCursor = position.codexCursor;
-    let skip = position.skip;
+    let after = position.after;
     for (let pages = 1; ; pages++) {
         if (pageCursor !== null) readCursors.add(pageCursor);
         const response = await threadList(sessionIndexThreadListParams(cwds, pageOptions, pageCursor));
-        const kept = (keep === undefined ? response.data : response.data.filter(keep)).slice(skip);
+        const kept = rowsAfter(keep === undefined ? response.data : response.data.filter(keep), after);
         const nextCursor = response.nextCursor ?? null;
         if (filtered && kept.length > options.limit) {
             // The rest of the kept rows of this page come with the next request.
+            const threads = kept.slice(0, options.limit);
+            const last = threads[threads.length - 1]!;
             return {
-                threads: kept.slice(0, options.limit),
-                nextCursor: encodeFilteredCursor({codexCursor: pageCursor, skip: skip + options.limit}),
+                threads,
+                nextCursor: encodeFilteredCursor({codexCursor: pageCursor, after: {recency: recencyOf(last), id: last.id}}),
             };
         }
         if (kept.length > 0 || nextCursor === null) {
@@ -154,27 +166,56 @@ export async function readSessionIndexPage(
             return {threads: [], nextCursor: encode(nextCursor)};
         }
         pageCursor = nextCursor;
-        skip = 0;
+        after = null;
     }
+}
+
+/** The recency that the session index sorts by, newest first. */
+function recencyOf(thread: Thread): number {
+    return thread.recencyAt ?? thread.updatedAt;
+}
+
+/**
+ * The rows of a page that sort after `after`: older ones, and the ones as old that follow it on the page.
+ * When `after` is gone from the page, every row as old as it stays: a row may come twice, but none is lost.
+ */
+function rowsAfter(rows: Thread[], after: FilteredCursor["after"]): Thread[] {
+    if (after === null) return rows;
+    const sameRecency = rows.filter(row => recencyOf(row) === after.recency);
+    const anchorIndex = sameRecency.findIndex(row => row.id === after.id);
+    const seen = new Set(anchorIndex < 0 ? [] : sameRecency.slice(0, anchorIndex + 1).map(row => row.id));
+    return rows.filter(row => recencyOf(row) < after.recency || (recencyOf(row) === after.recency && !seen.has(row.id)));
 }
 
 function encodeFilteredCursor(cursor: FilteredCursor): string {
-    return FILTERED_CURSOR_PREFIX + Buffer.from(JSON.stringify([cursor.codexCursor, cursor.skip])).toString("base64url");
+    const value = [cursor.codexCursor, cursor.after === null ? null : [cursor.after.recency, cursor.after.id]];
+    return FILTERED_CURSOR_PREFIX + Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
-/** Reads an adapter cursor of a filtered list. Any other cursor counts as a Codex cursor. */
+/** Reads an adapter cursor of a filtered list. A cursor without the adapter prefix counts as a Codex cursor. */
 function decodeFilteredCursor(cursor: string | null): FilteredCursor {
-    if (cursor === null || !cursor.startsWith(FILTERED_CURSOR_PREFIX)) return {codexCursor: cursor, skip: 0};
+    if (cursor === null || !cursor.startsWith(FILTERED_CURSOR_PREFIX)) return {codexCursor: cursor, after: null};
+    let value: unknown;
     try {
-        const value: unknown = JSON.parse(Buffer.from(cursor.slice(FILTERED_CURSOR_PREFIX.length), "base64url").toString("utf8"));
-        if (Array.isArray(value) && (value[0] === null || typeof value[0] === "string")
-            && typeof value[1] === "number" && Number.isInteger(value[1]) && value[1] >= 0) {
-            return {codexCursor: value[0] as string | null, skip: value[1]};
-        }
+        value = JSON.parse(Buffer.from(cursor.slice(FILTERED_CURSOR_PREFIX.length), "base64url").toString("utf8"));
     } catch {
-        // A cursor that the adapter did not write starts the list again.
+        throw invalidCursorError(cursor);
     }
-    return {codexCursor: null, skip: 0};
+    if (!Array.isArray(value) || value.length !== 2 || (value[0] !== null && typeof value[0] !== "string")) {
+        throw invalidCursorError(cursor);
+    }
+    const codexCursor = value[0] as string | null;
+    const after: unknown = value[1];
+    if (after === null) return {codexCursor, after: null};
+    if (Array.isArray(after) && after.length === 2 && typeof after[0] === "number" && Number.isFinite(after[0])
+        && typeof after[1] === "string") {
+        return {codexCursor, after: {recency: after[0], id: after[1]}};
+    }
+    throw invalidCursorError(cursor);
+}
+
+function invalidCursorError(cursor: string): RequestError {
+    return RequestError.invalidParams({cursor}, "invalid cursor");
 }
 
 /** The session list row of a thread. */
@@ -222,8 +263,18 @@ export function activityStateOf(status: ThreadStatus): SessionActivityState | un
 export class SessionIndexActivity {
     private readonly lastTurnEndedAt = new Map<string, string>();
 
+    /**
+     * @param isSession true for a thread that is a session of this connection. Only those are recorded: the
+     *   ephemeral threads of the title generation and other helper threads never show in the list.
+     */
+    constructor(private readonly isSession: (threadId: string) => boolean = () => true) {}
+
     observe(notification: ServerNotification): void {
-        if (notification.method !== "turn/completed") return;
+        if (notification.method === "thread/deleted") {
+            this.forget(notification.params.threadId);
+            return;
+        }
+        if (notification.method !== "turn/completed" || !this.isSession(notification.params.threadId)) return;
         const completedAt = notification.params.turn.completedAt;
         const endedAt = completedAt === null ? new Date() : new Date(completedAt * 1000);
         this.lastTurnEndedAt.set(notification.params.threadId, endedAt.toISOString());

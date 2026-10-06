@@ -34,12 +34,14 @@ const SYSTEM_PROMPT =
  * skips it, and tells whether the title was written. The automatic title and an explicit rename go through
  * the same queue, so neither overtakes the other in Codex.
  */
-export type SerializeTitleWrite = (write: () => Promise<boolean>) => Promise<boolean>;
+export type SerializeTitleWrite = (title: string, write: () => Promise<boolean>) => Promise<boolean>;
 
-const runTitleWriteNow: SerializeTitleWrite = (write) => write();
+const runTitleWriteNow: SerializeTitleWrite = (_title, write) => write();
 
 export class TitleGenerator {
     private generated = false;
+    /** The generated title was dropped for an explicit title, see {@link retryAfterFailedRename}. */
+    private droppedForExplicitTitle = false;
     private inFlight: Promise<void> | null = null;
     private renameEchoResolve: (() => void) | null = null;
 
@@ -57,6 +59,17 @@ export class TitleGenerator {
      */
     markExistingTitle(): void {
         this.generated = true;
+        this.droppedForExplicitTitle = false;
+    }
+
+    /**
+     * Call when an explicit rename failed. A title that this generator dropped for that rename is generated
+     * again after the next turn, as if the rename had never come.
+     */
+    retryAfterFailedRename(): void {
+        if (!this.droppedForExplicitTitle) return;
+        this.droppedForExplicitTitle = false;
+        this.generated = false;
     }
 
     /**
@@ -145,9 +158,12 @@ export class TitleGenerator {
 
         // Guard: user may have renamed the session while generation was running.
         // CodexEventHandler sets sessionTitleSource = "explicit" on thread/name/updated.
-        if (this.getSessionTitleSource() === "explicit") return;
+        if (this.getSessionTitleSource() === "explicit") {
+            this.droppedForExplicitTitle = true;
+            return;
+        }
 
-        const written = await this.serializeTitleWrite(async () => {
+        const written = await this.serializeTitleWrite(title, async () => {
             // An explicit rename that came while this write waited for its turn wins. One that comes after
             // this check waits until Codex has applied this write, so it lands last.
             if (this.getSessionTitleSource() === "explicit") return false;
@@ -157,7 +173,10 @@ export class TitleGenerator {
             });
             return true;
         });
-        if (!written) return;
+        if (!written) {
+            this.droppedForExplicitTitle = true;
+            return;
+        }
         await this.waitForRenameEcho(RENAME_ECHO_TIMEOUT_MS);
     }
 

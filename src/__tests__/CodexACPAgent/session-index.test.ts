@@ -183,6 +183,7 @@ describe("session/list", () => {
             createThread({id: "broken", status: {type: "systemError"}}),
         ];
         const {fixture, agent} = await createAgent("sessionIndex", threads);
+        await openLocalSession(fixture, "idle");
         fixture.sendServerNotification({
             method: "turn/completed",
             params: {
@@ -295,6 +296,60 @@ describe("session/list", () => {
         expect([first, second, third].map(page => page.sessions.map(session => session.sessionId))).toEqual([["a", "b"], ["c"], ["d"]]);
         expect(third.nextCursor).toBeNull();
         expect(threadList.mock.calls.map(call => call[0].cursor)).toEqual([null, null, "codex-2"]);
+    });
+
+    it("continues a relative cwd list after its last row when rows come or go in between", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        const row = (id: string, recencyAt: number) => createThread({id, cwd: `/repo/${id}/project`, recencyAt});
+        const [a, b, c, d] = [row("a", 40), row("b", 30), row("c", 20), row("d", 10)];
+        const list = (cursor: string | null) => agent.listSessions({cwd: "project", cursor, _meta: {jetbrains: {air: {list: {limit: 2}}}}});
+        const ids = (response: acp.ListSessionsResponse) => response.sessions.map(session => session.sessionId);
+        threadList.mockResolvedValueOnce({data: [a, b, c, d], nextCursor: null, backwardsCursor: null});
+        const first = await list(null);
+
+        threadList.mockResolvedValueOnce({data: [b, c, d], nextCursor: null, backwardsCursor: null});
+        const afterArchive = await list(first.nextCursor ?? null);
+        threadList.mockResolvedValueOnce({data: [row("new", 50), a, b, c, d], nextCursor: null, backwardsCursor: null});
+        const afterInsert = await list(first.nextCursor ?? null);
+
+        expect([ids(first), ids(afterArchive), ids(afterInsert)]).toEqual([["a", "b"], ["c", "d"], ["c", "d"]]);
+    });
+
+    it("rejects a cursor that the adapter did not write for this kind of list", async () => {
+        const {agent} = await createAgent("sessionIndex");
+        const filteredCursor = (await (async () => {
+            const {agent: other, threadList} = await createAgent("sessionIndex");
+            threadList.mockResolvedValueOnce({
+                data: [createThread({id: "a", cwd: "/x/project"}), createThread({id: "b", cwd: "/y/project"})],
+                nextCursor: null,
+                backwardsCursor: null,
+            });
+            return (await other.listSessions({cwd: "project", _meta: {jetbrains: {air: {list: {limit: 1}}}}})).nextCursor;
+        })())!;
+
+        await expect(agent.listSessions({cwd: "project", cursor: "air-filtered:not-json"})).rejects.toMatchObject({code: -32602});
+        await expect(agent.listSessions({cwd: "project", cursor: "air-filtered:WzEsMl0"})).rejects.toMatchObject({code: -32602});
+        await expect(agent.listSessions({cwd: "/repo/project", cursor: filteredCursor})).rejects.toMatchObject({code: -32602});
+    });
+
+    it("records the turn end only for the sessions of this connection and forgets a deleted thread", async () => {
+        const {fixture, agent} = await createAgent("sessionIndex", [
+            createThread({id: threadId}),
+            createThread({id: "ephemeral-title-thread"}),
+        ]);
+        await openLocalSession(fixture, threadId);
+        const completed = (id: string) => fixture.sendServerNotification({
+            method: "turn/completed",
+            params: {threadId: id, turn: {id: "turn-1", items: [], itemsView: "notLoaded", status: "completed", error: null, startedAt: 400, completedAt: 500, durationMs: 100000}},
+        });
+        const activities = async () => (await agent.listSessions({cwd: "/repo/project"})).sessions
+            .map(session => (session._meta as any)?.jetbrains?.air?.activity ?? null);
+        completed(threadId);
+        completed("ephemeral-title-thread");
+
+        expect(await activities()).toEqual([{lastTurnEndedAt: "1970-01-01T00:08:20.000Z"}, null]);
+        fixture.sendServerNotification({method: "thread/deleted", params: {threadId}});
+        expect(await activities()).toEqual([null, null]);
     });
 
     it("stops a scan at its page budget with a cursor the client can continue from", async () => {
@@ -475,6 +530,7 @@ describe("_session/rename", () => {
         // Longer than any wait for the automatic title: only its completion lets the rename go.
         await vi.advanceTimersByTimeAsync(30_000);
         expect(started).toEqual(["Automatic"]);
+        expect(agent.getSessionState(threadId).automaticTitleEcho).toBe("Automatic");
         automaticWrite.resolve();
         await rename;
 
@@ -530,6 +586,30 @@ describe("_session/rename", () => {
 
         await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"})).rejects.toThrow("app-server busy");
         const titleGen = agent.getSessionState(threadId).titleGen!;
+        titleGen.onTurnCompleted("Fix the build");
+        await vi.waitFor(() => expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit", "Automatic"]));
+    });
+
+    it("generates the automatic title again after a rename that failed while it was generated", async () => {
+        const {fixture, agent, appServer} = await createAgent("sessionIndex");
+        await openLocalSession(fixture, threadId);
+        const turn = deferred<unknown>();
+        vi.spyOn(appServer, "threadStart").mockResolvedValue({thread: {id: "ephemeral"}} as never);
+        const titleTurn = {turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}};
+        vi.spyOn(appServer, "runTurn").mockReturnValueOnce(turn.promise as never).mockResolvedValue(titleTurn as never);
+        const renameWrite = deferred<Record<string, never>>();
+        const threadSetName = vi.spyOn(appServer, "threadSetName")
+            .mockReturnValueOnce(renameWrite.promise)
+            .mockResolvedValue({});
+        const titleGen = agent.getSessionState(threadId).titleGen!;
+        titleGen.onTurnCompleted("Fix the build");
+
+        const rename = agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"});
+        turn.resolve(titleTurn);
+        await titleGen.waitForIdle(1_000);
+        renameWrite.reject(new Error("app-server busy"));
+        await expect(rename).rejects.toThrow("app-server busy");
+
         titleGen.onTurnCompleted("Fix the build");
         await vi.waitFor(() => expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit", "Automatic"]));
     });

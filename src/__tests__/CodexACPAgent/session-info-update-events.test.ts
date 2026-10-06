@@ -89,6 +89,7 @@ describe("CodexEventHandler - session info updates", () => {
             sessionTitle: "Explicit",
             sessionTitleSource: "explicit",
             sessionIndexExplicitTitle: "Explicit",
+            automaticTitleEcho: "Automatic",
         });
         await mockFixture.getCodexAcpAgent().prompt({ sessionId, prompt: [{ type: "text", text: "test" }] });
         mockFixture.clearAcpConnectionDump();
@@ -101,6 +102,27 @@ describe("CodexEventHandler - session info updates", () => {
                 method: "sessionUpdate",
                 args: [{ sessionId, update: { sessionUpdate: "session_info_update", title: "Explicit" } }],
             }]);
+        });
+    });
+
+    it("shows a later rename from elsewhere after a sessionIndex rename", async () => {
+        const { mockFixture } = setupPromptTestSession({
+            sessionId,
+            sessionTitle: "Explicit",
+            sessionTitleSource: "explicit",
+            sessionIndexExplicitTitle: "Explicit",
+            automaticTitleEcho: "Automatic",
+        });
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId, prompt: [{ type: "text", text: "test" }] });
+        mockFixture.clearAcpConnectionDump();
+
+        for (const threadName of ["Explicit", "From the TUI", "Automatic"]) {
+            mockFixture.sendServerNotification({ method: "thread/name/updated", params: { threadId: sessionId, threadName } });
+        }
+
+        await vi.waitFor(() => {
+            expect(mockFixture.getAcpConnectionEvents([]).map(event => event.args[0].update.title))
+                .toEqual(["Explicit", "From the TUI", "Automatic"]);
         });
     });
 

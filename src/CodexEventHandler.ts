@@ -529,12 +529,20 @@ export class CodexEventHandler {
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
             case "thread/name/updated": {
+                const name = normalizeSessionTitle(notification.params.threadName);
                 const explicitTitle = this.sessionState.sessionIndexExplicitTitle;
-                if (explicitTitle !== undefined
-                    && normalizeSessionTitle(notification.params.threadName) !== explicitTitle) {
-                    // A late echo of an automatic title that Codex wrote before the rename.
-                    this.sessionState.titleGen?.observeRename();
-                    return null;
+                if (this.sessionState.automaticTitleEcho !== undefined && name === this.sessionState.automaticTitleEcho) {
+                    delete this.sessionState.automaticTitleEcho;
+                    if (explicitTitle !== undefined && name !== explicitTitle) {
+                        // A late echo of the automatic title that Codex wrote before `_session/rename`.
+                        this.sessionState.titleGen?.observeRename();
+                        return null;
+                    }
+                }
+                if (explicitTitle !== undefined && name === explicitTitle) {
+                    // The echo of the rename: an automatic title echo can no longer follow.
+                    delete this.sessionState.sessionIndexExplicitTitle;
+                    delete this.sessionState.automaticTitleEcho;
                 }
                 this.sessionState.sessionTitle = normalizeSessionTitle(notification.params.threadName);
                 this.sessionState.sessionTitleSource = notification.params.threadName == null

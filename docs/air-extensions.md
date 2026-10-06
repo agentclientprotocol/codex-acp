@@ -1006,13 +1006,16 @@ The request can carry `_meta.jetbrains.air.list`:
   - `modelProviders: []` means every provider, whatever the login of the agent.
 - A relative `cwd` keeps the basename filter of the old path: the adapter sends the request above without `cwd`
   and with `limit: 100`, filters each page by the basename of `Thread.cwd` and cuts the rows to `limit`.
-  `archived` and the other fields still apply. The cursor of such a list is the adapter's own.
+  `archived` and the other fields still apply. The cursor of such a list is the adapter's own: the Codex page and
+  the last row the client got, so rows that come or go before it do not shift the next page.
   No `cwd` lists every thread.
 - Rows are ordered by `updatedAt`, newest first. `updatedAt` is `Thread.recencyAt`, or `Thread.updatedAt` without it.
-- A page with `nextCursor` is never empty: the adapter reads the next Codex page while a page has no row left and
-  the cursor advances, for at most 50 Codex pages. A read that reaches that budget answers an empty page with the
-  cursor where it stopped, so the client can go on. Only a cursor that Codex repeats ends the list early.
-  The cursor is the opaque Codex cursor, except for a relative `cwd`.
+- A page with `nextCursor` is not empty, with one exception: the adapter reads the next Codex page while a page
+  has no row left and the cursor advances, for at most 50 Codex pages. Only a relative-`cwd` list can reach that
+  budget, and it then answers an empty page with the cursor where it stopped. Clients follow `nextCursor` until it
+  is `null`, whatever the page holds. Only a cursor that Codex repeats ends the list early.
+- The cursor is the opaque Codex cursor, except for a relative `cwd`. A malformed adapter cursor, or one used for
+  the other kind of list, fails with `-32602`.
 - The list does not check the login, so it never fails with `auth_required`. `thread/list` reads the local state DB.
 
 A row can carry these optional fields in `_meta.jetbrains.air`:
@@ -1021,7 +1024,7 @@ A row can carry these optional fields in `_meta.jetbrains.air`:
 | --- | --- |
 | `gitBranch` | `Thread.gitInfo.branch`. |
 | `activity.state` | Only for a thread that this adapter has loaded: `running`, `requires_action` (waiting for an approval or for user input), or `idle`. Omitted for other threads. |
-| `activity.lastTurnEndedAt` | ISO time of the last `turn/completed` that this adapter saw for the thread. |
+| `activity.lastTurnEndedAt` | ISO time of the last `turn/completed` that this adapter saw for a session of this connection. Forgotten when the thread is deleted. |
 
 The adapter sends no `usage`: Codex reports no cost.
 
@@ -1039,8 +1042,9 @@ The adapter sends no `usage`: Codex reports no cost.
   A renamed session that is loaded gets `session_info_update {title}` and never gets an automatic title afterwards.
   The title writes of a session run one after another: a rename waits until an automatic title that Codex is
   writing has completed, so the explicit title is the last one. This holds across `session/close` and reload too,
-  and a late `thread/name/updated` of the automatic title does not replace the explicit one on the client.
-  A rename that fails leaves automatic titles on.
+  and a late `thread/name/updated` that carries exactly the automatic title does not replace the explicit one on
+  the client. A later rename of the thread from elsewhere, as in the Codex TUI, is shown.
+  A rename that fails leaves automatic titles on, also for a title that was generated while the rename ran.
 - Codex does not rename an archived thread. The rename then fails with `-32600` and `data.reason: "archived"`,
   and does not unarchive the thread.
 - Archive and unarchive are idempotent. Codex fails them for a thread already in the target state,
