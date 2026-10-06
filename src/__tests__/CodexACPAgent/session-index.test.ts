@@ -3,8 +3,8 @@ import * as acp from "@agentclientprotocol/sdk";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {createCodexMockTestFixture, createTestModel, type CodexMockTestFixture} from "../acp-test-utils";
-import type {Thread, ThreadListParams} from "../../app-server/v2";
+import {createCodexMockTestFixture, createTestModel, deferred, type CodexMockTestFixture} from "../acp-test-utils";
+import type {Thread, ThreadListParams, ThreadListResponse} from "../../app-server/v2";
 import {SESSION_LIST_CHANGED_METHOD} from "../../SessionIndex";
 
 const threadId = "01a0637c-5b99-7242-9064-04545d605fdb";
@@ -227,6 +227,59 @@ describe("session/list", () => {
         expect(threadList.mock.calls.map(call => call[0].cursor)).toEqual([null, "cursor-2"]);
     });
 
+    it("keeps reading while Codex answers empty pages with an advancing cursor", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        for (let page = 1; page <= 15; page++) {
+            threadList.mockResolvedValueOnce({data: [], nextCursor: `cursor-${page}`, backwardsCursor: null});
+        }
+        threadList.mockResolvedValueOnce({data: [createThread()], nextCursor: "cursor-last", backwardsCursor: null});
+
+        const response = await agent.listSessions({cwd: "/repo/project"});
+
+        expect(response.sessions.map(session => session.sessionId)).toEqual([threadId]);
+        expect(response.nextCursor).toBe("cursor-last");
+        expect(threadList).toHaveBeenCalledTimes(16);
+    });
+
+    it("ends the list when Codex repeats a cursor of empty pages", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        threadList
+            .mockResolvedValueOnce({data: [], nextCursor: "cursor-1", backwardsCursor: null})
+            .mockResolvedValueOnce({data: [], nextCursor: "cursor-2", backwardsCursor: null})
+            .mockResolvedValueOnce({data: [], nextCursor: "cursor-1", backwardsCursor: null});
+
+        await expect(agent.listSessions({cwd: "/repo/project"})).resolves.toEqual({sessions: [], nextCursor: null});
+        expect(threadList).toHaveBeenCalledTimes(3);
+    });
+
+    it("filters a relative cwd by basename and keeps the list options", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        const page = (data: Thread[], nextCursor: string | null): ThreadListResponse => ({data, nextCursor, backwardsCursor: null});
+        threadList
+            .mockResolvedValueOnce(page([createThread({id: "other", cwd: "/repo/other"})], "cursor-2"))
+            .mockResolvedValueOnce(page([
+                createThread({id: "match", cwd: "/elsewhere/project"}),
+                createThread({id: "miss", cwd: "/repo/other"}),
+            ], "cursor-3"));
+
+        const response = await agent.listSessions({
+            cwd: "project",
+            _meta: {jetbrains: {air: {list: {limit: 10, archived: "only"}}}},
+        });
+
+        expect(response.sessions.map(session => session.sessionId)).toEqual(["match"]);
+        expect(response.nextCursor).toBe("cursor-3");
+        expect(threadList.mock.calls.map(call => call[0])).toEqual([null, "cursor-2"].map(cursor => ({
+            cursor,
+            limit: 10,
+            sortKey: "recency_at",
+            archived: true,
+            sourceKinds: [],
+            modelProviders: [],
+            useStateDbOnly: true,
+        })));
+    });
+
     it("does not check the login for a sessionIndex client", async () => {
         const {agent, readAuthRequirement} = await createAgent("sessionIndex");
         readAuthRequirement.mockResolvedValue({required: true, account: null});
@@ -265,6 +318,29 @@ describe("_session/list_changed", () => {
 
         expect(listChangedNotifications(fixture)).toEqual([{cwd: "/repo/project"}]);
         agent.dispose();
+    });
+
+    it("starts no watcher for a list that was in flight when the connection closed", async () => {
+        vi.useFakeTimers();
+        const {fixture, agent, threadList} = await createAgent("sessionIndex");
+        const firstPage = deferred<ThreadListResponse>();
+        threadList.mockReturnValueOnce(firstPage.promise);
+        const listing = agent.listSessions({cwd: "/repo/project"});
+
+        agent.dispose();
+        firstPage.resolve({data: [createThread()], nextCursor: null, backwardsCursor: null});
+        await listing;
+        threadList.mockClear();
+        threadList.mockResolvedValue({
+            data: [createThread({status: {type: "active", activeFlags: []}})],
+            nextCursor: null,
+            backwardsCursor: null,
+        });
+        fixture.sendServerNotification({method: "thread/status/changed", params: {threadId, status: {type: "active", activeFlags: []}}});
+        await vi.advanceTimersByTimeAsync(5_000);
+
+        expect(threadList).not.toHaveBeenCalled();
+        expect(listChangedNotifications(fixture)).toEqual([]);
     });
 
     it("sends nothing to a client without sessionIndex", async () => {
@@ -324,6 +400,71 @@ describe("_session/rename", () => {
         }]);
     });
 
+    it("writes an explicit title after an automatic title that Codex is still writing", async () => {
+        vi.useFakeTimers();
+        const {fixture, agent, appServer} = await createAgent("sessionIndex");
+        await openLocalSession(fixture, threadId);
+        vi.spyOn(appServer, "threadStart").mockResolvedValue({thread: {id: "ephemeral"}} as never);
+        vi.spyOn(appServer, "runTurn").mockResolvedValue({
+            turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]},
+        } as never);
+        const automaticWrite = deferred<void>();
+        const started: string[] = [];
+        const applied: string[] = [];
+        vi.spyOn(appServer, "threadSetName").mockImplementation(async ({name}) => {
+            started.push(name);
+            if (name === "Automatic") await automaticWrite.promise;
+            applied.push(name);
+            return {};
+        });
+        agent.getSessionState(threadId).titleGen!.onTurnCompleted("Fix the build");
+        await vi.advanceTimersByTimeAsync(0);
+        expect(started).toEqual(["Automatic"]);
+
+        const rename = agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"});
+        // Longer than any wait for the automatic title: only its completion lets the rename go.
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(started).toEqual(["Automatic"]);
+        automaticWrite.resolve();
+        await rename;
+
+        expect(applied).toEqual(["Automatic", "Explicit"]);
+    });
+
+    it("skips an automatic title that is generated after an explicit rename", async () => {
+        const {fixture, agent, appServer} = await createAgent("sessionIndex");
+        await openLocalSession(fixture, threadId);
+        const turn = deferred<unknown>();
+        vi.spyOn(appServer, "threadStart").mockResolvedValue({thread: {id: "ephemeral"}} as never);
+        vi.spyOn(appServer, "runTurn").mockReturnValue(turn.promise as never);
+        const threadSetName = vi.spyOn(appServer, "threadSetName").mockResolvedValue({});
+        const titleGen = agent.getSessionState(threadId).titleGen!;
+        titleGen.onTurnCompleted("Fix the build");
+
+        await agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"});
+        turn.resolve({turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}});
+        await titleGen.waitForIdle(1_000);
+
+        expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit"]);
+    });
+
+    it("answers the archived reason for an archived thread and does not unarchive it", async () => {
+        const {agent, appServer, client} = await createAgent("sessionIndex");
+        vi.spyOn(client, "getHomePath").mockReturnValue("/home/user/.codex");
+        vi.spyOn(appServer, "threadSetName").mockRejectedValue(missingRolloutError());
+        const threadRead = vi.spyOn(appServer, "threadRead")
+            .mockResolvedValueOnce({thread: createThread({path: "/home/user/.codex/archived_sessions/rollout-1.jsonl"})} as never)
+            .mockRejectedValueOnce(missingRolloutError());
+        const threadUnarchive = vi.spyOn(appServer, "threadUnarchive");
+
+        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: "A"}))
+            .rejects.toMatchObject({code: -32600, data: {reason: "archived", sessionId: threadId}});
+        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: "A"}))
+            .rejects.toMatchObject({code: -32002, data: {sessionId: threadId}});
+        expect(threadRead).toHaveBeenCalledTimes(2);
+        expect(threadUnarchive).not.toHaveBeenCalled();
+    });
+
     it("maps an unknown thread to -32002 and a held thread to thread_active_writer", async () => {
         const {agent, appServer} = await createAgent("sessionIndex");
         vi.spyOn(appServer, "threadSetName")
@@ -381,12 +522,15 @@ describe("_session/archive and _session/unarchive", () => {
         await expect(agent.setSessionArchived({sessionId: threadId}, false)).resolves.toEqual({});
     });
 
-    it("keeps the Codex error when the thread is in the other state", async () => {
+    it("answers -32002 when Codex finds no rollout of a thread that thread/read shows", async () => {
         const {agent, threadArchive, threadRead} = await createArchiveAgent();
         threadArchive.mockRejectedValue(missingRollout(threadId));
-        threadRead.mockResolvedValue({thread: createThread({path: `${codexHome}/sessions/rollout-1.jsonl`})} as never);
+        threadRead
+            .mockResolvedValueOnce({thread: createThread({path: `${codexHome}/sessions/rollout-1.jsonl`})} as never)
+            .mockResolvedValueOnce({thread: createThread({path: null})} as never);
 
-        await expect(agent.setSessionArchived({sessionId: threadId}, true)).rejects.toThrow(`no rollout found for thread id ${threadId}`);
+        await expect(agent.setSessionArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32002, data: {sessionId: threadId}});
+        await expect(agent.setSessionArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32002, data: {sessionId: threadId}});
     });
 
     it("answers -32002 for a thread Codex does not have", async () => {

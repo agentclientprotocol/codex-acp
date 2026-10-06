@@ -12,6 +12,7 @@ import {
     isThreadActiveWriterError,
     isThreadNotFoundError,
     isUnknownThreadError,
+    sessionArchivedRequestError,
     sessionNotFoundRequestError,
     threadActiveWriterRequestError,
 } from "./CodexThreadErrors";
@@ -36,6 +37,30 @@ export function sessionIndexRequestError(sessionId: string, err: unknown): unkno
     if (isThreadActiveWriterError(err)) return threadActiveWriterRequestError(sessionId, err);
     if (isMissingThreadError(err)) return sessionNotFoundRequestError(sessionId);
     return err;
+}
+
+/**
+ * The ACP error of a failed `thread/name/set`. Codex answers "no rollout found" both for a thread it does
+ * not have and for an archived one. `thread/read` tells them apart: an archived thread fails with the `archived` reason, and the rename does
+ * not unarchive it. Only a thread that `thread/read` does not find either fails with `-32002`.
+ */
+export async function renameRequestError(
+    client: CodexAppServerClient,
+    threadId: string,
+    err: unknown,
+    codexHome: string | null,
+): Promise<unknown> {
+    if (isMissingRolloutError(err)) {
+        let archived: boolean | "missing";
+        try {
+            archived = await readThreadArchived(client, threadId, codexHome);
+        } catch (readError) {
+            logger.log("Cannot tell why the rename found no rollout", {threadId, error: String(readError)});
+            return sessionIndexRequestError(threadId, err);
+        }
+        if (archived === true) return sessionArchivedRequestError(threadId);
+    }
+    return sessionIndexRequestError(threadId, err);
 }
 
 /**
@@ -84,12 +109,15 @@ export async function deleteThread(client: CodexAppServerClient, threadId: strin
     }
 }
 
-/** Whether Codex has the thread archived, from `Thread.path`. `null` when the path is unknown. */
+/**
+ * Whether Codex has the thread archived, from `Thread.path`. A thread without a path has no rollout, which
+ * is what the archive requests need, so it counts as missing.
+ */
 async function readThreadArchived(
     client: CodexAppServerClient,
     threadId: string,
     codexHome: string | null,
-): Promise<boolean | "missing" | null> {
+): Promise<boolean | "missing"> {
     let threadPath: string | null;
     try {
         threadPath = (await client.threadRead({threadId})).thread.path;
@@ -97,7 +125,7 @@ async function readThreadArchived(
         if (isMissingThreadError(err)) return "missing";
         throw err;
     }
-    if (threadPath === null) return null;
+    if (threadPath === null) return "missing";
     return isArchivedRolloutPath(threadPath, codexHome);
 }
 

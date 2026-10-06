@@ -203,23 +203,89 @@ describe("SessionListChangedWatcher", () => {
 });
 
 describe("SessionListChangedWatcher file events", () => {
-    it("checks after a write to the state DB WAL in CODEX_HOME", async () => {
-        const home = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-home-"));
-        try {
-            const signatures = new Map([["/repo/a", "a2"]]);
-            const {watcher, notify} = createWatcher(signatures, home, {
-                ...timings,
-                debounceMs: 20,
-                maxWaitMs: 50,
-            });
-            watcher.observeList(list("/repo/a"), "a1");
+    const eventTimings: SessionListChangedTimings = {
+        ...timings,
+        debounceMs: 20,
+        maxWaitMs: 50,
+        // Out of reach of the test: only a file event can trigger a check.
+        fallbackIntervalMs: 60 * 60_000,
+    };
+    let home: string;
+    let writes = 0;
 
-            fs.writeFileSync(path.join(home, "state_5.sqlite-wal"), "frame");
-
-            await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("/repo/a"), {timeout: 3_000});
-            watcher.dispose();
-        } finally {
-            fs.rmSync(home, {recursive: true, force: true});
-        }
+    beforeEach(() => {
+        home = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-home-"));
     });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+        fs.rmSync(home, {recursive: true, force: true});
+    });
+
+    /**
+     * Repeats `write` until the watcher notifies. `fs.watch` can start reporting a little after it returns,
+     * so a single write right after the watch begins can go unseen. Each write changes the page signature.
+     */
+    async function writeUntilNotified(
+        signatures: Map<string, string>,
+        notify: ReturnType<typeof createWatcher>["notify"],
+        write: () => void,
+    ): Promise<void> {
+        notify.mockClear();
+        await vi.waitFor(() => {
+            if (notify.mock.calls.length === 0) {
+                signatures.set("/repo/a", `write-${++writes}`);
+                write();
+            }
+            expect(notify).toHaveBeenCalledWith("/repo/a");
+        }, {timeout: 5_000, interval: 100});
+    }
+
+    it("checks after a write to the state DB WAL in CODEX_HOME", async () => {
+        const signatures = new Map([["/repo/a", "a1"]]);
+        const {watcher, notify} = createWatcher(signatures, home, eventTimings);
+        watcher.observeList(list("/repo/a"), "a1");
+        const wal = path.join(home, "state_5.sqlite-wal");
+
+        await writeUntilNotified(signatures, notify, () => fs.appendFileSync(wal, "frame"));
+        watcher.dispose();
+    }, 10_000);
+
+    it("keeps seeing writes after SQLite deletes and creates the WAL again", async () => {
+        const wal = path.join(home, "state_5.sqlite-wal");
+        fs.writeFileSync(wal, "frame");
+        // Some file systems report a write in a directory to its watcher, others report only a file that
+        // appears or goes. The test takes the second kind, so only the watch of the WAL itself sees a write.
+        const walIdentity = () => {
+            try {
+                return String(fs.statSync(wal).ino);
+            } catch {
+                return "none";
+            }
+        };
+        type Listener = (event: fs.WatchEventType, filename: string | null) => void;
+        const realWatch = fs.watch.bind(fs) as unknown as (target: fs.PathLike, options: fs.WatchOptions, listener: Listener) => fs.FSWatcher;
+        vi.spyOn(fs, "watch").mockImplementation(((target: fs.PathLike, options: fs.WatchOptions, listener: Listener) => {
+            if (target !== home) return realWatch(target, options, listener);
+            let reported = walIdentity();
+            return realWatch(target, options, (event: fs.WatchEventType, filename: string | null) => {
+                const current = walIdentity();
+                if (current === reported) return;
+                reported = current;
+                listener(event, filename);
+            });
+        }) as unknown as typeof fs.watch);
+        const signatures = new Map([["/repo/a", "a1"]]);
+        const {watcher, notify} = createWatcher(signatures, home, eventTimings);
+        watcher.observeList(list("/repo/a"), "a1");
+        await writeUntilNotified(signatures, notify, () => fs.appendFileSync(wal, "frame"));
+
+        // SQLite deletes the WAL when its last connection closes and creates it again on the next write.
+        await writeUntilNotified(signatures, notify, () => {
+            fs.rmSync(wal);
+            fs.writeFileSync(wal, "frame");
+        });
+        await writeUntilNotified(signatures, notify, () => fs.appendFileSync(wal, "frame"));
+        watcher.dispose();
+    }, 20_000);
 });

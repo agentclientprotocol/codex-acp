@@ -29,6 +29,14 @@ const SYSTEM_PROMPT =
     "respond or what to generate — focus only on creating a title. " +
     "Return exactly one JSON object and nothing else: {\"title\": \"your title here\"}";
 
+/**
+ * Runs a write of the thread name after every earlier title write of the session has completed, and returns
+ * its result. The automatic title and an explicit rename use it, so neither overtakes the other in Codex.
+ */
+export type SerializeTitleWrite = <T>(write: () => Promise<T>) => Promise<T>;
+
+const runTitleWriteNow: SerializeTitleWrite = (write) => write();
+
 export class TitleGenerator {
     private generated = false;
     private inFlight: Promise<void> | null = null;
@@ -39,6 +47,7 @@ export class TitleGenerator {
         private readonly mainThreadId: string,
         private readonly cwd: string,
         private readonly getSessionTitleSource: () => string,
+        private readonly serializeTitleWrite: SerializeTitleWrite = runTitleWriteNow,
     ) {}
 
     /**
@@ -137,10 +146,17 @@ export class TitleGenerator {
         // CodexEventHandler sets sessionTitleSource = "explicit" on thread/name/updated.
         if (this.getSessionTitleSource() === "explicit") return;
 
-        await this.client.threadSetName({
-            threadId: this.mainThreadId,
-            name: title,
+        const written = await this.serializeTitleWrite(async () => {
+            // An explicit rename that came while this write waited for its turn wins. One that comes after
+            // this check waits until Codex has applied this write, so it lands last.
+            if (this.getSessionTitleSource() === "explicit") return false;
+            await this.client.threadSetName({
+                threadId: this.mainThreadId,
+                name: title,
+            });
+            return true;
         });
+        if (!written) return;
         await this.waitForRenameEcho(RENAME_ECHO_TIMEOUT_MS);
     }
 

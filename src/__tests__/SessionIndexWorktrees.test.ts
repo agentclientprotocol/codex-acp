@@ -87,6 +87,24 @@ describe("linkedWorktreeCwds", () => {
         expect(linkedWorktreeCwds(repo)).toEqual([repo, worktrees[0]]);
     });
 
+    it("adds the linked worktrees of a bare repository, which has no primary checkout", () => {
+        const commonDir = path.join(root, "repo.git");
+        fs.mkdirSync(path.join(commonDir, "worktrees"), {recursive: true});
+        fs.writeFileSync(path.join(commonDir, "HEAD"), "ref: refs/heads/main\n");
+        const worktrees = ["main", "feature"].map(name => {
+            const checkout = path.join(root, name);
+            const adminDir = path.join(commonDir, "worktrees", name);
+            fs.mkdirSync(checkout);
+            fs.mkdirSync(adminDir);
+            fs.writeFileSync(path.join(checkout, ".git"), `gitdir: ${adminDir}\n`);
+            fs.writeFileSync(path.join(adminDir, "commondir"), "../..\n");
+            fs.writeFileSync(path.join(adminDir, "gitdir"), `${path.join(checkout, ".git")}\n`);
+            return checkout;
+        });
+
+        expect(linkedWorktreeCwds(worktrees[0]!)).toEqual([worktrees[0], worktrees[1]]);
+    });
+
     it("adds the canonical cwd after the requested spelling", () => {
         const {repo, worktrees} = createRepository(root, ["feature-a"]);
         const link = path.join(root, "link");

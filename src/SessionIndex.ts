@@ -13,6 +13,7 @@ import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadStatus} from "./app-server/v2";
 import {AIR_META_KEY, JETBRAINS_META_KEY, withAirMeta} from "./AirExtension";
 import {normalizeSessionTitle} from "./SessionTitle";
+import {logger} from "./Logger";
 
 export const AIR_SESSION_INDEX_KEY = "sessionIndex";
 export const SESSION_RENAME_METHOD = "_session/rename";
@@ -28,11 +29,6 @@ export const AIR_ACTIVITY_KEY = "activity";
 export const DEFAULT_SESSION_INDEX_LIMIT = 50;
 /** The largest page that the adapter asks Codex for. */
 export const MAX_SESSION_INDEX_LIMIT = 100;
-/**
- * How many more `thread/list` pages one `session/list` reads when Codex
- * answers an empty page with a cursor. A page with a cursor is never empty.
- */
-const MAX_EMPTY_PAGE_SKIPS = 10;
 
 export type SessionIndexArchivedFilter = "exclude" | "only";
 
@@ -95,22 +91,36 @@ export function sessionIndexThreadListParams(
 
 /**
  * Reads one page of the session index. Codex filters, sorts and limits the page.
- * An empty page with a cursor is skipped, so a page with a cursor is never empty.
+ *
+ * `keep` filters the rows of each Codex page after the read, for the filters that Codex cannot apply.
+ * A page that has no row left but has a cursor is skipped, so a page with a cursor is never empty.
+ * The skipping goes on while the cursor advances: stopping earlier would tell the client that the list
+ * ends while Codex has more rows. A cursor that Codex already answered means that it does not advance,
+ * and only then the list ends early.
  */
 export async function readSessionIndexPage(
     threadList: (params: ThreadListParams) => Promise<ThreadListResponse>,
     cwds: string[] | null,
     options: SessionIndexListOptions,
     cursor: string | null,
+    keep: (thread: Thread) => boolean = () => true,
 ): Promise<{threads: Thread[], nextCursor: string | null}> {
-    let response = await threadList(sessionIndexThreadListParams(cwds, options, cursor));
-    for (let skips = 0; response.data.length === 0 && response.nextCursor && skips < MAX_EMPTY_PAGE_SKIPS; skips++) {
-        response = await threadList(sessionIndexThreadListParams(cwds, options, response.nextCursor));
+    const readCursors = new Set<string>();
+    let pageCursor = cursor;
+    for (;;) {
+        if (pageCursor !== null) readCursors.add(pageCursor);
+        const response = await threadList(sessionIndexThreadListParams(cwds, options, pageCursor));
+        const threads = response.data.filter(keep);
+        const nextCursor = response.nextCursor ?? null;
+        if (threads.length > 0 || nextCursor === null) {
+            return {threads, nextCursor: threads.length === 0 ? null : nextCursor};
+        }
+        if (readCursors.has(nextCursor)) {
+            logger.log("thread/list repeats its cursor; the session list ends here", {cursor: nextCursor});
+            return {threads: [], nextCursor: null};
+        }
+        pageCursor = nextCursor;
     }
-    return {
-        threads: response.data,
-        nextCursor: response.data.length === 0 ? null : response.nextCursor ?? null,
-    };
 }
 
 /** The session list row of a thread. */

@@ -59,6 +59,12 @@ export interface SessionListChangedWatcherDeps {
     now?: () => number;
 }
 
+/** The watch of one WAL file. `fs.watch` of a file follows its inode, not its name. */
+interface WalWatch {
+    watcher: fs.FSWatcher;
+    ino: number;
+}
+
 interface WatchEntry extends WatchedSessionList {
     signature: string;
     lastRequestedAt: number;
@@ -69,7 +75,7 @@ export class SessionListChangedWatcher {
     private readonly timings: SessionListChangedTimings;
     private readonly now: () => number;
     private fsWatcher: fs.FSWatcher | null = null;
-    private readonly walWatchers = new Map<string, fs.FSWatcher>();
+    private readonly walWatchers = new Map<string, WalWatch>();
     private watchedHome: string | null = null;
     private fallbackTimer: ReturnType<typeof setInterval> | null = null;
     private walSnapshot: string | null = null;
@@ -235,35 +241,50 @@ export class SessionListChangedWatcher {
         this.fallbackTimer = null;
     }
 
-    /** Watches each state DB WAL in CODEX_HOME, and stops watching the ones that are gone. */
+    /**
+     * Watches each state DB WAL in CODEX_HOME, and stops watching the ones that are gone. SQLite deletes the
+     * WAL when the last connection closes and creates a new file later. A watch of the old file sees none of
+     * the writes to the new one, so a WAL whose inode changed is watched again.
+     */
     private refreshWalWatchers(home: string): void {
         if (this.disposed) return;
-        const names = new Set(listWalFiles(home));
-        for (const [name, watcher] of this.walWatchers) {
-            if (!names.has(name)) {
-                watcher.close();
-                this.walWatchers.delete(name);
-            }
+        const inodes = new Map<string, number>();
+        for (const name of listWalFiles(home)) {
+            const ino = inodeOf(path.join(home, name));
+            if (ino !== null) inodes.set(name, ino);
         }
-        for (const name of names) {
+        for (const [name, watch] of this.walWatchers) {
+            if (inodes.get(name) !== watch.ino) this.dropWalWatcher(name, watch);
+        }
+        for (const [name, ino] of inodes) {
             if (this.walWatchers.has(name)) continue;
             try {
-                const watcher = fs.watch(path.join(home, name), {persistent: false}, () => this.trigger());
-                watcher.on("error", () => {
-                    watcher.close();
-                    if (this.walWatchers.get(name) === watcher) this.walWatchers.delete(name);
+                const watcher = fs.watch(path.join(home, name), {persistent: false}, (event) => {
+                    if (event === "rename") {
+                        // The file was deleted or replaced: this watch sees no more writes.
+                        this.dropWalWatcher(name, watch);
+                        this.refreshWalWatchers(home);
+                    }
+                    this.trigger();
                 });
-                this.walWatchers.set(name, watcher);
+                const watch: WalWatch = {watcher, ino};
+                watcher.on("error", () => this.dropWalWatcher(name, watch));
+                this.walWatchers.set(name, watch);
             } catch (error) {
                 logger.log("Cannot watch the state DB WAL; the 30 s check remains", {name, error: String(error)});
             }
         }
     }
 
+    private dropWalWatcher(name: string, watch: WalWatch): void {
+        watch.watcher.close();
+        if (this.walWatchers.get(name) === watch) this.walWatchers.delete(name);
+    }
+
     private closeFsWatcher(): void {
         this.fsWatcher?.close();
         this.fsWatcher = null;
-        for (const watcher of this.walWatchers.values()) watcher.close();
+        for (const watch of this.walWatchers.values()) watch.watcher.close();
         this.walWatchers.clear();
         this.watchedHome = null;
     }
@@ -283,6 +304,14 @@ function readWalSnapshot(home: string): string {
             return `${name}:-`;
         }
     }).join("|");
+}
+
+function inodeOf(file: string): number | null {
+    try {
+        return fs.statSync(file).ino;
+    } catch {
+        return null;
+    }
 }
 
 function listWalFiles(home: string): string[] {

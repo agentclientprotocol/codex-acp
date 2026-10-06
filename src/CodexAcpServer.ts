@@ -23,9 +23,7 @@ import {
     isAccountReadAuthFailureError,
     isAccountReadUnavailableError,
     isNoActiveTurnError,
-    isThreadActiveWriterError,
     sessionNotFoundRequestError,
-    threadActiveWriterRequestError,
 } from "./CodexThreadErrors";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -184,8 +182,8 @@ import {
 } from "./SessionIndex";
 import {linkedWorktreeCwds} from "./SessionIndexWorktrees";
 import {SessionListChangedWatcher, type WatchedSessionList} from "./SessionListChangedWatcher";
-import {deleteThread, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
-import {isAbsolutePathLike} from "./PathUtils";
+import {deleteThread, renameRequestError, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
+import {arePathBasenamesEqual, isAbsolutePathLike} from "./PathUtils";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
 import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdate} from "./CodexSessionCompactions";
@@ -382,6 +380,10 @@ export class CodexAcpServer {
     private readonly sessionIndexActivity = new SessionIndexActivity();
     /** Created on the first `session/list` of a `sessionIndex` client that names a cwd. */
     private sessionListWatcher: SessionListChangedWatcher | null = null;
+    /** The connection is gone, see {@link dispose}. */
+    private disposed = false;
+    /** The tail of the title writes of each session, see {@link serializeTitleWrite}. */
+    private readonly titleWrites = new Map<string, Promise<void>>();
 
     constructor(
         connection: AcpClientConnection,
@@ -877,6 +879,7 @@ export class CodexAcpServer {
             sessionId,
             sessionState.cwd,
             () => sessionState.sessionTitleSource,
+            (write) => this.serializeTitleWrite(sessionId, write),
         );
         this.installSessionState(sessionState);
         resumeSubscribed = false;
@@ -1267,17 +1270,12 @@ export class CodexAcpServer {
 
     /**
      * Answers `session/list` for a `sessionIndex` client. Codex filters by the cwd and its worktrees, sorts by
-     * recency and limits the page, so no page is filtered after the read. The list does not check the login:
-     * `thread/list` reads the local state DB and works without one.
+     * recency and limits the page. Only a relative cwd is filtered after the read. The list does not check the
+     * login: `thread/list` reads the local state DB and works without one.
      */
     private async listSessionIndex(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
         const options = readSessionIndexListOptions(params._meta);
         const cwd = params.cwd?.trim() || null;
-        if (cwd !== null && !isAbsolutePathLike(cwd)) {
-            // A relative cwd keeps the local basename filter of the old path.
-            const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
-            return {...response, sessions: response.sessions.map(session => this.withActiveAdditionalDirectories(session))};
-        }
         const page = await this.readSessionIndexRows(cwd, options, params.cursor ?? null);
         if (cwd !== null && !params.cursor) {
             this.watchSessionList({cwd, options}, sessionIndexPageSignature(page.sessions, page.nextCursor));
@@ -1290,12 +1288,16 @@ export class CodexAcpServer {
         options: SessionIndexListOptions,
         cursor: string | null,
     ): Promise<{sessions: acp.SessionInfo[], nextCursor: string | null}> {
-        const cwds = cwd === null ? null : linkedWorktreeCwds(cwd);
+        // Codex filters by an absolute cwd. A relative one keeps the basename filter of the old path, which the
+        // adapter applies to each page of the unfiltered list.
+        const relativeCwd = cwd !== null && !isAbsolutePathLike(cwd) ? cwd : null;
+        const cwds = cwd === null || relativeCwd !== null ? null : linkedWorktreeCwds(cwd);
         const page = await this.runWithProcessCheck(() => readSessionIndexPage(
             (listParams) => this.codexAcpClient.appServerClient.threadList(listParams),
             cwds,
             options,
             cursor,
+            relativeCwd === null ? undefined : (thread) => arePathBasenamesEqual(thread.cwd, relativeCwd),
         ));
         return {
             sessions: page.threads.map(thread => this.withActiveAdditionalDirectories(
@@ -1314,6 +1316,8 @@ export class CodexAcpServer {
     }
 
     private watchSessionList(list: WatchedSessionList, signature: string): void {
+        // A list that was in flight when the connection closed must not start the watcher again.
+        if (this.disposed) return;
         this.sessionListWatcher ??= new SessionListChangedWatcher({
             codexHome: () => this.codexAcpClient.getHomePath(),
             readSignature: async (watched) => {
@@ -1340,8 +1344,11 @@ export class CodexAcpServer {
     }
 
     /**
-     * `_session/rename`: sets the explicit title of a thread, loaded or not. A loaded session stops its
-     * automatic title first, so the generated title never replaces this one.
+     * `_session/rename`: sets the explicit title of a thread, loaded or not.
+     *
+     * The title writes of a session go one after another, see {@link serializeTitleWrite}. The explicit title is
+     * marked before this write waits for its turn, so an automatic title that has not been written yet is
+     * skipped, and one that Codex is writing now completes before this write starts.
      */
     async renameSessionIndexEntry(params: SessionRenameRequest): Promise<Record<string, never>> {
         this.requireSessionIndex(SESSION_RENAME_METHOD);
@@ -1355,20 +1362,28 @@ export class CodexAcpServer {
         if (sessionState) {
             sessionState.sessionTitleSource = "explicit";
             sessionState.titleGen?.markExistingTitle();
-            await sessionState.titleGen?.waitForIdle(TITLE_GENERATION_SETTLE_TIMEOUT_MS);
         }
         try {
-            await this.runWithProcessCheck(() => this.codexAcpClient.renameSession(sessionId, title));
+            await this.serializeTitleWrite(sessionId, () => this.runWithProcessCheck(
+                () => this.codexAcpClient.renameSession(sessionId, title),
+            ));
         } catch (err) {
             if (sessionState && previousTitleSource !== undefined && sessionState.sessionTitleSource === "explicit") {
                 sessionState.sessionTitleSource = previousTitleSource;
             }
-            throw sessionIndexRequestError(sessionId, err);
+            throw await renameRequestError(
+                this.codexAcpClient.appServerClient,
+                sessionId,
+                err,
+                this.codexAcpClient.getHomePath(),
+            );
         }
         const current = this.sessions.get(sessionId);
         if (current) {
             current.sessionTitle = title;
             current.sessionTitleSource = "explicit";
+            // Sent here, not left to the `thread/name/updated` echo: a session gets the Codex notifications
+            // of its thread only after its first prompt on this connection.
             await new ACPSessionConnection(this.connection, sessionId).update({
                 sessionUpdate: "session_info_update",
                 title,
@@ -1376,6 +1391,22 @@ export class CodexAcpServer {
         }
         this.sessionListWatcher?.trigger();
         return {};
+    }
+
+    /**
+     * Runs the title writes of a session one after another, each through its completion: the automatic title
+     * of {@link TitleGenerator} and `_session/rename`. Codex may apply two `thread/name/set` requests that are
+     * in flight together in either order, so a write starts only after the previous one has finished.
+     */
+    private serializeTitleWrite<T>(sessionId: string, write: () => Promise<T>): Promise<T> {
+        const previous = this.titleWrites.get(sessionId) ?? Promise.resolve();
+        const run = previous.then(write);
+        const settled = run.then(() => undefined, () => undefined);
+        this.titleWrites.set(sessionId, settled);
+        void settled.then(() => {
+            if (this.titleWrites.get(sessionId) === settled) this.titleWrites.delete(sessionId);
+        });
+        return run;
     }
 
     /**
@@ -1402,8 +1433,7 @@ export class CodexAcpServer {
                     this.codexAcpClient.getHomePath(),
                 ));
             } catch (err) {
-                // `setThreadArchived` tells a missing thread by its outcome. Any other error stays as it is.
-                throw isThreadActiveWriterError(err) ? threadActiveWriterRequestError(sessionId, err) : err;
+                throw sessionIndexRequestError(sessionId, err);
             }
             // A thread that this connection had open but Codex never persisted is gone with the close.
             if (outcome === "missing" && !hadLocalSession) {
@@ -1418,6 +1448,7 @@ export class CodexAcpServer {
 
     /** Stops the session list watcher. The connection is gone. */
     dispose(): void {
+        this.disposed = true;
         this.sessionListWatcher?.dispose();
         this.sessionListWatcher = null;
     }
@@ -2496,6 +2527,7 @@ export class CodexAcpServer {
             sessionId,
             sessionState.cwd,
             () => sessionState.sessionTitleSource,
+            (write) => this.serializeTitleWrite(sessionId, write),
         );
         this.installSessionState(sessionState);
         if (knownAccount === "pending") {

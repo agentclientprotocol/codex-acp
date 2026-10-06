@@ -17,8 +17,11 @@ interface RepositoryIdentity {
     commonDir: string;
     /** The cwd relative to the root of its checkout, kept across worktrees. */
     relativeCwd: string;
-    /** The canonical root of the primary checkout. */
-    primaryRoot: string;
+    /**
+     * The canonical root of the primary checkout, or `null` when the repository has none:
+     * a bare repository, or a common dir that is not the `.git` directory of a checkout.
+     */
+    primaryRoot: string | null;
 }
 
 /**
@@ -48,7 +51,9 @@ function linkedWorktreeCwdsOrNull(cwd: string): string[] | null {
         result.push(currentCwd);
     }
 
-    appendLinkedCwd(result, seen, identity.primaryRoot, identity);
+    if (identity.primaryRoot !== null) {
+        appendLinkedCwd(result, seen, identity.primaryRoot, identity);
+    }
 
     const worktreesPath = path.join(identity.commonDir, "worktrees");
     if (!fs.existsSync(worktreesPath)) return result;
@@ -114,6 +119,15 @@ function repositoryIdentity(cwd: string): RepositoryIdentity | null {
     }
     if (commonDir === null) return null;
 
+    return {commonDir, relativeCwd, primaryRoot: primaryCheckoutRoot(commonDir)};
+}
+
+/**
+ * The checkout whose `.git` directory is `commonDir`, or `null`. The linked worktrees of a bare repository
+ * have no primary checkout, but they are listed all the same.
+ */
+function primaryCheckoutRoot(commonDir: string): string | null {
+    if (path.basename(commonDir) !== ".git") return null;
     const primaryRoot = path.dirname(commonDir);
     const primaryGitEntry = path.join(primaryRoot, ".git");
     const primaryEntry = lstat(primaryGitEntry);
@@ -122,7 +136,7 @@ function repositoryIdentity(cwd: string): RepositoryIdentity | null {
         || canonicalize(primaryGitEntry) !== commonDir) {
         return null;
     }
-    return {commonDir, relativeCwd, primaryRoot};
+    return primaryRoot;
 }
 
 /** The nearest ancestor of `dir` with a `.git` file, or a `.git` directory that has a `HEAD`. */

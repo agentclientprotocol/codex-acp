@@ -1000,12 +1000,16 @@ The request can carry `_meta.jetbrains.air.list`:
   `{cwd, limit, sortKey: "recency_at", archived, sourceKinds: [], modelProviders: [], useStateDbOnly: true, cursor}`.
   - `cwd` is the requested cwd plus the same directory in the primary checkout and in each linked Git worktree.
     The adapter reads `<git-common-dir>/worktrees/*/gitdir` and never runs Git, as the Codex TUI does.
-    A worktree whose directory is gone is left out. A single cwd goes as a string.
+    A worktree whose directory is gone is left out. The worktrees of a bare repository count too; the primary
+    checkout is added only when there is one. A single cwd goes as a string.
   - `sourceKinds: []` means the interactive sources, so `codex exec` runs and subagent threads are not listed.
   - `modelProviders: []` means every provider, whatever the login of the agent.
-- A relative `cwd` keeps the basename filter of the old path. No `cwd` lists every thread.
+- A relative `cwd` keeps the basename filter of the old path: the adapter sends the request above without `cwd`
+  and filters each page by the basename of `Thread.cwd`. `limit`, `archived` and the other fields still apply.
+  No `cwd` lists every thread.
 - Rows are ordered by `updatedAt`, newest first. `updatedAt` is `Thread.recencyAt`, or `Thread.updatedAt` without it.
-- A page with `nextCursor` is never empty. The cursor is the opaque Codex cursor.
+- A page with `nextCursor` is never empty: the adapter reads the next Codex page while a page has no row left and
+  the cursor advances. Only a cursor that Codex repeats ends the list early. The cursor is the opaque Codex cursor.
 - The list does not check the login, so it never fails with `auth_required`. `thread/list` reads the local state DB.
 
 A row can carry these optional fields in `_meta.jetbrains.air`:
@@ -1030,13 +1034,17 @@ The adapter sends no `usage`: Codex reports no cost.
 - Each request answers `{}` and works for a thread that is not loaded.
 - `title` is collapsed to one line and cut to 256 characters with an ellipsis. A blank title fails with `-32602`.
   A renamed session that is loaded gets `session_info_update {title}` and never gets an automatic title afterwards.
+  The title writes of a session run one after another: a rename waits until an automatic title that Codex is
+  writing has completed, so the explicit title is the last one.
+- Codex does not rename an archived thread. The rename then fails with `-32600` and `data.reason: "archived"`,
+  and does not unarchive the thread.
 - Archive and unarchive are idempotent. Codex fails them for a thread already in the target state,
   so the adapter reads `Thread.path` with `thread/read`: an archived rollout is under `<CODEX_HOME>/archived_sessions/`.
 - Codex does not open an archived thread. `session/load` of one fails, and it does not unarchive it.
 - Errors:
   - A thread that another Codex process holds fails with the `thread_active_writer` reason in `data.reason`.
-  - A thread that Codex does not have fails with `-32002`. A loaded session that Codex never persisted,
-    because it had no prompt yet, counts as archived or deleted.
+  - A thread that Codex does not have fails with `-32002`, as does a thread that `thread/read` shows without a
+    rollout. A loaded session that Codex never persisted, because it had no prompt yet, counts as archived or deleted.
 - Without `sessionIndex` the three `_session/*` methods answer method-not-found,
   and `session/delete` keeps archiving the thread.
 

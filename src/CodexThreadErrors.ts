@@ -112,6 +112,17 @@ export function sessionNotFoundRequestError(sessionId: string): RequestError {
     return new RequestError(RESOURCE_NOT_FOUND_CODE, `Session not found: ${sessionId}`, {sessionId});
 }
 
+/** The `data.reason` of the error for a request that an archived session does not take. */
+export const SESSION_ARCHIVED_REASON = "archived";
+
+/** The ACP error for a request that Codex refuses because the thread is archived. */
+export function sessionArchivedRequestError(sessionId: string): RequestError {
+    return RequestError.invalidRequest(
+        {reason: SESSION_ARCHIVED_REASON, sessionId},
+        `Session is archived: ${sessionId}`,
+    );
+}
+
 /** The JSON-RPC code of an app-server internal error. */
 const INTERNAL_ERROR_CODE = -32603;
 
