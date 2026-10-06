@@ -126,7 +126,9 @@ url = "https://example.com/mcp"
         });
 
         await vi.waitFor(() => {
-            expect(fixture.getAcpConnectionDump([])).toContain("MCP server `broken-mcp` failed to start");
+            const dump = fixture.getAcpConnectionDump([]);
+            expect(dump).toContain("MCP server `broken-mcp` failed to start");
+            expect(dump).toContain("MCP server `disabled-mcp` was not started, because the Codex config already defines an MCP server with this name.");
         });
     });
 

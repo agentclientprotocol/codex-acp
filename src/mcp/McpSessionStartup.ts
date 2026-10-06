@@ -12,6 +12,7 @@ import type {McpStartupResult} from "./McpStartupTracker";
 
 interface PendingMcpStartupSession {
     requestedServers: Set<string>;
+    skippedServers: Array<string>;
     startup: Promise<McpStartupResult>;
     /** Stops the startup wait and the sign-in of the startup report. */
     abort: AbortController;
@@ -23,12 +24,13 @@ export interface McpSessionStartupOptions {
     publish: boolean;
     /** When positive, `begin` waits for the startup at most this time. */
     awaitTimeoutMs?: number | undefined;
-    /** The requested servers that the Codex config already defines. Nothing waits for them. */
+    /** The requested servers that the Codex config already defines. Nothing waits for them, and the report shows them. */
     skippedServers?: Array<string> | undefined;
 }
 
 /**
- * Reports the MCP server startup of a session. The report shows the servers that failed to start.
+ * Reports the MCP server startup of a session. The report shows the servers that failed to start, and the requested
+ * servers that Codex replaces with its own entry.
  * Before the report, it signs in to each server that needs authentication.
  */
 export class McpSessionStartup {
@@ -130,7 +132,7 @@ export class McpSessionStartup {
         ));
         // An abort can reject the startup before a caller awaits it.
         void startup.catch(() => {});
-        return {requestedServers, startup, abort};
+        return {requestedServers, skippedServers, startup, abort};
     }
 
     private async doPublish(sessionId: string): Promise<void> {
@@ -145,7 +147,7 @@ export class McpSessionStartup {
                 || this.pendingSessions.get(sessionId) !== pendingStartup) {
                 return;
             }
-            await this.publish(sessionId, mcpStartup, pendingStartup.abort.signal, pendingStartup.requestedServers);
+            await this.publish(sessionId, mcpStartup, pendingStartup);
         } catch (err) {
             if (!pendingStartup.abort.signal.aborted) {
                 logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
@@ -158,9 +160,9 @@ export class McpSessionStartup {
     private async publish(
         sessionId: string,
         mcpStartup: McpStartupResult,
-        signal: AbortSignal,
-        requestedServers: Set<string>,
+        pendingStartup: PendingMcpStartupSession,
     ): Promise<void> {
+        const {requestedServers, skippedServers, abort: {signal}} = pendingStartup;
         const filteredStartup = {
             ready: mcpStartup.ready.filter(server => requestedServers.has(server)),
             failed: mcpStartup.failed.filter(server => requestedServers.has(server.server)),
@@ -184,11 +186,14 @@ export class McpSessionStartup {
         }
 
         const renderer = new AcpToolCallRenderer(this.capabilities());
-        for (const facts of McpStartupReporter.failures({
-            ...filteredStartup,
-            ready: readyAfterOauth,
-            failed: failuresAfterOauth,
-        })) {
+        for (const facts of [
+            ...McpStartupReporter.skipped(skippedServers),
+            ...McpStartupReporter.failures({
+                ...filteredStartup,
+                ready: readyAfterOauth,
+                failed: failuresAfterOauth,
+            }),
+        ]) {
             await this.connection.notify(acp.methods.client.session.update, {
                 sessionId,
                 update: renderer.render(facts),

@@ -45,7 +45,8 @@ It keeps tracking every requested server in the background.
 
 A requested server whose name the Codex config already defines is not passed to Codex: Codex runs its own entry
 instead. The wait leaves such a server out, because its startup events, if any, belong to the entry of Codex. A disabled
-entry sends none.
+entry sends none. The adapter reports such a server with the other startup reports, in the same shape, with a text that
+says the server was not started.
 
 When the requested servers reach a terminal state, the adapter reports each of them that failed or was cancelled.
 Each report is a `session/update` with a new `tool_call` in the `failed` status and the title `mcp__<server>__startup`.

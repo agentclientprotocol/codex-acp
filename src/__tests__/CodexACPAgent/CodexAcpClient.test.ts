@@ -1145,6 +1145,38 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(awaitMcpStartupSpy).toHaveBeenCalledWith(["new-mcp"], expect.any(Number), {threadId: "new-id", signal: expect.any(AbortSignal)});
     });
 
+    it('reports the MCP servers that the Codex config already defines', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
+            sessionId: "new-id",
+            currentModelId: "gpt-5[medium]",
+            models: [createTestModel({id: "gpt-5"})],
+            collaborationMode: "default",
+            currentServiceTier: null,
+            additionalDirectories: [],
+            skippedMcpServers: ["codex-mcp"],
+        });
+        vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockResolvedValue({ready: [], failed: [], cancelled: []});
+
+        await codexAcpAgent.newSession({
+            cwd: "/workspace",
+            mcpServers: [{name: "codex-mcp", command: "npx", args: ["codex"], env: []}],
+        });
+
+        await vi.waitFor(() => {
+            const dump = mockFixture.getAcpConnectionDump([]);
+            expect(dump).toMatch(/"toolCallId": "mcp_startup\.codex-mcp\.[0-9a-f-]{36}"/);
+            expect(dump).toContain('"title": "mcp__codex-mcp__startup"');
+            expect(dump).toContain("MCP server `codex-mcp` was not started, because the Codex config already defines an MCP server with this name.");
+        });
+    });
+
     it('skips waiting for MCP startup when _meta.mcpStartupAwaitTimeoutMs is <= 0', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
