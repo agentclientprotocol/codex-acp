@@ -43,6 +43,10 @@ import type {
     ThreadStatusChangedNotification,
     ThreadArchiveParams,
     ThreadArchiveResponse,
+    ThreadDeleteParams,
+    ThreadDeleteResponse,
+    ThreadUnarchiveParams,
+    ThreadUnarchiveResponse,
     ThreadCompactStartParams,
     ThreadCompactStartResponse,
     ThreadGoalClearedNotification,
@@ -723,6 +727,14 @@ export class CodexAppServerClient {
 
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
         return await this.sendRequest({ method: "thread/archive", params: params });
+    }
+
+    async threadUnarchive(params: ThreadUnarchiveParams): Promise<ThreadUnarchiveResponse> {
+        return await this.sendRequest({ method: "thread/unarchive", params: params });
+    }
+
+    async threadDelete(params: ThreadDeleteParams): Promise<ThreadDeleteResponse> {
+        return await this.sendRequest({ method: "thread/delete", params: params });
     }
 
     async threadUnsubscribe(params: ThreadUnsubscribeParams): Promise<ThreadUnsubscribeResponse> {

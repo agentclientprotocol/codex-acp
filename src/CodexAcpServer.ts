@@ -23,6 +23,9 @@ import {
     isAccountReadAuthFailureError,
     isAccountReadUnavailableError,
     isNoActiveTurnError,
+    isThreadActiveWriterError,
+    sessionNotFoundRequestError,
+    threadActiveWriterRequestError,
 } from "./CodexThreadErrors";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
@@ -163,6 +166,26 @@ import {
     clientSupportsAirCapability,
     JETBRAINS_META_KEY,
 } from "./AirExtension";
+import {
+    AIR_SESSION_INDEX_KEY,
+    readSessionIndexListOptions,
+    readSessionIndexPage,
+    SESSION_ARCHIVE_METHOD,
+    SESSION_LIST_CHANGED_METHOD,
+    SESSION_RENAME_METHOD,
+    SESSION_UNARCHIVE_METHOD,
+    changesSessionIndex,
+    SessionIndexActivity,
+    sessionIndexPageSignature,
+    sessionIndexSessionInfo,
+    type SessionArchiveRequest,
+    type SessionIndexListOptions,
+    type SessionRenameRequest,
+} from "./SessionIndex";
+import {linkedWorktreeCwds} from "./SessionIndexWorktrees";
+import {SessionListChangedWatcher, type WatchedSessionList} from "./SessionListChangedWatcher";
+import {deleteThread, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
+import {isAbsolutePathLike} from "./PathUtils";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
 import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdate} from "./CodexSessionCompactions";
@@ -354,6 +377,11 @@ export class CodexAcpServer {
     private codexProcessGeneration = 0;
     private initializeRequest: acp.InitializeRequest | null = null;
     private providerUpdate: Promise<void> | null = null;
+    /** The client declared the AIR `sessionIndex` capability, see `SessionIndex.ts`. */
+    private sessionIndexEnabled = false;
+    private readonly sessionIndexActivity = new SessionIndexActivity();
+    /** Created on the first `session/list` of a `sessionIndex` client that names a cwd. */
+    private sessionListWatcher: SessionListChangedWatcher | null = null;
 
     constructor(
         connection: AcpClientConnection,
@@ -423,7 +451,11 @@ export class CodexAcpServer {
         this.capabilities = ClientCapabilities.from(_params.clientCapabilities);
         this.reportingConnection.reports.compareMeta = this.capabilities.airClient;
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
+        this.sessionIndexEnabled = clientSupportsAirCapability(_params.clientCapabilities, AIR_SESSION_INDEX_KEY);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
+        if (this.sessionIndexEnabled) {
+            this.observeSessionIndexNotifications(this.codexAcpClient);
+        }
         this.publishFirstAuthStatusAfterResponse();
         const goalCapability = {
             version: GOAL_EXTENSION_VERSION,
@@ -490,6 +522,9 @@ export class CodexAcpServer {
                                 AIR_RAW_INPUT_RENDERING_KEY,
                                 AIR_PLAN_CONTENT_DELTA_KEY,
                                 AIR_CODEX_HOOKS_KEY,
+                                // Only a client that declares it gets it: the old AIR builds use `session/list` and
+                                // `session/delete` the old way.
+                                ...(this.sessionIndexEnabled ? [AIR_SESSION_INDEX_KEY] : []),
                             ],
                         },
                     },
@@ -1121,6 +1156,9 @@ export class CodexAcpServer {
 
     async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
         logger.log("Listing sessions...", {cwd: params.cwd, cursor: params.cursor});
+        if (this.sessionIndexEnabled) {
+            return await this.listSessionIndex(params);
+        }
         await this.checkAuthorization();
         const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
         return {
@@ -1189,13 +1227,199 @@ export class CodexAcpServer {
                 this.bumpSessionGeneration(sessionId);
             }
 
-            await this.runWithProcessCheck(() => this.codexAcpClient.deleteSession(sessionId));
+            if (this.sessionIndexEnabled) {
+                await this.deleteThreadForSessionIndex(sessionId, shouldCloseLocalSession);
+            } else {
+                await this.runWithProcessCheck(() => this.codexAcpClient.deleteSession(sessionId));
+            }
             logger.log("Session deleted", {sessionId});
         } finally {
             this.endSessionCloseFence(sessionId);
         }
 
         return {};
+    }
+
+    /**
+     * Deletes the thread for a `sessionIndex` client: AIR then means "delete", not "done", because it has
+     * `_session/archive` for that. A thread that this connection had open but Codex never persisted (no
+     * prompt yet) is gone with the close, so it counts as deleted.
+     */
+    private async deleteThreadForSessionIndex(sessionId: string, hadLocalSession: boolean): Promise<void> {
+        let outcome;
+        try {
+            outcome = await this.runWithProcessCheck(() => deleteThread(this.codexAcpClient.appServerClient, sessionId));
+        } catch (err) {
+            throw sessionIndexRequestError(sessionId, err);
+        }
+        if (outcome === "missing" && !hadLocalSession) {
+            throw sessionNotFoundRequestError(sessionId);
+        }
+        this.sessionIndexActivity.forget(sessionId);
+        this.sessionListWatcher?.trigger();
+    }
+
+    private requireSessionIndex(method: string): void {
+        if (!this.sessionIndexEnabled) {
+            throw RequestError.methodNotFound(method);
+        }
+    }
+
+    /**
+     * Answers `session/list` for a `sessionIndex` client. Codex filters by the cwd and its worktrees, sorts by
+     * recency and limits the page, so no page is filtered after the read. The list does not check the login:
+     * `thread/list` reads the local state DB and works without one.
+     */
+    private async listSessionIndex(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+        const options = readSessionIndexListOptions(params._meta);
+        const cwd = params.cwd?.trim() || null;
+        if (cwd !== null && !isAbsolutePathLike(cwd)) {
+            // A relative cwd keeps the local basename filter of the old path.
+            const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSessions(params));
+            return {...response, sessions: response.sessions.map(session => this.withActiveAdditionalDirectories(session))};
+        }
+        const page = await this.readSessionIndexRows(cwd, options, params.cursor ?? null);
+        if (cwd !== null && !params.cursor) {
+            this.watchSessionList({cwd, options}, sessionIndexPageSignature(page.sessions, page.nextCursor));
+        }
+        return page;
+    }
+
+    private async readSessionIndexRows(
+        cwd: string | null,
+        options: SessionIndexListOptions,
+        cursor: string | null,
+    ): Promise<{sessions: acp.SessionInfo[], nextCursor: string | null}> {
+        const cwds = cwd === null ? null : linkedWorktreeCwds(cwd);
+        const page = await this.runWithProcessCheck(() => readSessionIndexPage(
+            (listParams) => this.codexAcpClient.appServerClient.threadList(listParams),
+            cwds,
+            options,
+            cursor,
+        ));
+        return {
+            sessions: page.threads.map(thread => this.withActiveAdditionalDirectories(
+                sessionIndexSessionInfo(thread, this.sessionIndexActivity.activityOf(thread)),
+            )),
+            nextCursor: page.nextCursor,
+        };
+    }
+
+    private withActiveAdditionalDirectories(session: acp.SessionInfo): acp.SessionInfo {
+        const activeSession = this.sessions.get(session.sessionId);
+        if (!activeSession || activeSession.additionalDirectories.length === 0) {
+            return session;
+        }
+        return {...session, additionalDirectories: activeSession.additionalDirectories};
+    }
+
+    private watchSessionList(list: WatchedSessionList, signature: string): void {
+        this.sessionListWatcher ??= new SessionListChangedWatcher({
+            codexHome: () => this.codexAcpClient.getHomePath(),
+            readSignature: async (watched) => {
+                const page = await this.readSessionIndexRows(watched.cwd, watched.options, null);
+                return sessionIndexPageSignature(page.sessions, page.nextCursor);
+            },
+            notify: async (cwd) => {
+                await this.connection.notify(SESSION_LIST_CHANGED_METHOD, {cwd});
+            },
+        });
+        this.sessionListWatcher.observeList(list, signature);
+    }
+
+    /** Feeds the thread notifications of this app-server, for every thread, to the session index. */
+    private observeSessionIndexNotifications(client: CodexAcpClient): void {
+        client.appServerClient.onClientTransportEvent((event) => {
+            if (event.eventType !== "notification") return;
+            const notification = event as unknown as ServerNotification;
+            this.sessionIndexActivity.observe(notification);
+            if (changesSessionIndex(notification)) {
+                this.sessionListWatcher?.trigger();
+            }
+        });
+    }
+
+    /**
+     * `_session/rename`: sets the explicit title of a thread, loaded or not. A loaded session stops its
+     * automatic title first, so the generated title never replaces this one.
+     */
+    async renameSessionIndexEntry(params: SessionRenameRequest): Promise<Record<string, never>> {
+        this.requireSessionIndex(SESSION_RENAME_METHOD);
+        const {sessionId} = params;
+        const title = normalizeSessionTitle(params.title);
+        if (title === null) {
+            throw RequestError.invalidParams({sessionId}, "title must be a non-empty string");
+        }
+        const sessionState = this.sessions.get(sessionId);
+        const previousTitleSource = sessionState?.sessionTitleSource;
+        if (sessionState) {
+            sessionState.sessionTitleSource = "explicit";
+            sessionState.titleGen?.markExistingTitle();
+            await sessionState.titleGen?.waitForIdle(TITLE_GENERATION_SETTLE_TIMEOUT_MS);
+        }
+        try {
+            await this.runWithProcessCheck(() => this.codexAcpClient.renameSession(sessionId, title));
+        } catch (err) {
+            if (sessionState && previousTitleSource !== undefined && sessionState.sessionTitleSource === "explicit") {
+                sessionState.sessionTitleSource = previousTitleSource;
+            }
+            throw sessionIndexRequestError(sessionId, err);
+        }
+        const current = this.sessions.get(sessionId);
+        if (current) {
+            current.sessionTitle = title;
+            current.sessionTitleSource = "explicit";
+            await new ACPSessionConnection(this.connection, sessionId).update({
+                sessionUpdate: "session_info_update",
+                title,
+            });
+        }
+        this.sessionListWatcher?.trigger();
+        return {};
+    }
+
+    /**
+     * `_session/archive` and `_session/unarchive`. Both are idempotent and work for a session that is not
+     * loaded. Codex refuses to archive a thread that its own process has loaded, so a loaded session closes
+     * first, as `session/close` does.
+     */
+    async setSessionArchived(params: SessionArchiveRequest, archived: boolean): Promise<Record<string, never>> {
+        this.requireSessionIndex(archived ? SESSION_ARCHIVE_METHOD : SESSION_UNARCHIVE_METHOD);
+        const {sessionId} = params;
+        logger.log(archived ? "Archiving session..." : "Unarchiving session...", {sessionId});
+        const hadLocalSession = archived && this.hasLocalSession(sessionId);
+        if (archived) this.beginSessionCloseFence(sessionId);
+        try {
+            if (hadLocalSession) {
+                await this.closeSession({sessionId});
+            }
+            let outcome;
+            try {
+                outcome = await this.runWithProcessCheck(() => setThreadArchived(
+                    this.codexAcpClient.appServerClient,
+                    sessionId,
+                    archived,
+                    this.codexAcpClient.getHomePath(),
+                ));
+            } catch (err) {
+                // `setThreadArchived` tells a missing thread by its outcome. Any other error stays as it is.
+                throw isThreadActiveWriterError(err) ? threadActiveWriterRequestError(sessionId, err) : err;
+            }
+            // A thread that this connection had open but Codex never persisted is gone with the close.
+            if (outcome === "missing" && !hadLocalSession) {
+                throw sessionNotFoundRequestError(sessionId);
+            }
+        } finally {
+            if (archived) this.endSessionCloseFence(sessionId);
+        }
+        this.sessionListWatcher?.trigger();
+        return {};
+    }
+
+    /** Stops the session list watcher. The connection is gone. */
+    dispose(): void {
+        this.sessionListWatcher?.dispose();
+        this.sessionListWatcher = null;
     }
 
     private hasLocalSession(sessionId: string): boolean {
@@ -1326,6 +1550,9 @@ export class CodexAcpServer {
             }
             await replacement.initialize(this.initializeRequest);
             this.codexAcpClient = replacement;
+            if (this.sessionIndexEnabled) {
+                this.observeSessionIndexNotifications(replacement);
+            }
             this.availableCommands = this.createAvailableCommands(replacement);
 
             const resumeErrors: unknown[] = [];
