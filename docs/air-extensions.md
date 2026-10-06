@@ -24,6 +24,7 @@ It describes only this adapter.
 - [Agent file-change report](#agent-file-change-report)
 - [Session failure](#session-failure)
 - [Native subagent sessions](#native-subagent-sessions)
+- [Session index](#session-index)
 - [Context compaction](#context-compaction)
 - [Session fork point](#session-fork-point)
 - [Presentation hints](#presentation-hints)
@@ -142,7 +143,9 @@ The `initialize` response carries the agent side of the extension only when the 
 }
 ```
 
-The agent list does not depend on the client capability list.
+The agent list does not depend on the client capability list, except for `sessionIndex`.
+The agent lists `sessionIndex` only when the client declared it, because AIR builds without it use
+`session/list` and `session/delete` the old way.
 An extension is active only when the client declared its capability.
 A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initialize` response.
 
@@ -159,6 +162,7 @@ A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initi
 | `sessionFailure` | Sends warnings and errors as typed transcript records. | [Session failure](#session-failure) |
 | `nativeSubagentSessions` | Reports a Codex subagent as a native ACP child session. | [Native subagent sessions](#native-subagent-sessions) |
 | `codexHooks` | Lets AIR review and trust startup hooks before it opens a session. | [Hook trust](#hook-trust) |
+| `sessionIndex` | Serves `session/list` as the session index of AIR, adds rename and archive requests, and sends `_session/list_changed`. | [Session index](#session-index) |
 
 The goal extension has no client capability.
 The agent advertises the `goal` object, and the client uses the control method when it wants to.
@@ -975,6 +979,77 @@ This section covers only the AIR bridge.
 - The agent always advertises `agentCapabilities.sessionCapabilities.subagents`. It advertises `nativeSubagentSessions` to AIR.
 - Without either signal, a Codex subagent stays an ordinary tool call.
   AIR gets `_meta.jetbrains.air.subagent: true` on a spawn. Another client gets the tool call without `_meta`.
+
+## Session index
+
+AIR uses `session/list` as its index of Codex threads when it declares `sessionIndex`.
+Everything in this section applies only to such a client.
+Another client, AIR included, keeps the old `session/list`, `session/delete` and `initialize` answers.
+
+### List
+
+The request can carry `_meta.jetbrains.air.list`:
+
+```json
+{ "cwd": "/repo", "cursor": null, "_meta": { "jetbrains": { "air": { "list": { "limit": 50, "archived": "exclude" } } } } }
+```
+
+- `limit` is `50` by default. The adapter clamps it to `1..100`.
+- `archived` is `exclude` by default, or `only`.
+- The adapter sends one `thread/list` request:
+  `{cwd, limit, sortKey: "recency_at", archived, sourceKinds: [], modelProviders: [], useStateDbOnly: true, cursor}`.
+  - `cwd` is the requested cwd plus the same directory in the primary checkout and in each linked Git worktree.
+    The adapter reads `<git-common-dir>/worktrees/*/gitdir` and never runs Git, as the Codex TUI does.
+    A worktree whose directory is gone is left out. A single cwd goes as a string.
+  - `sourceKinds: []` means the interactive sources, so `codex exec` runs and subagent threads are not listed.
+  - `modelProviders: []` means every provider, whatever the login of the agent.
+- A relative `cwd` keeps the basename filter of the old path. No `cwd` lists every thread.
+- Rows are ordered by `updatedAt`, newest first. `updatedAt` is `Thread.recencyAt`, or `Thread.updatedAt` without it.
+- A page with `nextCursor` is never empty. The cursor is the opaque Codex cursor.
+- The list does not check the login, so it never fails with `auth_required`. `thread/list` reads the local state DB.
+
+A row can carry these optional fields in `_meta.jetbrains.air`:
+
+| Field | Value |
+| --- | --- |
+| `gitBranch` | `Thread.gitInfo.branch`. |
+| `activity.state` | Only for a thread that this adapter has loaded: `running`, `requires_action` (waiting for an approval or for user input), or `idle`. Omitted for other threads. |
+| `activity.lastTurnEndedAt` | ISO time of the last `turn/completed` that this adapter saw for the thread. |
+
+The adapter sends no `usage`: Codex reports no cost.
+
+### Requests
+
+| Method | Params | Codex call |
+| --- | --- | --- |
+| `_session/rename` | `{sessionId, title}` | `thread/name/set`. |
+| `_session/archive` | `{sessionId}` | `thread/archive`. A session that this connection has loaded closes first, as `session/close` does. |
+| `_session/unarchive` | `{sessionId}` | `thread/unarchive`. |
+| `session/delete` | `{sessionId}` | `thread/delete`. A loaded session closes first. |
+
+- Each request answers `{}` and works for a thread that is not loaded.
+- `title` is collapsed to one line and cut to 256 characters with an ellipsis. A blank title fails with `-32602`.
+  A renamed session that is loaded gets `session_info_update {title}` and never gets an automatic title afterwards.
+- Archive and unarchive are idempotent. Codex fails them for a thread already in the target state,
+  so the adapter reads `Thread.path` with `thread/read`: an archived rollout is under `<CODEX_HOME>/archived_sessions/`.
+- Codex does not open an archived thread. `session/load` of one fails, and it does not unarchive it.
+- Errors:
+  - A thread that another Codex process holds fails with the `thread_active_writer` reason in `data.reason`.
+  - A thread that Codex does not have fails with `-32002`. A loaded session that Codex never persisted,
+    because it had no prompt yet, counts as archived or deleted.
+- Without `sessionIndex` the three `_session/*` methods answer method-not-found,
+  and `session/delete` keeps archiving the thread.
+
+### `_session/list_changed`
+
+The adapter sends `_session/list_changed {cwd}` when page 1 of a list that the client read changed.
+
+- It watches the cwds that the client listed with page 1 in the last 10 minutes, at most 32.
+- Triggers: a write to `<CODEX_HOME>/state_<n>.sqlite-wal` by any Codex process, a thread notification of its own
+  app-server, and a check of the WAL size and time every 30 s.
+- A trigger waits 1 s for more events, and at most 2 s after the first one. The adapter then reads page 1 of each
+  watched list again and notifies only the lists whose rows changed.
+- A lost notification is acceptable: the client also polls page 1.
 
 ## Context compaction
 
