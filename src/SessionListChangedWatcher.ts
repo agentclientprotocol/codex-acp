@@ -260,8 +260,9 @@ export class SessionListChangedWatcher {
             if (this.walWatchers.has(name)) continue;
             try {
                 const watcher = fs.watch(path.join(home, name), {persistent: false}, (event) => {
-                    if (event === "rename") {
-                        // The file was deleted or replaced: this watch sees no more writes.
+                    // macOS also reports a write in place as "rename". Only a file that is gone or replaced
+                    // needs a new watch: this one sees no more of its writes.
+                    if (event === "rename" && inodeOf(path.join(home, name)) !== watch.ino) {
                         this.dropWalWatcher(name, watch);
                         this.refreshWalWatchers(home);
                     }

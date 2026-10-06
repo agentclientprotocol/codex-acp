@@ -303,6 +303,8 @@ export class CodexCommands {
                     await this.sendCommandUsageMessage(commandName, "new name", sessionId);
                     return { handled: true };
                 }
+                // The new name replaces a `_session/rename` title, so its echo must be shown.
+                delete sessionState.sessionIndexExplicitTitle;
                 await this.runWithProcessCheck(() => this.codexAcpClient.renameSession(sessionId, command.rest));
                 return { handled: true };
             }

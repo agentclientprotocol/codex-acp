@@ -90,37 +90,91 @@ export function sessionIndexThreadListParams(
 }
 
 /**
+ * The most `thread/list` pages that one read of the session index asks for. A read that reaches it answers
+ * the rows it has with the cursor where it stopped, so the client can go on: the list never ends early.
+ */
+export const SESSION_INDEX_SCAN_BUDGET_PAGES = 50;
+
+/** The prefix of the adapter cursor of a filtered list, see {@link readSessionIndexPage}. */
+const FILTERED_CURSOR_PREFIX = "air-filtered:";
+
+/** A position in a filtered list: the Codex page, and how many kept rows of it the client already has. */
+interface FilteredCursor {
+    codexCursor: string | null;
+    skip: number;
+}
+
+/**
  * Reads one page of the session index. Codex filters, sorts and limits the page.
  *
- * `keep` filters the rows of each Codex page after the read, for the filters that Codex cannot apply.
- * A page that has no row left but has a cursor is skipped, so a page with a cursor is never empty.
- * The skipping goes on while the cursor advances: stopping earlier would tell the client that the list
- * ends while Codex has more rows. A cursor that Codex already answered means that it does not advance,
- * and only then the list ends early.
+ * `keep` filters the rows after the read, for the filters that Codex cannot apply. Such a read asks Codex
+ * for the largest pages and cuts the kept rows to the limit, and its cursor is the adapter's: the Codex
+ * cursor of the page and the number of its kept rows that the client already has.
+ *
+ * A page that has no row left but has a cursor is skipped, so a page with a cursor is never empty. The
+ * skipping goes on while the cursor advances, for at most {@link SESSION_INDEX_SCAN_BUDGET_PAGES} pages.
+ * At the budget the answer is an empty page with the cursor where the read stopped. A cursor that Codex
+ * already answered means that it does not advance, and only then the list ends early.
  */
 export async function readSessionIndexPage(
     threadList: (params: ThreadListParams) => Promise<ThreadListResponse>,
     cwds: string[] | null,
     options: SessionIndexListOptions,
     cursor: string | null,
-    keep: (thread: Thread) => boolean = () => true,
+    keep?: (thread: Thread) => boolean,
 ): Promise<{threads: Thread[], nextCursor: string | null}> {
+    const filtered = keep !== undefined;
+    const position = filtered ? decodeFilteredCursor(cursor) : {codexCursor: cursor, skip: 0};
+    const pageOptions = filtered ? {...options, limit: MAX_SESSION_INDEX_LIMIT} : options;
+    const encode = (codexCursor: string) => filtered ? encodeFilteredCursor({codexCursor, skip: 0}) : codexCursor;
     const readCursors = new Set<string>();
-    let pageCursor = cursor;
-    for (;;) {
+    let pageCursor = position.codexCursor;
+    let skip = position.skip;
+    for (let pages = 1; ; pages++) {
         if (pageCursor !== null) readCursors.add(pageCursor);
-        const response = await threadList(sessionIndexThreadListParams(cwds, options, pageCursor));
-        const threads = response.data.filter(keep);
+        const response = await threadList(sessionIndexThreadListParams(cwds, pageOptions, pageCursor));
+        const kept = (keep === undefined ? response.data : response.data.filter(keep)).slice(skip);
         const nextCursor = response.nextCursor ?? null;
-        if (threads.length > 0 || nextCursor === null) {
-            return {threads, nextCursor: threads.length === 0 ? null : nextCursor};
+        if (filtered && kept.length > options.limit) {
+            // The rest of the kept rows of this page come with the next request.
+            return {
+                threads: kept.slice(0, options.limit),
+                nextCursor: encodeFilteredCursor({codexCursor: pageCursor, skip: skip + options.limit}),
+            };
+        }
+        if (kept.length > 0 || nextCursor === null) {
+            return {threads: kept, nextCursor: kept.length === 0 || nextCursor === null ? null : encode(nextCursor)};
         }
         if (readCursors.has(nextCursor)) {
             logger.log("thread/list repeats its cursor; the session list ends here", {cursor: nextCursor});
             return {threads: [], nextCursor: null};
         }
+        if (pages >= SESSION_INDEX_SCAN_BUDGET_PAGES) {
+            logger.log("The session list read its page budget; the client continues from the cursor", {pages});
+            return {threads: [], nextCursor: encode(nextCursor)};
+        }
         pageCursor = nextCursor;
+        skip = 0;
     }
+}
+
+function encodeFilteredCursor(cursor: FilteredCursor): string {
+    return FILTERED_CURSOR_PREFIX + Buffer.from(JSON.stringify([cursor.codexCursor, cursor.skip])).toString("base64url");
+}
+
+/** Reads an adapter cursor of a filtered list. Any other cursor counts as a Codex cursor. */
+function decodeFilteredCursor(cursor: string | null): FilteredCursor {
+    if (cursor === null || !cursor.startsWith(FILTERED_CURSOR_PREFIX)) return {codexCursor: cursor, skip: 0};
+    try {
+        const value: unknown = JSON.parse(Buffer.from(cursor.slice(FILTERED_CURSOR_PREFIX.length), "base64url").toString("utf8"));
+        if (Array.isArray(value) && (value[0] === null || typeof value[0] === "string")
+            && typeof value[1] === "number" && Number.isInteger(value[1]) && value[1] >= 0) {
+            return {codexCursor: value[0] as string | null, skip: value[1]};
+        }
+    } catch {
+        // A cursor that the adapter did not write starts the list again.
+    }
+    return {codexCursor: null, skip: 0};
 }
 
 /** The session list row of a thread. */

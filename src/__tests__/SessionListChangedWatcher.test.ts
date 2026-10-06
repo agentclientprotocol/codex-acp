@@ -251,6 +251,29 @@ describe("SessionListChangedWatcher file events", () => {
         watcher.dispose();
     }, 10_000);
 
+    it("keeps the watch of a WAL that macOS reports as renamed after a write in place", async () => {
+        const wal = path.join(home, "state_5.sqlite-wal");
+        fs.writeFileSync(wal, "frame");
+        type Listener = (event: fs.WatchEventType, filename: string | null) => void;
+        const realWatch = fs.watch.bind(fs) as unknown as (target: fs.PathLike, options: fs.WatchOptions, listener: Listener) => fs.FSWatcher;
+        const walListeners: Listener[] = [];
+        vi.spyOn(fs, "watch").mockImplementation(((target: fs.PathLike, options: fs.WatchOptions, listener: Listener) => {
+            if (target === wal) walListeners.push(listener);
+            return realWatch(target, options, target === wal ? () => {} : listener);
+        }) as unknown as typeof fs.watch);
+        const signatures = new Map([["/repo/a", "a2"]]);
+        const {watcher, notify} = createWatcher(signatures, home, eventTimings);
+        watcher.observeList(list("/repo/a"), "a1");
+        expect(walListeners).toHaveLength(1);
+
+        fs.appendFileSync(wal, "frame");
+        walListeners[0]!("rename", "state_5.sqlite-wal");
+
+        await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("/repo/a"), {timeout: 2_000});
+        expect(walListeners).toHaveLength(1);
+        watcher.dispose();
+    });
+
     it("keeps seeing writes after SQLite deletes and creates the WAL again", async () => {
         const wal = path.join(home, "state_5.sqlite-wal");
         fs.writeFileSync(wal, "frame");

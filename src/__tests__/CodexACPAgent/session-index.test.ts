@@ -268,16 +268,66 @@ describe("session/list", () => {
         });
 
         expect(response.sessions.map(session => session.sessionId)).toEqual(["match"]);
-        expect(response.nextCursor).toBe("cursor-3");
+        expect(response.nextCursor).not.toBeNull();
         expect(threadList.mock.calls.map(call => call[0])).toEqual([null, "cursor-2"].map(cursor => ({
             cursor,
-            limit: 10,
+            limit: 100,
             sortKey: "recency_at",
             archived: true,
             sourceKinds: [],
             modelProviders: [],
             useStateDbOnly: true,
         })));
+    });
+
+    it("cuts the kept rows of a relative cwd to the limit and continues inside the Codex page", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        const rows = ["a", "b", "c"].map(id => createThread({id, cwd: `/repo/${id}/project`}));
+        threadList.mockResolvedValue({data: rows, nextCursor: "codex-2", backwardsCursor: null});
+        const list = (cursor: string | null) => agent.listSessions({cwd: "project", cursor, _meta: {jetbrains: {air: {list: {limit: 2}}}}});
+
+        const first = await list(null);
+        threadList.mockResolvedValueOnce({data: rows, nextCursor: "codex-2", backwardsCursor: null})
+            .mockResolvedValueOnce({data: [createThread({id: "d", cwd: "/repo/d/project"})], nextCursor: null, backwardsCursor: null});
+        const second = await list(first.nextCursor ?? null);
+        const third = await list(second.nextCursor ?? null);
+
+        expect([first, second, third].map(page => page.sessions.map(session => session.sessionId))).toEqual([["a", "b"], ["c"], ["d"]]);
+        expect(third.nextCursor).toBeNull();
+        expect(threadList.mock.calls.map(call => call[0].cursor)).toEqual([null, null, "codex-2"]);
+    });
+
+    it("stops a scan at its page budget with a cursor the client can continue from", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        let page = 0;
+        threadList.mockImplementation(async () => {
+            page++;
+            return page === 70
+                ? {data: [createThread({cwd: "/repo/project"})], nextCursor: null, backwardsCursor: null}
+                : {data: [createThread({cwd: "/repo/other"})], nextCursor: `codex-${page}`, backwardsCursor: null};
+        });
+
+        const first = await agent.listSessions({cwd: "project"});
+        expect(first).toEqual({sessions: [], nextCursor: expect.any(String)});
+        expect(threadList).toHaveBeenCalledTimes(50);
+
+        const second = await agent.listSessions({cwd: "project", cursor: first.nextCursor ?? null});
+        expect(second.sessions.map(session => session.sessionId)).toEqual([threadId]);
+        expect(second.nextCursor).toBeNull();
+        expect(threadList).toHaveBeenCalledTimes(70);
+    });
+
+    it("does not watch a relative cwd", async () => {
+        vi.useFakeTimers();
+        const {fixture, agent, threadList} = await createAgent("sessionIndex", [createThread({cwd: "/repo/project"})]);
+        await agent.listSessions({cwd: "project"});
+        threadList.mockClear();
+
+        fixture.sendServerNotification({method: "thread/status/changed", params: {threadId, status: {type: "active", activeFlags: []}}});
+        await vi.advanceTimersByTimeAsync(5_000);
+
+        expect(threadList).not.toHaveBeenCalled();
+        agent.dispose();
     });
 
     it("does not check the login for a sessionIndex client", async () => {
@@ -446,6 +496,42 @@ describe("_session/rename", () => {
         await titleGen.waitForIdle(1_000);
 
         expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit"]);
+    });
+
+    it("skips the automatic title of a session that was closed before its rename", async () => {
+        const {fixture, agent, appServer} = await createAgent("sessionIndex");
+        await openLocalSession(fixture, threadId);
+        vi.spyOn(appServer, "threadUnsubscribe").mockResolvedValue({status: "unsubscribed"});
+        const turn = deferred<unknown>();
+        vi.spyOn(appServer, "threadStart").mockResolvedValue({thread: {id: "ephemeral"}} as never);
+        vi.spyOn(appServer, "runTurn").mockReturnValue(turn.promise as never);
+        const threadSetName = vi.spyOn(appServer, "threadSetName").mockResolvedValue({});
+        const titleGen = agent.getSessionState(threadId).titleGen!;
+        titleGen.onTurnCompleted("Fix the build");
+
+        await agent.closeSession({sessionId: threadId});
+        await agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"});
+        turn.resolve({turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}});
+        await titleGen.waitForIdle(1_000);
+
+        expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit"]);
+    });
+
+    it("keeps the automatic title after a rename that failed", async () => {
+        const {fixture, agent, appServer} = await createAgent("sessionIndex");
+        await openLocalSession(fixture, threadId);
+        vi.spyOn(appServer, "threadStart").mockResolvedValue({thread: {id: "ephemeral"}} as never);
+        vi.spyOn(appServer, "runTurn").mockResolvedValue({
+            turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]},
+        } as never);
+        const threadSetName = vi.spyOn(appServer, "threadSetName")
+            .mockRejectedValueOnce(new Error("app-server busy"))
+            .mockResolvedValue({});
+
+        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"})).rejects.toThrow("app-server busy");
+        const titleGen = agent.getSessionState(threadId).titleGen!;
+        titleGen.onTurnCompleted("Fix the build");
+        await vi.waitFor(() => expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit", "Automatic"]));
     });
 
     it("answers the archived reason for an archived thread and does not unarchive it", async () => {

@@ -1005,11 +1005,14 @@ The request can carry `_meta.jetbrains.air.list`:
   - `sourceKinds: []` means the interactive sources, so `codex exec` runs and subagent threads are not listed.
   - `modelProviders: []` means every provider, whatever the login of the agent.
 - A relative `cwd` keeps the basename filter of the old path: the adapter sends the request above without `cwd`
-  and filters each page by the basename of `Thread.cwd`. `limit`, `archived` and the other fields still apply.
+  and with `limit: 100`, filters each page by the basename of `Thread.cwd` and cuts the rows to `limit`.
+  `archived` and the other fields still apply. The cursor of such a list is the adapter's own.
   No `cwd` lists every thread.
 - Rows are ordered by `updatedAt`, newest first. `updatedAt` is `Thread.recencyAt`, or `Thread.updatedAt` without it.
 - A page with `nextCursor` is never empty: the adapter reads the next Codex page while a page has no row left and
-  the cursor advances. Only a cursor that Codex repeats ends the list early. The cursor is the opaque Codex cursor.
+  the cursor advances, for at most 50 Codex pages. A read that reaches that budget answers an empty page with the
+  cursor where it stopped, so the client can go on. Only a cursor that Codex repeats ends the list early.
+  The cursor is the opaque Codex cursor, except for a relative `cwd`.
 - The list does not check the login, so it never fails with `auth_required`. `thread/list` reads the local state DB.
 
 A row can carry these optional fields in `_meta.jetbrains.air`:
@@ -1035,7 +1038,9 @@ The adapter sends no `usage`: Codex reports no cost.
 - `title` is collapsed to one line and cut to 256 characters with an ellipsis. A blank title fails with `-32602`.
   A renamed session that is loaded gets `session_info_update {title}` and never gets an automatic title afterwards.
   The title writes of a session run one after another: a rename waits until an automatic title that Codex is
-  writing has completed, so the explicit title is the last one.
+  writing has completed, so the explicit title is the last one. This holds across `session/close` and reload too,
+  and a late `thread/name/updated` of the automatic title does not replace the explicit one on the client.
+  A rename that fails leaves automatic titles on.
 - Codex does not rename an archived thread. The rename then fails with `-32600` and `data.reason: "archived"`,
   and does not unarchive the thread.
 - Archive and unarchive are idempotent. Codex fails them for a thread already in the target state,
@@ -1052,7 +1057,8 @@ The adapter sends no `usage`: Codex reports no cost.
 
 The adapter sends `_session/list_changed {cwd}` when page 1 of a list that the client read changed.
 
-- It watches the cwds that the client listed with page 1 in the last 10 minutes, at most 32.
+- It watches the absolute cwds that the client listed with page 1 in the last 10 minutes, at most 32.
+  A relative cwd is not watched.
 - Triggers: a write to `<CODEX_HOME>/state_<n>.sqlite-wal` by any Codex process, a thread notification of its own
   app-server, and a check of the WAL size and time every 30 s.
 - A trigger waits 1 s for more events, and at most 2 s after the first one. The adapter then reads page 1 of each

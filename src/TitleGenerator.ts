@@ -30,10 +30,11 @@ const SYSTEM_PROMPT =
     "Return exactly one JSON object and nothing else: {\"title\": \"your title here\"}";
 
 /**
- * Runs a write of the thread name after every earlier title write of the session has completed, and returns
- * its result. The automatic title and an explicit rename use it, so neither overtakes the other in Codex.
+ * Runs the write of the automatic title after every earlier title write of the session has completed, or
+ * skips it, and tells whether the title was written. The automatic title and an explicit rename go through
+ * the same queue, so neither overtakes the other in Codex.
  */
-export type SerializeTitleWrite = <T>(write: () => Promise<T>) => Promise<T>;
+export type SerializeTitleWrite = (write: () => Promise<boolean>) => Promise<boolean>;
 
 const runTitleWriteNow: SerializeTitleWrite = (write) => write();
 

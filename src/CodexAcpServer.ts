@@ -228,6 +228,11 @@ export interface SessionState {
     goalRevision: number;
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
+    /**
+     * The title that `_session/rename` set while the session was loaded here. A `thread/name/updated` with
+     * another name is then a late echo of an automatic title and is not shown. `/rename` clears it.
+     */
+    sessionIndexExplicitTitle?: string;
     sessionFailure?: SessionFailure;
     titleGen?: TitleGenerator;
     subagents: CodexSubagentEventRouter;
@@ -384,6 +389,12 @@ export class CodexAcpServer {
     private disposed = false;
     /** The tail of the title writes of each session, see {@link serializeTitleWrite}. */
     private readonly titleWrites = new Map<string, Promise<void>>();
+    /**
+     * The sessions whose title `_session/rename` has set or is setting, by session id. It outlives the
+     * `SessionState`, so an automatic title of a session that was closed or loaded again since its generation
+     * started still sees the rename, see {@link writeAutomaticTitle}.
+     */
+    private readonly explicitTitles = new Map<string, {confirmed: boolean, pending: number}>();
 
     constructor(
         connection: AcpClientConnection,
@@ -879,7 +890,7 @@ export class CodexAcpServer {
             sessionId,
             sessionState.cwd,
             () => sessionState.sessionTitleSource,
-            (write) => this.serializeTitleWrite(sessionId, write),
+            (write) => this.writeAutomaticTitle(sessionId, write),
         );
         this.installSessionState(sessionState);
         resumeSubscribed = false;
@@ -1259,6 +1270,7 @@ export class CodexAcpServer {
             throw sessionNotFoundRequestError(sessionId);
         }
         this.sessionIndexActivity.forget(sessionId);
+        this.explicitTitles.delete(sessionId);
         this.sessionListWatcher?.trigger();
     }
 
@@ -1277,7 +1289,8 @@ export class CodexAcpServer {
         const options = readSessionIndexListOptions(params._meta);
         const cwd = params.cwd?.trim() || null;
         const page = await this.readSessionIndexRows(cwd, options, params.cursor ?? null);
-        if (cwd !== null && !params.cursor) {
+        // A relative cwd is filtered by the adapter, page by page, which is too costly to repeat on every change.
+        if (cwd !== null && !params.cursor && isAbsolutePathLike(cwd)) {
             this.watchSessionList({cwd, options}, sessionIndexPageSignature(page.sessions, page.nextCursor));
         }
         return page;
@@ -1346,9 +1359,10 @@ export class CodexAcpServer {
     /**
      * `_session/rename`: sets the explicit title of a thread, loaded or not.
      *
-     * The title writes of a session go one after another, see {@link serializeTitleWrite}. The explicit title is
-     * marked before this write waits for its turn, so an automatic title that has not been written yet is
-     * skipped, and one that Codex is writing now completes before this write starts.
+     * The title writes of a session go one after another, see {@link serializeTitleWrite}. The rename is
+     * recorded before its write waits for its turn, so an automatic title that has not been written yet is
+     * skipped, and one that Codex is writing now completes before this write starts. Automatic titles stop for
+     * good only once the rename succeeded.
      */
     async renameSessionIndexEntry(params: SessionRenameRequest): Promise<Record<string, never>> {
         this.requireSessionIndex(SESSION_RENAME_METHOD);
@@ -1361,13 +1375,20 @@ export class CodexAcpServer {
         const previousTitleSource = sessionState?.sessionTitleSource;
         if (sessionState) {
             sessionState.sessionTitleSource = "explicit";
-            sessionState.titleGen?.markExistingTitle();
         }
+        const explicitTitle = this.explicitTitles.get(sessionId) ?? {confirmed: false, pending: 0};
+        this.explicitTitles.set(sessionId, explicitTitle);
+        explicitTitle.pending++;
         try {
             await this.serializeTitleWrite(sessionId, () => this.runWithProcessCheck(
                 () => this.codexAcpClient.renameSession(sessionId, title),
             ));
         } catch (err) {
+            explicitTitle.pending--;
+            if (!explicitTitle.confirmed && explicitTitle.pending === 0
+                && this.explicitTitles.get(sessionId) === explicitTitle) {
+                this.explicitTitles.delete(sessionId);
+            }
             if (sessionState && previousTitleSource !== undefined && sessionState.sessionTitleSource === "explicit") {
                 sessionState.sessionTitleSource = previousTitleSource;
             }
@@ -1378,10 +1399,15 @@ export class CodexAcpServer {
                 this.codexAcpClient.getHomePath(),
             );
         }
+        explicitTitle.pending--;
+        explicitTitle.confirmed = true;
+        sessionState?.titleGen?.markExistingTitle();
         const current = this.sessions.get(sessionId);
         if (current) {
+            current.titleGen?.markExistingTitle();
             current.sessionTitle = title;
             current.sessionTitleSource = "explicit";
+            current.sessionIndexExplicitTitle = title;
             // Sent here, not left to the `thread/name/updated` echo: a session gets the Codex notifications
             // of its thread only after its first prompt on this connection.
             await new ACPSessionConnection(this.connection, sessionId).update({
@@ -1391,6 +1417,18 @@ export class CodexAcpServer {
         }
         this.sessionListWatcher?.trigger();
         return {};
+    }
+
+    /**
+     * Writes an automatic title in the title queue of the session, unless `_session/rename` has set or is
+     * setting the title. The check runs when the write gets its turn, whatever `SessionState` the generator
+     * belongs to. Only a `sessionIndex` client renames this way, so nothing changes for other clients.
+     */
+    private writeAutomaticTitle(sessionId: string, write: () => Promise<boolean>): Promise<boolean> {
+        return this.serializeTitleWrite(sessionId, async () => {
+            if (this.explicitTitles.has(sessionId)) return false;
+            return await write();
+        });
     }
 
     /**
@@ -2527,7 +2565,7 @@ export class CodexAcpServer {
             sessionId,
             sessionState.cwd,
             () => sessionState.sessionTitleSource,
-            (write) => this.serializeTitleWrite(sessionId, write),
+            (write) => this.writeAutomaticTitle(sessionId, write),
         );
         this.installSessionState(sessionState);
         if (knownAccount === "pending") {

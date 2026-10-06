@@ -528,7 +528,14 @@ export class CodexEventHandler {
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
-            case "thread/name/updated":
+            case "thread/name/updated": {
+                const explicitTitle = this.sessionState.sessionIndexExplicitTitle;
+                if (explicitTitle !== undefined
+                    && normalizeSessionTitle(notification.params.threadName) !== explicitTitle) {
+                    // A late echo of an automatic title that Codex wrote before the rename.
+                    this.sessionState.titleGen?.observeRename();
+                    return null;
+                }
                 this.sessionState.sessionTitle = normalizeSessionTitle(notification.params.threadName);
                 this.sessionState.sessionTitleSource = notification.params.threadName == null
                     ? "unset"
@@ -538,6 +545,7 @@ export class CodexEventHandler {
                     sessionUpdate: "session_info_update",
                     title: this.sessionState.sessionTitle,
                 };
+            }
             case "thread/status/changed":
                 return this.createCodexSessionInfoUpdate({
                     threadStatus: notification.params.status,
