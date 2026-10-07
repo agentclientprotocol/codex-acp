@@ -10,6 +10,7 @@ import {CodexAcpClient} from "./CodexAcpClient";
 import {CodexAppServerClient} from "./CodexAppServerClient";
 import packageJson from "../package.json";
 import {logger} from "./Logger";
+import {CodexAppServerSupervisor} from "./app-server-recovery/CodexAppServerSupervisor";
 import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
 import {prepareCodexHookConfig} from "./CodexHookConfig";
@@ -105,23 +106,20 @@ function startAcpServer() {
     });
 
     const codexProcessState: CodexProcessState = {
-        connection: startCodexConnection(codexPath, undefined, hookConfig.appServerStartupArgs),
+        // The supervisor disposes the connection itself, after the last output of the process was read.
+        connection: startCodexConnection(codexPath, undefined, hookConfig.appServerStartupArgs, {disposeOnExit: false}),
         codexPath,
         config: hookConfig.sessionConfig,
         appServerStartupArgs: hookConfig.appServerStartupArgs,
         modelProvider,
         stderr: "",
     };
+    const supervisor = new CodexAppServerSupervisor(codexProcessState);
+    codexProcessState.supervisor = supervisor;
 
     process.stdin.on("close", () => {
-        codexProcessState.connection.process.stdin.end();
-        // Kill the codex process if it doesn't exit naturally
-        setTimeout(() => {
-            if (!codexProcessState.connection.process.killed) {
-                logger.log("Codex still running 2s after stdin closed; terminating process");
-                codexProcessState.connection.process.kill();
-            }
-        }, 2000);
+        // Ends the stdin of the app-server, sends SIGTERM if it is still running 2 s later, and never restarts it.
+        supervisor.shutdown();
     });
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);

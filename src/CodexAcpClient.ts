@@ -166,6 +166,22 @@ export class CodexAcpClient {
         return this.codexClient;
     }
 
+    /**
+     * A client of the same configuration for another app-server: the same config and model provider. The routing
+     * that the agent set at runtime (gateway auth, `providers/set`) is copied by {@link adoptRoutingFrom}.
+     */
+    withAppServer(codexClient: CodexAppServerClient): CodexAcpClient {
+        const client = new CodexAcpClient(codexClient, this.config, this.modelProvider ?? undefined);
+        client.adoptRoutingFrom(this);
+        return client;
+    }
+
+    /** Takes the runtime routing of `previous`, the client that this client replaces. */
+    adoptRoutingFrom(previous: CodexAcpClient): void {
+        this.gatewayConfig = previous.gatewayConfig;
+        this.gatewayConfigSource = previous.gatewayConfigSource;
+    }
+
     private readonly defaultClientInfo: ClientInfo = {
         name: `${packageJson.name}`, title: "Codex ACP", version: `${packageJson.version}`
     };
@@ -183,6 +199,14 @@ export class CodexAcpClient {
             }
         });
         this.configPath = response?.codexHome ?? null;
+        this.isInitialized = true;
+    }
+
+    private isInitialized = false;
+
+    /** The app-server `initialize` handshake of this client succeeded. */
+    get initialized(): boolean {
+        return this.isInitialized;
     }
 
     getHomePath(): string | null {

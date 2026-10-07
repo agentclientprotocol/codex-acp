@@ -57,6 +57,17 @@ export class ThreadRefusedError extends AppServerUnavailableError {
     }
 }
 
+/** A session closed or was opened again while the agent resumed it after an app-server restart. */
+export class SessionReplacedError extends AppServerUnavailableError {
+    constructor(sessionId: string) {
+        super(
+            `Session ${sessionId} was closed or opened again while the agent reopened it after an app-server restart.`,
+            {exitCode: null, signal: null, restartable: true},
+        );
+        this.name = "SessionReplacedError";
+    }
+}
+
 export function isAppServerUnavailableError(error: unknown): error is AppServerUnavailableError {
     return error instanceof RequestError && error.code === CODEX_PROCESS_EXITED_ERROR_CODE;
 }

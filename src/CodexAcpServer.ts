@@ -24,7 +24,10 @@ import {
     isAccountReadUnavailableError,
     isNoActiveTurnError,
 } from "./CodexThreadErrors";
-import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
+import {type CodexConnection} from "./CodexJsonRpcConnection";
+import {AppServerRecovery, recoveryLimitsFromEnv} from "./app-server-recovery/AppServerRecovery";
+import {CODEX_PROCESS_EXITED_ERROR_CODE, SessionReplacedError, ThreadRefusedError} from "./app-server-recovery/AppServerExit";
+import {CodexAppServerSupervisor} from "./app-server-recovery/CodexAppServerSupervisor";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
 import type {
@@ -238,8 +241,6 @@ export interface SessionFailure {
     actions: SessionFailureAction[];
 }
 
-const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;
-
 /**
  * How long `session/load` waits for an in-flight title generation to settle
  * before answering anyway. Generous enough for a title model round-trip, short
@@ -312,6 +313,8 @@ export interface CodexProcessState {
     modelProvider: string | undefined;
     stderr: string;
     stderrProcess?: CodexConnection["process"];
+    /** Owns the app-server child; created by `index.ts`, or by the server for a state without one. */
+    supervisor?: CodexAppServerSupervisor;
 }
 
 export class CodexAcpServer {
@@ -353,7 +356,8 @@ export class CodexAcpServer {
     private readonly goalControlGenerations: Map<string, number>;
     private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
     private readonly codexProcessState: CodexProcessState | null;
-    private codexProcessGeneration = 0;
+    /** Brings the app-server back after a crash; `null` without a process state (tests). */
+    private readonly recovery: AppServerRecovery<SessionState> | null;
     private initializeRequest: acp.InitializeRequest | null = null;
     private providerUpdate: Promise<void> | null = null;
     /** The AIR `sessionIndex` extension, see `SessionIndexService.ts`. */
@@ -412,7 +416,7 @@ export class CodexAcpServer {
         this.booleanConfigOptionsSupported = false;
         this.currentAuthStatus = null;
         this.availableCommands = this.createAvailableCommands(codexAcpClient);
-        this.observeCodexProcess();
+        this.recovery = this.createRecovery();
     }
 
     private createAvailableCommands(client: CodexAcpClient): CodexCommands {
@@ -433,6 +437,8 @@ export class CodexAcpServer {
         this.clientCapabilities = _params.clientCapabilities ?? null;
         this.initializeRequest = _params;
         this.capabilities = ClientCapabilities.from(_params.clientCapabilities);
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         this.reportingConnection.reports.compareMeta = this.capabilities.airClient;
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         this.sessionIndex.configure(_params.clientCapabilities);
@@ -541,10 +547,12 @@ export class CodexAcpServer {
                 return await this.executeOrQueueSteeringRequest(this.parseSessionSteerParams(methodRequest.params));
             case ASYNC_TASK_STOP_METHOD: {
                 if (this.providerUpdate !== null) {
-                    await this.providerUpdate;
+                    await this.waitForProviderUpdate();
                 }
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
                 if (!sessionState) return {stopped: false};
+                // A task of a dead app-server is failed already; stopping it needs no restarted one.
+                if (this.recovery !== null && !this.recovery.sessionIsLive(sessionState)) return {stopped: false};
                 return {
                     stopped: await this.runWithProcessCheck(
                         () => sessionState.asyncTasks.stop(methodRequest.params.asyncTaskId),
@@ -557,6 +565,11 @@ export class CodexAcpServer {
                 if (!sessionState) {
                     throw RequestError.invalidParams(undefined, `Unknown session: ${methodRequest.params.sessionId}`);
                 }
+                if (this.providerUpdate !== null) {
+                    await this.waitForProviderUpdate();
+                }
+                const sessionReady = this.ensureSessionReady(sessionState);
+                if (sessionReady) await sessionReady;
                 const sessionGeneration = this.getSessionGeneration(sessionState.sessionId);
                 const goalControlGeneration = this.bumpGoalControlGeneration(sessionState.sessionId);
                 if (methodRequest.params.action === "set") {
@@ -623,6 +636,8 @@ export class CodexAcpServer {
      * work answers `unauthenticated`, see {@link isAccountReadAuthFailureError}. Another error rejects.
      */
     private async readAuthenticationStatus(): Promise<AuthenticationStatusResponse> {
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         try {
             return await this.runWithProcessCheck(() => this.codexAcpClient.getAuthenticationStatus());
         } catch (error) {
@@ -708,7 +723,10 @@ export class CodexAcpServer {
             }
             this.beginSessionCloseFence(sessionId);
             try {
-                await this.runWithProcessCheck(() => this.codexAcpClient.closeSession(sessionId));
+                // A dead app-server holds nothing to close.
+                if (this.recovery === null || this.recovery.isReady()) {
+                    await this.runWithProcessCheck(() => this.codexAcpClient.closeSession(sessionId));
+                }
             } catch (err) {
                 logger.error(`Failed to close stale session open for ${sessionId}`, err);
             } finally {
@@ -767,21 +785,29 @@ export class CodexAcpServer {
             : null;
         const knownAccount = await this.checkAuthorization();
         const requestedMcpServers = request.mcpServers ?? [];
-        const mcpServerStartupVersion = requestedMcpServers.length > 0
+        const readMcpServerStartupVersion = () => requestedMcpServers.length > 0
             ? this.codexAcpClient.getMcpServerStartupVersion()
             : null;
+        let mcpServerStartupVersion = readMcpServerStartupVersion();
 
         let sessionMetadata: SessionMetadata;
         let resumeSubscribed = false;
+        // The app-server that loads the thread, read in the closure that loads it. A crash after the load makes the
+        // session stale, see AppServerRecovery.
+        let openGeneration = this.recovery?.generation ?? 0;
         if (operation === "resume") {
             const resumeRequest = request as acp.ResumeSessionRequest;
             logger.log(`Resume existing session: ${resumeRequest.sessionId}...`);
             try {
-                sessionMetadata = await this.runWithProcessCheck(() =>
-                    this.codexAcpClient.resumeSession(resumeRequest, () => {
+                const pendingResume = this.recovery?.settleResume(resumeRequest.sessionId);
+                if (pendingResume) await pendingResume;
+                sessionMetadata = await this.runWithProcessCheck(() => {
+                    openGeneration = this.recovery?.generation ?? 0;
+                    mcpServerStartupVersion = readMcpServerStartupVersion();
+                    return this.codexAcpClient.resumeSession(resumeRequest, () => {
                         resumeSubscribed = true;
-                    })
-                );
+                    });
+                });
             } catch (err) {
                 if (resumeSubscribed && requestedSessionGeneration !== null) {
                     await this.cleanupStaleSessionOpen(resumeRequest.sessionId, requestedSessionGeneration);
@@ -791,10 +817,18 @@ export class CodexAcpServer {
         } else if (operation === "fork") {
             const forkRequest = request as acp.ForkSessionRequest;
             logger.log(`Fork existing session: ${forkRequest.sessionId}...`);
-            sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.forkSession(forkRequest));
+            sessionMetadata = await this.runWithProcessCheck(() => {
+                openGeneration = this.recovery?.generation ?? 0;
+                mcpServerStartupVersion = readMcpServerStartupVersion();
+                return this.codexAcpClient.forkSession(forkRequest);
+            });
         } else {
             logger.log(`Create new session...`);
-            sessionMetadata = await this.runWithProcessCheck(() => this.codexAcpClient.newSession(request as acp.NewSessionRequest));
+            sessionMetadata = await this.runWithProcessCheck(() => {
+                openGeneration = this.recovery?.generation ?? 0;
+                mcpServerStartupVersion = readMcpServerStartupVersion();
+                return this.codexAcpClient.newSession(request as acp.NewSessionRequest);
+            });
         }
 
         const {sessionId, currentModelId, models} = sessionMetadata;
@@ -860,6 +894,7 @@ export class CodexAcpServer {
             this.sessionIndex.titleWriter(sessionId),
         );
         this.installSessionState(sessionState);
+        this.recovery?.markLoaded(sessionState, openGeneration);
         resumeSubscribed = false;
 
         const canPublishSessionUpdates = operation !== "fork";
@@ -1049,9 +1084,17 @@ export class CodexAcpServer {
     }
 
     async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
+        return this.recovery === null
+            ? await this.loadSessionOnce(params)
+            : await this.recovery.trackOpen(params.sessionId, () => this.loadSessionOnce(params));
+    }
+
+    private async loadSessionOnce(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
         if (this.providerUpdate !== null) {
-            await this.providerUpdate;
+            await this.waitForProviderUpdate();
         }
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         logger.log("Loading session...", {sessionId: params.sessionId});
         // Captured before the load installs a fresh SessionState: a title
         // generation started by an earlier turn on this session belongs to the
@@ -1077,7 +1120,7 @@ export class CodexAcpServer {
             await this.closeSession({sessionId}).catch(closeError => {
                 logger.error(`Failed to close session ${sessionId} after a failed history read`, closeError);
             });
-            throw err;
+            throw this.recovery?.mapError(err) ?? err;
         }
         await this.getSessionState(sessionId).asyncTasks.reconcile();
         // A load response means "the replay is complete"; a late rename echo
@@ -1097,9 +1140,17 @@ export class CodexAcpServer {
     }
 
     async resumeSession(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
+        return this.recovery === null
+            ? await this.resumeSessionOnce(params)
+            : await this.recovery.trackOpen(params.sessionId, () => this.resumeSessionOnce(params));
+    }
+
+    private async resumeSessionOnce(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
         if (this.providerUpdate !== null) {
-            await this.providerUpdate;
+            await this.waitForProviderUpdate();
         }
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         logger.log("Resuming session...", {sessionId: params.sessionId});
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -1117,8 +1168,10 @@ export class CodexAcpServer {
 
     async forkSession(params: acp.ForkSessionRequest): Promise<acp.ForkSessionResponse> {
         if (this.providerUpdate !== null) {
-            await this.providerUpdate;
+            await this.waitForProviderUpdate();
         }
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         logger.log("Forking session...", {sessionId: params.sessionId});
         try {
             const [sessionId, , modeState] = await this.tryCreateSession(params, "fork");
@@ -1136,6 +1189,8 @@ export class CodexAcpServer {
     }
 
     async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         logger.log("Listing sessions...", {cwd: params.cwd, cursor: params.cursor});
         if (this.sessionIndex.enabled) {
             return await this.sessionIndex.list(params);
@@ -1177,7 +1232,12 @@ export class CodexAcpServer {
                 await activePrompt.completion;
             }
 
-            await this.runWithProcessCheck(() => this.codexAcpClient.closeSession(params.sessionId));
+            if (this.recovery === null || this.recovery.isReady() && (!sessionState || this.recovery.sessionIsLive(sessionState))) {
+                await this.runWithProcessCheck(() => this.codexAcpClient.closeSession(params.sessionId));
+            } else {
+                // The thread is not loaded in a running app-server: nothing to close there, and no restart for it.
+                logger.log("Session closed without an app-server call: its app-server is gone", {sessionId: params.sessionId});
+            }
             logger.log("Session closed", {sessionId: params.sessionId});
         } finally {
             if (this.getSessionGeneration(params.sessionId) === closeGeneration) {
@@ -1196,6 +1256,8 @@ export class CodexAcpServer {
     }
 
     async deleteSession(params: acp.DeleteSessionRequest): Promise<acp.DeleteSessionResponse> {
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         logger.log("Deleting session...", {sessionId: params.sessionId});
         const sessionId = params.sessionId;
         const shouldCloseLocalSession = this.hasLocalSession(sessionId);
@@ -1238,8 +1300,10 @@ export class CodexAcpServer {
         params: acp.NewSessionRequest,
     ): Promise<LegacyNewSessionResponse> {
         if (this.providerUpdate !== null) {
-            await this.providerUpdate;
+            await this.waitForProviderUpdate();
         }
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         logger.log("Starting new session...");
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -1262,6 +1326,8 @@ export class CodexAcpServer {
         requestId?: acp.JsonRpcId,
     ): Promise<acp.AuthenticateResponse> {
         logger.log("Authenticate request received");
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         const elicitationRequester = this.createUrlElicitationRequester(requestId);
         const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
         if (!isAuthenticated) {
@@ -1300,6 +1366,8 @@ export class CodexAcpServer {
 
     async logout(_params: acp.LogoutRequest): Promise<void> {
         logger.log("Logout request received");
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         await this.runWithProcessCheck(() => this.codexAcpClient.logout());
         await this.refreshAuthState(null);
         logger.log("Logout request completed");
@@ -1353,30 +1421,54 @@ export class CodexAcpServer {
             this.availableCommands = this.createAvailableCommands(replacement);
 
             const resumeErrors: unknown[] = [];
+            this.recovery?.completeReplacement(replacement);
+            const replacementGeneration = this.recovery?.generation ?? 0;
             for (const session of this.sessions.values()) {
                 session.asyncTasks.setAppServer(replacement.appServerClient);
+                session.titleGen?.rebindAppServer(replacement.appServerClient);
+                if (replacement.appServerClient.connectionLoss.lost) {
+                    // The new app-server died: the next use of each session resumes it in the restarted one.
+                    break;
+                }
                 try {
-                    await replacement.resumeSession({
+                    const request = {
                         sessionId: session.sessionId,
                         cwd: session.cwd,
                         additionalDirectories: session.additionalDirectories,
                         mcpServers: session.mcpServers ?? [],
-                    });
+                    };
+                    const resume = (onSubscribed?: () => void) => onSubscribed === undefined
+                        ? replacement.resumeSession(request)
+                        : replacement.resumeSession(request, onSubscribed);
+                    await (this.recovery?.resumeForReplacement(session, replacementGeneration, replacement, resume) ?? resume());
                     session.authProvider = replacement.getModelProvider();
                     session.asyncTasks.refresh();
                     logger.log("Resumed session after provider restart", {sessionId: session.sessionId});
                 } catch (error) {
-                    resumeErrors.push(error);
+                    if (error instanceof ThreadRefusedError || error instanceof SessionReplacedError) {
+                        // A refused session stays not live and its next use reports the refusal; a session that closed
+                        // or opened again meanwhile needs no resume. Neither fails the provider update.
+                        logger.log("Session not resumed after provider restart", {sessionId: session.sessionId, reason: String(error)});
+                        continue;
+                    }
+                    resumeErrors.push(this.recovery?.mapError(error, replacement) ?? error);
                     logger.error(`Failed to resume session ${session.sessionId} after provider restart`, error);
                 }
+            }
+            if (this.recovery !== null && !this.recovery.isReady(replacementGeneration)) {
+                // The new app-server died: report its exit, so requests that waited for the update restart it.
+                throw this.recovery.errorForGeneration(replacementGeneration);
             }
             if (resumeErrors.length > 0) {
                 throw new AggregateError(resumeErrors, `Failed to resume ${resumeErrors.length} session(s) after provider restart`);
             }
         });
         this.providerUpdate = update;
+        this.recovery?.settleReplacement(update);
         try {
             await update;
+        } catch (error) {
+            throw this.recovery?.mapError(error) ?? error;
         } finally {
             if (this.providerUpdate === update) {
                 this.providerUpdate = null;
@@ -1389,52 +1481,116 @@ export class CodexAcpServer {
         if (state === null || state.stderrProcess === state.connection.process) {
             return;
         }
-        state.stderrProcess = state.connection.process;
-        state.connection.process.stderr.addListener("data", (data: Buffer) => {
+        const process = state.connection.process;
+        state.stderrProcess = process;
+        process.stderr.addListener("data", (data: Buffer) => {
+            // Late output of an old app-server does not belong in the crash report of the new one.
+            if (state.connection.process !== process) return;
             state.stderr = (state.stderr + data.toString()).slice(-2 * 1024);
         });
     }
 
-    private observeCodexProcess(): void {
-        const process = this.codexProcessState?.connection.process;
-        if (!process) return;
-        const generation = ++this.codexProcessGeneration;
-        process.once("exit", () => {
-            if (generation !== this.codexProcessGeneration) return;
-            void this.finishAllAsyncTasks("failed", "after the Codex process exited");
-        });
-    }
-
     private async restartCodexClient(): Promise<CodexAcpClient> {
-        const state = this.codexProcessState;
-        if (state === null) {
+        if (this.recovery === null) {
             throw new Error("Codex process state is unavailable");
         }
+        return await this.recovery.beginReplacement();
+    }
 
-        const previous = state.connection;
-        this.codexProcessGeneration += 1;
-        const exited = previous.process.exitCode === null
-            ? once(previous.process, "exit")
-            : Promise.resolve();
-        previous.process.stdin.end();
-        const forceKill = setTimeout(() => {
-            if (previous.process.exitCode === null) {
-                logger.log("Codex still running 2s after provider restart; terminating process");
-                previous.process.kill();
-            }
-        }, 2000);
-        await exited;
-        clearTimeout(forceKill);
+    /**
+     * Waits for the provider update in flight. When its app-server died, the request goes on: the failure belongs to
+     * the `providers/set` request, and the request restarts the app-server itself. Any other failure fails it, as before.
+     */
+    private async waitForProviderUpdate(): Promise<void> {
+        try {
+            await this.providerUpdate;
+        } catch (error) {
+            const mapped = this.recovery?.mapError(error) ?? error;
+            if (!(mapped instanceof RequestError && mapped.code === CODEX_PROCESS_EXITED_ERROR_CODE)) throw error;
+            logger.log("A provider update failed because its app-server died; the request goes on", {error: String(error)});
+        }
+    }
 
-        state.stderr = "";
-        state.connection = startCodexConnection(state.codexPath, undefined, state.appServerStartupArgs);
-        this.captureStderr();
-        this.observeCodexProcess();
-        return new CodexAcpClient(
-            new CodexAppServerClient(state.connection.connection),
-            state.config,
-            state.modelProvider,
-        );
+    /**
+     * Starts the app-server again when it crashed. The entry points of user requests call it, see `AppServerRecovery`.
+     * Returns `undefined` when the app-server runs, so callers add no `await` on the normal path:
+     * `const appServer = this.ensureAppServer(); if (appServer) await appServer;`.
+     */
+    private ensureAppServer(): Promise<void> | undefined {
+        return this.recovery?.ensureRunning();
+    }
+
+    /** Resumes the thread of `sessionState` again when it was loaded in an app-server that died; see {@link ensureAppServer}. */
+    private ensureSessionReady(sessionState: SessionState): Promise<void> | undefined {
+        return this.recovery?.ensureSessionReady(sessionState);
+    }
+
+    /** Runs an operation of a prompt on the app-server of `generation`, never on a restarted one. */
+    private runOnAppServer<T>(generation: number, client: CodexAcpClient, operation: () => Promise<T>): Promise<T> {
+        try {
+            this.recovery?.throwIfLost(generation);
+        } catch (error) {
+            return Promise.reject(error);
+        }
+        return this.runWithProcessCheck(operation, client);
+    }
+
+    private createRecovery(): AppServerRecovery<SessionState> | null {
+        const state = this.codexProcessState;
+        if (state === null) return null;
+        const supervisor = state.supervisor ?? new CodexAppServerSupervisor(state);
+        state.supervisor = supervisor;
+        return new AppServerRecovery<SessionState>({
+            supervisor,
+            currentClient: () => this.codexAcpClient,
+            createClient: (connection) => {
+                this.captureStderr();
+                return this.codexAcpClient.withAppServer(new CodexAppServerClient(connection.connection));
+            },
+            handshake: (client) => this.initializeRequest !== null && this.codexAcpClient.initialized
+                ? client.initialize(this.initializeRequest)
+                : null,
+            install: (client) => this.installCodexClient(client),
+            crashed: () => {
+                // Every session takes its tasks now, before any await, so a task that a restarted app-server starts
+                // meanwhile is not failed with the old ones.
+                for (const session of this.sessions.values()) {
+                    session.asyncTasks.finishAll("failed").catch(error => {
+                        logger.error("Failed to finish background terminal tasks after the Codex process exited", error);
+                    });
+                }
+            },
+            resumeSession: async (session, client, onSubscribed) => {
+                const metadata = await client.resumeSession({
+                    sessionId: session.sessionId,
+                    cwd: session.cwd,
+                    additionalDirectories: session.additionalDirectories,
+                    mcpServers: session.mcpServers ?? [],
+                }, onSubscribed);
+                return {collaborationMode: metadata.collaborationMode};
+            },
+            applyCollaborationMode: (session, client) =>
+                client.setCollaborationMode(session.sessionId, session.collaborationMode, session.currentModelId),
+            collaborationMode: (session) => session.collaborationMode,
+            resumed: (session) => session.asyncTasks.refresh(),
+            sessionLifetime: (session) => this.getSessionGeneration(session.sessionId),
+            isCurrent: (session, lifetime) => this.sessions.get(session.sessionId) === session
+                && this.getSessionGeneration(session.sessionId) === lifetime
+                && !this.sessionIsClosing(session.sessionId),
+            installedSession: (sessionId) => this.sessions.get(sessionId),
+        }, recoveryLimitsFromEnv());
+    }
+
+    /** Makes `client`, of a restarted app-server, the client of the agent and of every session. */
+    private installCodexClient(client: CodexAcpClient): void {
+        // A `providers/set` can have changed the routing of the old client while the restart ran.
+        client.adoptRoutingFrom(this.codexAcpClient);
+        this.codexAcpClient = client;
+        this.availableCommands = this.createAvailableCommands(client);
+        for (const session of this.sessions.values()) {
+            session.asyncTasks.setAppServer(client.appServerClient);
+            session.titleGen?.rebindAppServer(client.appServerClient);
+        }
     }
 
     /** Returns whether the auth state was read (and thus the auth status pushed). */
@@ -1705,7 +1861,12 @@ export class CodexAcpServer {
         if (mode === null) {
             throw RequestError.invalidParams();
         }
-        await this.codexAcpClient.setCollaborationMode(sessionState.sessionId, mode, sessionState.currentModelId);
+        if (this.recovery !== null && !this.recovery.sessionIsLive(sessionState)) {
+            // The thread is not loaded in a running app-server. Its resume applies the mode, see AppServerRecovery.
+            sessionState.collaborationMode = mode;
+            return;
+        }
+        await this.runWithProcessCheck(() => this.codexAcpClient.setCollaborationMode(sessionState.sessionId, mode, sessionState.currentModelId));
         sessionState.collaborationMode = mode;
     }
 
@@ -1750,7 +1911,9 @@ export class CodexAcpServer {
 
         const {model: requestedModelName, effort: requestedEffort} = ModelId.fromString(params.modelId);
 
-        const models = await this.codexAcpClient.fetchAvailableModels();
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
+        const models = await this.runWithProcessCheck(() => this.codexAcpClient.fetchAvailableModels());
         const model = models.find(m => m.id === requestedModelName);
         if (!model) throw new Error(`Unknown model ${params.modelId}`);
 
@@ -2205,21 +2368,29 @@ export class CodexAcpServer {
         // The load awaits the result below. This stops an unhandled rejection while `thread/resume` runs.
         authorization.catch(() => {});
         const requestedMcpServers = request.mcpServers ?? [];
-        const mcpServerStartupVersion = requestedMcpServers.length > 0
+        const readMcpServerStartupVersion = () => requestedMcpServers.length > 0
             ? this.codexAcpClient.getMcpServerStartupVersion()
             : null;
+        let mcpServerStartupVersion = readMcpServerStartupVersion();
 
         logger.log(`Load existing session: ${request.sessionId}...`);
         let subscribed = false;
         let sessionMetadata: SessionMetadataWithThread;
         let knownAccount: KnownAccount | "pending";
+        // The app-server that loads the thread, read in the closure that loads it. A crash after the load makes the
+        // session stale, see AppServerRecovery.
+        let openGeneration = this.recovery?.generation ?? 0;
         try {
             try {
-                sessionMetadata = await this.runWithProcessCheck(() =>
-                    this.codexAcpClient.loadSession(request, () => {
+                const pendingResume = this.recovery?.settleResume(request.sessionId);
+                if (pendingResume) await pendingResume;
+                sessionMetadata = await this.runWithProcessCheck(() => {
+                    openGeneration = this.recovery?.generation ?? 0;
+                    mcpServerStartupVersion = readMcpServerStartupVersion();
+                    return this.codexAcpClient.loadSession(request, () => {
                         subscribed = true;
-                    })
-                );
+                    });
+                });
             } catch (err) {
                 // An auth error that is known within the grace time comes first, as it did when the check ran
                 // before `thread/resume`. A read that is still pending does not hold back the resume error.
@@ -2296,6 +2467,7 @@ export class CodexAcpServer {
             this.sessionIndex.titleWriter(sessionId),
         );
         this.installSessionState(sessionState);
+        this.recovery?.markLoaded(sessionState, openGeneration);
         if (knownAccount === "pending") {
             this.applyLateAccountRead(sessionState, authorization, authStatusVersionAtStart);
         }
@@ -2887,6 +3059,11 @@ export class CodexAcpServer {
         turn: { threadId: string, turnId: string },
         requestName: "Cancel" | "Close",
     ): Promise<void> {
+        if (this.recovery !== null && !this.turnAppServerIsLive(turn.threadId)) {
+            // The turn died with its app-server. A restarted app-server has no such turn.
+            logger.log(`${requestName} - turnInterrupt skipped: the app-server of the turn is gone`, {sessionId: turn.threadId});
+            return;
+        }
         for (let attempt = 0; ; attempt++) {
             try {
                 await this.runWithProcessCheck(() => this.codexAcpClient.turnInterrupt({
@@ -2922,6 +3099,12 @@ export class CodexAcpServer {
                 await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
+    }
+
+    private turnAppServerIsLive(threadId: string): boolean {
+        if (this.recovery === null) return true;
+        const sessionState = this.sessions.get(threadId);
+        return sessionState === undefined ? this.recovery.isReady() : this.recovery.sessionIsLive(sessionState);
     }
 
     private interruptLateStartedTurn(turn: { threadId: string, turnId: string }): void {
@@ -2996,7 +3179,7 @@ export class CodexAcpServer {
         onTurnStarted?: () => void,
     ): Promise<acp.PromptResponse> {
         if (this.providerUpdate !== null) {
-            await this.providerUpdate;
+            await this.waitForProviderUpdate();
         }
         logger.log("Prompt received", {
             sessionId: params.sessionId,
@@ -3026,6 +3209,10 @@ export class CodexAcpServer {
         const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
         let eventHandler: CodexEventHandler | null = null;
         let promptNotificationsActive = true;
+        // The app-server of this prompt. A restart during the prompt must not mix clients, see AppServerRecovery.
+        let promptClient = this.codexAcpClient;
+        let promptCommands = this.availableCommands;
+        let promptGeneration = this.recovery?.generation ?? 0;
         const clearRecoveredSessionFailure = async (handler: CodexEventHandler): Promise<void> => {
             await handler.completeSuccessfulTurn(sessionState.currentTurnId);
             const current = sessionState.sessionFailure;
@@ -3044,6 +3231,25 @@ export class CodexAcpServer {
         };
 
         try {
+            const sessionReady = this.recovery?.ensureSessionReady(sessionState);
+            if (sessionReady) {
+                // A resume of a large session can take long: a cancel or close during it ends the prompt.
+                const readiness = sessionReady.then(() => true);
+                readiness.catch(() => undefined);
+                const ready = await Promise.race([
+                    readiness,
+                    activePrompt.closeSignal.then(() => false),
+                    activePrompt.cancelSignal.then(() => false),
+                ]);
+                if (!ready) {
+                    return cancelledPromptResponse();
+                }
+            }
+            if (this.recovery !== null) {
+                promptClient = this.codexAcpClient;
+                promptCommands = this.availableCommands;
+                promptGeneration = this.recovery.generation;
+            }
             const promptEventHandler = new CodexEventHandler(
                 this.connection,
                 sessionState,
@@ -3076,7 +3282,7 @@ export class CodexAcpServer {
                 permissionContext.handleNotification(event);
                 await elicitationHandler.handleNotification(event);
             };
-            await this.codexAcpClient.subscribeToSessionEvents(params.sessionId,
+            await promptClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
                     await observeInteraction(event);
                     if (!promptNotificationsActive) {
@@ -3103,7 +3309,7 @@ export class CodexAcpServer {
                 return cancelledPromptResponse();
             }
 
-            const commandPromise = this.availableCommands.tryHandleCommand(params.prompt, sessionState, {
+            const commandPromise = promptCommands.tryHandleCommand(params.prompt, sessionState, {
                 signal: activePrompt.signal,
                 onTurnStartPending: () => {
                     sessionState.lastTokenUsage = null;
@@ -3149,7 +3355,7 @@ export class CodexAcpServer {
             if (commandResult.handled) {
                 promptNotificationsActive = false;
                 logger.log("Prompt handled by a command");
-                await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                await promptClient.waitForSessionNotifications(params.sessionId);
                 await eventHandler.flushPendingErrors();
                 await eventHandler.flushPendingErrorsAsSessionScoped();
                 if (commandResult.turnCompleted) {
@@ -3214,8 +3420,8 @@ export class CodexAcpServer {
             );
             sessionState.lastTokenUsage = null;
             ensurePendingTurnStart();
-            const sendPromptPromise = this.runWithProcessCheck(
-                () => this.codexAcpClient.sendPrompt(
+            const sendPromptPromise = this.runOnAppServer(promptGeneration, promptClient,
+                () => promptClient.sendPrompt(
                     effectiveParams,
                     agentMode,
                     modelId,
@@ -3251,11 +3457,11 @@ export class CodexAcpServer {
                 return cancelledPromptResponse();
             }
 
-            await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+            await promptClient.waitForSessionNotifications(params.sessionId);
             if (turnCompleted.turn.status === "completed") {
                 await eventHandler.waitForNativeSubagents(activePrompt.signal);
                 if (activePrompt.signal.aborted) return cancelledPromptResponse();
-                await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                await promptClient.waitForSessionNotifications(params.sessionId);
             }
             else {
                 await eventHandler.finishOutstandingNativeSubagents(
@@ -3314,8 +3520,8 @@ export class CodexAcpServer {
                     };
                     activePrompt.currentTurn = null;
                     sessionState.currentTurnId = null;
-                    const implementationPromise = this.runWithProcessCheck(
-                        () => this.codexAcpClient.sendPrompt(
+                    const implementationPromise = this.runOnAppServer(promptGeneration, promptClient,
+                        () => promptClient.sendPrompt(
                             implementationRequest,
                             agentMode,
                             modelId,
@@ -3354,11 +3560,11 @@ export class CodexAcpServer {
                         return cancelledPromptResponse();
                     }
 
-                    await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                    await promptClient.waitForSessionNotifications(params.sessionId);
                     if (turnCompleted.turn.status === "completed") {
                         await eventHandler.waitForNativeSubagents(activePrompt.signal);
                         if (activePrompt.signal.aborted) return cancelledPromptResponse();
-                        await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                        await promptClient.waitForSessionNotifications(params.sessionId);
                     }
                     else {
                         await eventHandler.finishOutstandingNativeSubagents(
@@ -3424,7 +3630,8 @@ export class CodexAcpServer {
                 usage: this.buildPromptUsage(sessionState.lastTokenUsage),
                 _meta: this.buildQuotaMeta(sessionState),
             };
-        } catch (err) {
+        } catch (caught) {
+            const err = this.recovery?.mapError(caught, promptClient) ?? caught;
             logger.error(`Prompt for session ${params.sessionId} failed`, err);
             if (activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)) {
                 return cancelledPromptResponse();
@@ -3433,6 +3640,7 @@ export class CodexAcpServer {
             agentFileChangeReportUnavailableReason = "providerError";
             const isProcessExit = err instanceof RequestError
                 && err.code === CODEX_PROCESS_EXITED_ERROR_CODE;
+
             const isUnexpectedFailure = !(err instanceof RequestError);
             if (eventHandler !== null
                 && clientSupportsTypedSessionFailures(this.clientCapabilities)
@@ -3457,7 +3665,7 @@ export class CodexAcpServer {
             // awaiting disposal so queued late notifications cannot enter prompt-local buffers.
             promptNotificationsActive = false;
             try {
-                await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
+                await promptClient.waitForSessionNotifications(params.sessionId);
                 await eventHandler?.finishOutstandingNativeSubagents(
                     promptWasCancelled || activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)
                         ? "cancelled"
@@ -3577,10 +3785,18 @@ export class CodexAcpServer {
         return toPromptUsage(lastTokenUsage);
     }
 
-    private async runWithProcessCheck<T>(operation: () => Promise<T>): Promise<T> {
+    /**
+     * Runs an app-server operation and maps a failure because the app-server is gone to a clear error.
+     * It never starts the app-server again: the entry points of user requests do that, see {@link ensureAppServer}.
+     * `client` is the client that the operation uses, by default the installed one at the call.
+     */
+    private async runWithProcessCheck<T>(operation: () => Promise<T>, client = this.codexAcpClient): Promise<T> {
         try {
             return await operation();
         } catch (err) {
+            if (this.recovery !== null) {
+                throw this.recovery.mapError(err, client);
+            }
             const exitCode = this.getExitCode();
             const requestErrorCode = CODEX_PROCESS_EXITED_ERROR_CODE;
             if (exitCode == 3221225781) {
