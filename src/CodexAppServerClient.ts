@@ -1,4 +1,5 @@
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
+import {AppServerConnectionLostError, ConnectionLoss} from "./app-server-recovery/ConnectionLoss";
 import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
 import {McpStartupTracker} from "./mcp/McpStartupTracker";
 import type {
@@ -178,9 +179,12 @@ export class CodexAppServerClient {
     private readonly threadGoalClearedCaptures = new Map<string, Set<() => void>>();
     private readonly threadSettings = new Map<string, ThreadSettings>();
     private readonly staleTurnIds = new Map<string, Set<string>>();
+    /** Ends the notification waits below when the connection is gone, see {@link waitWhileConnected}. */
+    readonly connectionLoss: ConnectionLoss;
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
+        this.connectionLoss = new ConnectionLoss(connection);
         // The process exit disposes the connection and does not close it, so both events end the MCP waits.
         this.connection.onClose?.(() => this.disposeMcpWaits());
         this.connection.onDispose?.(() => this.disposeMcpWaits());
@@ -401,6 +405,7 @@ export class CodexAppServerClient {
             noGoalTurnStarted.threadStatusChanged(status);
         });
 
+        const whileConnected = <T>(wait: Promise<T>) => this.waitWhileConnected("the goal update", wait);
         try {
             const goalSetResponse = await this.threadGoalSet(params);
             expectedGoal = goalSetResponse.goal;
@@ -411,10 +416,10 @@ export class CodexAppServerClient {
                 noGoalTurnStarted.goalUpdated();
             }
             if (expectedGoal.status !== "active") {
-                await matchingGoalUpdateHandled;
+                await whileConnected(matchingGoalUpdateHandled);
                 return null;
             }
-            const turnId = goalTurnId ?? await Promise.race([goalTurnStarted, noGoalTurnStarted.promise]);
+            const turnId = goalTurnId ?? await whileConnected(Promise.race([goalTurnStarted, noGoalTurnStarted.promise]));
             noGoalTurnStarted.release();
             releaseRoutingCapture();
             releaseStatusCapture();
@@ -426,7 +431,7 @@ export class CodexAppServerClient {
             if (earlyCompletion) {
                 return earlyCompletion;
             }
-            return await goalTurnCompleted;
+            return await whileConnected(goalTurnCompleted);
         } finally {
             noGoalTurnStarted.release();
             releaseCompletionCapture();
@@ -452,7 +457,7 @@ export class CodexAppServerClient {
             if (!response.cleared || goalClearedHandled) {
                 return;
             }
-            await matchingGoalClearedHandled;
+            await this.waitWhileConnected("the goal clear", matchingGoalClearedHandled);
         } finally {
             releaseGoalClearedCapture();
         }
@@ -810,18 +815,56 @@ export class CodexAppServerClient {
 
     //TODO create type-safe helper
     async awaitTurnCompleted(threadId: string, turnId: string): Promise<TurnCompletedNotification> {
-        return await new Promise((resolve) => {
+        let resolver: ((event: TurnCompletedNotification) => void) | undefined;
+        const completed = new Promise<TurnCompletedNotification>((resolve) => {
+            resolver = resolve;
             const threadResolvers = this.getOrCreatePendingTurnCompletionResolvers(threadId);
             threadResolvers.set(turnId, resolve);
+        });
+        return await this.waitWhileConnected("the end of the turn", completed, () => {
+            const threadResolvers = this.pendingTurnCompletionResolvers.get(threadId);
+            if (!threadResolvers || threadResolvers.get(turnId) !== resolver) return;
+            threadResolvers.delete(turnId);
+            if (threadResolvers.size === 0) {
+                this.pendingTurnCompletionResolvers.delete(threadId);
+            }
         });
     }
 
     async awaitCompactionCompleted(threadId: string): Promise<CompactionCompletedNotification> {
-        return await new Promise((resolve) => {
-            const releaseCapture = this.captureCompactionCompletions(threadId, (event) => {
+        let releaseCapture: () => void = () => {};
+        const completed = new Promise<CompactionCompletedNotification>((resolve) => {
+            releaseCapture = this.captureCompactionCompletions(threadId, (event) => {
                 releaseCapture();
                 resolve(event);
             });
+        });
+        return await this.waitWhileConnected("the end of the compaction", completed, () => releaseCapture());
+    }
+
+    /**
+     * Waits for `wait`, or rejects with {@link AppServerConnectionLostError} when the connection is lost first.
+     * A JSON-RPC response wait needs no such guard: vscode-jsonrpc rejects it on dispose. A notification wait does.
+     * `release` removes the registration behind `wait`; it runs once the wait ends either way.
+     */
+    waitWhileConnected<T>(what: string, wait: Promise<T>, release: () => void = () => {}): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            let ended = false;
+            const end = () => {
+                if (ended) return false;
+                ended = true;
+                removeListener();
+                release();
+                return true;
+            };
+            let removeListener: () => void = () => {};
+            removeListener = this.connectionLoss.onLost(() => {
+                if (end()) reject(new AppServerConnectionLostError(what));
+            });
+            wait.then(
+                value => { if (end()) resolve(value); },
+                error => { if (end()) reject(error); },
+            );
         });
     }
 
