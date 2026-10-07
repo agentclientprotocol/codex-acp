@@ -31,9 +31,15 @@ export function createJSONRPCWriter(writable: Writable): MessageWriter {
 }
 
 //TODO ask to include proper jsonrpc field and remove
-export function createJSONRPCReader(readable: Readable): MessageReader {
+export function createJSONRPCReader(readable: Readable): MessageReader & {deliver?: (message: Message) => void} {
+    let listener: DataCallback | null = null;
     return {
+        /** Hands `message` to the connection after the messages read so far. */
+        deliver(message: Message) {
+            listener?.(message);
+        },
         listen(callback: DataCallback): Disposable {
+            listener = callback;
             const onLine = (text: string) => {
                 const line = text.trim();
                 if (!line) return;
