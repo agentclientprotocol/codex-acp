@@ -383,10 +383,10 @@ export function sessionIndexSessionInfo(
         sessionId: thread.id,
         cwd: thread.cwd,
         title: normalizeSessionTitle(thread.name ?? thread.preview),
-        // Not `Thread.updatedAt`: Codex also moves it for metadata writes. `thread/unarchive` sets the rollout
-        // mtime to now and copies it into `updated_at` (thread-store unarchive_thread.rs, state mark_unarchived),
-        // and #2161 says unarchive should not change `updatedAt`. `recencyAt` only moves when a turn starts.
-        updatedAt: isoTime(thread.recencyAt ?? thread.updatedAt),
+        // Codex moves `Thread.updatedAt` for every rollout write of the user or the agent: the last activity of any
+        // kind. The list is ordered by `lastPromptAt ?? updatedAt` instead. Known deviation from #2161: Codex also
+        // moves it on `thread/unarchive`, which sets the rollout mtime to now (thread-store unarchive_thread.rs).
+        updatedAt: isoTime(thread.updatedAt),
         ...(meta ? {_meta: meta} : {}),
     };
 }

@@ -1025,12 +1025,11 @@ The request can carry `_meta.jetbrains.air.list`:
   No `cwd` lists every thread.
 - Rows are ordered by last user activity, `lastPromptAt ?? updatedAt`, newest first, ties in the Codex order:
   Codex sorts by `recency_at`, which it moves when a turn starts.
-- `updatedAt` is `Thread.recencyAt`, or `Thread.updatedAt` without it, so every row has it and it equals the order
-  key. It is not `Thread.updatedAt`, although that one moves for every rollout write of the user or the agent:
-  Codex also moves `Thread.updatedAt` for metadata writes. `thread/unarchive` sets the rollout file time to now and
-  copies it into `updated_at`, and #2161 says unarchive should not change `updatedAt`. So `updatedAt` here is the
-  time the last turn started, not of the last agent output; `lastTurnEndedAt` covers that for sessions of this
-  connection.
+- `updatedAt` is `Thread.updatedAt`, the last activity of any kind: Codex moves it for every rollout write of the
+  user or the agent, so it can be later than `lastPromptAt` while the agent works. Every row has it. A rename and
+  an archive do not move it, but `thread/unarchive` does: Codex sets the rollout file time to now and copies it
+  into `updated_at`. That is a known deviation from #2161, see below. The order does not change, as it uses
+  `lastPromptAt`.
 - The cursor is the adapter's own: the Codex cursor of each list it reads and the last rows the client got (their
   recency and ids), so rows that come or go before them do not shift the next page. It is tied to the scope of
   the list: `cwd` (resolved, so `/repo/` and `/repo` are the same; a relative `cwd` as sent), `archived` and
@@ -1118,7 +1117,9 @@ The names and the semantics are the RFDs'. The transport differs:
 | `_meta.jetbrains.air.list.limit` | `session/list` `limit` |
 | `_meta.jetbrains.air.list.includeWorktrees` | `session/list` `includeWorktrees` |
 | `_meta.jetbrains.air.list.archived` | `session/list` `archived` (#2161) |
-| `SessionInfo._meta.jetbrains.air.{createdAt, lastPromptAt, gitBranch, model, forkedFrom, state, lastTurnEndedAt}` | the `SessionInfo` fields of the same names |
+| `SessionInfo.updatedAt` = `Thread.updatedAt` | `SessionInfo.updatedAt`, the last activity of any kind |
+| `SessionInfo._meta.jetbrains.air.lastPromptAt` = `Thread.recencyAt`, the order key | `SessionInfo.lastPromptAt`; the list order `lastPromptAt ?? updatedAt` |
+| `SessionInfo._meta.jetbrains.air.{createdAt, gitBranch, model, forkedFrom, state, lastTurnEndedAt}` | the `SessionInfo` fields of the same names |
 | `SessionInfo._meta.jetbrains.air.archived` | `SessionInfo.archived` (#2161) |
 | `session_info_update._meta.jetbrains.air.archived` | `SessionInfoUpdate.archived` (#2161) |
 | `_session/archive`, `_session/unarchive` | `session/archive`, `session/unarchive` (#2161) |
@@ -1132,6 +1133,8 @@ Remaining differences:
   #2161 forbids that substitution for clients of the RFD; here it only keeps old AIR builds from losing threads.
 - The relative-`cwd` list can answer an empty page with `nextCursor` at its scan budget, see above.
 - `cost` is never sent.
+- `updatedAt` moves on unarchive, because Codex touches the rollout file then; #2161 says it should not. The order
+  is not affected.
 
 ## Context compaction
 

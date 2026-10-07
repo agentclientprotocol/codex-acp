@@ -282,6 +282,25 @@ describe("session/list", () => {
         await expect(list("/repo/a/", first.nextCursor ?? null, 5)).resolves.toMatchObject({sessions: [{sessionId: "b"}], nextCursor: null});
     });
 
+    it("reports the last activity as updatedAt and orders by the last prompt", async () => {
+        // "busy" got its last prompt first but the agent worked on after "fresh" got its prompt.
+        const {agent} = await createAgent("sessionIndex", [
+            createThread({id: "fresh", recencyAt: 500, updatedAt: 500}),
+            createThread({id: "busy", recencyAt: 400, updatedAt: 1_000}),
+        ]);
+
+        const response = await agent.listSessions({cwd: "/repo/project"});
+
+        expect(response.sessions.map(session => [
+            session.sessionId,
+            session.updatedAt,
+            (session._meta as any).jetbrains.air.lastPromptAt,
+        ])).toEqual([
+            ["fresh", "1970-01-01T00:08:20.000Z", "1970-01-01T00:08:20.000Z"],
+            ["busy", "1970-01-01T00:16:40.000Z", "1970-01-01T00:06:40.000Z"],
+        ]);
+    });
+
     it("validates limit: default for omitted or null, clamped integers, -32602 otherwise", async () => {
         const {agent, threadList} = await createAgent("sessionIndex");
         const list = (limit: unknown) => agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {limit}}}}});
