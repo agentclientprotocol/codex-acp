@@ -1001,9 +1001,10 @@ The request can carry `_meta.jetbrains.air.list`:
 - `limit` is `50` by default. The adapter clamps it to `1..100` and never answers more rows.
 - `archived` is a boolean. Omitted, `null` or `false`: unarchived threads only. `true`: unarchived and archived
   threads in one list. Any other value fails with `-32602`.
-- `includeWorktrees` is a boolean, `false` by default. Any other value fails with `-32602`.
+- `includeWorktrees` is a boolean. Omitted or `null` is `false`. Any other value fails with `-32602`.
   - `false`: `cwd` matches exactly, plus its canonical path when that differs (symlinks).
-  - `true`: also the same directory in the primary checkout and in each linked Git worktree. The adapter reads
+  - `true`: also the same relative subdirectory of `cwd` in the primary checkout and in each linked Git
+    worktree: for `<repo>/src/app`, `<worktree>/src/app`. The adapter reads
     `<git-common-dir>/worktrees/*/gitdir` and never runs Git, as the Codex TUI does. A worktree whose directory is
     gone is left out. The worktrees of a bare repository count too; the primary checkout is added only when there
     is one. Each row reports its own real `cwd`.
@@ -1012,7 +1013,8 @@ The request can carry `_meta.jetbrains.air.list`:
   - `cwd` is a string for a single path and an array otherwise.
   - Codex lists unarchived and archived threads apart, so `archived: true` sends one request with `archived: false`
     and one with `archived: true`, and merges the two by recency. A row is answered only when no unread Codex page
-    can hold a newer one.
+    can hold a newer one. An empty Codex page that has a cursor tells nothing about that, so the adapter reads on
+    in that list first; these reads count against the budget below.
   - `sourceKinds: []` means the interactive sources, so `codex exec` runs and subagent threads are not listed.
   - `modelProviders: []` means every provider, whatever the login of the agent.
   - Codex deletes a thread with `thread/delete`, so a deleted thread is never listed, whatever `archived` is.
@@ -1022,9 +1024,10 @@ The request can carry `_meta.jetbrains.air.list`:
 - Rows are ordered by `updatedAt`, newest first, ties in the Codex order. `updatedAt` is `Thread.recencyAt`, or
   `Thread.updatedAt` without it, so every row has it. The adapter never writes it; it is the Codex value.
 - The cursor is the adapter's own: the Codex cursor of each list it reads and the last rows the client got (their
-  recency and ids), so rows that come or go before them do not shift the next page. It is tied to `archived`,
-  `includeWorktrees` and the relative-cwd filter: a malformed cursor, a Codex cursor or a cursor of another list
-  fails with `-32602`. Clients keep `cwd`, `archived` and `includeWorktrees` while they follow `nextCursor`.
+  recency and ids), so rows that come or go before them do not shift the next page. It is tied to the scope of
+  the list: `cwd` (resolved, so `/repo/` and `/repo` are the same; a relative `cwd` as sent), `archived` and
+  `includeWorktrees`. A malformed cursor, a Codex cursor or a cursor of another scope fails with `-32602`.
+  `limit` may change between pages.
 - A page with `nextCursor` is not empty, with one exception. The adapter reads the next Codex pages while a page
   has no row left and the cursors advance, for at most 50 rounds. A relative-`cwd` list, which the adapter
   filters itself, can reach that budget, and then answers an empty page with the cursor where it stopped. That is

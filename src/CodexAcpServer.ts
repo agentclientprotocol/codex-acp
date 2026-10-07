@@ -1,3 +1,4 @@
+import path from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
@@ -1324,6 +1325,7 @@ export class CodexAcpServer {
             options,
             cursor,
             relativeCwd === null ? undefined : (thread) => arePathBasenamesEqual(thread.cwd, relativeCwd),
+            cwd === null || relativeCwd !== null ? cwd : path.resolve(cwd),
         ));
         return {
             sessions: page.threads.map(entry => this.withActiveAdditionalDirectories(

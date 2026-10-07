@@ -143,6 +143,8 @@ interface SideCursor {
  * count, so rows that come or go between two requests do not shift the next page.
  */
 interface AdapterCursor {
+    /** The requested cwd, or `null` for a list without one. */
+    scope: string | null;
     archived: boolean;
     includeWorktrees: boolean;
     filtered: boolean;
@@ -169,7 +171,7 @@ interface SidePage {
  *
  * The cursor is the adapter's: the Codex pages to read next and the last rows that the client has, kept by
  * their recency and ids rather than by a count, so rows that come or go between two requests do not shift
- * the next page. It is tied to `archived`, `includeWorktrees` and the filtering.
+ * the next page. It is tied to the cwd, `archived`, `includeWorktrees` and the filtering.
  *
  * A page that has no row left but has a cursor is skipped, so a page with a cursor is not empty. The
  * skipping goes on while the cursors advance, for at most {@link SESSION_INDEX_SCAN_BUDGET_PAGES} rounds of
@@ -177,7 +179,8 @@ interface SidePage {
  * the cursor where it stopped. A Codex cursor that Codex already answered means that it does not advance,
  * and only then that Codex list ends early.
  *
- * @throws RequestError `invalidParams` for a cursor that is malformed or belongs to another kind of list.
+ * @param scope The requested cwd, which the cursor is tied to as well. `limit` may change between pages.
+ * @throws RequestError `invalidParams` for a cursor that is malformed or belongs to another list.
  */
 export async function readSessionIndexPage(
     threadList: (params: ThreadListParams) => Promise<ThreadListResponse>,
@@ -185,10 +188,12 @@ export async function readSessionIndexPage(
     options: SessionIndexListOptions,
     cursor: string | null,
     keep?: (thread: Thread) => boolean,
+    scope: string | null = null,
 ): Promise<{threads: SessionIndexThread[], nextCursor: string | null}> {
     const filtered = keep !== undefined;
     const state: AdapterCursor = cursor === null
         ? {
+            scope,
             archived: options.archived,
             includeWorktrees: options.includeWorktrees,
             filtered,
@@ -196,8 +201,8 @@ export async function readSessionIndexPage(
             after: null,
         }
         : decodeAdapterCursor(cursor);
-    if (state.archived !== options.archived || state.includeWorktrees !== options.includeWorktrees
-        || state.filtered !== filtered) {
+    if (state.scope !== scope || state.archived !== options.archived
+        || state.includeWorktrees !== options.includeWorktrees || state.filtered !== filtered) {
         throw invalidCursorError(cursor!);
     }
 
@@ -205,6 +210,19 @@ export async function readSessionIndexPage(
     const sideArchived = (index: number) => index === 1;
     const readCursors = state.sides.map(side => new Set(side.codexCursor === null ? [] : [side.codexCursor]));
     const pages = new Map<number, SidePage>();
+    /** Moves a Codex list on to its next page, or ends it. */
+    const advanceSide = (index: number, nextCursor: string | null): void => {
+        const side = state.sides[index]!;
+        if (nextCursor === null) {
+            side.done = true;
+        } else if (readCursors[index]!.has(nextCursor)) {
+            logger.log("thread/list repeats its cursor; that list ends here", {cursor: nextCursor, archived: sideArchived(index)});
+            side.done = true;
+        } else {
+            readCursors[index]!.add(nextCursor);
+            side.codexCursor = nextCursor;
+        }
+    };
 
     for (let round = 1; ; round++) {
         for (const [index, side] of state.sides.entries()) {
@@ -216,6 +234,21 @@ export async function readSessionIndexPage(
                 nextCursor: response.nextCursor ?? null,
                 oldest: recencies.length === 0 ? null : Math.min(...recencies),
             });
+        }
+        // An empty Codex page with more pages says nothing about how new the rows of its list are, so no row of
+        // the other list can be answered before that list's next page is read.
+        const unresolved = [...pages].filter(([, page]) => page.oldest === null && page.nextCursor !== null);
+        if (unresolved.length > 0) {
+            for (const [index, page] of unresolved) {
+                pages.delete(index);
+                advanceSide(index, page.nextCursor!);
+            }
+            if (state.sides.every(side => side.done)) return {threads: [], nextCursor: null};
+            if (round >= SESSION_INDEX_SCAN_BUDGET_PAGES) {
+                logger.log("The session list read its page budget; the client continues from the cursor", {rounds: round});
+                return {threads: [], nextCursor: encodeAdapterCursor(state)};
+            }
+            continue;
         }
         // A row older than the oldest row of a Codex page with more pages could still come after a newer row
         // of that list's next page.
@@ -237,17 +270,8 @@ export async function readSessionIndexPage(
         for (const [index, page] of [...pages]) {
             const allTaken = (page.oldest === null || page.oldest >= bound) && page.rows.every(row => takenIds.has(row.id));
             if (!allTaken) continue;
-            const side = state.sides[index]!;
             pages.delete(index);
-            if (page.nextCursor === null) {
-                side.done = true;
-            } else if (readCursors[index]!.has(page.nextCursor)) {
-                logger.log("thread/list repeats its cursor; that list ends here", {cursor: page.nextCursor, archived: sideArchived(index)});
-                side.done = true;
-            } else {
-                readCursors[index]!.add(page.nextCursor);
-                side.codexCursor = page.nextCursor;
-            }
+            advanceSide(index, page.nextCursor);
         }
         if (taken.length > 0) {
             const last = recencyOf(taken[taken.length - 1]!.thread);
@@ -285,6 +309,7 @@ function rowsAfter(rows: Thread[], after: AdapterCursor["after"]): Thread[] {
 
 function encodeAdapterCursor(cursor: AdapterCursor): string {
     const value = [
+        cursor.scope,
         cursor.archived,
         cursor.includeWorktrees,
         cursor.filtered,
@@ -303,9 +328,9 @@ function decodeAdapterCursor(cursor: string): AdapterCursor {
     } catch {
         throw invalidCursorError(cursor);
     }
-    if (!Array.isArray(value) || value.length !== 5) throw invalidCursorError(cursor);
-    const [archived, includeWorktrees, filtered, sides, after] = value as unknown[];
-    if (typeof archived !== "boolean" || typeof includeWorktrees !== "boolean" || typeof filtered !== "boolean"
+    if (!Array.isArray(value) || value.length !== 6) throw invalidCursorError(cursor);
+    const [scope, archived, includeWorktrees, filtered, sides, after] = value as unknown[];
+    if ((scope !== null && typeof scope !== "string") || typeof archived !== "boolean" || typeof includeWorktrees !== "boolean" || typeof filtered !== "boolean"
         || !Array.isArray(sides) || sides.length !== (archived ? 2 : 1)) {
         throw invalidCursorError(cursor);
     }
@@ -316,10 +341,11 @@ function decodeAdapterCursor(cursor: string): AdapterCursor {
         }
         throw invalidCursorError(cursor);
     });
-    if (after === null) return {archived, includeWorktrees, filtered, sides: sideCursors, after: null};
+    const common = {scope: scope as string | null, archived, includeWorktrees, filtered, sides: sideCursors};
+    if (after === null) return {...common, after: null};
     if (Array.isArray(after) && after.length === 2 && typeof after[0] === "number" && Number.isFinite(after[0])
         && Array.isArray(after[1]) && after[1].every((id: unknown) => typeof id === "string")) {
-        return {archived, includeWorktrees, filtered, sides: sideCursors, after: {recency: after[0], ids: after[1] as string[]}};
+        return {...common, after: {recency: after[0], ids: after[1] as string[]}};
     }
     throw invalidCursorError(cursor);
 }

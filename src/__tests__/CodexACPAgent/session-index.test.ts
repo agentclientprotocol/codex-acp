@@ -251,6 +251,37 @@ describe("session/list", () => {
             .rejects.toMatchObject({code: -32602});
     });
 
+    it("reads past an empty Codex page before it answers a row of the other list", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        threadList.mockImplementation(async (params) => {
+            const page = (data: Thread[], nextCursor: string | null) => ({data, nextCursor, backwardsCursor: null});
+            if (params.archived) return page([createThread({id: "archived-10", recencyAt: 10})], null);
+            return params.cursor === null
+                ? page([], "unarchived-2")
+                : page([createThread({id: "unarchived-20", recencyAt: 20})], null);
+        });
+        const ids: string[] = [];
+        let cursor: string | null = null;
+        do {
+            const response = await agent.listSessions({cwd: "/repo/project", cursor, _meta: {jetbrains: {air: {list: {limit: 1, archived: true}}}}});
+            ids.push(...response.sessions.map(session => session.sessionId));
+            cursor = response.nextCursor ?? null;
+        } while (cursor !== null && ids.length < 5);
+
+        expect(ids).toEqual(["unarchived-20", "archived-10"]);
+    });
+
+    it("ties a cursor to the cwd and the scope of the list, but not to the limit", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        threadList.mockResolvedValue({data: [createThread({id: "a", recencyAt: 20}), createThread({id: "b", recencyAt: 10})], nextCursor: null, backwardsCursor: null});
+        const list = (cwd: string, cursor: string | null, limit = 1) =>
+            agent.listSessions({cwd, cursor, _meta: {jetbrains: {air: {list: {limit, archived: null, includeWorktrees: null}}}}});
+        const first = await list("/repo/a", null);
+
+        await expect(list("/repo/b", first.nextCursor ?? null)).rejects.toMatchObject({code: -32602});
+        await expect(list("/repo/a/", first.nextCursor ?? null, 5)).resolves.toMatchObject({sessions: [{sessionId: "b"}], nextCursor: null});
+    });
+
     it("never answers an empty page with a cursor", async () => {
         const {agent, threadList} = await createAgent("sessionIndex");
         threadList
