@@ -251,14 +251,20 @@ describe("SessionListChangedWatcher file events", () => {
         watcher.dispose();
     }, 10_000);
 
-    /** Watches a WAL whose own watch reports only what the test sends, and returns those listeners. */
-    function watchWalByHand(wal: string) {
-        type Listener = (event: fs.WatchEventType, filename: string | null) => void;
+    type Listener = (event: fs.WatchEventType, filename: string | null) => void;
+
+    /**
+     * Watches a WAL whose own watch reports only what the test sends, and returns those listeners. With
+     * `dirListeners`, the watch of CODEX_HOME reports only what the test sends too.
+     */
+    function watchWalByHand(wal: string, dirListeners: Listener[] | null = null) {
         const realWatch = fs.watch.bind(fs) as unknown as (target: fs.PathLike, options: fs.WatchOptions, listener: Listener) => fs.FSWatcher;
         const walListeners: Listener[] = [];
         vi.spyOn(fs, "watch").mockImplementation(((target: fs.PathLike, options: fs.WatchOptions, listener: Listener) => {
             if (target === wal) walListeners.push(listener);
-            return realWatch(target, options, target === wal ? () => {} : listener);
+            if (target === home && dirListeners !== null) dirListeners.push(listener);
+            const byHand = target === wal || (target === home && dirListeners !== null);
+            return realWatch(target, options, byHand ? () => {} : listener);
         }) as unknown as typeof fs.watch);
         return walListeners;
     }
@@ -286,6 +292,35 @@ describe("SessionListChangedWatcher file events", () => {
 
         await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("/repo/a"), {timeout: 2_000});
         expect(walListeners).toHaveLength(1);
+        watcher.dispose();
+    });
+
+    it("keeps the WAL watch on Linux when the reported creation time follows the change time", () => {
+        onPlatform("linux");
+        const wal = path.join(home, "state_5.sqlite-wal");
+        fs.writeFileSync(wal, "frame");
+        // Without statx, libuv reports the change time as the creation time, so it moves with every write.
+        const realStat = fs.statSync.bind(fs) as (file: fs.PathLike) => fs.Stats;
+        let writes = 0;
+        vi.spyOn(fs, "statSync").mockImplementation(((file: fs.PathLike) => {
+            const stats = realStat(file);
+            return file === wal ? Object.assign(Object.create(stats) as fs.Stats, {birthtimeMs: ++writes}) : stats;
+        }) as unknown as typeof fs.statSync);
+        const dirListeners: Listener[] = [];
+        const walListeners = watchWalByHand(wal, dirListeners);
+        const {watcher} = createWatcher(new Map(), home, eventTimings);
+        watcher.observeList(list("/repo/a"), "a1");
+        expect(walListeners).toHaveLength(1);
+
+        for (let write = 0; write < 3; write++) {
+            fs.appendFileSync(wal, "frame");
+            dirListeners[0]!("change", "state_5.sqlite-wal");
+        }
+        expect(walListeners).toHaveLength(1);
+
+        // SQLite deletes the WAL and creates it again with the same inode: the watch of the old file says "rename".
+        walListeners[0]!("rename", "state_5.sqlite-wal");
+        expect(walListeners).toHaveLength(2);
         watcher.dispose();
     });
 

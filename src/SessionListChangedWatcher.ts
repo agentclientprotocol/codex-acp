@@ -311,13 +311,17 @@ function readWalSnapshot(home: string): string {
 }
 
 /**
- * What tells a file from another one under the same name: its inode and its creation time. Linux gives a
- * file that is created right after a delete the inode of the deleted one, so the inode alone is not enough.
+ * What tells a file from another one under the same name. On macOS that is the inode and the creation time,
+ * which stays as the file is written. Elsewhere it is the inode alone: without `statx`, libuv reports the
+ * change time as the creation time, so every write would look like another file. A file that Linux creates
+ * with the inode of a deleted one is caught by the "rename" event of the watch of the deleted file instead.
  */
 function fileIdentityOf(file: string): string | null {
     try {
         const stats = fs.statSync(file);
-        return `${stats.dev}:${stats.ino}:${stats.birthtimeMs}`;
+        return process.platform === "darwin"
+            ? `${stats.dev}:${stats.ino}:${stats.birthtimeMs}`
+            : `${stats.dev}:${stats.ino}`;
     } catch {
         return null;
     }
