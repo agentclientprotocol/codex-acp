@@ -49,18 +49,23 @@ export function startCodexConnection(
     return {connection: connection, process: codex};
 }
 
-function attachLogs(proc: ChildProcessWithoutNullStreams) {
+/**
+ * Logs the traffic of the app-server.
+ * The listeners stay attached when logging is off, so that stderr keeps draining,
+ * but a chunk is turned into a string only when the logger writes it.
+ */
+export function attachLogs(proc: ChildProcessWithoutNullStreams) {
     const originalWrite = proc.stdin.write.bind(proc.stdin);
     proc.stdin.write = (chunk: any, encoding?: any, callback?: any): boolean => {
-        logger.log(`[IN] ${chunk.toString()}`);
+        if (logger.enabled) logger.log(`[IN] ${chunk.toString()}`);
         return originalWrite(chunk, encoding, callback);
     };
 
     proc.stderr.on("data", (data) => {
-        logger.log(`[ERR] ${data.toString()}`);
+        if (logger.enabled) logger.log(`[ERR] ${data.toString()}`);
     });
     proc.stdout.on("data", (data: Buffer) => {
-        logger.log(`[OUT] ${data.toString()}`);
+        if (logger.enabled) logger.log(`[OUT] ${data.toString()}`);
     });
     proc.on("exit", (code) => {
         logger.log(`[EXIT] code: ${code?.toString()}`);
