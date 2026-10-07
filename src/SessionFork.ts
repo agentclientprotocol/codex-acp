@@ -1,10 +1,11 @@
 import {createHash} from "node:crypto";
 import type * as acp from "@agentclientprotocol/sdk";
 import {RequestError} from "@agentclientprotocol/sdk";
+import type {SessionConfig} from "./CodexAcpClient";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import type {ModeKind} from "./app-server/ModeKind";
 import type {ServiceTier} from "./app-server/ServiceTier";
-import type {Model, ThreadForkParams} from "./app-server/v2";
+import type {Model} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
 
 export type SessionForkDependencies = {
@@ -14,7 +15,7 @@ export type SessionForkDependencies = {
         cwd: string,
         additionalDirectories: string[],
         mcpServers: acp.McpServer[],
-    ): Promise<NonNullable<ThreadForkParams["config"]>>;
+    ): Promise<SessionConfig>;
     getResumeModelProvider(): Promise<string>;
     fetchAvailableModels(): Promise<Model[]>;
     createCurrentModelId(models: Model[], model: string, reasoningEffort: string | null): string;
@@ -28,13 +29,14 @@ export async function forkSession(
 ): Promise<SessionMetadata> {
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
     const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
+    const sessionConfig = await dependencies.createSessionConfig(
+        request.cwd,
+        additionalDirectories,
+        request.mcpServers ?? [],
+    );
     const response = await dependencies.codexClient.threadFork({
         excludeTurns: true,
-        config: await dependencies.createSessionConfig(
-            request.cwd,
-            additionalDirectories,
-            request.mcpServers ?? [],
-        ),
+        config: sessionConfig.config,
         cwd: request.cwd,
         ...(lastTurnId !== undefined && {lastTurnId}),
         modelProvider: await dependencies.getResumeModelProvider(),
@@ -51,6 +53,7 @@ export async function forkSession(
         modelProvider: response.modelProvider,
         currentServiceTier: response.serviceTier as ServiceTier ?? null,
         additionalDirectories,
+        skippedMcpServers: sessionConfig.skippedMcpServers,
     };
 }
 
