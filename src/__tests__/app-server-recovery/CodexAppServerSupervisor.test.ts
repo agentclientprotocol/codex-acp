@@ -63,6 +63,62 @@ process.stdout.write(JSON.stringify({method: "turn/completed", params: {threadId
         fs.rmSync(dir, {recursive: true, force: true});
     }, 15_000);
 
+    it.skipIf(process.platform === "win32")("delivers a burst of output written before the exit, up to its last message", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-burst-"));
+        const script = path.join(dir, "codex");
+        fs.writeFileSync(script, `#!/usr/bin/env node
+let out = "";
+for (let i = 0; i < 10000; i++) out += JSON.stringify({method: "item/agentMessage/delta", params: {threadId: "t", delta: "x"}}) + "\\n";
+out += JSON.stringify({method: "turn/completed", params: {threadId: "t", turn: {id: "u"}}}) + "\\n";
+process.stdout.write(out, () => process.exit(1));
+`);
+        fs.chmodSync(script, 0o755);
+        const state = {connection: startCodexConnection(script, undefined, {disposeOnExit: false}), codexPath: script, stderr: ""};
+        let deltas = 0;
+        let completedBeforeDispose = false;
+        let disposed = false;
+        state.connection.connection.onUnhandledNotification((notification) => {
+            if (notification.method === "item/agentMessage/delta") deltas++;
+            if (notification.method === "turn/completed") completedBeforeDispose = !disposed;
+        });
+        state.connection.connection.onDispose(() => {
+            disposed = true;
+        });
+        const supervisor = new CodexAppServerSupervisor(state);
+
+        await supervisor.current.exited;
+
+        expect(deltas).toBe(10000);
+        expect(completedBeforeDispose).toBe(true);
+        fs.rmSync(dir, {recursive: true, force: true});
+    }, 30_000);
+
+    it.skipIf(process.platform === "win32")("waits for a backlog that takes longer to handle than the close grace time", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-backlog-"));
+        const script = path.join(dir, "codex");
+        fs.writeFileSync(script, `#!/usr/bin/env node
+let out = "";
+for (let i = 0; i < 2000; i++) out += JSON.stringify({method: "item/agentMessage/delta", params: {threadId: "t", delta: "x"}}) + "\\n";
+out += JSON.stringify({method: "turn/completed", params: {threadId: "t", turn: {id: "u"}}}) + "\\n";
+process.stdout.write(out, () => process.exit(1));
+`);
+        fs.chmodSync(script, 0o755);
+        const state = {connection: startCodexConnection(script, undefined, {disposeOnExit: false}), codexPath: script, stderr: ""};
+        let completed = false;
+        state.connection.connection.onUnhandledNotification((notification) => {
+            // About 1 ms of work per message: the backlog takes about 2 s, more than the close grace time.
+            const until = performance.now() + 1;
+            while (performance.now() < until) { /* busy */ }
+            if (notification.method === "turn/completed") completed = true;
+        });
+        const supervisor = new CodexAppServerSupervisor(state, undefined, {closeGraceMs: 200});
+
+        await supervisor.current.exited;
+
+        expect(completed).toBe(true);
+        fs.rmSync(dir, {recursive: true, force: true});
+    }, 30_000);
+
     it("disposes after the close grace time when a grandchild keeps the pipes open", async () => {
         const {initial, supervisor} = supervisorWith();
         initial.child.emit("exit", null, "SIGKILL");

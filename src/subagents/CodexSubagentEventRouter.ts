@@ -212,6 +212,13 @@ export class CodexSubagentEventRouter {
         return [...closing.values()];
     }
 
+    /** The ACP session ids of the native subagent sessions that have not ended. */
+    childSessionIds(): string[] {
+        return [...this.children.values()]
+            .filter(child => child.terminalState === undefined)
+            .map(child => child.sessionId);
+    }
+
     takeBufferedNotifications(): ServerNotification[] {
         return this.replayQueue.splice(0);
     }
@@ -426,7 +433,8 @@ export class CodexSubagentEventRouter {
         this.materializationWaiters.delete(childThreadId);
     }
 
-    private hasOutstanding(): boolean {
+    /** Some native subagent has not ended yet. */
+    hasOutstanding(): boolean {
         return this.pendingSpawns.size > 0
             || [...this.children.values()].some(child => child.terminalState === undefined);
     }
