@@ -25,17 +25,32 @@ export const SESSION_LIST_CHANGED_METHOD = "_session/list_changed";
 /** The `_meta.jetbrains.air` key of the list options in a `session/list` request. */
 export const AIR_SESSION_LIST_KEY = "list";
 export const AIR_GIT_BRANCH_KEY = "gitBranch";
-export const AIR_ACTIVITY_KEY = "activity";
+export const AIR_STATE_KEY = "state";
+export const AIR_LAST_TURN_ENDED_AT_KEY = "lastTurnEndedAt";
+export const AIR_LAST_PROMPT_AT_KEY = "lastPromptAt";
+export const AIR_CREATED_AT_KEY = "createdAt";
+export const AIR_MODEL_KEY = "model";
+export const AIR_FORKED_FROM_KEY = "forkedFrom";
 
 export const DEFAULT_SESSION_INDEX_LIMIT = 50;
 /** The largest page that the adapter asks Codex for. */
 export const MAX_SESSION_INDEX_LIMIT = 100;
 
-export type SessionIndexArchivedFilter = "exclude" | "only";
+/** The `_meta.jetbrains.air` key of the archive state of a session list row or `session_info_update`. */
+export const AIR_ARCHIVED_KEY = "archived";
 
 export interface SessionIndexListOptions {
     limit: number;
-    archived: SessionIndexArchivedFilter;
+    /** `false`: unarchived sessions only. `true`: unarchived and archived sessions in one list. */
+    archived: boolean;
+    /** Also list the sessions of the linked Git worktrees of the cwd. */
+    includeWorktrees: boolean;
+}
+
+/** A thread of the session index and whether it is archived. */
+export interface SessionIndexThread {
+    thread: Thread;
+    archived: boolean;
 }
 
 export type SessionActivityState = "running" | "idle" | "requires_action";
@@ -48,14 +63,29 @@ export interface SessionActivity {
 export type SessionRenameRequest = { sessionId: string; title: string };
 export type SessionArchiveRequest = { sessionId: string };
 
-/** Reads `_meta.jetbrains.air.list` of a `session/list` request. Bad values fall back to the defaults. */
+/**
+ * Reads `_meta.jetbrains.air.list` of a `session/list` request. A bad `limit` falls back to the default.
+ *
+ * @throws RequestError `invalidParams` for an `archived` or `includeWorktrees` that is neither a boolean nor
+ *   omitted or `null`.
+ */
 export function readSessionIndexListOptions(meta: Record<string, unknown> | null | undefined): SessionIndexListOptions {
     const jetbrains = asRecord(asRecord(meta)[JETBRAINS_META_KEY]);
     const list = asRecord(asRecord(jetbrains[AIR_META_KEY])[AIR_SESSION_LIST_KEY]);
     return {
         limit: clampLimit(list["limit"]),
-        archived: list["archived"] === "only" ? "only" : "exclude",
+        archived: readBoolean(list, "archived"),
+        includeWorktrees: readBoolean(list, "includeWorktrees"),
     };
+}
+
+/** A boolean list option: omitted and `null` are `false`, anything else that is not a boolean is an error. */
+function readBoolean(list: Record<string, unknown>, key: string): boolean {
+    const value = list[key] ?? false;
+    if (typeof value !== "boolean") {
+        throw RequestError.invalidParams({[key]: value}, `${key} must be a boolean`);
+    }
+    return value;
 }
 
 function clampLimit(value: unknown): number {
@@ -75,14 +105,15 @@ function clampLimit(value: unknown): number {
  */
 export function sessionIndexThreadListParams(
     cwds: string[] | null,
-    options: SessionIndexListOptions,
+    limit: number,
+    archived: boolean,
     cursor: string | null,
 ): ThreadListParams {
     return {
         cursor,
-        limit: options.limit,
+        limit,
         sortKey: "recency_at",
-        archived: options.archived === "only",
+        archived,
         sourceKinds: [],
         modelProviders: [],
         ...(cwds === null ? {} : {cwd: cwds.length === 1 ? cwds[0]! : cwds}),
@@ -96,34 +127,57 @@ export function sessionIndexThreadListParams(
  */
 export const SESSION_INDEX_SCAN_BUDGET_PAGES = 50;
 
-/** The prefix of the adapter cursor of a filtered list, see {@link readSessionIndexPage}. */
-const FILTERED_CURSOR_PREFIX = "air-filtered:";
+/** The prefix of the adapter cursor, see {@link readSessionIndexPage}. */
+const ADAPTER_CURSOR_PREFIX = "air-list:";
 
-/**
- * A position in a filtered list: the Codex page to read again, and the last row that the client already
- * has. The row is kept by its recency and id rather than by a count, so rows that come or go before it
- * between two requests do not shift the next page.
- */
-interface FilteredCursor {
+/** Where one Codex list, the unarchived or the archived threads, goes on. */
+interface SideCursor {
+    /** The Codex page to read, read again when the client has not got all its rows yet. */
     codexCursor: string | null;
-    after: {recency: number, id: string} | null;
+    /** Codex has no more rows. */
+    done: boolean;
 }
 
 /**
- * Reads one page of the session index. Codex filters, sorts and limits the page.
+ * The adapter cursor. The last rows that the client has are kept by their recency and ids rather than by a
+ * count, so rows that come or go between two requests do not shift the next page.
+ */
+interface AdapterCursor {
+    archived: boolean;
+    includeWorktrees: boolean;
+    filtered: boolean;
+    /** The unarchived list, then the archived one when `archived` is true. */
+    sides: SideCursor[];
+    /** The recency of the last row that the client has, and the ids of its rows with that recency. */
+    after: {recency: number, ids: string[]} | null;
+}
+
+interface SidePage {
+    rows: Thread[];
+    nextCursor: string | null;
+    /** The recency of the oldest row of the Codex page, before any filter. `null` for an empty page. */
+    oldest: number | null;
+}
+
+/**
+ * Reads one page of the session index, newest first.
  *
- * `keep` filters the rows after the read, for the filters that Codex cannot apply. Such a read asks Codex
- * for the largest pages and cuts the kept rows to the limit, and its cursor is the adapter's: the Codex
- * cursor of the page and the last row that the client already has.
+ * Codex lists the unarchived and the archived threads apart, so with `archived` the adapter reads both and
+ * merges them. It answers a row only when no unread Codex page can hold a newer one. `keep` filters the rows
+ * after the read, for the filters that Codex cannot apply; such a read asks Codex for the largest pages and
+ * cuts the kept rows to the limit.
+ *
+ * The cursor is the adapter's: the Codex pages to read next and the last rows that the client has, kept by
+ * their recency and ids rather than by a count, so rows that come or go between two requests do not shift
+ * the next page. It is tied to `archived`, `includeWorktrees` and the filtering.
  *
  * A page that has no row left but has a cursor is skipped, so a page with a cursor is not empty. The
- * skipping goes on while the cursor advances, for at most {@link SESSION_INDEX_SCAN_BUDGET_PAGES} pages.
- * Only a filtered list can reach that budget: it then answers an empty page with the cursor where the read
- * stopped. A cursor that Codex already answered means that it does not advance, and only then the list
- * ends early.
+ * skipping goes on while the cursors advance, for at most {@link SESSION_INDEX_SCAN_BUDGET_PAGES} rounds of
+ * Codex reads. A read that reaches that budget, in practice only a filtered one, answers an empty page with
+ * the cursor where it stopped. A Codex cursor that Codex already answered means that it does not advance,
+ * and only then that Codex list ends early.
  *
- * @throws RequestError `invalidParams` for an adapter cursor that is malformed or belongs to the other kind
- *   of list.
+ * @throws RequestError `invalidParams` for a cursor that is malformed or belongs to another kind of list.
  */
 export async function readSessionIndexPage(
     threadList: (params: ThreadListParams) => Promise<ThreadListResponse>,
@@ -131,42 +185,89 @@ export async function readSessionIndexPage(
     options: SessionIndexListOptions,
     cursor: string | null,
     keep?: (thread: Thread) => boolean,
-): Promise<{threads: Thread[], nextCursor: string | null}> {
+): Promise<{threads: SessionIndexThread[], nextCursor: string | null}> {
     const filtered = keep !== undefined;
-    if (!filtered && cursor?.startsWith(FILTERED_CURSOR_PREFIX)) throw invalidCursorError(cursor);
-    const position: FilteredCursor = filtered ? decodeFilteredCursor(cursor) : {codexCursor: cursor, after: null};
-    const pageOptions = filtered ? {...options, limit: MAX_SESSION_INDEX_LIMIT} : options;
-    const encode = (codexCursor: string) => filtered ? encodeFilteredCursor({codexCursor, after: null}) : codexCursor;
-    const readCursors = new Set<string>();
-    let pageCursor = position.codexCursor;
-    let after = position.after;
-    for (let pages = 1; ; pages++) {
-        if (pageCursor !== null) readCursors.add(pageCursor);
-        const response = await threadList(sessionIndexThreadListParams(cwds, pageOptions, pageCursor));
-        const kept = rowsAfter(keep === undefined ? response.data : response.data.filter(keep), after);
-        const nextCursor = response.nextCursor ?? null;
-        if (filtered && kept.length > options.limit) {
-            // The rest of the kept rows of this page come with the next request.
-            const threads = kept.slice(0, options.limit);
-            const last = threads[threads.length - 1]!;
-            return {
-                threads,
-                nextCursor: encodeFilteredCursor({codexCursor: pageCursor, after: {recency: recencyOf(last), id: last.id}}),
+    const state: AdapterCursor = cursor === null
+        ? {
+            archived: options.archived,
+            includeWorktrees: options.includeWorktrees,
+            filtered,
+            sides: (options.archived ? [false, true] : [false]).map(() => ({codexCursor: null, done: false})),
+            after: null,
+        }
+        : decodeAdapterCursor(cursor);
+    if (state.archived !== options.archived || state.includeWorktrees !== options.includeWorktrees
+        || state.filtered !== filtered) {
+        throw invalidCursorError(cursor!);
+    }
+
+    const pageLimit = filtered ? MAX_SESSION_INDEX_LIMIT : options.limit;
+    const sideArchived = (index: number) => index === 1;
+    const readCursors = state.sides.map(side => new Set(side.codexCursor === null ? [] : [side.codexCursor]));
+    const pages = new Map<number, SidePage>();
+
+    for (let round = 1; ; round++) {
+        for (const [index, side] of state.sides.entries()) {
+            if (side.done || pages.has(index)) continue;
+            const response = await threadList(sessionIndexThreadListParams(cwds, pageLimit, sideArchived(index), side.codexCursor));
+            const recencies = response.data.map(recencyOf);
+            pages.set(index, {
+                rows: rowsAfter(keep === undefined ? response.data : response.data.filter(keep), state.after),
+                nextCursor: response.nextCursor ?? null,
+                oldest: recencies.length === 0 ? null : Math.min(...recencies),
+            });
+        }
+        // A row older than the oldest row of a Codex page with more pages could still come after a newer row
+        // of that list's next page.
+        let bound = -Infinity;
+        for (const [index, page] of pages) {
+            if (!state.sides[index]!.done && page.nextCursor !== null && page.oldest !== null) {
+                bound = Math.max(bound, page.oldest);
+            }
+        }
+        const candidates = [...pages].flatMap(([index, page]) => page.rows
+            .filter(row => recencyOf(row) >= bound)
+            .map(thread => ({thread, archived: sideArchived(index), index})));
+        // A stable sort: rows as recent as each other keep the Codex order, unarchived first.
+        candidates.sort((left, right) => recencyOf(right.thread) - recencyOf(left.thread));
+        const taken = candidates.slice(0, options.limit);
+        const takenIds = new Set(taken.map(row => row.thread.id));
+
+        // A Codex page whose rows the client now has, or which had none to give, is done with.
+        for (const [index, page] of [...pages]) {
+            const allTaken = (page.oldest === null || page.oldest >= bound) && page.rows.every(row => takenIds.has(row.id));
+            if (!allTaken) continue;
+            const side = state.sides[index]!;
+            pages.delete(index);
+            if (page.nextCursor === null) {
+                side.done = true;
+            } else if (readCursors[index]!.has(page.nextCursor)) {
+                logger.log("thread/list repeats its cursor; that list ends here", {cursor: page.nextCursor, archived: sideArchived(index)});
+                side.done = true;
+            } else {
+                readCursors[index]!.add(page.nextCursor);
+                side.codexCursor = page.nextCursor;
+            }
+        }
+        if (taken.length > 0) {
+            const last = recencyOf(taken[taken.length - 1]!.thread);
+            const ids = taken.filter(row => recencyOf(row.thread) === last).map(row => row.thread.id);
+            state.after = {
+                recency: last,
+                ids: state.after?.recency === last ? [...state.after.ids, ...ids] : ids,
             };
         }
-        if (kept.length > 0 || nextCursor === null) {
-            return {threads: kept, nextCursor: kept.length === 0 || nextCursor === null ? null : encode(nextCursor)};
+        const finished = state.sides.every(side => side.done);
+        if (taken.length > 0 || finished) {
+            return {
+                threads: taken.map(({thread, archived}) => ({thread, archived})),
+                nextCursor: finished ? null : encodeAdapterCursor(state),
+            };
         }
-        if (readCursors.has(nextCursor)) {
-            logger.log("thread/list repeats its cursor; the session list ends here", {cursor: nextCursor});
-            return {threads: [], nextCursor: null};
+        if (round >= SESSION_INDEX_SCAN_BUDGET_PAGES) {
+            logger.log("The session list read its page budget; the client continues from the cursor", {rounds: round});
+            return {threads: [], nextCursor: encodeAdapterCursor(state)};
         }
-        if (pages >= SESSION_INDEX_SCAN_BUDGET_PAGES) {
-            logger.log("The session list read its page budget; the client continues from the cursor", {pages});
-            return {threads: [], nextCursor: encode(nextCursor)};
-        }
-        pageCursor = nextCursor;
-        after = null;
     }
 }
 
@@ -175,41 +276,50 @@ function recencyOf(thread: Thread): number {
     return thread.recencyAt ?? thread.updatedAt;
 }
 
-/**
- * The rows of a page that sort after `after`: older ones, and the ones as old that follow it on the page.
- * When `after` is gone from the page, every row as old as it stays: a row may come twice, but none is lost.
- */
-function rowsAfter(rows: Thread[], after: FilteredCursor["after"]): Thread[] {
+/** The rows that the client does not have yet: older than `after`, or as old and not among its ids. */
+function rowsAfter(rows: Thread[], after: AdapterCursor["after"]): Thread[] {
     if (after === null) return rows;
-    const sameRecency = rows.filter(row => recencyOf(row) === after.recency);
-    const anchorIndex = sameRecency.findIndex(row => row.id === after.id);
-    const seen = new Set(anchorIndex < 0 ? [] : sameRecency.slice(0, anchorIndex + 1).map(row => row.id));
+    const seen = new Set(after.ids);
     return rows.filter(row => recencyOf(row) < after.recency || (recencyOf(row) === after.recency && !seen.has(row.id)));
 }
 
-function encodeFilteredCursor(cursor: FilteredCursor): string {
-    const value = [cursor.codexCursor, cursor.after === null ? null : [cursor.after.recency, cursor.after.id]];
-    return FILTERED_CURSOR_PREFIX + Buffer.from(JSON.stringify(value)).toString("base64url");
+function encodeAdapterCursor(cursor: AdapterCursor): string {
+    const value = [
+        cursor.archived,
+        cursor.includeWorktrees,
+        cursor.filtered,
+        cursor.sides.map(side => side.done ? 0 : [side.codexCursor]),
+        cursor.after === null ? null : [cursor.after.recency, cursor.after.ids],
+    ];
+    return ADAPTER_CURSOR_PREFIX + Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
-/** Reads an adapter cursor of a filtered list. A cursor without the adapter prefix counts as a Codex cursor. */
-function decodeFilteredCursor(cursor: string | null): FilteredCursor {
-    if (cursor === null || !cursor.startsWith(FILTERED_CURSOR_PREFIX)) return {codexCursor: cursor, after: null};
+/** Reads an adapter cursor. A Codex cursor, or any other string, is an error. */
+function decodeAdapterCursor(cursor: string): AdapterCursor {
+    if (!cursor.startsWith(ADAPTER_CURSOR_PREFIX)) throw invalidCursorError(cursor);
     let value: unknown;
     try {
-        value = JSON.parse(Buffer.from(cursor.slice(FILTERED_CURSOR_PREFIX.length), "base64url").toString("utf8"));
+        value = JSON.parse(Buffer.from(cursor.slice(ADAPTER_CURSOR_PREFIX.length), "base64url").toString("utf8"));
     } catch {
         throw invalidCursorError(cursor);
     }
-    if (!Array.isArray(value) || value.length !== 2 || (value[0] !== null && typeof value[0] !== "string")) {
+    if (!Array.isArray(value) || value.length !== 5) throw invalidCursorError(cursor);
+    const [archived, includeWorktrees, filtered, sides, after] = value as unknown[];
+    if (typeof archived !== "boolean" || typeof includeWorktrees !== "boolean" || typeof filtered !== "boolean"
+        || !Array.isArray(sides) || sides.length !== (archived ? 2 : 1)) {
         throw invalidCursorError(cursor);
     }
-    const codexCursor = value[0] as string | null;
-    const after: unknown = value[1];
-    if (after === null) return {codexCursor, after: null};
+    const sideCursors = sides.map((side: unknown): SideCursor => {
+        if (side === 0) return {codexCursor: null, done: true};
+        if (Array.isArray(side) && side.length === 1 && (side[0] === null || typeof side[0] === "string")) {
+            return {codexCursor: side[0] as string | null, done: false};
+        }
+        throw invalidCursorError(cursor);
+    });
+    if (after === null) return {archived, includeWorktrees, filtered, sides: sideCursors, after: null};
     if (Array.isArray(after) && after.length === 2 && typeof after[0] === "number" && Number.isFinite(after[0])
-        && typeof after[1] === "string") {
-        return {codexCursor, after: {recency: after[0], id: after[1]}};
+        && Array.isArray(after[1]) && after[1].every((id: unknown) => typeof id === "string")) {
+        return {archived, includeWorktrees, filtered, sides: sideCursors, after: {recency: after[0], ids: after[1] as string[]}};
     }
     throw invalidCursorError(cursor);
 }
@@ -219,13 +329,22 @@ function invalidCursorError(cursor: string): RequestError {
 }
 
 /** The session list row of a thread. */
-export function sessionIndexSessionInfo(thread: Thread, activity: SessionActivity | null): acp.SessionInfo {
-    const airFields: Record<string, unknown> = {};
+export function sessionIndexSessionInfo(
+    thread: Thread,
+    archived: boolean,
+    activity: SessionActivity | null,
+): acp.SessionInfo {
+    const airFields: Record<string, unknown> = {[AIR_ARCHIVED_KEY]: archived};
     const branch = thread.gitInfo?.branch;
     if (branch) airFields[AIR_GIT_BRANCH_KEY] = branch;
-    if (activity !== null && (activity.state !== undefined || activity.lastTurnEndedAt !== undefined)) {
-        airFields[AIR_ACTIVITY_KEY] = activity;
-    }
+    // `recencyAt` is what Codex orders threads by for user activity; AIR takes it as the time of the last prompt.
+    if (thread.recencyAt !== null) airFields[AIR_LAST_PROMPT_AT_KEY] = isoTime(thread.recencyAt);
+    airFields[AIR_CREATED_AT_KEY] = isoTime(thread.createdAt);
+    if (thread.model) airFields[AIR_MODEL_KEY] = thread.model;
+    if (thread.forkedFromId) airFields[AIR_FORKED_FROM_KEY] = thread.forkedFromId;
+    // `state` is omitted when unknown, never "unknown".
+    if (activity?.state !== undefined) airFields[AIR_STATE_KEY] = activity.state;
+    if (activity?.lastTurnEndedAt !== undefined) airFields[AIR_LAST_TURN_ENDED_AT_KEY] = activity.lastTurnEndedAt;
     let meta: Record<string, unknown> | undefined;
     for (const [key, value] of Object.entries(airFields)) {
         meta = withAirMeta(meta, key, value);
@@ -234,9 +353,14 @@ export function sessionIndexSessionInfo(thread: Thread, activity: SessionActivit
         sessionId: thread.id,
         cwd: thread.cwd,
         title: normalizeSessionTitle(thread.name ?? thread.preview),
-        updatedAt: new Date((thread.recencyAt ?? thread.updatedAt) * 1000).toISOString(),
+        updatedAt: isoTime(thread.recencyAt ?? thread.updatedAt),
         ...(meta ? {_meta: meta} : {}),
     };
+}
+
+/** The ISO time of a Codex time in seconds. */
+function isoTime(seconds: number): string {
+    return new Date(seconds * 1000).toISOString();
 }
 
 /**

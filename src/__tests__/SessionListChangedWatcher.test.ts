@@ -17,7 +17,7 @@ const timings: SessionListChangedTimings = {
 };
 
 function list(cwd: string): WatchedSessionList {
-    return {cwd, options: {limit: 50, archived: "exclude"}};
+    return {cwd, options: {limit: 50, archived: false, includeWorktrees: false}};
 }
 
 function createWatcher(signatures: Map<string, string>, codexHome: string | null = null, watcherTimings = timings) {
@@ -151,6 +151,19 @@ describe("SessionListChangedWatcher", () => {
         expect(cwds).toHaveLength(MAX_WATCHED_SESSION_LISTS);
         expect(cwds).not.toContain("/repo/0");
         expect(cwds).toContain(`/repo/${MAX_WATCHED_SESSION_LISTS}`);
+        watcher.dispose();
+    });
+
+    it("keys a watch by cwd and worktree scope, renewed by the latest list of that scope", () => {
+        const {watcher} = createWatcher(new Map());
+        watcher.observeList({cwd: "/repo/a", options: {limit: 50, archived: false, includeWorktrees: false}}, "");
+        watcher.observeList({cwd: "/repo/a", options: {limit: 10, archived: true, includeWorktrees: false}}, "");
+        watcher.observeList({cwd: "/repo/a", options: {limit: 20, archived: false, includeWorktrees: true}}, "");
+
+        expect(watcher.watchedLists()).toEqual([
+            {cwd: "/repo/a", options: {limit: 10, archived: true, includeWorktrees: false}},
+            {cwd: "/repo/a", options: {limit: 20, archived: false, includeWorktrees: true}},
+        ]);
         watcher.dispose();
     });
 

@@ -139,16 +139,15 @@ describe("session/list", () => {
         await agent.listSessions({cwd: "/repo/project", cursor: null});
         await agent.listSessions({
             cwd: "/repo/project",
-            cursor: "cursor-1",
-            _meta: {jetbrains: {air: {list: {limit: 500, archived: "only"}}}},
+            _meta: {jetbrains: {air: {list: {limit: 500, archived: true}}}},
         });
-        await agent.listSessions({cwd: null, _meta: {jetbrains: {air: {list: {limit: 0}}}}});
+        await agent.listSessions({cwd: null, _meta: {jetbrains: {air: {list: {limit: 0, archived: null}}}}});
 
         await expect(`${JSON.stringify(threadList.mock.calls.map(call => call[0]), null, 2)}\n`)
             .toMatchFileSnapshot("data/session-index-list-params.json");
     });
 
-    it("lists the sessions of every linked worktree of the cwd", async () => {
+    it("lists the sessions of the linked worktrees of the cwd only when the client asks for them", async () => {
         const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-session-index-")));
         try {
             const repo = path.join(root, "repo");
@@ -164,18 +163,26 @@ describe("session/list", () => {
                 createThread({cwd: worktree}),
             ]);
 
-            const response = await agent.listSessions({cwd: repo});
+            const response = await agent.listSessions({cwd: repo, _meta: {jetbrains: {air: {list: {includeWorktrees: true}}}}});
+            await agent.listSessions({cwd: repo});
+            await agent.listSessions({cwd: repo, _meta: {jetbrains: {air: {list: {includeWorktrees: false}}}}});
 
-            expect(threadList.mock.calls[0]?.[0].cwd).toEqual([repo, worktree]);
+            expect(threadList.mock.calls.map(call => call[0].cwd)).toEqual([[repo, worktree], repo, repo]);
             expect(response.sessions[0]?.cwd).toBe(worktree);
         } finally {
             fs.rmSync(root, {recursive: true, force: true});
         }
     });
 
-    it("maps the rows of a sessionIndex client, with the activity of own threads", async () => {
+    it("maps the rows of a sessionIndex client, with the state of own threads", async () => {
         const threads = [
-            createThread({id: "running", status: {type: "active", activeFlags: []}, gitInfo: {sha: null, branch: "main", originUrl: null}}),
+            createThread({
+                id: "running",
+                status: {type: "active", activeFlags: []},
+                gitInfo: {sha: null, branch: "main", originUrl: null},
+                model: "gpt-5.5",
+                forkedFromId: "01a0637c-5b99-7242-9064-04545d605fdd",
+            }),
             createThread({id: "approval", status: {type: "active", activeFlags: ["waitingOnApproval"]}}),
             createThread({id: "input", status: {type: "active", activeFlags: ["waitingOnUserInput"]}}),
             createThread({id: "idle", status: {type: "idle"}, name: "Explicit name", recencyAt: null}),
@@ -215,6 +222,35 @@ describe("session/list", () => {
         });
     });
 
+    it("merges the unarchived and the archived threads by recency when the client asks for archived ones", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        const row = (id: string, recencyAt: number) => createThread({id, recencyAt});
+        const unarchived = [row("u1", 90), row("u2", 70), row("u3", 50), row("u4", 30), row("u5", 10)];
+        const archived = [row("a1", 80), row("a2", 75), row("a3", 40), row("a4", 20)];
+        threadList.mockImplementation(async (params) => {
+            const rows = params.archived ? archived : unarchived;
+            const start = params.cursor === null ? 0 : Number(params.cursor);
+            const end = start + params.limit!;
+            return {data: rows.slice(start, end), nextCursor: end < rows.length ? String(end) : null, backwardsCursor: null};
+        });
+        const pages: [string, boolean][][] = [];
+        let cursor: string | null = null;
+        do {
+            const response = await agent.listSessions({cwd: "/repo/project", cursor, _meta: {jetbrains: {air: {list: {limit: 2, archived: true}}}}});
+            expect(response.sessions.length).toBeGreaterThan(0);
+            pages.push(response.sessions.map(session => [session.sessionId, (session._meta as any).jetbrains.air.archived]));
+            cursor = response.nextCursor ?? null;
+        } while (cursor !== null && pages.length < 20);
+
+        expect(pages.flat().map(([id]) => id)).toEqual(["u1", "a1", "a2", "u2", "u3", "a3", "u4", "a4", "u5"]);
+        expect(pages.every(page => page.length <= 2)).toBe(true);
+        expect(Object.fromEntries(pages.flat())).toMatchObject({u1: false, a1: true, a4: true, u5: false});
+        await expect(agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {archived: "only"}}}}}))
+            .rejects.toMatchObject({code: -32602});
+        await expect(agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {includeWorktrees: 1}}}}}))
+            .rejects.toMatchObject({code: -32602});
+    });
+
     it("never answers an empty page with a cursor", async () => {
         const {agent, threadList} = await createAgent("sessionIndex");
         threadList
@@ -224,8 +260,13 @@ describe("session/list", () => {
         const response = await agent.listSessions({cwd: "/repo/project"});
 
         expect(response.sessions.map(session => session.sessionId)).toEqual([threadId]);
-        expect(response.nextCursor).toBe("cursor-3");
+        expect(response.nextCursor).not.toBeNull();
         expect(threadList.mock.calls.map(call => call[0].cursor)).toEqual([null, "cursor-2"]);
+
+        threadList.mockResolvedValueOnce({data: [createThread({id: otherThreadId, recencyAt: 200})], nextCursor: null, backwardsCursor: null});
+        const next = await agent.listSessions({cwd: "/repo/project", cursor: response.nextCursor ?? null});
+        expect(next).toMatchObject({sessions: [{sessionId: otherThreadId}], nextCursor: null});
+        expect(threadList.mock.calls[2]?.[0].cursor).toBe("cursor-3");
     });
 
     it("keeps reading while Codex answers empty pages with an advancing cursor", async () => {
@@ -238,7 +279,7 @@ describe("session/list", () => {
         const response = await agent.listSessions({cwd: "/repo/project"});
 
         expect(response.sessions.map(session => session.sessionId)).toEqual([threadId]);
-        expect(response.nextCursor).toBe("cursor-last");
+        expect(response.nextCursor).not.toBeNull();
         expect(threadList).toHaveBeenCalledTimes(16);
     });
 
@@ -265,7 +306,7 @@ describe("session/list", () => {
 
         const response = await agent.listSessions({
             cwd: "project",
-            _meta: {jetbrains: {air: {list: {limit: 10, archived: "only"}}}},
+            _meta: {jetbrains: {air: {list: {limit: 10, archived: false}}}},
         });
 
         expect(response.sessions.map(session => session.sessionId)).toEqual(["match"]);
@@ -274,7 +315,7 @@ describe("session/list", () => {
             cursor,
             limit: 100,
             sortKey: "recency_at",
-            archived: true,
+            archived: false,
             sourceKinds: [],
             modelProviders: [],
             useStateDbOnly: true,
@@ -327,9 +368,16 @@ describe("session/list", () => {
             return (await other.listSessions({cwd: "project", _meta: {jetbrains: {air: {list: {limit: 1}}}}})).nextCursor;
         })())!;
 
-        await expect(agent.listSessions({cwd: "project", cursor: "air-filtered:not-json"})).rejects.toMatchObject({code: -32602});
-        await expect(agent.listSessions({cwd: "project", cursor: "air-filtered:WzEsMl0"})).rejects.toMatchObject({code: -32602});
+        const listMeta = (list: Record<string, unknown>) => ({_meta: {jetbrains: {air: {list}}}});
+        await expect(agent.listSessions({cwd: "project", cursor: "air-list:not-json"})).rejects.toMatchObject({code: -32602});
+        await expect(agent.listSessions({cwd: "project", cursor: "air-list:WzEsMl0"})).rejects.toMatchObject({code: -32602});
+        await expect(agent.listSessions({cwd: "/repo/project", cursor: "codex-cursor"})).rejects.toMatchObject({code: -32602});
         await expect(agent.listSessions({cwd: "/repo/project", cursor: filteredCursor})).rejects.toMatchObject({code: -32602});
+        await expect(agent.listSessions({cwd: "project", cursor: filteredCursor, ...listMeta({archived: true})}))
+            .rejects.toMatchObject({code: -32602});
+        await expect(agent.listSessions({cwd: "project", cursor: filteredCursor, ...listMeta({includeWorktrees: true})}))
+            .rejects.toMatchObject({code: -32602});
+        await expect(agent.listSessions({cwd: "project", cursor: filteredCursor})).resolves.toBeDefined();
     });
 
     it("records the turn end only for the sessions of this connection and forgets a deleted thread", async () => {
@@ -343,11 +391,11 @@ describe("session/list", () => {
             params: {threadId: id, turn: {id: "turn-1", items: [], itemsView: "notLoaded", status: "completed", error: null, startedAt: 400, completedAt: 500, durationMs: 100000}},
         });
         const activities = async () => (await agent.listSessions({cwd: "/repo/project"})).sessions
-            .map(session => (session._meta as any)?.jetbrains?.air?.activity ?? null);
+            .map(session => (session._meta as any)?.jetbrains?.air?.lastTurnEndedAt ?? null);
         completed(threadId);
         completed("ephemeral-title-thread");
 
-        expect(await activities()).toEqual([{lastTurnEndedAt: "1970-01-01T00:08:20.000Z"}, null]);
+        expect(await activities()).toEqual(["1970-01-01T00:08:20.000Z", null]);
         fixture.sendServerNotification({method: "thread/deleted", params: {threadId}});
         expect(await activities()).toEqual([null, null]);
     });
@@ -718,33 +766,65 @@ describe("_session/archive and _session/unarchive", () => {
         await expect(agent.setSessionArchived({sessionId: threadId}, false)).rejects.toMatchObject({data: {reason: "thread_active_writer", threadId}});
     });
 
-    it("closes a loaded session before it archives the thread", async () => {
+    it("refuses to archive a session that is open here and leaves it open", async () => {
         const {fixture, agent, appServer, threadArchive} = await createArchiveAgent();
         await openLocalSession(fixture, threadId);
+        const threadUnsubscribe = vi.spyOn(appServer, "threadUnsubscribe");
+
+        await expect(agent.setSessionArchived({sessionId: threadId}, true))
+            .rejects.toMatchObject({code: -32600, data: {reason: "session_active", sessionId: threadId}});
+
+        expect(threadArchive).not.toHaveBeenCalled();
+        expect(threadUnsubscribe).not.toHaveBeenCalled();
+        expect(agent.getSessionState(threadId).sessionId).toBe(threadId);
+    });
+
+    it("unarchives a session that is open here and reports its archive state to it", async () => {
+        const {fixture, agent, threadUnarchive} = await createArchiveAgent();
+        await openLocalSession(fixture, threadId);
+
+        await expect(agent.setSessionArchived({sessionId: threadId}, false)).resolves.toEqual({});
+
+        expect(threadUnarchive).toHaveBeenCalledWith({threadId});
+        expect(fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "session_info_update")).toEqual([{
+            method: "sessionUpdate",
+            args: [{sessionId: threadId, update: {sessionUpdate: "session_info_update", _meta: {jetbrains: {air: {version: 1, archived: false}}}}}],
+        }]);
+    });
+
+    it("sends no session update for a session that is not open here", async () => {
+        const {fixture, agent} = await createArchiveAgent();
+
+        await agent.setSessionArchived({sessionId: threadId}, true);
+        await agent.setSessionArchived({sessionId: threadId}, false);
+
+        expect(fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "session_info_update")).toEqual([]);
+    });
+
+    it("runs the writes of a session one after another", async () => {
+        const {agent, appServer, threadArchive} = await createArchiveAgent();
+        const renameWrite = deferred<Record<string, never>>();
         const order: string[] = [];
-        vi.spyOn(appServer, "threadUnsubscribe").mockImplementation(async () => {
-            order.push("thread/unsubscribe");
-            return {status: "unsubscribed"};
+        vi.spyOn(appServer, "threadSetName").mockImplementation(async () => {
+            order.push("rename started");
+            await renameWrite.promise;
+            order.push("rename done");
+            return {};
         });
         threadArchive.mockImplementation(async () => {
-            order.push("thread/archive");
+            order.push("archive");
             return {};
         });
 
-        await expect(agent.setSessionArchived({sessionId: threadId}, true)).resolves.toEqual({});
+        const rename = agent.renameSessionIndexEntry({sessionId: threadId, title: "Renamed"});
+        const archive = agent.setSessionArchived({sessionId: threadId}, true);
+        await vi.waitFor(() => expect(order).toEqual(["rename started"]));
+        renameWrite.resolve({});
+        await Promise.all([rename, archive]);
 
-        expect(order).toEqual(["thread/unsubscribe", "thread/archive"]);
-        expect(() => agent.getSessionState(threadId)).toThrow(`Session ${threadId} not found`);
-    });
-
-    it("counts a loaded session that Codex never persisted as archived", async () => {
-        const {fixture, agent, threadArchive, threadRead} = await createArchiveAgent();
-        await openLocalSession(fixture, otherThreadId);
-        vi.spyOn(fixture.getCodexAppServerClient(), "threadUnsubscribe").mockResolvedValue({status: "unsubscribed"});
-        threadArchive.mockRejectedValue(missingRollout(otherThreadId));
-        threadRead.mockRejectedValue(missingRollout(otherThreadId));
-
-        await expect(agent.setSessionArchived({sessionId: otherThreadId}, true)).resolves.toEqual({});
+        expect(order).toEqual(["rename started", "rename done", "archive"]);
     });
 });
 

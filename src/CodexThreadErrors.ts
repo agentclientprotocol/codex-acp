@@ -123,6 +123,17 @@ export function sessionArchivedRequestError(sessionId: string): RequestError {
     );
 }
 
+/** The `data.reason` of the error for a request that an open session does not take. */
+export const SESSION_ACTIVE_REASON = "session_active";
+
+/** The ACP error for archiving a session that is open: archiving it would stop it. */
+export function sessionActiveRequestError(sessionId: string): RequestError {
+    return RequestError.invalidRequest(
+        {reason: SESSION_ACTIVE_REASON, sessionId},
+        `Session is active, close it first: ${sessionId}`,
+    );
+}
+
 /** The JSON-RPC code of an app-server internal error. */
 const INTERNAL_ERROR_CODE = -32603;
 

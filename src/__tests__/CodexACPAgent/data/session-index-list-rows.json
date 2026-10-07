@@ -9,10 +9,13 @@
         "jetbrains": {
           "air": {
             "version": 1,
+            "archived": false,
             "gitBranch": "main",
-            "activity": {
-              "state": "running"
-            }
+            "lastPromptAt": "1970-01-01T00:05:00.000Z",
+            "createdAt": "1970-01-01T00:01:40.000Z",
+            "model": "gpt-5.5",
+            "forkedFrom": "01a0637c-5b99-7242-9064-04545d605fdd",
+            "state": "running"
           }
         }
       }
@@ -26,9 +29,10 @@
         "jetbrains": {
           "air": {
             "version": 1,
-            "activity": {
-              "state": "requires_action"
-            }
+            "archived": false,
+            "lastPromptAt": "1970-01-01T00:05:00.000Z",
+            "createdAt": "1970-01-01T00:01:40.000Z",
+            "state": "requires_action"
           }
         }
       }
@@ -42,9 +46,42 @@
         "jetbrains": {
           "air": {
             "version": 1,
-            "activity": {
-              "state": "requires_action"
-            }
+            "archived": false,
+            "lastPromptAt": "1970-01-01T00:05:00.000Z",
+            "createdAt": "1970-01-01T00:01:40.000Z",
+            "state": "requires_action"
+          }
+        }
+      }
+    },
+    {
+      "sessionId": "foreign",
+      "cwd": "/repo/project",
+      "title": "First message",
+      "updatedAt": "1970-01-01T00:05:00.000Z",
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "archived": false,
+            "lastPromptAt": "1970-01-01T00:05:00.000Z",
+            "createdAt": "1970-01-01T00:01:40.000Z"
+          }
+        }
+      }
+    },
+    {
+      "sessionId": "broken",
+      "cwd": "/repo/project",
+      "title": "First message",
+      "updatedAt": "1970-01-01T00:05:00.000Z",
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "archived": false,
+            "lastPromptAt": "1970-01-01T00:05:00.000Z",
+            "createdAt": "1970-01-01T00:01:40.000Z"
           }
         }
       }
@@ -58,25 +95,13 @@
         "jetbrains": {
           "air": {
             "version": 1,
-            "activity": {
-              "state": "idle",
-              "lastTurnEndedAt": "1970-01-01T00:08:20.000Z"
-            }
+            "archived": false,
+            "createdAt": "1970-01-01T00:01:40.000Z",
+            "state": "idle",
+            "lastTurnEndedAt": "1970-01-01T00:08:20.000Z"
           }
         }
       }
-    },
-    {
-      "sessionId": "foreign",
-      "cwd": "/repo/project",
-      "title": "First message",
-      "updatedAt": "1970-01-01T00:05:00.000Z"
-    },
-    {
-      "sessionId": "broken",
-      "cwd": "/repo/project",
-      "title": "First message",
-      "updatedAt": "1970-01-01T00:05:00.000Z"
     }
   ],
   "nextCursor": null

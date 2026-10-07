@@ -23,6 +23,7 @@ import {
     isAccountReadAuthFailureError,
     isAccountReadUnavailableError,
     isNoActiveTurnError,
+    sessionActiveRequestError,
     sessionNotFoundRequestError,
 } from "./CodexThreadErrors";
 import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
@@ -163,8 +164,10 @@ import {
     AIR_SESSION_FAILURE_KEY,
     clientSupportsAirCapability,
     JETBRAINS_META_KEY,
+    withAirMeta,
 } from "./AirExtension";
 import {
+    AIR_ARCHIVED_KEY,
     AIR_SESSION_INDEX_KEY,
     readSessionIndexListOptions,
     readSessionIndexPage,
@@ -180,7 +183,7 @@ import {
     type SessionIndexListOptions,
     type SessionRenameRequest,
 } from "./SessionIndex";
-import {linkedWorktreeCwds} from "./SessionIndexWorktrees";
+import {canonicalCwds, linkedWorktreeCwds} from "./SessionIndexWorktrees";
 import {SessionListChangedWatcher, type WatchedSessionList} from "./SessionListChangedWatcher";
 import {deleteThread, renameRequestError, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
 import {arePathBasenamesEqual, isAbsolutePathLike} from "./PathUtils";
@@ -392,7 +395,7 @@ export class CodexAcpServer {
     private sessionListWatcher: SessionListChangedWatcher | null = null;
     /** The connection is gone, see {@link dispose}. */
     private disposed = false;
-    /** The tail of the title writes of each session, see {@link serializeTitleWrite}. */
+    /** The tail of the writes of each session, see {@link serializeSessionWrite}. */
     private readonly titleWrites = new Map<string, Promise<void>>();
     /**
      * The sessions whose title `_session/rename` has set or is setting, by session id. It outlives the
@@ -1247,7 +1250,10 @@ export class CodexAcpServer {
             }
 
             if (this.sessionIndexEnabled) {
-                await this.deleteThreadForSessionIndex(sessionId, shouldCloseLocalSession);
+                await this.serializeSessionWrite(
+                    sessionId,
+                    () => this.deleteThreadForSessionIndex(sessionId, shouldCloseLocalSession),
+                );
             } else {
                 await this.runWithProcessCheck(() => this.codexAcpClient.deleteSession(sessionId));
             }
@@ -1309,7 +1315,9 @@ export class CodexAcpServer {
         // Codex filters by an absolute cwd. A relative one keeps the basename filter of the old path, which the
         // adapter applies to each page of the unfiltered list.
         const relativeCwd = cwd !== null && !isAbsolutePathLike(cwd) ? cwd : null;
-        const cwds = cwd === null || relativeCwd !== null ? null : linkedWorktreeCwds(cwd);
+        const cwds = cwd === null || relativeCwd !== null
+            ? null
+            : options.includeWorktrees ? linkedWorktreeCwds(cwd) : canonicalCwds(cwd);
         const page = await this.runWithProcessCheck(() => readSessionIndexPage(
             (listParams) => this.codexAcpClient.appServerClient.threadList(listParams),
             cwds,
@@ -1318,8 +1326,8 @@ export class CodexAcpServer {
             relativeCwd === null ? undefined : (thread) => arePathBasenamesEqual(thread.cwd, relativeCwd),
         ));
         return {
-            sessions: page.threads.map(thread => this.withActiveAdditionalDirectories(
-                sessionIndexSessionInfo(thread, this.sessionIndexActivity.activityOf(thread)),
+            sessions: page.threads.map(entry => this.withActiveAdditionalDirectories(
+                sessionIndexSessionInfo(entry.thread, entry.archived, this.sessionIndexActivity.activityOf(entry.thread)),
             )),
             nextCursor: page.nextCursor,
         };
@@ -1364,7 +1372,7 @@ export class CodexAcpServer {
     /**
      * `_session/rename`: sets the explicit title of a thread, loaded or not.
      *
-     * The title writes of a session go one after another, see {@link serializeTitleWrite}. The rename is
+     * The title writes of a session go one after another, see {@link serializeSessionWrite}. The rename is
      * recorded before its write waits for its turn, so an automatic title that has not been written yet is
      * skipped, and one that Codex is writing now completes before this write starts. Automatic titles stop for
      * good only once the rename succeeded.
@@ -1385,7 +1393,7 @@ export class CodexAcpServer {
         this.explicitTitles.set(sessionId, explicitTitle);
         explicitTitle.pending++;
         try {
-            await this.serializeTitleWrite(sessionId, async () => {
+            await this.serializeSessionWrite(sessionId, async () => {
                 // The outcome is recorded before the next title write of the queue starts, so an automatic
                 // title that waits behind this rename sees whether it failed.
                 try {
@@ -1442,7 +1450,7 @@ export class CodexAcpServer {
      * belongs to. Only a `sessionIndex` client renames this way, so nothing changes for other clients.
      */
     private writeAutomaticTitle(sessionId: string, title: string, write: () => Promise<boolean>): Promise<boolean> {
-        return this.serializeTitleWrite(sessionId, async () => {
+        return this.serializeSessionWrite(sessionId, async () => {
             if (this.explicitTitles.has(sessionId)) return false;
             // Its echo can come after a later `_session/rename`, see `CodexEventHandler`.
             const echo = normalizeSessionTitle(title) ?? undefined;
@@ -1459,11 +1467,12 @@ export class CodexAcpServer {
     }
 
     /**
-     * Runs the title writes of a session one after another, each through its completion: the automatic title
-     * of {@link TitleGenerator} and `_session/rename`. Codex may apply two `thread/name/set` requests that are
-     * in flight together in either order, so a write starts only after the previous one has finished.
+     * Runs the writes of a session one after another, each through its completion: the automatic title of
+     * {@link TitleGenerator}, and for a `sessionIndex` client `_session/rename`, `_session/archive`,
+     * `_session/unarchive` and `session/delete`. Codex may apply two requests that are in flight together in
+     * either order, so a write starts only after the previous one has finished.
      */
-    private serializeTitleWrite<T>(sessionId: string, write: () => Promise<T>): Promise<T> {
+    private serializeSessionWrite<T>(sessionId: string, write: () => Promise<T>): Promise<T> {
         const previous = this.titleWrites.get(sessionId) ?? Promise.resolve();
         const run = previous.then(write);
         const settled = run.then(() => undefined, () => undefined);
@@ -1475,37 +1484,46 @@ export class CodexAcpServer {
     }
 
     /**
-     * `_session/archive` and `_session/unarchive`. Both are idempotent and work for a session that is not
-     * loaded. Codex refuses to archive a thread that its own process has loaded, so a loaded session closes
-     * first, as `session/close` does.
+     * `_session/archive` and `_session/unarchive`, as `session/archive` and `session/unarchive` of ACP RFD #2161.
+     * Both are idempotent and work for a session that is not loaded. Neither loads, resumes, closes or cancels
+     * a session: `thread/archive` would unload a thread that this process has loaded, so archiving a session
+     * that is open here fails with the `session_active` reason and changes nothing. The client closes it first.
+     * Unarchiving needs no such rule: Codex does not load an archived thread, so an open one is unarchived.
      */
     async setSessionArchived(params: SessionArchiveRequest, archived: boolean): Promise<Record<string, never>> {
         this.requireSessionIndex(archived ? SESSION_ARCHIVE_METHOD : SESSION_UNARCHIVE_METHOD);
         const {sessionId} = params;
         logger.log(archived ? "Archiving session..." : "Unarchiving session...", {sessionId});
-        const hadLocalSession = archived && this.hasLocalSession(sessionId);
-        if (archived) this.beginSessionCloseFence(sessionId);
-        try {
-            if (hadLocalSession) {
-                await this.closeSession({sessionId});
+        await this.serializeSessionWrite(sessionId, async () => {
+            if (archived && this.hasLocalSession(sessionId)) {
+                throw sessionActiveRequestError(sessionId);
             }
-            let outcome;
+            // An open of the session that starts meanwhile would load the thread that Codex archives.
+            if (archived) this.beginSessionCloseFence(sessionId);
             try {
-                outcome = await this.runWithProcessCheck(() => setThreadArchived(
-                    this.codexAcpClient.appServerClient,
-                    sessionId,
-                    archived,
-                    this.codexAcpClient.getHomePath(),
-                ));
-            } catch (err) {
-                throw sessionIndexRequestError(sessionId, err);
+                let outcome;
+                try {
+                    outcome = await this.runWithProcessCheck(() => setThreadArchived(
+                        this.codexAcpClient.appServerClient,
+                        sessionId,
+                        archived,
+                        this.codexAcpClient.getHomePath(),
+                    ));
+                } catch (err) {
+                    throw sessionIndexRequestError(sessionId, err);
+                }
+                if (outcome === "missing") {
+                    throw sessionNotFoundRequestError(sessionId);
+                }
+            } finally {
+                if (archived) this.endSessionCloseFence(sessionId);
             }
-            // A thread that this connection had open but Codex never persisted is gone with the close.
-            if (outcome === "missing" && !hadLocalSession) {
-                throw sessionNotFoundRequestError(sessionId);
-            }
-        } finally {
-            if (archived) this.endSessionCloseFence(sessionId);
+        });
+        if (this.sessions.has(sessionId)) {
+            await new ACPSessionConnection(this.connection, sessionId).update({
+                sessionUpdate: "session_info_update",
+                _meta: withAirMeta(undefined, AIR_ARCHIVED_KEY, archived),
+            });
         }
         this.sessionListWatcher?.trigger();
         return {};

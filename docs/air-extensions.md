@@ -162,7 +162,7 @@ A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initi
 | `sessionFailure` | Sends warnings and errors as typed transcript records. | [Session failure](#session-failure) |
 | `nativeSubagentSessions` | Reports a Codex subagent as a native ACP child session. | [Native subagent sessions](#native-subagent-sessions) |
 | `codexHooks` | Lets AIR review and trust startup hooks before it opens a session. | [Hook trust](#hook-trust) |
-| `sessionIndex` | Serves `session/list` as the session index of AIR, adds rename and archive requests, and sends `_session/list_changed`. | [Session index](#session-index) |
+| `sessionIndex` | Serves `session/list` as the session index of AIR, adds rename and archive requests, and sends `_session/list_changed`, as the ACP session list extensions RFD and RFD #2161 describe. | [Session index](#session-index) |
 
 The goal extension has no client capability.
 The agent advertises the `goal` object, and the client uses the control method when it wants to.
@@ -986,88 +986,141 @@ AIR uses `session/list` as its index of Codex threads when it declares `sessionI
 Everything in this section applies only to such a client.
 Another client, AIR included, keeps the old `session/list`, `session/delete` and `initialize` answers.
 
+The extension follows two ACP RFDs field for field: the session list extensions RFD (`limit`, order, row fields,
+`session/list_changed`) and [RFD #2161](https://github.com/agentclientprotocol/agent-client-protocol/pull/2161)
+(archive). Only the transport differs, see [Relation to the ACP RFDs](#relation-to-the-acp-rfds).
+
 ### List
 
 The request can carry `_meta.jetbrains.air.list`:
 
 ```json
-{ "cwd": "/repo", "cursor": null, "_meta": { "jetbrains": { "air": { "list": { "limit": 50, "archived": "exclude" } } } } }
+{ "cwd": "/repo", "cursor": null, "_meta": { "jetbrains": { "air": { "list": { "limit": 50, "archived": false, "includeWorktrees": false } } } } }
 ```
 
-- `limit` is `50` by default. The adapter clamps it to `1..100`.
-- `archived` is `exclude` by default, or `only`.
-- The adapter sends one `thread/list` request:
+- `limit` is `50` by default. The adapter clamps it to `1..100` and never answers more rows.
+- `archived` is a boolean. Omitted, `null` or `false`: unarchived threads only. `true`: unarchived and archived
+  threads in one list. Any other value fails with `-32602`.
+- `includeWorktrees` is a boolean, `false` by default. Any other value fails with `-32602`.
+  - `false`: `cwd` matches exactly, plus its canonical path when that differs (symlinks).
+  - `true`: also the same directory in the primary checkout and in each linked Git worktree. The adapter reads
+    `<git-common-dir>/worktrees/*/gitdir` and never runs Git, as the Codex TUI does. A worktree whose directory is
+    gone is left out. The worktrees of a bare repository count too; the primary checkout is added only when there
+    is one. Each row reports its own real `cwd`.
+- The adapter sends `thread/list`
   `{cwd, limit, sortKey: "recency_at", archived, sourceKinds: [], modelProviders: [], useStateDbOnly: true, cursor}`.
-  - `cwd` is the requested cwd plus the same directory in the primary checkout and in each linked Git worktree.
-    The adapter reads `<git-common-dir>/worktrees/*/gitdir` and never runs Git, as the Codex TUI does.
-    A worktree whose directory is gone is left out. The worktrees of a bare repository count too; the primary
-    checkout is added only when there is one. A single cwd goes as a string.
+  - `cwd` is a string for a single path and an array otherwise.
+  - Codex lists unarchived and archived threads apart, so `archived: true` sends one request with `archived: false`
+    and one with `archived: true`, and merges the two by recency. A row is answered only when no unread Codex page
+    can hold a newer one.
   - `sourceKinds: []` means the interactive sources, so `codex exec` runs and subagent threads are not listed.
   - `modelProviders: []` means every provider, whatever the login of the agent.
-- A relative `cwd` keeps the basename filter of the old path: the adapter sends the request above without `cwd`
+  - Codex deletes a thread with `thread/delete`, so a deleted thread is never listed, whatever `archived` is.
+- A relative `cwd` keeps the basename filter of the old path: the adapter sends the requests above without `cwd`
   and with `limit: 100`, filters each page by the basename of `Thread.cwd` and cuts the rows to `limit`.
-  `archived` and the other fields still apply. The cursor of such a list is the adapter's own: the Codex page and
-  the last row the client got, so rows that come or go before it do not shift the next page.
   No `cwd` lists every thread.
-- Rows are ordered by `updatedAt`, newest first. `updatedAt` is `Thread.recencyAt`, or `Thread.updatedAt` without it.
-- A page with `nextCursor` is not empty, with one exception: the adapter reads the next Codex page while a page
-  has no row left and the cursor advances, for at most 50 Codex pages. Only a relative-`cwd` list can reach that
-  budget, and it then answers an empty page with the cursor where it stopped. Clients follow `nextCursor` until it
-  is `null`, whatever the page holds. Only a cursor that Codex repeats ends the list early.
-- The cursor is the opaque Codex cursor, except for a relative `cwd`. A malformed adapter cursor, or one used for
-  the other kind of list, fails with `-32602`.
+- Rows are ordered by `updatedAt`, newest first, ties in the Codex order. `updatedAt` is `Thread.recencyAt`, or
+  `Thread.updatedAt` without it, so every row has it. The adapter never writes it; it is the Codex value.
+- The cursor is the adapter's own: the Codex cursor of each list it reads and the last rows the client got (their
+  recency and ids), so rows that come or go before them do not shift the next page. It is tied to `archived`,
+  `includeWorktrees` and the relative-cwd filter: a malformed cursor, a Codex cursor or a cursor of another list
+  fails with `-32602`. Clients keep `cwd`, `archived` and `includeWorktrees` while they follow `nextCursor`.
+- A page with `nextCursor` is not empty, with one exception. The adapter reads the next Codex pages while a page
+  has no row left and the cursors advance, for at most 50 rounds. A relative-`cwd` list, which the adapter
+  filters itself, can reach that budget, and then answers an empty page with the cursor where it stopped. That is
+  the only case: Codex filters every other list itself and does not answer empty pages for it. Clients follow
+  `nextCursor` until it is `null`, whatever the page holds. A Codex cursor that Codex repeats ends that list.
 - The list does not check the login, so it never fails with `auth_required`. `thread/list` reads the local state DB.
 
-A row can carry these optional fields in `_meta.jetbrains.air`:
+Every row carries `archived` in `_meta.jetbrains.air`, and these optional fields when known:
 
 | Field | Value |
 | --- | --- |
+| `archived` | `true` for a thread from the archived Codex list. Always present. |
+| `createdAt` | ISO time of `Thread.createdAt`. |
+| `lastPromptAt` | ISO time of `Thread.recencyAt`, the time Codex orders threads by for user activity. |
 | `gitBranch` | `Thread.gitInfo.branch`. |
-| `activity.state` | Only for a thread that this adapter has loaded: `running`, `requires_action` (waiting for an approval or for user input), or `idle`. Omitted for other threads. |
-| `activity.lastTurnEndedAt` | ISO time of the last `turn/completed` that this adapter saw for a session of this connection. Forgotten when the thread is deleted. |
+| `model` | `Thread.model`. |
+| `forkedFrom` | `Thread.forkedFromId`. |
+| `state` | Only for a thread that this adapter has loaded: `running`, `requires_action` (waiting for an approval or for user input), or `idle`. Omitted otherwise, never `unknown`. |
+| `lastTurnEndedAt` | ISO time of the last `turn/completed` that this adapter saw for a session of this connection. Forgotten when the thread is deleted. |
 
-The adapter sends no `usage`: Codex reports no cost.
+The adapter sends no `cost`: Codex reports none.
 
 ### Requests
 
 | Method | Params | Codex call |
 | --- | --- | --- |
 | `_session/rename` | `{sessionId, title}` | `thread/name/set`. |
-| `_session/archive` | `{sessionId}` | `thread/archive`. A session that this connection has loaded closes first, as `session/close` does. |
+| `_session/archive` | `{sessionId}` | `thread/archive`. |
 | `_session/unarchive` | `{sessionId}` | `thread/unarchive`. |
 | `session/delete` | `{sessionId}` | `thread/delete`. A loaded session closes first. |
 
 - Each request answers `{}` and works for a thread that is not loaded.
+- The writes of one session run one after another: rename, archive, unarchive, delete and the automatic title.
 - `title` is collapsed to one line and cut to 256 characters with an ellipsis. A blank title fails with `-32602`.
   A renamed session that is loaded gets `session_info_update {title}` and never gets an automatic title afterwards.
-  The title writes of a session run one after another: a rename waits until an automatic title that Codex is
-  writing has completed, so the explicit title is the last one. This holds across `session/close` and reload too,
-  and a late `thread/name/updated` that carries exactly the automatic title does not replace the explicit one on
-  the client. A later rename of the thread from elsewhere, as in the Codex TUI, is shown.
-  A rename that fails leaves automatic titles on, also for a title that was generated while the rename ran.
+  A rename waits until an automatic title that Codex is writing has completed, so the explicit title is the last
+  one. This holds across `session/close` and reload too, and a late `thread/name/updated` that carries exactly the
+  automatic title does not replace the explicit one on the client. A later rename of the thread from elsewhere, as
+  in the Codex TUI, is shown. A rename that fails leaves automatic titles on, also for a title that was generated
+  while the rename ran.
 - Codex does not rename an archived thread. The rename then fails with `-32600` and `data.reason: "archived"`,
   and does not unarchive the thread.
-- Archive and unarchive are idempotent. Codex fails them for a thread already in the target state,
-  so the adapter reads `Thread.path` with `thread/read`: an archived rollout is under `<CODEX_HOME>/archived_sessions/`.
-- Codex does not open an archived thread. `session/load` of one fails, and it does not unarchive it.
+- Archive and unarchive never load, resume, close or cancel a session.
+  - `thread/archive` unloads a thread that this process has loaded, so archiving a session that is open here
+    fails with `-32600` and `data.reason: "session_active"` and changes nothing. The client closes it first.
+  - Codex does not load an archived thread, so a session open here is not archived and unarchive just succeeds.
+  - Both are idempotent. Codex fails them for a thread already in the target state, so the adapter reads
+    `Thread.path` with `thread/read`: an archived rollout is under `<CODEX_HOME>/archived_sessions/`.
+  - After a change of a session that is open on this connection, the adapter sends
+    `session_info_update` with `_meta.jetbrains.air.archived`.
+  - `session/load` and `session/resume` of an archived thread fail, and do not unarchive it.
 - Errors:
   - A thread that another Codex process holds fails with the `thread_active_writer` reason in `data.reason`.
-  - A thread that Codex does not have fails with `-32002`, as does a thread that `thread/read` shows without a
-    rollout. A loaded session that Codex never persisted, because it had no prompt yet, counts as archived or deleted.
-- Without `sessionIndex` the three `_session/*` methods answer method-not-found,
-  and `session/delete` keeps archiving the thread.
+  - A thread that Codex does not have, or has deleted, fails with `-32002`, as does a thread that `thread/read`
+    shows without a rollout. Unarchive never brings back a deleted thread.
+- Without `sessionIndex` the three `_session/*` methods answer method-not-found, and `session/delete` keeps
+  archiving the thread: old AIR builds send `session/delete` for "Done". Threads they closed that way show as
+  archived to a `sessionIndex` client.
 
 ### `_session/list_changed`
 
 The adapter sends `_session/list_changed {cwd}` when page 1 of a list that the client read changed.
 
-- It watches the absolute cwds that the client listed with page 1 in the last 10 minutes, at most 32.
-  A relative cwd is not watched.
+- A watch is per `cwd` and `includeWorktrees`. A `session/list` of page 1 starts or renews it, with that
+  request's `limit` and `archived`, and it expires after 10 minutes. At most 32 are kept.
+- A list without `cwd`, or with a relative one, is not watched.
 - Triggers: a write to `<CODEX_HOME>/state_<n>.sqlite-wal` by any Codex process, a thread notification of its own
   app-server, and a check of the WAL size and time every 30 s.
 - A trigger waits 1 s for more events, and at most 2 s after the first one. The adapter then reads page 1 of each
   watched list again and notifies only the lists whose rows changed.
 - A lost notification is acceptable: the client also polls page 1.
+
+### Relation to the ACP RFDs
+
+The names and the semantics are the RFDs'. The transport differs:
+
+| Extension | RFD |
+| --- | --- |
+| capability `sessionIndex` in `_meta.jetbrains.air.capabilities` | `sessionCapabilities.list.limit`, `list.changes`, `sessionCapabilities.archive`; client `session.listChanged` |
+| `_meta.jetbrains.air.list.limit` | `session/list` `limit` |
+| `_meta.jetbrains.air.list.includeWorktrees` | `session/list` `includeWorktrees` |
+| `_meta.jetbrains.air.list.archived` | `session/list` `archived` (#2161) |
+| `SessionInfo._meta.jetbrains.air.{createdAt, lastPromptAt, gitBranch, model, forkedFrom, state, lastTurnEndedAt}` | the `SessionInfo` fields of the same names |
+| `SessionInfo._meta.jetbrains.air.archived` | `SessionInfo.archived` (#2161) |
+| `session_info_update._meta.jetbrains.air.archived` | `SessionInfoUpdate.archived` (#2161) |
+| `_session/archive`, `_session/unarchive` | `session/archive`, `session/unarchive` (#2161) |
+| `_session/list_changed {cwd}` | `session/list_changed {cwd}` |
+| `_session/rename` | client-set titles, RFD #1987 |
+
+Remaining differences:
+
+- One capability string gates everything, for the client and the agent.
+- An AIR client without `sessionIndex` deletes as "Done", so the adapter keeps archiving on its `session/delete`.
+  #2161 forbids that substitution for clients of the RFD; here it only keeps old AIR builds from losing threads.
+- The relative-`cwd` list can answer an empty page with `nextCursor` at its scan budget, see above.
+- `cost` is never sent.
 
 ## Context compaction
 

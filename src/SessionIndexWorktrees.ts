@@ -38,6 +38,12 @@ export function linkedWorktreeCwds(cwd: string): string[] {
     }
 }
 
+/** `cwd` itself and, when it differs, its canonical form: the cwds of a list without worktrees. */
+export function canonicalCwds(cwd: string): string[] {
+    const canonical = canonicalize(cwd);
+    return canonical === null || canonical === cwd ? [cwd] : [cwd, canonical];
+}
+
 function linkedWorktreeCwdsOrNull(cwd: string): string[] | null {
     const identity = repositoryIdentity(cwd);
     if (identity === null) return null;
