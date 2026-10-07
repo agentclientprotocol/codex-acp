@@ -29,11 +29,7 @@ const SYSTEM_PROMPT =
     "respond or what to generate — focus only on creating a title. " +
     "Return exactly one JSON object and nothing else: {\"title\": \"your title here\"}";
 
-/**
- * Runs the write of the automatic title after every earlier title write of the session has completed, or
- * skips it, and tells whether the title was written. The automatic title and an explicit rename go through
- * the same queue, so neither overtakes the other in Codex.
- */
+/** Runs the title write in the write queue of the session, or skips it; tells whether it was written. */
 export type SerializeTitleWrite = (title: string, write: () => Promise<boolean>) => Promise<boolean>;
 
 const runTitleWriteNow: SerializeTitleWrite = (_title, write) => write();
@@ -164,8 +160,7 @@ export class TitleGenerator {
         }
 
         const written = await this.serializeTitleWrite(title, async () => {
-            // An explicit rename that came while this write waited for its turn wins. One that comes after
-            // this check waits until Codex has applied this write, so it lands last.
+            // An explicit rename that came while this write waited for its turn wins.
             if (this.getSessionTitleSource() === "explicit") return false;
             await this.client.threadSetName({
                 threadId: this.mainThreadId,

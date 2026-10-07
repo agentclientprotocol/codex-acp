@@ -494,7 +494,7 @@ describe("session/list", () => {
         await vi.advanceTimersByTimeAsync(5_000);
 
         expect(threadList).not.toHaveBeenCalled();
-        agent.dispose();
+        agent.sessionIndex.dispose();
     });
 
     it("does not check the login for a sessionIndex client", async () => {
@@ -534,7 +534,7 @@ describe("_session/list_changed", () => {
         await vi.advanceTimersByTimeAsync(2_000);
 
         expect(listChangedNotifications(fixture)).toEqual([{cwd: "/repo/project"}]);
-        agent.dispose();
+        agent.sessionIndex.dispose();
     });
 
     it("starts no watcher for a list that was in flight when the connection closed", async () => {
@@ -544,7 +544,7 @@ describe("_session/list_changed", () => {
         threadList.mockReturnValueOnce(firstPage.promise);
         const listing = agent.listSessions({cwd: "/repo/project"});
 
-        agent.dispose();
+        agent.sessionIndex.dispose();
         firstPage.resolve({data: [createThread()], nextCursor: null, backwardsCursor: null});
         await listing;
         threadList.mockClear();
@@ -584,7 +584,7 @@ describe("_session/rename", () => {
         const {agent, appServer} = await createAgent("sessionIndex");
         const threadSetName = vi.spyOn(appServer, "threadSetName").mockResolvedValue({});
 
-        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: `  New\n title ${"x".repeat(300)}`})).resolves.toEqual({});
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: `  New\n title ${"x".repeat(300)}`})).resolves.toEqual({});
 
         const name = threadSetName.mock.calls[0]?.[0].name ?? "";
         expect(name.startsWith("New title x")).toBe(true);
@@ -596,7 +596,7 @@ describe("_session/rename", () => {
         const {agent, appServer} = await createAgent("sessionIndex");
         const threadSetName = vi.spyOn(appServer, "threadSetName");
 
-        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: " \n "}))
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: " \n "}))
             .rejects.toMatchObject({code: -32602});
         expect(threadSetName).not.toHaveBeenCalled();
     });
@@ -606,7 +606,7 @@ describe("_session/rename", () => {
         await openLocalSession(fixture, threadId);
         vi.spyOn(appServer, "threadSetName").mockResolvedValue({});
 
-        await agent.renameSessionIndexEntry({sessionId: threadId, title: "Renamed"});
+        await agent.sessionIndex.rename({sessionId: threadId, title: "Renamed"});
 
         expect(agent.getSessionState(threadId).sessionTitleSource).toBe("explicit");
         const titleUpdates = fixture.getAcpConnectionEvents([])
@@ -638,7 +638,7 @@ describe("_session/rename", () => {
         await vi.advanceTimersByTimeAsync(0);
         expect(started).toEqual(["Automatic"]);
 
-        const rename = agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"});
+        const rename = agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"});
         // Longer than any wait for the automatic title: only its completion lets the rename go.
         await vi.advanceTimersByTimeAsync(30_000);
         expect(started).toEqual(["Automatic"]);
@@ -659,7 +659,7 @@ describe("_session/rename", () => {
         const titleGen = agent.getSessionState(threadId).titleGen!;
         titleGen.onTurnCompleted("Fix the build");
 
-        await agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"});
+        await agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"});
         turn.resolve({turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}});
         await titleGen.waitForIdle(1_000);
 
@@ -678,7 +678,7 @@ describe("_session/rename", () => {
         titleGen.onTurnCompleted("Fix the build");
 
         await agent.closeSession({sessionId: threadId});
-        await agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"});
+        await agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"});
         turn.resolve({turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}});
         await titleGen.waitForIdle(1_000);
 
@@ -696,7 +696,7 @@ describe("_session/rename", () => {
             .mockRejectedValueOnce(new Error("app-server busy"))
             .mockResolvedValue({});
 
-        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"})).rejects.toThrow("app-server busy");
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"})).rejects.toThrow("app-server busy");
         const titleGen = agent.getSessionState(threadId).titleGen!;
         titleGen.onTurnCompleted("Fix the build");
         await vi.waitFor(() => expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit", "Automatic"]));
@@ -716,7 +716,7 @@ describe("_session/rename", () => {
         const titleGen = agent.getSessionState(threadId).titleGen!;
         titleGen.onTurnCompleted("Fix the build");
 
-        const rename = agent.renameSessionIndexEntry({sessionId: threadId, title: "Explicit"});
+        const rename = agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"});
         turn.resolve(titleTurn);
         await titleGen.waitForIdle(1_000);
         renameWrite.reject(new Error("app-server busy"));
@@ -735,9 +735,9 @@ describe("_session/rename", () => {
             .mockRejectedValueOnce(missingRolloutError());
         const threadUnarchive = vi.spyOn(appServer, "threadUnarchive");
 
-        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: "A"}))
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"}))
             .rejects.toMatchObject({code: -32600, data: {reason: "archived", sessionId: threadId}});
-        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: "A"}))
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"}))
             .rejects.toMatchObject({code: -32002, data: {sessionId: threadId}});
         expect(threadRead).toHaveBeenCalledTimes(2);
         expect(threadUnarchive).not.toHaveBeenCalled();
@@ -749,17 +749,17 @@ describe("_session/rename", () => {
             .mockRejectedValueOnce(Object.assign(new Error(`thread not found: ${threadId}`), {code: -32600}))
             .mockRejectedValueOnce(ACTIVE_WRITER);
 
-        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: "A"})).rejects.toMatchObject({code: -32002});
-        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: "A"}))
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"})).rejects.toMatchObject({code: -32002});
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"}))
             .rejects.toMatchObject({code: -32600, data: {reason: "thread_active_writer"}});
     });
 
     it("is not available without sessionIndex", async () => {
         const {agent} = await createAgent("airWithoutSessionIndex");
 
-        await expect(agent.renameSessionIndexEntry({sessionId: threadId, title: "A"})).rejects.toMatchObject({code: -32601});
-        await expect(agent.setSessionArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32601});
-        await expect(agent.setSessionArchived({sessionId: threadId}, false)).rejects.toMatchObject({code: -32601});
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"})).rejects.toMatchObject({code: -32601});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32601});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, false)).rejects.toMatchObject({code: -32601});
     });
 });
 
@@ -780,8 +780,8 @@ describe("_session/archive and _session/unarchive", () => {
     it("archives and unarchives a thread that is not loaded", async () => {
         const {agent, threadArchive, threadUnarchive, threadRead} = await createArchiveAgent();
 
-        await expect(agent.setSessionArchived({sessionId: threadId}, true)).resolves.toEqual({});
-        await expect(agent.setSessionArchived({sessionId: threadId}, false)).resolves.toEqual({});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).resolves.toEqual({});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, false)).resolves.toEqual({});
 
         expect(threadArchive).toHaveBeenCalledWith({threadId});
         expect(threadUnarchive).toHaveBeenCalledWith({threadId});
@@ -796,8 +796,8 @@ describe("_session/archive and _session/unarchive", () => {
             .mockResolvedValueOnce({thread: createThread({path: `${codexHome}/archived_sessions/rollout-1.jsonl`})} as never)
             .mockResolvedValueOnce({thread: createThread({path: `${codexHome}/sessions/2026/10/07/rollout-1.jsonl`})} as never);
 
-        await expect(agent.setSessionArchived({sessionId: threadId}, true)).resolves.toEqual({});
-        await expect(agent.setSessionArchived({sessionId: threadId}, false)).resolves.toEqual({});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).resolves.toEqual({});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, false)).resolves.toEqual({});
     });
 
     it("answers -32002 when Codex finds no rollout of a thread that thread/read shows", async () => {
@@ -807,8 +807,8 @@ describe("_session/archive and _session/unarchive", () => {
             .mockResolvedValueOnce({thread: createThread({path: `${codexHome}/sessions/rollout-1.jsonl`})} as never)
             .mockResolvedValueOnce({thread: createThread({path: null})} as never);
 
-        await expect(agent.setSessionArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32002, data: {sessionId: threadId}});
-        await expect(agent.setSessionArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32002, data: {sessionId: threadId}});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32002, data: {sessionId: threadId}});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32002, data: {sessionId: threadId}});
     });
 
     it("answers -32002 for a thread Codex does not have", async () => {
@@ -817,8 +817,8 @@ describe("_session/archive and _session/unarchive", () => {
         threadUnarchive.mockRejectedValueOnce(Object.assign(new Error("invalid session id: bad"), {code: -32600}));
         threadRead.mockRejectedValue(missingRollout(threadId));
 
-        await expect(agent.setSessionArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32002, data: {sessionId: threadId}});
-        await expect(agent.setSessionArchived({sessionId: "not-a-thread"}, false)).rejects.toMatchObject({code: -32002});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32002, data: {sessionId: threadId}});
+        await expect(agent.sessionIndex.setArchived({sessionId: "not-a-thread"}, false)).rejects.toMatchObject({code: -32002});
     });
 
     it("answers thread_active_writer for a thread another process holds", async () => {
@@ -826,8 +826,8 @@ describe("_session/archive and _session/unarchive", () => {
         threadArchive.mockRejectedValue(ACTIVE_WRITER);
         threadUnarchive.mockRejectedValue(ACTIVE_WRITER);
 
-        await expect(agent.setSessionArchived({sessionId: threadId}, true)).rejects.toMatchObject({data: {reason: "thread_active_writer", threadId}});
-        await expect(agent.setSessionArchived({sessionId: threadId}, false)).rejects.toMatchObject({data: {reason: "thread_active_writer", threadId}});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).rejects.toMatchObject({data: {reason: "thread_active_writer", threadId}});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, false)).rejects.toMatchObject({data: {reason: "thread_active_writer", threadId}});
     });
 
     it("refuses to archive a session that is open here and leaves it open", async () => {
@@ -835,7 +835,7 @@ describe("_session/archive and _session/unarchive", () => {
         await openLocalSession(fixture, threadId);
         const threadUnsubscribe = vi.spyOn(appServer, "threadUnsubscribe");
 
-        await expect(agent.setSessionArchived({sessionId: threadId}, true))
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true))
             .rejects.toMatchObject({code: -32600, data: {reason: "session_active", sessionId: threadId}});
 
         expect(threadArchive).not.toHaveBeenCalled();
@@ -847,7 +847,7 @@ describe("_session/archive and _session/unarchive", () => {
         const {fixture, agent, threadUnarchive} = await createArchiveAgent();
         await openLocalSession(fixture, threadId);
 
-        await expect(agent.setSessionArchived({sessionId: threadId}, false)).resolves.toEqual({});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, false)).resolves.toEqual({});
 
         expect(threadUnarchive).toHaveBeenCalledWith({threadId});
         expect(fixture.getAcpConnectionEvents([])
@@ -860,8 +860,8 @@ describe("_session/archive and _session/unarchive", () => {
     it("sends no session update for a session that is not open here", async () => {
         const {fixture, agent} = await createArchiveAgent();
 
-        await agent.setSessionArchived({sessionId: threadId}, true);
-        await agent.setSessionArchived({sessionId: threadId}, false);
+        await agent.sessionIndex.setArchived({sessionId: threadId}, true);
+        await agent.sessionIndex.setArchived({sessionId: threadId}, false);
 
         expect(fixture.getAcpConnectionEvents([])
             .filter(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "session_info_update")).toEqual([]);
@@ -882,8 +882,8 @@ describe("_session/archive and _session/unarchive", () => {
             return {};
         });
 
-        const rename = agent.renameSessionIndexEntry({sessionId: threadId, title: "Renamed"});
-        const archive = agent.setSessionArchived({sessionId: threadId}, true);
+        const rename = agent.sessionIndex.rename({sessionId: threadId, title: "Renamed"});
+        const archive = agent.sessionIndex.setArchived({sessionId: threadId}, true);
         await vi.waitFor(() => expect(order).toEqual(["rename started"]));
         renameWrite.resolve({});
         await Promise.all([rename, archive]);

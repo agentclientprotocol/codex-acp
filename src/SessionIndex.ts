@@ -10,6 +10,7 @@
 
 import type * as acp from "@agentclientprotocol/sdk";
 import {RequestError} from "@agentclientprotocol/sdk";
+import {z} from "zod";
 import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadStatus} from "./app-server/v2";
 import {AIR_META_KEY, JETBRAINS_META_KEY, withAirMeta} from "./AirExtension";
@@ -62,6 +63,15 @@ export interface SessionActivity {
 
 export type SessionRenameRequest = { sessionId: string; title: string };
 export type SessionArchiveRequest = { sessionId: string };
+
+export const sessionRenameParamsParser = z.object({
+    sessionId: z.string(),
+    title: z.string(),
+}).passthrough();
+
+export const sessionArchiveParamsParser = z.object({
+    sessionId: z.string(),
+}).passthrough();
 
 /**
  * Reads `_meta.jetbrains.air.list` of a `session/list` request.

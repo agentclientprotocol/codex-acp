@@ -65,6 +65,7 @@ import type {SubagentState} from "./subagents/AcpSubagents";
 import {mergeRateLimitSnapshot} from "./RateLimitsMap";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "./AgentFileChangeReport";
 import {createSessionNotice} from "./SessionNotice";
+import {isStaleAutomaticTitleEcho} from "./SessionIndexTitles";
 import {readableServiceErrorMessage} from "./ServiceErrorMessage";
 
 export { stripShellPrefix };
@@ -528,21 +529,10 @@ export class CodexEventHandler {
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
-            case "thread/name/updated": {
-                const name = normalizeSessionTitle(notification.params.threadName);
-                const explicitTitle = this.sessionState.sessionIndexExplicitTitle;
-                if (this.sessionState.automaticTitleEcho !== undefined && name === this.sessionState.automaticTitleEcho) {
-                    delete this.sessionState.automaticTitleEcho;
-                    if (explicitTitle !== undefined && name !== explicitTitle) {
-                        // A late echo of the automatic title that Codex wrote before `_session/rename`.
-                        this.sessionState.titleGen?.observeRename();
-                        return null;
-                    }
-                }
-                if (explicitTitle !== undefined && name === explicitTitle) {
-                    // The echo of the rename: an automatic title echo can no longer follow.
-                    delete this.sessionState.sessionIndexExplicitTitle;
-                    delete this.sessionState.automaticTitleEcho;
+            case "thread/name/updated":
+                if (isStaleAutomaticTitleEcho(this.sessionState, normalizeSessionTitle(notification.params.threadName))) {
+                    this.sessionState.titleGen?.observeRename();
+                    return null;
                 }
                 this.sessionState.sessionTitle = normalizeSessionTitle(notification.params.threadName);
                 this.sessionState.sessionTitleSource = notification.params.threadName == null
@@ -553,7 +543,6 @@ export class CodexEventHandler {
                     sessionUpdate: "session_info_update",
                     title: this.sessionState.sessionTitle,
                 };
-            }
             case "thread/status/changed":
                 return this.createCodexSessionInfoUpdate({
                     threadStatus: notification.params.status,
