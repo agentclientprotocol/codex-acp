@@ -286,7 +286,8 @@ export async function readSessionIndexPage(
                 bound = Math.max(bound, page.oldest);
             }
         }
-        const candidates = [...pages].flatMap(([index, page]) => page.rows
+        // Sides in their own order, not in the order their responses arrived, so ties come out the same way.
+        const candidates = [...pages].sort(([left], [right]) => left - right).flatMap(([index, page]) => page.rows
             .filter(row => recencyOf(row) >= bound)
             .map(thread => ({thread, archived: sideArchived(index), index})));
         // A stable sort: rows as recent as each other keep the Codex order, unarchived first.

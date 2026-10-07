@@ -286,6 +286,21 @@ describe("session/list", () => {
         expect(maxInFlight).toBe(2);
     });
 
+    it("answers rows as recent as each other unarchived first, whichever list replies first", async () => {
+        for (const archivedFirst of [true, false]) {
+            const {agent, threadList} = await createAgent("sessionIndex");
+            threadList.mockImplementation(async (params) => {
+                await new Promise(resolve => setTimeout(resolve, params.archived === archivedFirst ? 1 : 15));
+                const id = params.archived ? "archived" : "unarchived";
+                return {data: [createThread({id, recencyAt: 10})], nextCursor: null, backwardsCursor: null};
+            });
+
+            const response = await agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {archived: true}}}}});
+
+            expect(response.sessions.map(session => session.sessionId)).toEqual(["unarchived", "archived"]);
+        }
+    });
+
     it("stops a sparse relative cwd scan after its time budget with a cursor to continue", async () => {
         const {agent, threadList} = await createAgent("sessionIndex");
         let page = 0;
