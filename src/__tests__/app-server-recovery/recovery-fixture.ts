@@ -139,11 +139,11 @@ export function createRecoveryFixture(options: {air?: boolean, env?: Record<stri
 
 export const AIR_CAPABILITIES = {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}};
 
-export async function initialize(fixture: RecoveryFixture, air = false): Promise<void> {
+export async function initialize(fixture: RecoveryFixture, air = false, capabilities: Record<string, unknown> = {}): Promise<void> {
     await fixture.agent.initialize({
         protocolVersion: acp.PROTOCOL_VERSION,
         clientInfo: {name: "test-client", version: "1.0"},
-        clientCapabilities: air ? AIR_CAPABILITIES as never : {},
+        clientCapabilities: (air ? {...AIR_CAPABILITIES, ...capabilities} : capabilities) as never,
     });
 }
 

@@ -28,6 +28,8 @@ import {type CodexConnection} from "./CodexJsonRpcConnection";
 import {AppServerRecovery, recoveryLimitsFromEnv} from "./app-server-recovery/AppServerRecovery";
 import {CODEX_PROCESS_EXITED_ERROR_CODE, SessionReplacedError, ThreadRefusedError} from "./app-server-recovery/AppServerExit";
 import {CodexAppServerSupervisor} from "./app-server-recovery/CodexAppServerSupervisor";
+import {lossAwareConnection} from "./app-server-recovery/LossAwareConnection";
+import {AppServerConnectionLostError} from "./app-server-recovery/ConnectionLoss";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort, ServerNotification} from "./app-server";
 import type {
@@ -297,6 +299,10 @@ interface ActivePrompt {
     requestCancel: () => void;
     requestClose: () => void;
     complete: () => void;
+    /** The client sent `session/cancel` for this prompt. A prompt that ends after it answers `cancelled`. */
+    clientCancelled: boolean;
+    clientCancelSignal: Promise<null>;
+    requestClientCancel: () => void;
 }
 
 export interface CodexProcessState {
@@ -2907,6 +2913,10 @@ export class CodexAcpServer {
             resolveCancelSignal = resolve;
         });
         const abortController = new AbortController();
+        let resolveClientCancelSignal: (value: null) => void = () => {};
+        const clientCancelSignal = new Promise<null>((resolve) => {
+            resolveClientCancelSignal = resolve;
+        });
 
         let completed = false;
         let closeRequested = false;
@@ -2940,6 +2950,12 @@ export class CodexAcpServer {
                     this.activePrompts.delete(sessionId);
                 }
                 resolveCompletion();
+            },
+            clientCancelled: false,
+            clientCancelSignal,
+            requestClientCancel: () => {
+                activePrompt.clientCancelled = true;
+                resolveClientCancelSignal(null);
             },
         };
 
@@ -3171,6 +3187,15 @@ export class CodexAcpServer {
         let promptClient = this.codexAcpClient;
         let promptCommands = this.availableCommands;
         let promptGeneration = this.recovery?.generation ?? 0;
+        const appServerLost = new AbortController();
+        let removeAppServerLossListener: () => void = () => {};
+        let promptElicitations: CodexElicitationHandler | null = null;
+        const interactionConnection = this.recovery === null
+            ? this.connection
+            : lossAwareConnection(this.connection, appServerLost.signal);
+        const subagentWaitSignal = this.recovery === null
+            ? activePrompt.signal
+            : AbortSignal.any([activePrompt.signal, appServerLost.signal]);
         const clearRecoveredSessionFailure = async (handler: CodexEventHandler): Promise<void> => {
             await handler.completeSuccessfulTurn(sessionState.currentTurnId);
             const current = sessionState.sessionFailure;
@@ -3198,15 +3223,20 @@ export class CodexAcpServer {
                     readiness,
                     activePrompt.closeSignal.then(() => false),
                     activePrompt.cancelSignal.then(() => false),
+                    activePrompt.clientCancelSignal.then(() => false),
                 ]);
                 if (!ready) {
                     return cancelledPromptResponse();
                 }
             }
+            if (activePrompt.clientCancelled) {
+                return cancelledPromptResponse();
+            }
             if (this.recovery !== null) {
                 promptClient = this.codexAcpClient;
                 promptCommands = this.availableCommands;
                 promptGeneration = this.recovery.generation;
+                removeAppServerLossListener = this.recovery.onGenerationLost(promptGeneration, () => appServerLost.abort());
             }
             const promptEventHandler = new CodexEventHandler(
                 this.connection,
@@ -3224,18 +3254,19 @@ export class CodexAcpServer {
             const permissionContext = permissionLifecycle.beginPrompt();
             const toolCallRenderer = new AcpToolCallRenderer(this.capabilities);
             const approvalHandler = new CodexApprovalHandler(
-                this.connection,
+                interactionConnection,
                 permissionContext,
                 activePrompt.signal,
                 toolCallRenderer,
             );
             const elicitationHandler = new CodexElicitationHandler(
-                this.connection,
+                interactionConnection,
                 permissionContext,
                 this.clientCapabilities,
                 activePrompt.signal,
                 toolCallRenderer,
             );
+            promptElicitations = elicitationHandler;
             const observeInteraction = async (event: ServerNotification): Promise<void> => {
                 permissionContext.handleNotification(event);
                 await elicitationHandler.handleNotification(event);
@@ -3417,8 +3448,9 @@ export class CodexAcpServer {
 
             await promptClient.waitForSessionNotifications(params.sessionId);
             if (turnCompleted.turn.status === "completed") {
-                await eventHandler.waitForNativeSubagents(activePrompt.signal);
+                await eventHandler.waitForNativeSubagents(subagentWaitSignal);
                 if (activePrompt.signal.aborted) return cancelledPromptResponse();
+                this.throwIfSubagentWaitLost(appServerLost.signal, sessionState, promptGeneration);
                 await promptClient.waitForSessionNotifications(params.sessionId);
             }
             else {
@@ -3460,6 +3492,7 @@ export class CodexAcpServer {
                     sessionState,
                     completedPlan,
                     activePrompt.signal,
+                    interactionConnection,
                 );
                 if (this.promptShouldStop(params.sessionId, activePrompt)) {
                     return cancelledPromptResponse();
@@ -3520,8 +3553,9 @@ export class CodexAcpServer {
 
                     await promptClient.waitForSessionNotifications(params.sessionId);
                     if (turnCompleted.turn.status === "completed") {
-                        await eventHandler.waitForNativeSubagents(activePrompt.signal);
+                        await eventHandler.waitForNativeSubagents(subagentWaitSignal);
                         if (activePrompt.signal.aborted) return cancelledPromptResponse();
+                        this.throwIfSubagentWaitLost(appServerLost.signal, sessionState, promptGeneration);
                         await promptClient.waitForSessionNotifications(params.sessionId);
                     }
                     else {
@@ -3591,14 +3625,29 @@ export class CodexAcpServer {
         } catch (caught) {
             const err = this.recovery?.mapError(caught, promptClient) ?? caught;
             logger.error(`Prompt for session ${params.sessionId} failed`, err);
+            const lostAppServer = this.recovery !== null
+                && err instanceof RequestError
+                && err.code === CODEX_PROCESS_EXITED_ERROR_CODE;
             if (activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)) {
+                if (lostAppServer) await this.finishPromptAfterAppServerLoss(sessionState, eventHandler, promptClient, promptElicitations, "cancelled");
                 return cancelledPromptResponse();
             }
             agentFileChangeReportTurnId = null;
             agentFileChangeReportUnavailableReason = "providerError";
             const isProcessExit = err instanceof RequestError
                 && err.code === CODEX_PROCESS_EXITED_ERROR_CODE;
-
+            if (lostAppServer) {
+                // ACP: a prompt that the client cancelled answers `cancelled`, also when the app-server died meanwhile.
+                if (activePrompt.clientCancelled) {
+                    await this.finishPromptAfterAppServerLoss(sessionState, eventHandler, promptClient, promptElicitations, "cancelled");
+                    return cancelledPromptResponse();
+                }
+                await this.finishPromptAfterAppServerLoss(sessionState, eventHandler, promptClient, promptElicitations, "failed");
+                // A cancel that came while the cleanup published still wins (ACP: a cancelled prompt answers `cancelled`).
+                if (activePrompt.clientCancelled || activePrompt.signal.aborted) {
+                    return cancelledPromptResponse();
+                }
+            }
             const isUnexpectedFailure = !(err instanceof RequestError);
             if (eventHandler !== null
                 && clientSupportsTypedSessionFailures(this.clientCapabilities)
@@ -3655,6 +3704,7 @@ export class CodexAcpServer {
             logger.log("Prompt completed", {sessionId: params.sessionId});
             await eventHandler?.dispose();
             disposePromptRequestCancellation();
+            removeAppServerLossListener();
             sessionState.currentTurnId = null;
             const registeredPendingTurnStart = this.pendingTurnStarts.get(params.sessionId);
             if (registeredPendingTurnStart !== undefined) {
@@ -3669,10 +3719,11 @@ export class CodexAcpServer {
         sessionState: SessionState,
         plan: CompletedPlan,
         cancellationSignal: AbortSignal,
+        connection: AcpClientConnection = this.connection,
     ): Promise<boolean> {
         const renderer = new AcpToolCallRenderer(sessionState.clientCapabilities);
         try {
-            const response = await this.connection.request(
+            const response = await connection.request(
                 acp.methods.client.session.requestPermission,
                 PlanReviewReporter.permissionRequest(sessionState.sessionId, plan, renderer),
                 {cancellationSignal},
@@ -3684,8 +3735,58 @@ export class CodexAcpServer {
             });
             return approved;
         } catch (error) {
+            // The app-server died while the dialog was open: the prompt fails with its exit, see LossAwareConnection.
+            if (error instanceof AppServerConnectionLostError) throw error;
             logger.error("Error requesting plan implementation permission", error);
             return false;
+        }
+    }
+
+    /**
+     * The wait for native subagents ended because the app-server died while some still ran: the prompt fails with the
+     * exit. A turn that completed before the app-server died, with no subagent left, still ends normally.
+     */
+    private throwIfSubagentWaitLost(lost: AbortSignal, sessionState: SessionState, generation: number): void {
+        if (this.recovery === null || !lost.aborted || !sessionState.subagents.hasOutstanding()) return;
+        throw this.recovery.errorForGeneration(generation);
+    }
+
+    /**
+     * Ends what a prompt showed as running when its app-server died: open tool calls of the session and of its native
+     * subagent sessions, the subagent sessions themselves and compactions. Nothing will ever complete them.
+     */
+    private async finishPromptAfterAppServerLoss(
+        sessionState: SessionState,
+        eventHandler: CodexEventHandler | null,
+        promptClient: CodexAcpClient,
+        elicitations: CodexElicitationHandler | null,
+        state: "failed" | "cancelled",
+    ): Promise<void> {
+        try {
+            await elicitations?.completeAllUrlElicitations();
+            const sessionIds = new Set([sessionState.sessionId, ...sessionState.subagents.childSessionIds()]);
+            await this.failUnfinishedToolCalls(sessionIds);
+            // Ending the subagent sessions also ends the waits of queued notifications for them. The dead app-server
+            // sends nothing more, so the queue then drains. A tool call or a subagent session that the queue still
+            // starts is failed and ended in a second pass.
+            await eventHandler?.finishOutstandingNativeSubagents(state);
+            await promptClient.waitForSessionNotifications(sessionState.sessionId);
+            for (const childSessionId of sessionState.subagents.childSessionIds()) sessionIds.add(childSessionId);
+            await this.failUnfinishedToolCalls(sessionIds);
+            await eventHandler?.finishOutstandingNativeSubagents(state);
+        } catch (error) {
+            logger.error("Failed to finish the tool calls of a prompt whose app-server died", error);
+        }
+    }
+
+    private async failUnfinishedToolCalls(sessionIds: Iterable<string>): Promise<void> {
+        for (const sessionId of sessionIds) {
+            for (const toolCallId of this.reportingConnection.reports.unfinished(sessionId)) {
+                await this.connection.notify(acp.methods.client.session.update, {
+                    sessionId,
+                    update: {sessionUpdate: "tool_call_update", toolCallId, status: "failed"},
+                });
+            }
         }
     }
 
@@ -3781,6 +3882,7 @@ export class CodexAcpServer {
     }
 
     async cancel(params: acp.CancelNotification): Promise<void> {
+        this.activePrompts.get(params.sessionId)?.requestClientCancel();
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) {
             logger.log("Cancel request rejected: session not found", {sessionId: params.sessionId});

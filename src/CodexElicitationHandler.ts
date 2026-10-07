@@ -581,6 +581,16 @@ export class CodexElicitationHandler implements ElicitationHandler {
         });
     }
 
+    /**
+     * Completes every accepted URL elicitation: the app-server died and will never resolve them, so the client must
+     * not keep their flow open.
+     */
+    async completeAllUrlElicitations(): Promise<void> {
+        for (const threadId of [...this.pendingUrlElicitations.keys()]) {
+            await this.completeUrlElicitations(threadId);
+        }
+    }
+
     private trackUrlElicitation(threadId: string, elicitationId: string): void {
         const existing = this.pendingUrlElicitations.get(threadId);
         if (existing) {
