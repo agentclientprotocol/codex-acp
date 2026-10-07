@@ -64,16 +64,16 @@ export type SessionRenameRequest = { sessionId: string; title: string };
 export type SessionArchiveRequest = { sessionId: string };
 
 /**
- * Reads `_meta.jetbrains.air.list` of a `session/list` request. A bad `limit` falls back to the default.
+ * Reads `_meta.jetbrains.air.list` of a `session/list` request.
  *
- * @throws RequestError `invalidParams` for an `archived` or `includeWorktrees` that is neither a boolean nor
- *   omitted or `null`.
+ * @throws RequestError `invalidParams` for a `limit` that is not an integer of at least 1, or an `archived` or
+ *   `includeWorktrees` that is not a boolean. Omitted and `null` mean the default for each.
  */
 export function readSessionIndexListOptions(meta: Record<string, unknown> | null | undefined): SessionIndexListOptions {
     const jetbrains = asRecord(asRecord(meta)[JETBRAINS_META_KEY]);
     const list = asRecord(asRecord(jetbrains[AIR_META_KEY])[AIR_SESSION_LIST_KEY]);
     return {
-        limit: clampLimit(list["limit"]),
+        limit: readLimit(list["limit"]),
         archived: readBoolean(list, "archived"),
         includeWorktrees: readBoolean(list, "includeWorktrees"),
     };
@@ -88,9 +88,13 @@ function readBoolean(list: Record<string, unknown>, key: string): boolean {
     return value;
 }
 
-function clampLimit(value: unknown): number {
-    if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_SESSION_INDEX_LIMIT;
-    return Math.min(MAX_SESSION_INDEX_LIMIT, Math.max(1, Math.floor(value)));
+/** `limit`: omitted or `null` is the default, an integer of at least 1 is clamped to the maximum. */
+function readLimit(value: unknown): number {
+    if (value === undefined || value === null) return DEFAULT_SESSION_INDEX_LIMIT;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+        throw RequestError.invalidParams({limit: value}, "limit must be an integer of at least 1");
+    }
+    return Math.min(MAX_SESSION_INDEX_LIMIT, value);
 }
 
 /**
@@ -295,7 +299,7 @@ export async function readSessionIndexPage(
     }
 }
 
-/** The recency that the session index sorts by, newest first. */
+/** The recency that the session index sorts by, newest first: `lastPromptAt ?? updatedAt`, as Codex sorts. */
 function recencyOf(thread: Thread): number {
     return thread.recencyAt ?? thread.updatedAt;
 }
@@ -363,7 +367,7 @@ export function sessionIndexSessionInfo(
     const airFields: Record<string, unknown> = {[AIR_ARCHIVED_KEY]: archived};
     const branch = thread.gitInfo?.branch;
     if (branch) airFields[AIR_GIT_BRANCH_KEY] = branch;
-    // `recencyAt` is what Codex orders threads by for user activity; AIR takes it as the time of the last prompt.
+    // Codex moves `recencyAt` when a turn starts and orders threads by it: the time of the last prompt.
     if (thread.recencyAt !== null) airFields[AIR_LAST_PROMPT_AT_KEY] = isoTime(thread.recencyAt);
     airFields[AIR_CREATED_AT_KEY] = isoTime(thread.createdAt);
     if (thread.model) airFields[AIR_MODEL_KEY] = thread.model;
@@ -379,6 +383,9 @@ export function sessionIndexSessionInfo(
         sessionId: thread.id,
         cwd: thread.cwd,
         title: normalizeSessionTitle(thread.name ?? thread.preview),
+        // Not `Thread.updatedAt`: Codex also moves it for metadata writes. `thread/unarchive` sets the rollout
+        // mtime to now and copies it into `updated_at` (thread-store unarchive_thread.rs, state mark_unarchived),
+        // and #2161 says unarchive should not change `updatedAt`. `recencyAt` only moves when a turn starts.
         updatedAt: isoTime(thread.recencyAt ?? thread.updatedAt),
         ...(meta ? {_meta: meta} : {}),
     };

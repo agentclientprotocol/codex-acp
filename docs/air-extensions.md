@@ -998,7 +998,9 @@ The request can carry `_meta.jetbrains.air.list`:
 { "cwd": "/repo", "cursor": null, "_meta": { "jetbrains": { "air": { "list": { "limit": 50, "archived": false, "includeWorktrees": false } } } } }
 ```
 
-- `limit` is `50` by default. The adapter clamps it to `1..100` and never answers more rows.
+- `limit`: omitted or `null` is `50`. An integer of at least 1 is clamped to `100`; the adapter never answers more
+  rows. Anything else (a string, a fraction, `0`, a negative number, `NaN`, `Infinity`, a boolean, an object) fails
+  with `-32602`.
 - `archived` is a boolean. Omitted, `null` or `false`: unarchived threads only. `true`: unarchived and archived
   threads in one list. Any other value fails with `-32602`.
 - `includeWorktrees` is a boolean. Omitted or `null` is `false`. Any other value fails with `-32602`.
@@ -1021,8 +1023,14 @@ The request can carry `_meta.jetbrains.air.list`:
 - A relative `cwd` keeps the basename filter of the old path: the adapter sends the requests above without `cwd`
   and with `limit: 100`, filters each page by the basename of `Thread.cwd` and cuts the rows to `limit`.
   No `cwd` lists every thread.
-- Rows are ordered by `updatedAt`, newest first, ties in the Codex order. `updatedAt` is `Thread.recencyAt`, or
-  `Thread.updatedAt` without it, so every row has it. The adapter never writes it; it is the Codex value.
+- Rows are ordered by last user activity, `lastPromptAt ?? updatedAt`, newest first, ties in the Codex order:
+  Codex sorts by `recency_at`, which it moves when a turn starts.
+- `updatedAt` is `Thread.recencyAt`, or `Thread.updatedAt` without it, so every row has it and it equals the order
+  key. It is not `Thread.updatedAt`, although that one moves for every rollout write of the user or the agent:
+  Codex also moves `Thread.updatedAt` for metadata writes. `thread/unarchive` sets the rollout file time to now and
+  copies it into `updated_at`, and #2161 says unarchive should not change `updatedAt`. So `updatedAt` here is the
+  time the last turn started, not of the last agent output; `lastTurnEndedAt` covers that for sessions of this
+  connection.
 - The cursor is the adapter's own: the Codex cursor of each list it reads and the last rows the client got (their
   recency and ids), so rows that come or go before them do not shift the next page. It is tied to the scope of
   the list: `cwd` (resolved, so `/repo/` and `/repo` are the same; a relative `cwd` as sent), `archived` and
@@ -1041,7 +1049,7 @@ Every row carries `archived` in `_meta.jetbrains.air`, and these optional fields
 | --- | --- |
 | `archived` | `true` for a thread from the archived Codex list. Always present. |
 | `createdAt` | ISO time of `Thread.createdAt`. |
-| `lastPromptAt` | ISO time of `Thread.recencyAt`, the time Codex orders threads by for user activity. |
+| `lastPromptAt` | ISO time of `Thread.recencyAt`: Codex moves it when a turn starts and orders threads by it. |
 | `gitBranch` | `Thread.gitInfo.branch`. |
 | `model` | `Thread.model`. |
 | `forkedFrom` | `Thread.forkedFromId`. |

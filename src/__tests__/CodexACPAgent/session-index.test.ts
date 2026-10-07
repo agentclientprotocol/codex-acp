@@ -141,7 +141,7 @@ describe("session/list", () => {
             cwd: "/repo/project",
             _meta: {jetbrains: {air: {list: {limit: 500, archived: true}}}},
         });
-        await agent.listSessions({cwd: null, _meta: {jetbrains: {air: {list: {limit: 0, archived: null}}}}});
+        await agent.listSessions({cwd: null, _meta: {jetbrains: {air: {list: {limit: 1, archived: null}}}}});
 
         await expect(`${JSON.stringify(threadList.mock.calls.map(call => call[0]), null, 2)}\n`)
             .toMatchFileSnapshot("data/session-index-list-params.json");
@@ -280,6 +280,20 @@ describe("session/list", () => {
 
         await expect(list("/repo/b", first.nextCursor ?? null)).rejects.toMatchObject({code: -32602});
         await expect(list("/repo/a/", first.nextCursor ?? null, 5)).resolves.toMatchObject({sessions: [{sessionId: "b"}], nextCursor: null});
+    });
+
+    it("validates limit: default for omitted or null, clamped integers, -32602 otherwise", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        const list = (limit: unknown) => agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {limit}}}}});
+
+        for (const limit of [undefined, null, 1, 100, 500]) {
+            await list(limit);
+        }
+        for (const limit of ["10", 2.5, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, true, {}]) {
+            await expect(list(limit)).rejects.toMatchObject({code: -32602});
+        }
+
+        expect(threadList.mock.calls.map(call => call[0].limit)).toEqual([50, 50, 1, 100, 100]);
     });
 
     it("never answers an empty page with a cursor", async () => {
