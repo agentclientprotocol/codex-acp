@@ -35,7 +35,7 @@ export class TitleGenerator {
     private renameEchoResolve: (() => void) | null = null;
 
     constructor(
-        private readonly client: CodexAppServerClient,
+        private client: CodexAppServerClient,
         private readonly mainThreadId: string,
         private readonly cwd: string,
         private readonly getSessionTitleSource: () => string,
@@ -150,6 +150,11 @@ export class TitleGenerator {
             setTimeout(resolve, timeoutMs);
         });
         this.renameEchoResolve = null;
+    }
+
+    /** The app-server restarted: later writes go to `client`. A generation in flight ends with the old one. */
+    rebindAppServer(client: CodexAppServerClient): void {
+        this.client = client;
     }
 }
 

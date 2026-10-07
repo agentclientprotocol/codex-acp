@@ -1134,21 +1134,70 @@ export class CodexAppServerClient {
         this.mcpOauthCompletions.dispose();
     }
 
+    /**
+     * The thread ids of the requests in flight that read a whole rollout into the app-server, with their count.
+     * When the app-server dies, these tell which thread it was opening, see `AppServerRecovery`.
+     */
+    private readonly threadLoads = new Map<string, number>();
+
+    /**
+     * Runs each request that reads a whole rollout, see `AppServerRecovery.loadThread`: it can refuse a thread that
+     * crashed the app-server too often, or run such requests one at a time. By default it runs the request at once.
+     */
+    threadLoadGate: <T>(threadId: string, request: () => Promise<T>) => Promise<T> = (_threadId, request) => request();
+
+    threadLoadsInFlight(): string[] {
+        return [...this.threadLoads.keys()];
+    }
+
     private async sendRequest<R>(request: CodexRequest): Promise<R> {
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "request", ...request});
         }
+        const loadedThreadId = threadLoadOf(request);
         let result: any;
-        if (request.params) {
-            result = await this.connection.sendRequest<R>(request.method, request.params)
-        }
-        else {
-            result = await this.connection.sendRequest<R>(request.method);
+        if (loadedThreadId === null) {
+            if (request.params) {
+                result = await this.connection.sendRequest<R>(request.method, request.params)
+            }
+            else {
+                result = await this.connection.sendRequest<R>(request.method);
+            }
+        } else {
+            result = await this.threadLoadGate(loadedThreadId, () => this.sendThreadLoad<R>(loadedThreadId, request));
         }
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "response", ...result});
         }
         return result;
+    }
+
+    private async sendThreadLoad<R>(threadId: string, request: CodexRequest): Promise<R> {
+        this.threadLoads.set(threadId, (this.threadLoads.get(threadId) ?? 0) + 1);
+        try {
+            return await this.connection.sendRequest<R>(request.method, (request as {params?: unknown}).params);
+        } finally {
+            const count = (this.threadLoads.get(threadId) ?? 1) - 1;
+            if (count > 0) this.threadLoads.set(threadId, count);
+            else this.threadLoads.delete(threadId);
+        }
+    }
+}
+
+/** The thread whose rollout `request` reads: a resume, a fork (of the source thread) or a history read. */
+function threadLoadOf(request: CodexRequest): string | null {
+    const params = (request as {params?: unknown}).params as {threadId?: unknown, includeTurns?: unknown} | undefined;
+    if (typeof params?.threadId !== "string") return null;
+    switch (request.method) {
+        case "thread/resume":
+        case "thread/fork":
+        case "thread/turns/list":
+        case "thread/items/list":
+            return params.threadId;
+        case "thread/read":
+            return params.includeTurns === true ? params.threadId : null;
+        default:
+            return null;
     }
 }
 
