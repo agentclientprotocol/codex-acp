@@ -1014,14 +1014,15 @@ The request can carry `_meta.jetbrains.air.list`:
   `{cwd, limit, sortKey: "recency_at", archived, sourceKinds: [], modelProviders: [], useStateDbOnly: true, cursor}`.
   - `cwd` is a string for a single path and an array otherwise.
   - Codex lists unarchived and archived threads apart, so `archived: true` sends one request with `archived: false`
-    and one with `archived: true`, and merges the two by recency. A row is answered only when no unread Codex page
-    can hold a newer one. An empty Codex page that has a cursor tells nothing about that, so the adapter reads on
-    in that list first; these reads count against the budget below.
+    and one with `archived: true` at the same time, and merges the two by recency. A row is answered only when no
+    unread Codex page can hold a newer one. An empty Codex page that has a cursor tells nothing about that, so the
+    adapter reads on in that list first; these reads count against the budget below.
   - `sourceKinds: []` means the interactive sources, so `codex exec` runs and subagent threads are not listed.
   - `modelProviders: []` means every provider, whatever the login of the agent.
   - Codex deletes a thread with `thread/delete`, so a deleted thread is never listed, whatever `archived` is.
 - A relative `cwd` keeps the basename filter of the old path: the adapter sends the requests above without `cwd`
-  and with `limit: 100`, filters each page by the basename of `Thread.cwd` and cuts the rows to `limit`.
+  and with `limit: 100`, filters each page by the basename of `Thread.cwd`, gathers the matches of several Codex
+  pages up to `limit` and cuts them to it.
   No `cwd` lists every thread.
 - Rows are ordered by last user activity, `lastPromptAt ?? updatedAt`, newest first, ties in the Codex order:
   Codex sorts by `recency_at`, which it moves when a turn starts.
@@ -1036,8 +1037,9 @@ The request can carry `_meta.jetbrains.air.list`:
   `includeWorktrees`. A malformed cursor, a Codex cursor or a cursor of another scope fails with `-32602`.
   `limit` may change between pages.
 - A page with `nextCursor` is not empty, with one exception. The adapter reads the next Codex pages while a page
-  has no row left and the cursors advance, for at most 50 rounds. A relative-`cwd` list, which the adapter
-  filters itself, can reach that budget, and then answers an empty page with the cursor where it stopped. That is
+  has no row left and the cursors advance, for at most 50 rounds and 300 ms. A relative-`cwd` list, which the
+  adapter filters itself, can reach that budget, and then answers the rows it has, possibly none, with the cursor
+  where it stopped. That is
   the only case: Codex filters every other list itself and does not answer empty pages for it. Clients follow
   `nextCursor` until it is `null`, whatever the page holds. A Codex cursor that Codex repeats ends that list.
 - The list does not check the login, so it never fails with `auth_required`. `thread/list` reads the local state DB.

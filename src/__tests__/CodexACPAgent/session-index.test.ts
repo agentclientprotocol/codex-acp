@@ -271,6 +271,38 @@ describe("session/list", () => {
         expect(ids).toEqual(["unarchived-20", "archived-10"]);
     });
 
+    it("reads the unarchived and the archived lists at the same time", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        let inFlight = 0, maxInFlight = 0;
+        threadList.mockImplementation(async (params) => {
+            maxInFlight = Math.max(maxInFlight, ++inFlight);
+            await new Promise(resolve => setTimeout(resolve, 5));
+            inFlight--;
+            return {data: [createThread({id: params.archived ? "a" : "u"})], nextCursor: null, backwardsCursor: null};
+        });
+
+        await agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {archived: true}}}}});
+
+        expect(maxInFlight).toBe(2);
+    });
+
+    it("stops a sparse relative cwd scan after its time budget with a cursor to continue", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        let page = 0;
+        threadList.mockImplementation(async () => {
+            await new Promise(resolve => setTimeout(resolve, 40));
+            page++;
+            return {data: [createThread({cwd: "/repo/other"})], nextCursor: `codex-${page}`, backwardsCursor: null};
+        });
+
+        const started = Date.now();
+        const response = await agent.listSessions({cwd: "project"});
+
+        expect(response).toEqual({sessions: [], nextCursor: expect.any(String)});
+        expect(Date.now() - started).toBeLessThan(1_000);
+        expect(page).toBeLessThan(20);
+    });
+
     it("ties a cursor to the cwd and the scope of the list, but not to the limit", async () => {
         const {agent, threadList} = await createAgent("sessionIndex");
         threadList.mockResolvedValue({data: [createThread({id: "a", recencyAt: 20}), createThread({id: "b", recencyAt: 10})], nextCursor: null, backwardsCursor: null});
@@ -366,7 +398,7 @@ describe("session/list", () => {
             .mockResolvedValueOnce(page([
                 createThread({id: "match", cwd: "/elsewhere/project"}),
                 createThread({id: "miss", cwd: "/repo/other"}),
-            ], "cursor-3"));
+            ], null));
 
         const response = await agent.listSessions({
             cwd: "project",
@@ -374,7 +406,7 @@ describe("session/list", () => {
         });
 
         expect(response.sessions.map(session => session.sessionId)).toEqual(["match"]);
-        expect(response.nextCursor).not.toBeNull();
+        expect(response.nextCursor).toBeNull();
         expect(threadList.mock.calls.map(call => call[0])).toEqual([null, "cursor-2"].map(cursor => ({
             cursor,
             limit: 100,
@@ -386,7 +418,7 @@ describe("session/list", () => {
         })));
     });
 
-    it("cuts the kept rows of a relative cwd to the limit and continues inside the Codex page", async () => {
+    it("fills a relative cwd page from several Codex pages, cut to the limit, and continues inside a Codex page", async () => {
         const {agent, threadList} = await createAgent("sessionIndex");
         const rows = ["a", "b", "c"].map(id => createThread({id, cwd: `/repo/${id}/project`}));
         threadList.mockResolvedValue({data: rows, nextCursor: "codex-2", backwardsCursor: null});
@@ -396,10 +428,9 @@ describe("session/list", () => {
         threadList.mockResolvedValueOnce({data: rows, nextCursor: "codex-2", backwardsCursor: null})
             .mockResolvedValueOnce({data: [createThread({id: "d", cwd: "/repo/d/project"})], nextCursor: null, backwardsCursor: null});
         const second = await list(first.nextCursor ?? null);
-        const third = await list(second.nextCursor ?? null);
 
-        expect([first, second, third].map(page => page.sessions.map(session => session.sessionId))).toEqual([["a", "b"], ["c"], ["d"]]);
-        expect(third.nextCursor).toBeNull();
+        expect([first, second].map(page => page.sessions.map(session => session.sessionId))).toEqual([["a", "b"], ["c", "d"]]);
+        expect(second.nextCursor).toBeNull();
         expect(threadList.mock.calls.map(call => call[0].cursor)).toEqual([null, null, "codex-2"]);
     });
 

@@ -136,10 +136,12 @@ export function sessionIndexThreadListParams(
 }
 
 /**
- * The most `thread/list` pages that one read of the session index asks for. A read that reaches it answers
- * the rows it has with the cursor where it stopped, so the client can go on: the list never ends early.
+ * The most rounds of `thread/list` reads that one read of the session index makes, and the longest time it
+ * starts new ones. A read that reaches either answers the rows it has with the cursor where it stopped, so
+ * the client can go on: the list never ends early.
  */
 export const SESSION_INDEX_SCAN_BUDGET_PAGES = 50;
+export const SESSION_INDEX_SCAN_BUDGET_MS = 300;
 
 /** The prefix of the adapter cursor, see {@link readSessionIndexPage}. */
 const ADAPTER_CURSOR_PREFIX = "air-list:";
@@ -238,9 +240,25 @@ export async function readSessionIndexPage(
         }
     };
 
+    // A filtered list gathers rows from several Codex pages to fill the page: its matches can be sparse.
+    const collected: SessionIndexThread[] = [];
+    const startedAt = Date.now();
+    const answer = (): {threads: SessionIndexThread[], nextCursor: string | null} => ({
+        threads: collected,
+        nextCursor: state.sides.every(side => side.done) ? null : encodeAdapterCursor(state),
+    });
+    const overBudget = (round: number): boolean => {
+        if (round < SESSION_INDEX_SCAN_BUDGET_PAGES && Date.now() - startedAt < SESSION_INDEX_SCAN_BUDGET_MS) return false;
+        if (collected.length === 0) {
+            logger.log("The session list read its scan budget; the client continues from the cursor", {rounds: round});
+        }
+        return true;
+    };
+
     for (let round = 1; ; round++) {
-        for (const [index, side] of state.sides.entries()) {
-            if (side.done || pages.has(index)) continue;
+        // The unarchived and the archived lists are read at the same time.
+        await Promise.all([...state.sides.entries()].map(async ([index, side]) => {
+            if (side.done || pages.has(index)) return;
             const response = await threadList(sessionIndexThreadListParams(cwds, pageLimit, sideArchived(index), side.codexCursor));
             const recencies = response.data.map(recencyOf);
             pages.set(index, {
@@ -248,7 +266,7 @@ export async function readSessionIndexPage(
                 nextCursor: response.nextCursor ?? null,
                 oldest: recencies.length === 0 ? null : Math.min(...recencies),
             });
-        }
+        }));
         // An empty Codex page with more pages says nothing about how new the rows of its list are, so no row of
         // the other list can be answered before that list's next page is read.
         const unresolved = [...pages].filter(([, page]) => page.oldest === null && page.nextCursor !== null);
@@ -257,11 +275,7 @@ export async function readSessionIndexPage(
                 pages.delete(index);
                 advanceSide(index, page.nextCursor!);
             }
-            if (state.sides.every(side => side.done)) return {threads: [], nextCursor: null};
-            if (round >= SESSION_INDEX_SCAN_BUDGET_PAGES) {
-                logger.log("The session list read its page budget; the client continues from the cursor", {rounds: round});
-                return {threads: [], nextCursor: encodeAdapterCursor(state)};
-            }
+            if (state.sides.every(side => side.done) || overBudget(round)) return answer();
             continue;
         }
         // A row older than the oldest row of a Codex page with more pages could still come after a newer row
@@ -277,7 +291,7 @@ export async function readSessionIndexPage(
             .map(thread => ({thread, archived: sideArchived(index), index})));
         // A stable sort: rows as recent as each other keep the Codex order, unarchived first.
         candidates.sort((left, right) => recencyOf(right.thread) - recencyOf(left.thread));
-        const taken = candidates.slice(0, options.limit);
+        const taken = candidates.slice(0, options.limit - collected.length);
         const takenIds = new Set(taken.map(row => row.thread.id));
 
         // A Codex page whose rows the client now has, or which had none to give, is done with.
@@ -294,18 +308,15 @@ export async function readSessionIndexPage(
                 recency: last,
                 ids: state.after?.recency === last ? [...state.after.ids, ...ids] : ids,
             };
+            collected.push(...taken.map(({thread, archived}) => ({thread, archived})));
+            // The Codex pages kept for the next round still hold no taken row: those were all at or above
+            // the bound, and a page is kept only for its rows below it.
+            for (const page of pages.values()) page.rows = rowsAfter(page.rows, state.after);
         }
         const finished = state.sides.every(side => side.done);
-        if (taken.length > 0 || finished) {
-            return {
-                threads: taken.map(({thread, archived}) => ({thread, archived})),
-                nextCursor: finished ? null : encodeAdapterCursor(state),
-            };
-        }
-        if (round >= SESSION_INDEX_SCAN_BUDGET_PAGES) {
-            logger.log("The session list read its page budget; the client continues from the cursor", {rounds: round});
-            return {threads: [], nextCursor: encodeAdapterCursor(state)};
-        }
+        // An unfiltered list answers after the first round that gives rows: its Codex pages are full.
+        if (finished || collected.length >= options.limit || (collected.length > 0 && !filtered)) return answer();
+        if (overBudget(round)) return answer();
     }
 }
 
