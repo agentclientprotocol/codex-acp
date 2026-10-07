@@ -1,4 +1,4 @@
-import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {afterEach, beforeEach, describe, expect, it, onTestFinished, vi} from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -251,9 +251,8 @@ describe("SessionListChangedWatcher file events", () => {
         watcher.dispose();
     }, 10_000);
 
-    it("keeps the watch of a WAL that macOS reports as renamed after a write in place", async () => {
-        const wal = path.join(home, "state_5.sqlite-wal");
-        fs.writeFileSync(wal, "frame");
+    /** Watches a WAL whose own watch reports only what the test sends, and returns those listeners. */
+    function watchWalByHand(wal: string) {
         type Listener = (event: fs.WatchEventType, filename: string | null) => void;
         const realWatch = fs.watch.bind(fs) as unknown as (target: fs.PathLike, options: fs.WatchOptions, listener: Listener) => fs.FSWatcher;
         const walListeners: Listener[] = [];
@@ -261,6 +260,22 @@ describe("SessionListChangedWatcher file events", () => {
             if (target === wal) walListeners.push(listener);
             return realWatch(target, options, target === wal ? () => {} : listener);
         }) as unknown as typeof fs.watch);
+        return walListeners;
+    }
+
+    function onPlatform(platform: NodeJS.Platform): void {
+        const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+        Object.defineProperty(process, "platform", {...original, value: platform});
+        onTestFinished(() => {
+            Object.defineProperty(process, "platform", original);
+        });
+    }
+
+    it("keeps the watch of a WAL that macOS reports as renamed after a write in place", async () => {
+        onPlatform("darwin");
+        const wal = path.join(home, "state_5.sqlite-wal");
+        fs.writeFileSync(wal, "frame");
+        const walListeners = watchWalByHand(wal);
         const signatures = new Map([["/repo/a", "a2"]]);
         const {watcher, notify} = createWatcher(signatures, home, eventTimings);
         watcher.observeList(list("/repo/a"), "a1");
@@ -274,14 +289,32 @@ describe("SessionListChangedWatcher file events", () => {
         watcher.dispose();
     });
 
+    it("watches the WAL again after a rename event outside macOS, whatever its inode", async () => {
+        onPlatform("linux");
+        const wal = path.join(home, "state_5.sqlite-wal");
+        fs.writeFileSync(wal, "frame");
+        const walListeners = watchWalByHand(wal);
+        const {watcher} = createWatcher(new Map(), home, eventTimings);
+        watcher.observeList(list("/repo/a"), "a1");
+        expect(walListeners).toHaveLength(1);
+
+        // inotify reports the deleted file as "rename"; a new file can carry the same inode number.
+        walListeners[0]!("rename", "state_5.sqlite-wal");
+
+        expect(walListeners).toHaveLength(2);
+        watcher.dispose();
+    });
+
     it("keeps seeing writes after SQLite deletes and creates the WAL again", async () => {
         const wal = path.join(home, "state_5.sqlite-wal");
         fs.writeFileSync(wal, "frame");
         // Some file systems report a write in a directory to its watcher, others report only a file that
         // appears or goes. The test takes the second kind, so only the watch of the WAL itself sees a write.
+        // Linux gives the new file the inode of the deleted one, so the creation time tells them apart.
         const walIdentity = () => {
             try {
-                return String(fs.statSync(wal).ino);
+                const stats = fs.statSync(wal);
+                return `${stats.ino}:${stats.birthtimeMs}`;
             } catch {
                 return "none";
             }

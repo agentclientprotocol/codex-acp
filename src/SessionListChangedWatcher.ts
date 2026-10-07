@@ -59,10 +59,11 @@ export interface SessionListChangedWatcherDeps {
     now?: () => number;
 }
 
-/** The watch of one WAL file. `fs.watch` of a file follows its inode, not its name. */
+/** The watch of one WAL file. `fs.watch` of a file follows the file, not its name. */
 interface WalWatch {
     watcher: fs.FSWatcher;
-    ino: number;
+    /** See {@link fileIdentityOf}. */
+    identity: string;
 }
 
 interface WatchEntry extends WatchedSessionList {
@@ -244,31 +245,33 @@ export class SessionListChangedWatcher {
     /**
      * Watches each state DB WAL in CODEX_HOME, and stops watching the ones that are gone. SQLite deletes the
      * WAL when the last connection closes and creates a new file later. A watch of the old file sees none of
-     * the writes to the new one, so a WAL whose inode changed is watched again.
+     * the writes to the new one, so a WAL that is another file now is watched again.
      */
     private refreshWalWatchers(home: string): void {
         if (this.disposed) return;
-        const inodes = new Map<string, number>();
+        const identities = new Map<string, string>();
         for (const name of listWalFiles(home)) {
-            const ino = inodeOf(path.join(home, name));
-            if (ino !== null) inodes.set(name, ino);
+            const identity = fileIdentityOf(path.join(home, name));
+            if (identity !== null) identities.set(name, identity);
         }
         for (const [name, watch] of this.walWatchers) {
-            if (inodes.get(name) !== watch.ino) this.dropWalWatcher(name, watch);
+            if (identities.get(name) !== watch.identity) this.dropWalWatcher(name, watch);
         }
-        for (const [name, ino] of inodes) {
+        for (const [name, identity] of identities) {
             if (this.walWatchers.has(name)) continue;
             try {
                 const watcher = fs.watch(path.join(home, name), {persistent: false}, (event) => {
-                    // macOS also reports a write in place as "rename". Only a file that is gone or replaced
-                    // needs a new watch: this one sees no more of its writes.
-                    if (event === "rename" && inodeOf(path.join(home, name)) !== watch.ino) {
+                    // A file that is gone or replaced needs a new watch: this one sees no more of its writes.
+                    // Elsewhere "rename" means just that, even when Linux gives the new file the same inode.
+                    // macOS also reports a write in place as "rename", so there only another file counts.
+                    if (event === "rename" && (process.platform !== "darwin"
+                        || fileIdentityOf(path.join(home, name)) !== watch.identity)) {
                         this.dropWalWatcher(name, watch);
                         this.refreshWalWatchers(home);
                     }
                     this.trigger();
                 });
-                const watch: WalWatch = {watcher, ino};
+                const watch: WalWatch = {watcher, identity};
                 watcher.on("error", () => this.dropWalWatcher(name, watch));
                 this.walWatchers.set(name, watch);
             } catch (error) {
@@ -307,9 +310,14 @@ function readWalSnapshot(home: string): string {
     }).join("|");
 }
 
-function inodeOf(file: string): number | null {
+/**
+ * What tells a file from another one under the same name: its inode and its creation time. Linux gives a
+ * file that is created right after a delete the inode of the deleted one, so the inode alone is not enough.
+ */
+function fileIdentityOf(file: string): string | null {
     try {
-        return fs.statSync(file).ino;
+        const stats = fs.statSync(file);
+        return `${stats.dev}:${stats.ino}:${stats.birthtimeMs}`;
     } catch {
         return null;
     }
