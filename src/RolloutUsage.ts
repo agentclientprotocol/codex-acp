@@ -132,33 +132,43 @@ export async function readLastTokenTotal(file: string): Promise<RawTokens | null
 
 export const ZERO_TOKENS: Readonly<RawTokens> = Object.freeze({input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0});
 
-/** How much of the start of a rollout is read for its `session_meta` line. */
-const SESSION_META_LIMIT = 1024 * 1024;
+/** How much of the start of a rollout is read for its `session_meta` line, and in what steps. */
+const SESSION_META_LIMIT = 4 * 1024 * 1024;
+const SESSION_META_STEP = 64 * 1024;
 
 /**
- * `"notForked"` for a rollout whose `session_meta`, its first line, has no `forked_from_id`; otherwise the
- * first `token_count` of the fork, see {@link readFirstTokenCount}.
+ * The thread that a rollout was forked from: `forked_from_id` of its `session_meta`, the first line, or `null`
+ * for a rollout that is no fork. `undefined` while that line is not complete yet.
  */
-export async function readForkStart(file: string): Promise<{total: RawTokens, last: RawTokens | null} | "notForked" | null> {
+export async function readForkOrigin(file: string): Promise<string | null | undefined> {
     const handle = await fs.open(file, "r");
-    let firstLine: string;
+    let firstLine: string | null = null;
     try {
-        const buffer = Buffer.alloc(SESSION_META_LIMIT);
-        const {bytesRead} = await handle.read(buffer, 0, SESSION_META_LIMIT, 0);
-        const end = buffer.subarray(0, bytesRead).indexOf(NEWLINE);
-        firstLine = buffer.toString("utf8", 0, end < 0 ? bytesRead : end);
+        const chunks: Buffer[] = [];
+        for (let position = 0; position < SESSION_META_LIMIT;) {
+            const chunk = Buffer.alloc(SESSION_META_STEP);
+            const {bytesRead} = await handle.read(chunk, 0, SESSION_META_STEP, position);
+            if (bytesRead === 0) break;
+            const end = chunk.subarray(0, bytesRead).indexOf(NEWLINE);
+            chunks.push(chunk.subarray(0, end < 0 ? bytesRead : end));
+            if (end >= 0) {
+                firstLine = Buffer.concat(chunks).toString("utf8");
+                break;
+            }
+            position += bytesRead;
+        }
     } finally {
         await handle.close();
     }
+    if (firstLine === null) return undefined;
     let meta: unknown;
     try {
         meta = JSON.parse(firstLine);
     } catch {
-        return "notForked";
+        return null;
     }
     const forkedFrom = field(field(meta, "payload"), "forked_from_id");
-    if (field(meta, "type") !== "session_meta" || typeof forkedFrom !== "string" || forkedFrom === "") return "notForked";
-    return await readFirstTokenCount(file);
+    return field(meta, "type") === "session_meta" && typeof forkedFrom === "string" && forkedFrom !== "" ? forkedFrom : null;
 }
 
 /** The first `token_count` of the rollout, read from its start, or `null` within {@link HEAD_LIMIT}. */

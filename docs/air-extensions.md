@@ -1068,7 +1068,7 @@ Every row carries these fields in `_meta.jetbrains.air`; all but `archived` only
 | `archived` | `true` for a thread from the archived Codex list, `false` otherwise, whatever the `archived` filter. Always present. |
 | `lastPromptAt` | ISO time of `Thread.recencyAt`: Codex moves it when a turn starts and orders threads by it. |
 | `model` | `Thread.model`. |
-| `forkedFrom` | `Thread.forkedFromId`. |
+| `forkedFrom` | The thread it was forked from: `forked_from_id` of the `session_meta` line of its rollout, which the adapter reads with the usage, see [Token usage](#token-usage). Until then `Thread.forkedFromId`, which `thread/read` answers and `thread/list` does not. |
 | `state` | Only for a thread that this adapter has loaded: `running`, `requires_action` (waiting for an approval or for user input), or `idle`. Omitted otherwise, never `unknown`. |
 | `lastTurnEndedAt` | ISO time of the last `turn/completed` that this adapter saw for a session of this connection. Forgotten when the thread is deleted. |
 | `usage` | The token usage of the thread, see [Token usage](#token-usage). Omitted until the adapter has read it, and for a thread whose rollout has no token count. |
@@ -1089,7 +1089,7 @@ The adapter sends no `cost`: Codex reports none.
 - `inputTokens` is fresh input only: Codex's input minus the cache reads and the cache writes, at least 0, as
   `PromptResponse.usage` counts it. `cachedReadTokens` and `cachedWriteTokens` are the cache reads and writes.
   `outputTokens` includes `reasoningTokens`.
-- `model` is `Thread.model`, the thread's latest model.
+- `model` is `Thread.model`, the thread's latest model, the same as the row's `model`.
 - A fork counts only its own work. A rollout whose first line, `session_meta`, names a `forked_from_id` is a
   fork; `Thread.forkedFromId` does not tell, as `thread/list` leaves it out. The first record of a fork carries
   the total of the history it inherited plus the usage of its own first request, so the adapter subtracts that

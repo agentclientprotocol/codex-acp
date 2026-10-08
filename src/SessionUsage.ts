@@ -16,7 +16,8 @@ import type {Thread} from "./app-server/v2";
 import {logger} from "./Logger";
 import {
     minus,
-    readForkStart,
+    readFirstTokenCount,
+    readForkOrigin,
     readLastTokenTotal,
     scanSpawnedThreads,
     type RawTokens,
@@ -120,6 +121,8 @@ export class SessionUsageIndex {
     private readonly usages = new Map<string, CachedUsage>();
     private readonly fileTokens = new Map<string, CachedFileTokens>();
     private readonly inherited = new Map<string, RawTokens | null>();
+    /** The thread each rollout was forked from, or `null` for no fork: `thread/list` leaves `forkedFromId` out. */
+    private readonly origins = new Map<string, string | null>();
     private readonly spawnScans = new Map<string, SpawnScan>();
     private readonly subagents = new Map<string, Subagent>();
     private readonly pending = new Map<string, UsageSubject>();
@@ -146,7 +149,13 @@ export class SessionUsageIndex {
         const current = cached !== undefined && cached.updatedAt === subject.thread.updatedAt
             && cached.path === subject.thread.path;
         if (!current || (cached.recheckAt !== null && this.nowSeconds() >= cached.recheckAt)) this.schedule(subject);
-        return cached?.usage;
+        // The model is the thread's latest, which can change without a new token count.
+        return cached?.usage ? {...cached.usage, model: subject.thread.model} : cached?.usage;
+    }
+
+    /** The thread that a thread was forked from, `null` for no fork, `undefined` before its rollout was read. */
+    forkOrigin(threadId: string): string | null | undefined {
+        return this.origins.get(threadId);
     }
 
     /** The usage of the last read of a thread, whatever thread it was read for; `undefined` before any. */
@@ -239,8 +248,16 @@ export class SessionUsageIndex {
     private async read(subject: UsageSubject): Promise<boolean> {
         const {thread} = subject;
         let usage: SessionUsage | null = null;
+        let originRead = false;
         if (thread.path !== null) {
             try {
+                if (!this.origins.has(thread.id)) {
+                    const origin = await readForkOrigin(thread.path);
+                    if (origin !== undefined) {
+                        remember(this.origins, thread.id, origin);
+                        originRead = origin !== null;
+                    }
+                }
                 const own = await this.tokensOf(thread.id, thread.path);
                 if (own !== null) {
                     usage = {...own, model: thread.model, subagents: await this.subagentUsages(subject, thread.path)};
@@ -256,7 +273,7 @@ export class SessionUsageIndex {
         remember(this.usages, thread.id, {updatedAt: thread.updatedAt, path: thread.path, usage, recheckAt});
         // Another record can come within the second of `updatedAt` without moving it: read once more after it.
         if (recheckAt !== null) this.readLater(subject, Math.max(0, recheckAt - this.nowSeconds()) * 1000);
-        return before === undefined ? usage !== null : JSON.stringify(before.usage) !== JSON.stringify(usage);
+        return originRead || (before === undefined ? usage !== null : JSON.stringify(before.usage) !== JSON.stringify(usage));
     }
 
     /**
@@ -339,10 +356,17 @@ export class SessionUsageIndex {
         let inherited = this.inherited.get(threadId);
         if (inherited === undefined) {
             // A fork tells from its own session_meta: `thread/list` leaves out `Thread.forkedFromId`.
-            const start = await readForkStart(file);
-            inherited = start === "notForked"
+            let origin = this.origins.get(threadId);
+            if (origin === undefined) {
+                const read = await readForkOrigin(file);
+                if (read === undefined) return null;
+                origin = read;
+                remember(this.origins, threadId, origin);
+            }
+            const first = origin === null ? null : await readFirstTokenCount(file);
+            inherited = origin === null
                 ? ZERO_TOKENS
-                : start === null ? null : start.last === null ? start.total : minus(start.total, start.last);
+                : first === null ? null : first.last === null ? first.total : minus(first.total, first.last);
             remember(this.inherited, threadId, inherited);
         }
         // A fork whose first record is beyond the read start of its rollout: its own part is unknown.

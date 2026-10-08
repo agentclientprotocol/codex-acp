@@ -458,9 +458,22 @@ export function sessionIndexSessionInfo(
     };
 }
 
-/** A row with another usage, or without one for `null`. The rest of the row stays as it is. */
+/** A row with another `forkedFrom`, or without one for `null`. */
+export function withSessionIndexForkOrigin(row: acp.SessionInfo, forkedFrom: string | null): acp.SessionInfo {
+    const jetbrains = asRecord(asRecord(row._meta)[JETBRAINS_META_KEY]);
+    const air = asRecord(jetbrains[AIR_META_KEY]);
+    if ((air[AIR_FORKED_FROM_KEY] ?? null) === forkedFrom) return row;
+    const {[AIR_FORKED_FROM_KEY]: _dropped, ...rest} = air;
+    const next = forkedFrom === null ? rest : {...rest, [AIR_FORKED_FROM_KEY]: forkedFrom};
+    return {...row, _meta: {...asRecord(row._meta), [JETBRAINS_META_KEY]: {...jetbrains, [AIR_META_KEY]: next}}};
+}
+
+/** A row with another usage, or without one for `null`. The usage `model` is the row's `model`. */
 export function withSessionIndexUsage(row: acp.SessionInfo, usage: SessionUsage | null): acp.SessionInfo {
-    if (usage !== null) return {...row, _meta: withAirMeta(row._meta, AIR_USAGE_KEY, usage)};
+    if (usage !== null) {
+        const model = asRecord(asRecord(asRecord(row._meta)[JETBRAINS_META_KEY])[AIR_META_KEY])[AIR_MODEL_KEY];
+        return {...row, _meta: withAirMeta(row._meta, AIR_USAGE_KEY, {...usage, model: typeof model === "string" ? model : null})};
+    }
     const jetbrains = asRecord(asRecord(row._meta)[JETBRAINS_META_KEY]);
     const air = asRecord(jetbrains[AIR_META_KEY]);
     if (!(AIR_USAGE_KEY in air)) return row;

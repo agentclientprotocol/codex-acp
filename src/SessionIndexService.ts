@@ -32,6 +32,7 @@ import {
     SESSION_UNARCHIVE_METHOD,
     SessionIndexActivity,
     sessionIndexSessionInfo,
+    withSessionIndexForkOrigin,
     withSessionIndexUsage,
     type SessionArchiveRequest,
     type SessionIndexListOptions,
@@ -97,7 +98,9 @@ export class SessionIndexService {
             rows: async (entries) => await this.rows(entries),
             withLatestUsage: (row) => {
                 const usage = this.usage.latestUsage(row.sessionId);
-                return usage === undefined ? row : withSessionIndexUsage(row, usage);
+                const origin = this.usage.forkOrigin(row.sessionId);
+                const withOrigin = origin === undefined ? row : withSessionIndexForkOrigin(row, origin);
+                return usage === undefined ? withOrigin : withSessionIndexUsage(withOrigin, usage);
             },
             scopeCwds: (cwd) => linkedWorktreeCwds(cwd),
             notify: async (changes) => {
@@ -295,12 +298,16 @@ export class SessionIndexService {
      * usage known for its thread; one that is not read yet is read in the background, see `SessionUsageIndex`.
      */
     private async rows(entries: ThreadEntry[]): Promise<acp.SessionInfo[]> {
-        return entries.map(entry => this.withActiveAdditionalDirectories(sessionIndexSessionInfo(
-            entry.thread,
-            entry.archived,
-            this.activity.activityOf(entry.thread),
-            this.usage.usageOf(entry) ?? null,
-        )));
+        return entries.map(entry => {
+            const usage = this.usage.usageOf(entry) ?? null;
+            // The fork origin comes from the rollout once it is read with the usage, for every row alike:
+            // `thread/list` answers no `forkedFromId`, `thread/read` does.
+            const origin = this.usage.forkOrigin(entry.thread.id);
+            const thread = origin === undefined ? entry.thread : {...entry.thread, forkedFromId: origin};
+            return this.withActiveAdditionalDirectories(
+                sessionIndexSessionInfo(thread, entry.archived, this.activity.activityOf(thread), usage),
+            );
+        });
     }
 
     private withActiveAdditionalDirectories(session: acp.SessionInfo): acp.SessionInfo {

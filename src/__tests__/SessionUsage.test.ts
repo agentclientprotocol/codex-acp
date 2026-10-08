@@ -321,6 +321,23 @@ describe("SessionUsageIndex", () => {
         expect(index.usageOf(changed)).toMatchObject({inputTokens: 20, subagents: [{sessionId: CHILD, inputTokens: 40}]});
     });
 
+    it("reads the fork origin from the rollout and gives the usage the thread's current model", async () => {
+        const file = write("fork.jsonl", [
+            JSON.stringify({type: "session_meta", payload: {id: PARENT, forked_from_id: OTHER}}),
+            tokenCount({input: 10, output: 1}),
+        ]);
+        const {index, onRead} = createIndex(new Map());
+        const subject = {thread: thread(PARENT, file), archived: false};
+        expect(index.forkOrigin(PARENT)).toBeUndefined();
+        index.usageOf(subject);
+        await settle(index);
+
+        expect(index.forkOrigin(PARENT)).toBe(OTHER);
+        expect(onRead).toHaveBeenCalledTimes(1);
+        expect(index.usageOf({thread: thread(PARENT, file, {model: "gpt-6"}), archived: false})).toMatchObject({model: "gpt-6"});
+        expect(index.busy()).toBe(false);
+    });
+
     it("reports no change for a read that gives the usage it had", async () => {
         const file = write("a.jsonl", [tokenCount({input: 10, output: 1})]);
         const {index, onRead} = createIndex(new Map());
