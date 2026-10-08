@@ -1843,10 +1843,10 @@ export class CodexAcpServer {
      * A failed injection is fatal only when the turn is still the session's
      * current turn and Codex reported something other than "no active turn to
      * steer". Otherwise the turn has already ended underneath us and the caller
-     * should start a new turn instead.
+     * should use its configured idle fallback instead.
      *
      * @returns true when the prompt was injected; false when the caller should
-     *     fall back to starting a new turn.
+     *     return "promptRequired" or use the legacy new-turn fallback.
      */
     private async injectSteerIntoActiveTurn(
         params: SessionSteerRequest,
