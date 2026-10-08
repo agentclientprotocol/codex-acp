@@ -3,7 +3,8 @@
  *
  * Codex writes `event_msg` `token_count` records into the rollout of a thread; `info.total_token_usage` of the
  * last one is the running total of the thread, `info.last_token_usage` the usage of the request it follows.
- * A thread that spawns a subagent records a `SubAgentActivity` item with the `agent_thread_id` of the child.
+ * A thread that spawns a subagent records an item that names the child: `SubAgentActivity` with its
+ * `agent_thread_id`, or, in older rollouts, a `spawn_agent` `CollabAgentToolCall` with its `receiver_thread_ids`.
  */
 
 import fs from "node:fs/promises";
@@ -175,7 +176,8 @@ export async function readFirstTokenCount(file: string): Promise<{total: RawToke
     }
 }
 
-const SPAWN_MARKER = Buffer.from("\"agent_thread_id\":\"");
+/** Markers of the records that name a spawned thread: a `SubAgentActivity` item and a `spawn_agent` tool call. */
+const SPAWN_MARKERS = [Buffer.from("\"SubAgentActivity\""), Buffer.from("\"spawn_agent\"")];
 const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SCAN_CHUNK = 1024 * 1024;
 
@@ -185,24 +187,32 @@ export interface SpawnScan {
     offset: number;
     /** The spawned thread ids, in the order of their first record. */
     threadIds: string[];
+    /** The scan reached the end of the file. */
+    done: boolean;
 }
 
 /**
- * The threads that a thread spawned, from the `agent_thread_id` of the `SubAgentActivity` items that it records
- * under its own `thread_id`: a fork can carry such items of the thread it was forked from. A rollout only grows,
- * so a scan goes on from where the last one stopped; one of a file that is shorter now starts over.
+ * The threads that a thread spawned, from its own records: an `item` of type `SubAgentActivity` with kind
+ * `started` under the thread's `thread_id`, or of type `CollabAgentToolCall` with tool `spawn_agent` and the
+ * thread as `sender_thread_id`. A rollout only grows, so a scan goes on from where the last one stopped, and
+ * reads at most `maxBytes`; one of a file that is shorter now starts over.
  */
-export async function scanSpawnedThreads(file: string, threadId: string, previous: SpawnScan | null): Promise<SpawnScan> {
-    const ownRecord = `"thread_id":"${threadId}"`;
+export async function scanSpawnedThreads(
+    file: string,
+    threadId: string,
+    previous: SpawnScan | null,
+    maxBytes: number,
+): Promise<SpawnScan> {
     const handle = await fs.open(file, "r");
     try {
         const size = (await handle.stat()).size;
         const scan: SpawnScan = previous !== null && previous.offset <= size
-            ? {offset: previous.offset, threadIds: [...previous.threadIds]}
-            : {offset: 0, threadIds: []};
+            ? {offset: previous.offset, threadIds: [...previous.threadIds], done: false}
+            : {offset: 0, threadIds: [], done: false};
         const seen = new Set(scan.threadIds);
+        const limit = Math.min(size, scan.offset + maxBytes);
         let position = scan.offset;
-        while (position < size) {
+        while (position < limit) {
             const length = Math.min(SCAN_CHUNK, size - position);
             const buffer = Buffer.alloc(length);
             const {bytesRead} = await handle.read(buffer, 0, length, position);
@@ -218,19 +228,47 @@ export async function scanSpawnedThreads(file: string, threadId: string, previou
             }
             // Only complete lines: the rest is read with the next chunk.
             const view = buffer.subarray(0, lastNewline + 1);
-            for (let at = view.indexOf(SPAWN_MARKER); at >= 0; at = view.indexOf(SPAWN_MARKER, at + SPAWN_MARKER.length)) {
-                const id = view.toString("latin1", at + SPAWN_MARKER.length, at + SPAWN_MARKER.length + 36).toLowerCase();
-                if (!THREAD_ID_PATTERN.test(id) || seen.has(id)) continue;
-                const line = view.toString("utf8", view.lastIndexOf(NEWLINE, at) + 1, view.indexOf(NEWLINE, at));
-                if (!line.includes(ownRecord) || !line.includes("\"SubAgentActivity\"")) continue;
-                seen.add(id);
-                scan.threadIds.push(id);
+            for (const marker of SPAWN_MARKERS) {
+                let at = view.indexOf(marker);
+                while (at >= 0) {
+                    const lineEnd = view.indexOf(NEWLINE, at);
+                    const line = view.toString("utf8", view.lastIndexOf(NEWLINE, at) + 1, lineEnd);
+                    for (const id of spawnedBy(line, threadId)) {
+                        if (seen.has(id)) continue;
+                        seen.add(id);
+                        scan.threadIds.push(id);
+                    }
+                    at = view.indexOf(marker, lineEnd + 1);
+                }
             }
             position += view.length;
             scan.offset = position;
         }
+        scan.done = scan.offset >= size;
         return scan;
     } finally {
         await handle.close();
     }
+}
+
+/** The threads that one rollout record says the thread spawned. */
+function spawnedBy(line: string, threadId: string): string[] {
+    let record: unknown;
+    try {
+        record = JSON.parse(line);
+    } catch {
+        return [];
+    }
+    const payload = field(record, "payload");
+    const item = field(payload, "item");
+    const ids: unknown[] = [];
+    if (field(item, "type") === "SubAgentActivity" && field(item, "kind") === "started"
+        && field(payload, "thread_id") === threadId) {
+        ids.push(field(item, "agent_thread_id"));
+    } else if (field(item, "type") === "CollabAgentToolCall" && field(item, "tool") === "spawn_agent"
+        && field(item, "sender_thread_id") === threadId) {
+        const receivers = field(item, "receiver_thread_ids");
+        if (Array.isArray(receivers)) ids.push(...receivers);
+    }
+    return ids.filter((id): id is string => typeof id === "string" && THREAD_ID_PATTERN.test(id));
 }

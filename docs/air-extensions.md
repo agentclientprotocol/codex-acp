@@ -1094,14 +1094,21 @@ The adapter sends no `cost`: Codex reports none.
   plus the usage of its own first request, so the adapter subtracts that first total minus its
   `last_token_usage`. A fork whose first record is not in the first 8 MB of its rollout gets no `usage`.
 - `subagents` lists the threads that the thread spawned, in the order it spawned them, each with its own counts
-  and `model`; they are not part of the thread's counts. The adapter finds them in the thread's rollout, from the
-  `agent_thread_id` of its `SubAgentActivity` items, and reads each one with `thread/read` for its rollout and
-  model. A subagent without a token count is left out; a thread that spawned none has `subagents: []`.
+  and `model`; they are not part of the thread's counts. The adapter finds them in the thread's own records in
+  its rollout: a `SubAgentActivity` item of kind `started` names the child in `agent_thread_id`, and in older
+  rollouts a `spawn_agent` `CollabAgentToolCall` names it in `receiver_thread_ids`. `thread/list` would miss about
+  half of them: it leaves out threads without a user message of their own. The adapter reads each subagent with
+  `thread/read` for its rollout and model, again when its rollout changed. A subagent without a token count, or
+  without a rollout yet, is left out; a thread that spawned none has `subagents: []`.
+- The adapter scans a rollout for subagents once per process, at most 8 MB per read, and goes on with the rest a
+  moment later, so a large rollout does not hold up the other rows. Until the scan is done, `subagents` lists the
+  subagents found so far, and the row is sent again when it finds more.
 - The adapter reads usage in the background, so a list never waits for it. A row carries the usage read for its
   thread; the first list of a thread has none, and a thread that changed keeps the usage of the last read until
   the new one is done. A subscription gets the row again when its usage was read, see
   [Session list subscription](#session-list-subscription). A thread whose `updatedAt` and rollout did not change is
-  not read again, and a rollout is read again only when its size or time changed.
+  not read again, and a rollout is read again only when its size or time changed. A thread read within 2 s of its
+  `updatedAt` is read once more after that, since `updatedAt` has whole seconds.
 - The usage of a subagent is read again when its parent thread changes: a subagent that works while its parent
   waits shows its new counts once the parent writes again.
 

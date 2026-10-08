@@ -102,6 +102,26 @@ describe("rollout reads", () => {
         expect(await readLastTokenTotal(file)).toEqual({input: 5, cached: 0, cacheWrite: 0, output: 5, reasoning: 0});
     });
 
+    it("counts spawns only, in both record formats, and scans at most the given bytes per call", async () => {
+        const collab = JSON.stringify({type: "event_msg", payload: {type: "item_completed", thread_id: PARENT, item: {
+            type: "CollabAgentToolCall", tool: "spawn_agent", status: "completed", sender_thread_id: PARENT, receiver_thread_ids: [OTHER],
+        }}});
+        const file = write("parent.jsonl", [
+            spawn(PARENT, CHILD, "interacted"),
+            filler(1024 * 1024),
+            collab,
+            filler(1024 * 1024),
+            spawn(PARENT, CHILD),
+        ]);
+
+        const first = await scanSpawnedThreads(file, PARENT, null, 1024 * 1024);
+        expect(first.done).toBe(false);
+        expect(first.threadIds).toEqual([]);
+        let scan = first;
+        while (!scan.done) scan = await scanSpawnedThreads(file, PARENT, scan, 1024 * 1024);
+        expect(scan.threadIds).toEqual([OTHER, CHILD]);
+    });
+
     it("reads the first token_count of a rollout past long lines", async () => {
         const file = write("fork.jsonl", [
             filler(700 * 1024),
@@ -122,17 +142,17 @@ describe("rollout reads", () => {
             spawn(PARENT, CHILD, "completed"),
             filler(2 * 1024 * 1024),
         ]);
-        const first = await scanSpawnedThreads(file, PARENT, null);
+        const first = await scanSpawnedThreads(file, PARENT, null, 64 * 1024 * 1024);
         expect(first.threadIds).toEqual([CHILD]);
         expect(first.offset).toBe(fs.statSync(file).size);
 
         // A record that Codex is still writing waits for the next scan.
         const record = spawn(PARENT, OTHER);
         fs.appendFileSync(file, record.slice(0, 50));
-        const partial = await scanSpawnedThreads(file, PARENT, first);
-        expect(partial).toEqual(first);
+        const partial = await scanSpawnedThreads(file, PARENT, first, 64 * 1024 * 1024);
+        expect(partial).toEqual({...first, done: false});
         fs.appendFileSync(file, record.slice(50) + "\n");
-        expect((await scanSpawnedThreads(file, PARENT, partial)).threadIds).toEqual([CHILD, OTHER]);
+        expect((await scanSpawnedThreads(file, PARENT, partial, 64 * 1024 * 1024)).threadIds).toEqual([CHILD, OTHER]);
     });
 });
 
@@ -236,9 +256,52 @@ describe("SessionUsageIndex", () => {
         await settle(index);
 
         expect(index.usageOf(changed)).toMatchObject({inputTokens: 20, subagents: [{inputTokens: 80}]});
-        expect(readThread).toHaveBeenCalledTimes(1);
+        // The subagent is read again because its rollout changed, which can come with another model.
+        expect(readThread).toHaveBeenCalledTimes(2);
         expect(onRead).toHaveBeenCalledTimes(2);
         open.mockRestore();
+    });
+
+    it("reads a thread once more after the second of its updatedAt, for a record of the same second", async () => {
+        vi.useFakeTimers({toFake: ["setTimeout", "clearTimeout", "Date"]});
+        const file = write("a.jsonl", [tokenCount({input: 10, output: 1})]);
+        let now = 100;
+        const onRead = vi.fn();
+        const index = new SessionUsageIndex({readThread: async () => null, onRead, nowSeconds: () => now});
+        const subject = {thread: thread(PARENT, file, {updatedAt: 100}), archived: false};
+        index.usageOf(subject);
+        await vi.waitFor(async () => {
+            await vi.advanceTimersByTimeAsync(1);
+            expect(index.usageOf(subject)).toMatchObject({inputTokens: 10});
+        });
+
+        fs.appendFileSync(file, tokenCount({input: 30, output: 3}) + "\n");
+        now = 103;
+        await vi.advanceTimersByTimeAsync(3_000);
+        await vi.waitFor(async () => {
+            await vi.advanceTimersByTimeAsync(1);
+            expect(index.usageOf(subject)).toMatchObject({inputTokens: 30});
+        });
+        expect(onRead).toHaveBeenCalledTimes(2);
+        index.dispose();
+    });
+
+    it("lists a subagent once Codex has its rollout, and goes on with the parent when it has none yet", async () => {
+        const childFile = path.join(dir, "child.jsonl");
+        const parentFile = write("parent.jsonl", [spawn(PARENT, CHILD), tokenCount({input: 10, output: 1})]);
+        const threads = new Map([[CHILD, thread(CHILD, childFile)]]);
+        const {index} = createIndex(threads);
+        const subject = {thread: thread(PARENT, parentFile), archived: false};
+        index.usageOf(subject);
+        await settle(index);
+        expect(index.usageOf(subject)).toMatchObject({inputTokens: 10, subagents: []});
+
+        fs.writeFileSync(childFile, tokenCount({input: 40, output: 4}) + "\n");
+        fs.appendFileSync(parentFile, tokenCount({input: 20, output: 2}) + "\n");
+        const changed = {thread: thread(PARENT, parentFile, {updatedAt: 200}), archived: false};
+        index.usageOf(changed);
+        await settle(index);
+        expect(index.usageOf(changed)).toMatchObject({inputTokens: 20, subagents: [{sessionId: CHILD, inputTokens: 40}]});
     });
 
     it("reports no change for a read that gives the usage it had", async () => {

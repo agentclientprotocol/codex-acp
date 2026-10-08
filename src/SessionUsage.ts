@@ -55,8 +55,15 @@ export interface SessionUsageIndexDeps {
 const MAX_CACHED = 4096;
 /** A thread updated this recently can get another record within the same second of `updatedAt`. */
 const UNSETTLED_SECONDS = 2;
-/** The most threads whose rollouts are read at a time. */
+/** The most threads, and separately the most subagents, whose rollouts are read at a time. */
 const READ_CONCURRENCY = 8;
+/**
+ * How much of a rollout one read scans for spawned subagents. A longer scan goes on in a later read, so a large
+ * rollout that is scanned for the first time does not hold up the usage of the other threads.
+ */
+const SPAWN_SCAN_BYTES = 8 * 1024 * 1024;
+/** How long a scan that stopped at {@link SPAWN_SCAN_BYTES} waits before it goes on. */
+const SPAWN_SCAN_PAUSE_MS = 250;
 
 interface CachedUsage {
     updatedAt: number;
@@ -76,6 +83,28 @@ interface Subagent {
     path: string;
     model: string | null;
     forked: boolean;
+    /** The stamp of the rollout when the thread was read: a subagent whose rollout changed is read again. */
+    stamp: string | null;
+}
+
+/** Runs at most `limit` tasks at a time. */
+function limiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
+    let running = 0;
+    const waiting: Array<() => void> = [];
+    return async <T>(task: () => Promise<T>): Promise<T> => {
+        if (running >= limit) await new Promise<void>(resolve => waiting.push(resolve));
+        running++;
+        try {
+            return await task();
+        } finally {
+            running--;
+            waiting.shift()?.();
+        }
+    };
+}
+
+function isMissingFile(error: unknown): boolean {
+    return (error as NodeJS.ErrnoException | null)?.code === "ENOENT";
 }
 
 /**
@@ -90,12 +119,17 @@ export class SessionUsageIndex {
     private readonly fileTokens = new Map<string, CachedFileTokens>();
     private readonly inherited = new Map<string, RawTokens | null>();
     private readonly spawnScans = new Map<string, SpawnScan>();
-    private readonly subagents = new Map<string, Subagent | null>();
+    private readonly subagents = new Map<string, Subagent>();
     private readonly pending = new Map<string, UsageSubject>();
+    /** Threads to read again later: a scan that stopped at its budget, or a read within a second of `updatedAt`. */
+    private readonly later = new Map<string, {subject: UsageSubject, at: number}>();
     private timer: ReturnType<typeof setTimeout> | null = null;
+    private laterTimer: ReturnType<typeof setTimeout> | null = null;
+    private laterAt: number | null = null;
     private running = false;
     private disposed = false;
     private readonly nowSeconds: () => number;
+    private readonly subagentReads = limiter(READ_CONCURRENCY);
 
     constructor(private readonly deps: SessionUsageIndexDeps) {
         this.nowSeconds = deps.nowSeconds ?? (() => Date.now() / 1000);
@@ -113,21 +147,62 @@ export class SessionUsageIndex {
         return cached?.usage;
     }
 
+    /** The usage of the last read of a thread, whatever thread it was read for; `undefined` before any. */
+    latestUsage(threadId: string): SessionUsage | null | undefined {
+        return this.usages.get(threadId)?.usage;
+    }
+
     /** Drops the pending reads. */
     dispose(): void {
         this.disposed = true;
         this.pending.clear();
+        this.later.clear();
         if (this.timer !== null) clearTimeout(this.timer);
         this.timer = null;
+        if (this.laterTimer !== null) clearTimeout(this.laterTimer);
+        this.laterTimer = null;
+        this.laterAt = null;
     }
 
-    /** Whether reads are pending or running. For tests. */
+    /** Whether reads are pending or running, not counting the ones for later. For tests. */
     busy(): boolean {
         return this.running || this.timer !== null;
     }
 
+    /** Reads the thread again after `delayMs`, unless it is read before for another reason. */
+    private readLater(subject: UsageSubject, delayMs: number): void {
+        if (this.disposed) return;
+        const at = Date.now() + delayMs;
+        const known = this.later.get(subject.thread.id);
+        this.later.set(subject.thread.id, {subject, at: known === undefined ? at : Math.min(known.at, at)});
+        this.armLater();
+    }
+
+    private armLater(): void {
+        let next: number | null = null;
+        for (const entry of this.later.values()) next = next === null ? entry.at : Math.min(next, entry.at);
+        if (next === this.laterAt) return;
+        if (this.laterTimer !== null) clearTimeout(this.laterTimer);
+        this.laterTimer = null;
+        this.laterAt = next;
+        if (next === null || this.disposed) return;
+        this.laterTimer = setTimeout(() => {
+            this.laterTimer = null;
+            this.laterAt = null;
+            const now = Date.now();
+            for (const [threadId, entry] of this.later) {
+                if (entry.at > now) continue;
+                this.later.delete(threadId);
+                this.schedule(entry.subject);
+            }
+            this.armLater();
+        }, Math.max(0, next - Date.now()));
+        this.laterTimer.unref?.();
+    }
+
     private schedule(subject: UsageSubject): void {
         if (this.disposed) return;
+        if (this.later.delete(subject.thread.id)) this.armLater();
         this.pending.set(subject.thread.id, subject);
         if (this.timer !== null || this.running) return;
         this.timer = setTimeout(() => {
@@ -159,13 +234,14 @@ export class SessionUsageIndex {
     }
 
     /** Reads the usage of a thread; true when it differs from the usage known before. */
-    private async read({thread}: UsageSubject): Promise<boolean> {
+    private async read(subject: UsageSubject): Promise<boolean> {
+        const {thread} = subject;
         let usage: SessionUsage | null = null;
         if (thread.path !== null) {
             try {
                 const own = await this.tokensOf(thread.id, thread.path, thread.forkedFromId !== null);
                 if (own !== null) {
-                    usage = {...own, model: thread.model, subagents: await this.subagentUsages(thread.id, thread.path)};
+                    usage = {...own, model: thread.model, subagents: await this.subagentUsages(subject, thread.path)};
                 }
             } catch (error) {
                 // Read again when the thread is listed next.
@@ -174,44 +250,67 @@ export class SessionUsageIndex {
             }
         }
         const before = this.usages.get(thread.id);
-        remember(this.usages, thread.id, {
-            updatedAt: thread.updatedAt,
-            path: thread.path,
-            usage,
-            recheckAt: this.recheckTime(thread),
-        });
+        const recheckAt = this.recheckTime(thread);
+        remember(this.usages, thread.id, {updatedAt: thread.updatedAt, path: thread.path, usage, recheckAt});
+        // Another record can come within the second of `updatedAt` without moving it: read once more after it.
+        if (recheckAt !== null) this.readLater(subject, Math.max(0, recheckAt - this.nowSeconds()) * 1000);
         return before === undefined ? usage !== null : JSON.stringify(before.usage) !== JSON.stringify(usage);
     }
 
-    /** The usage of the subagents that a thread spawned and that have any, in the order they were spawned. */
-    private async subagentUsages(threadId: string, file: string): Promise<SubagentUsage[]> {
-        const scan = await scanSpawnedThreads(file, threadId, this.spawnScans.get(threadId) ?? null);
+    /**
+     * The usage of the subagents that a thread spawned and that have any, in the order they were spawned. A scan
+     * that stops at its budget goes on later, and the usage grows by the subagents it finds.
+     */
+    private async subagentUsages(subject: UsageSubject, file: string): Promise<SubagentUsage[]> {
+        const threadId = subject.thread.id;
+        const scan = await scanSpawnedThreads(file, threadId, this.spawnScans.get(threadId) ?? null, SPAWN_SCAN_BYTES);
         remember(this.spawnScans, threadId, scan);
-        const usages = await Promise.all(scan.threadIds.map(async (childId): Promise<SubagentUsage | null> => {
-            let child = await this.subagent(childId);
-            if (child === null) return null;
-            let tokens: SessionUsageTokens | null;
-            try {
-                tokens = await this.tokensOf(childId, child.path, child.forked);
-            } catch {
-                // Archiving or unarchiving a thread moves its rollout: the thread knows where to.
-                this.subagents.delete(childId);
-                child = await this.subagent(childId);
-                if (child === null) return null;
-                tokens = await this.tokensOf(childId, child.path, child.forked);
-            }
-            return tokens === null ? null : {sessionId: childId, model: child.model, ...tokens};
-        }));
+        if (!scan.done) this.readLater(subject, SPAWN_SCAN_PAUSE_MS);
+        const usages = await Promise.all(scan.threadIds.map(childId => this.subagentReads(() => this.subagentUsage(childId))));
         return usages.filter((usage): usage is SubagentUsage => usage !== null);
     }
 
-    private async subagent(threadId: string): Promise<Subagent | null> {
-        const known = this.subagents.get(threadId);
-        if (known !== undefined) return known;
+    /** The usage of one subagent, or `null` when Codex has no rollout of it, or one without a token count. */
+    private async subagentUsage(childId: string): Promise<SubagentUsage | null> {
+        let child = this.subagents.get(childId) ?? await this.readSubagent(childId);
+        if (child === null) return null;
+        let stamp: string;
+        try {
+            stamp = await stampOf(child.path);
+        } catch (error) {
+            if (!isMissingFile(error)) throw error;
+            // Archiving or unarchiving a thread moves its rollout: the thread knows where to.
+            child = await this.readSubagent(childId);
+            if (child === null) return null;
+            try {
+                stamp = await stampOf(child.path);
+            } catch (again) {
+                // Codex writes the rollout of a new thread later.
+                if (isMissingFile(again)) return null;
+                throw again;
+            }
+        }
+        if (child.stamp !== null && child.stamp !== stamp) {
+            // The subagent changed since it was read, and so may its model.
+            child = await this.readSubagent(childId);
+            if (child === null) return null;
+        }
+        if (child.stamp === null) {
+            child = {...child, stamp};
+            remember(this.subagents, childId, child);
+        }
+        const tokens = await this.tokensOf(childId, child.path, child.forked);
+        return tokens === null ? null : {sessionId: childId, model: child.model, ...tokens};
+    }
+
+    /** A subagent as Codex has it now. One without a rollout is not kept: it gets one later. */
+    private async readSubagent(threadId: string): Promise<Subagent | null> {
         const thread = await this.deps.readThread(threadId);
-        const subagent = thread === null || thread.path === null
-            ? null
-            : {path: thread.path, model: thread.model, forked: thread.forkedFromId !== null};
+        if (thread === null || thread.path === null) {
+            this.subagents.delete(threadId);
+            return null;
+        }
+        const subagent: Subagent = {path: thread.path, model: thread.model, forked: thread.forkedFromId !== null, stamp: null};
         remember(this.subagents, threadId, subagent);
         return subagent;
     }
@@ -221,8 +320,7 @@ export class SessionUsageIndex {
      * again only when its path, size or modification time changed.
      */
     private async tokensOf(threadId: string, file: string, forked: boolean): Promise<SessionUsageTokens | null> {
-        const stats = await fs.stat(file);
-        const stamp = `${file}:${stats.size}:${stats.mtimeMs}`;
+        const stamp = await stampOf(file);
         const cached = this.fileTokens.get(threadId);
         if (cached !== undefined && cached.stamp === stamp) {
             remember(this.fileTokens, threadId, cached);
@@ -256,6 +354,12 @@ export class SessionUsageIndex {
         const settledAt = thread.updatedAt + UNSETTLED_SECONDS;
         return this.nowSeconds() < settledAt ? settledAt : null;
     }
+}
+
+/** What tells a rollout that changed: its path, size and modification time. */
+async function stampOf(file: string): Promise<string> {
+    const stats = await fs.stat(file);
+    return `${file}:${stats.size}:${stats.mtimeMs}`;
 }
 
 /** Keeps a value, most recent last, and drops the oldest beyond {@link MAX_CACHED}. */
