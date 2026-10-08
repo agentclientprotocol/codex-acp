@@ -49,7 +49,7 @@ describe('_session/steering', () => {
         vi.clearAllMocks();
     });
 
-    it('reports injected when the input joins the active turn', async () => {
+    it.each([undefined, {steering: {idleBehavior: "promptRequired"}}])('reports injected when the input joins the active turn (metadata: %j)', async (_meta) => {
         const {mockFixture, sessionState, turnCompleted} = startActiveTurn();
         const turnSteerSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnSteer")
             .mockResolvedValue({turnId: "turn-id"});
@@ -65,6 +65,7 @@ describe('_session/steering', () => {
         await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
             sessionId: "session-id",
             prompt: [{type: "text", text: "also keep backward compatibility"}],
+            _meta,
         })).resolves.toEqual({outcome: "injected"});
 
         expect(turnSteerSpy).toHaveBeenCalledWith({
@@ -269,6 +270,28 @@ describe('_session/steering', () => {
             prompt: [{type: "text", text: "follow-up"}],
             _meta: {steering: {idleBehavior: "startDetachedTurn"}},
         })).rejects.toThrow("unsupported steering idleBehavior");
+    });
+
+    it.each([
+        null,
+        [],
+        false,
+        "invalid",
+        {steering: null},
+        {steering: []},
+        {steering: "invalid"},
+        {steering: {idleBehavior: null}},
+    ])('rejects malformed steering metadata without starting or injecting a turn (%j)', async (_meta) => {
+        const mockFixture = createCodexMockTestFixture();
+        const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart");
+        const turnSteerSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnSteer");
+        await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "do not consume this"}],
+            _meta,
+        })).rejects.toThrow(RequestError);
+        expect(turnStartSpy).not.toHaveBeenCalled();
+        expect(turnSteerSpy).not.toHaveBeenCalled();
     });
 
     it('rejects image input when the model does not support it', async () => {
