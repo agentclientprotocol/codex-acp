@@ -150,6 +150,8 @@ export class SessionListSubscriptions {
     /** The newest `updatedAt` that a scan saw, per archive state; `null` before the first scan. */
     private marks: {unarchived: number, archived: number} | null = null;
     private marksReady: Promise<void> | null = null;
+    /** Something changed while a scan went on from its page limit: a scan from the top follows it. */
+    private changedDuringResume = false;
     /** Where a scan that stopped at its page limit goes on, per archive state. */
     private resumes: Record<"unarchived" | "archived", {cursor: string, cutoff: number, newest: number} | null> = {unarchived: null, archived: null};
     /** Moves on when the watching stops, so that a scan that was running then does not set the marks again. */
@@ -163,7 +165,7 @@ export class SessionListSubscriptions {
      * Threads that groups whose worktrees were resolved too recently could not take: offered to them again when
      * they may resolve again.
      */
-    private readonly scopeRetries = new Map<string, {entry: ThreadEntry, at: number}>();
+    private readonly scopeRetries = new Map<string, {entry: ThreadEntry, at: number, seenAt: number}>();
     /** Counts reads and baselines, so that a read that started before a baseline does not override it. */
     private epoch = 0;
     /** Deleted threads, with whether this adapter deleted them. */
@@ -293,6 +295,7 @@ export class SessionListSubscriptions {
             }
             case "thread/deleted":
                 this.pendingThreads.delete(notification.params.threadId);
+                this.scopeRetries.delete(notification.params.threadId);
                 this.deletedThreads.set(notification.params.threadId, true);
                 this.requestThreads(this.timings.ownChangeDelayMs);
                 return;
@@ -344,6 +347,11 @@ export class SessionListSubscriptions {
 
     /** A state DB WAL changed: scan after the quiet time. */
     private stateChanged(): void {
+        if (this.resumes.unarchived !== null || this.resumes.archived !== null) this.changedDuringResume = true;
+        this.requestScan();
+    }
+
+    private requestScan(): void {
         if (this.subscriptions.size === 0) return;
         const now = this.now();
         this.scanRequested = true;
@@ -406,6 +414,7 @@ export class SessionListSubscriptions {
         this.nameLog = null;
         this.marks = null;
         this.resumes = {unarchived: null, archived: null};
+        this.changedDuringResume = false;
         this.marksReady = null;
         this.watchGeneration++;
         if (this.timer !== null) clearTimeout(this.timer);
@@ -535,8 +544,8 @@ export class SessionListSubscriptions {
         const retries = [...this.scopeRetries].filter(([threadId, {at}]) =>
             at <= this.now() && !found.has(threadId) && !deleted.has(threadId));
         for (const [threadId] of retries) this.scopeRetries.delete(threadId);
-        const retried = retries.flatMap(([, {entry}]) => {
-            const groups = this.groupsOf(entry.thread.cwd).filter(group => group.baselineEpoch < readEpoch);
+        const retried = retries.flatMap(([, {entry, seenAt}]) => {
+            const groups = this.groupsOf(entry.thread.cwd, entry, seenAt).filter(group => group.baselineEpoch < readEpoch);
             return groups.length === 0 ? [] : [{entry, groups}];
         });
         const retriedRows = retried.length === 0 ? [] : await this.deps.rows(retried.map(({entry}) => entry));
@@ -548,6 +557,7 @@ export class SessionListSubscriptions {
         }
 
         for (const threadId of deleted.keys()) {
+            this.scopeRetries.delete(threadId);
             const knowing = [...this.subscriptions.values()]
                 .filter(subscription => subscription.sent.has(threadId) || subscription.group.rows.has(threadId));
             const cwd = [...this.groups.values()].map(group => group.rows.get(threadId)?.row.cwd).find(known => known !== undefined);
@@ -682,20 +692,23 @@ export class SessionListSubscriptions {
         const next = {unarchived: 0, archived: 0};
         let goOn = false;
         for (const side of sides) {
-            if (side.stoppedAt !== null && side.mark !== null) {
+            // Pages of threads all of the second of the mark are threads seen before: no reason to go on.
+            if (side.stoppedAt !== null && side.mark !== null && side.newest > side.mark) {
                 // The mark moves on only once the scan reached it: the rest goes on in the next scan.
                 this.resumes[side.key] = {cursor: side.stoppedAt, cutoff: side.mark, newest: side.newest};
                 next[side.key] = side.mark;
                 goOn = true;
             } else {
-                // A scan that went on from a page limit read no newer threads: the next one starts from the top.
-                if (side.resumed) goOn = true;
+                // A scan that went on from a page limit read no threads changed meanwhile: when there were any,
+                // the next one starts from the top.
+                if (side.resumed && this.changedDuringResume) goOn = true;
                 this.resumes[side.key] = null;
                 next[side.key] = side.newest;
             }
         }
         this.marks = next;
-        if (goOn) this.stateChanged();
+        if (this.resumes.unarchived === null && this.resumes.archived === null) this.changedDuringResume = false;
+        if (goOn) this.requestScan();
         return marks === null ? [] : sides.flatMap(side => side.entries);
     }
 
@@ -719,7 +732,11 @@ export class SessionListSubscriptions {
     }
 
     /** The groups whose scope has the cwd. The worktrees of a group are resolved again every 10 s at most. */
-    private groupsOf(cwd: string, entry?: ThreadEntry): Group[] {
+    /**
+     * @param entry the thread to offer again when a group could not resolve its worktrees since `seenAt`, when
+     *   the thread was seen to change.
+     */
+    private groupsOf(cwd: string, entry?: ThreadEntry, seenAt = this.now()): Group[] {
         const now = this.now();
         const resolve = (group: Group): void => {
             group.scopeResolvedAt = now;
@@ -732,7 +749,8 @@ export class SessionListSubscriptions {
         // A group without the cwd can miss a new worktree: it resolves again, at most once a second.
         let retryAt: number | null = null;
         for (const group of this.groups.values()) {
-            if (group.scope.has(cwd)) continue;
+            // A group resolved since the thread changed knows its worktrees of that time.
+            if (group.scope.has(cwd) || group.scopeResolvedAt >= seenAt) continue;
             if (now - group.scopeResolvedAt >= SCOPE_RETRY_MS) {
                 resolve(group);
             } else {
@@ -742,7 +760,7 @@ export class SessionListSubscriptions {
         }
         if (retryAt !== null && entry !== undefined) {
             this.scopeRetries.delete(entry.thread.id);
-            this.scopeRetries.set(entry.thread.id, {entry, at: retryAt});
+            this.scopeRetries.set(entry.thread.id, {entry, at: retryAt, seenAt});
             if (this.scopeRetries.size > MAX_IGNORED_THREADS) this.scopeRetries.delete(this.scopeRetries.keys().next().value!);
             this.threadsDueAt = this.threadsDueAt === null ? retryAt : Math.min(this.threadsDueAt, retryAt);
         }

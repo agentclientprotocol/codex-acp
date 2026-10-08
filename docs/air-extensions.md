@@ -1224,7 +1224,8 @@ How the agent sees changes:
   for unarchived threads and one for archived threads, and reads newest first until the threads are older than
   the newest one it saw before. Threads of the same second as that one are read again. A scan reads at most
   920 threads per archive state; one that stops there goes on where it stopped with the next scan, 150 ms later,
-  and the newest one it saw counts only once it reached the old one.
+  and the newest one it saw counts only once it reached the old one; a scan from the top follows when a write came
+  meanwhile. Pages of threads that all have the second of the old one count as read.
 - A rename moves no `updated_at`. The agent watches `<CODEX_HOME>/session_index.jsonl`, to which any process
   appends its renames, reads what was appended with the next scan, and reads those threads with `thread/read`. Archive moves no `updated_at`
   either: the agent watches `<CODEX_HOME>/archived_sessions/` and reads each thread whose rollout appears or goes

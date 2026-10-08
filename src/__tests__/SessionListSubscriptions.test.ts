@@ -323,6 +323,7 @@ describe("SessionListSubscriptions", () => {
         await vi.advanceTimersByTimeAsync(timings.quietMs);
         // A new thread while the scan goes on below its first pages.
         codex.put(thread("new", {updatedAt: 9_000}));
+        listener().stateChanged();
         await vi.advanceTimersByTimeAsync(3 * timings.maxWaitMs);
 
         expect(sent.flatMap(changes => ids(changes.sessions))).toContain("new");
@@ -350,6 +351,19 @@ describe("SessionListSubscriptions", () => {
         await vi.advanceTimersByTimeAsync(timings.minChangeIntervalMs);
         expect(sent.filter(changes => changes.removed.includes("old")).map(changes => changes.subscriptionId).sort())
             .toEqual([repo, worktree].sort());
+        subscriptions.dispose();
+    });
+
+    it("does not go on forever with pages of threads all of the second of its mark", async () => {
+        const {codex, subscriptions, listener} = setup();
+        for (let index = 0; index < 1_001; index++) codex.put(thread(`same-${index}`, {updatedAt: 5_000, cwd: "/elsewhere"}));
+        await subscriptions.subscribe("/repo");
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(5 * timings.maxWaitMs);
+        const scans = codex.scans().length;
+
+        await vi.advanceTimersByTimeAsync(5 * timings.maxWaitMs);
+        expect(codex.scans().length).toBe(scans);
         subscriptions.dispose();
     });
 
