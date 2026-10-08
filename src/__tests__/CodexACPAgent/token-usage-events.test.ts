@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ServerNotification } from '../../app-server';
-import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
+import { createCodexMockTestFixture, createTestEventHandler, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
+import { PromptTokenUsage } from '../../TokenCount';
 import type { TokenUsageBreakdown } from '../../app-server/v2';
 import type { SessionState } from '../../CodexAcpServer';
+import { ACPSessionConnection } from '../../ACPSessionConnection';
+import { CodexSubagentEventRouter } from '../../subagents/CodexSubagentEventRouter';
 
 function createTokenUsageNotification(
     sessionId: string,
@@ -10,13 +13,14 @@ function createTokenUsageNotification(
         total: TokenUsageBreakdown;
         last: TokenUsageBreakdown;
         modelContextWindow: number | null;
-    }
+    },
+    turnId = 'turn-id',
 ): ServerNotification {
     return {
         method: 'thread/tokenUsage/updated',
         params: {
             threadId: sessionId,
-            turnId: 'turn-id',
+            turnId,
             tokenUsage,
         },
     };
@@ -561,6 +565,116 @@ describe('Token Usage Events', () => {
             ])();
 
             expect(events).toEqual([]);
+        });
+    });
+    describe('usage of child threads', () => {
+        const childThreadId = 'child-thread-id';
+        const parentUsage = createTokenUsageNotification(sessionId, {
+            total: breakdown(1000, 800, 0, 200),
+            last: breakdown(1000, 800, 0, 200),
+            modelContextWindow: 128000,
+        });
+        const childUsage = createTokenUsageNotification(childThreadId, {
+            total: breakdown(50000, 49000, 40000, 1000),
+            last: breakdown(50000, 49000, 40000, 1000),
+            modelContextWindow: 200000,
+        }, 'child-turn-id');
+        const childSpawned: ServerNotification = {
+            method: 'item/started',
+            params: {
+                threadId: sessionId,
+                turnId: 'turn-id',
+                startedAtMs: 0,
+                item: {
+                    type: 'subAgentActivity',
+                    id: 'activity-started',
+                    kind: 'started',
+                    agentThreadId: childThreadId,
+                    agentPath: '/root/worker',
+                },
+            },
+        };
+
+        const childCompleted: ServerNotification = {
+            method: 'turn/completed',
+            params: {
+                threadId: childThreadId,
+                turn: {
+                    id: 'child-turn-id',
+                    items: [],
+                    itemsView: 'notLoaded',
+                    status: 'completed',
+                    error: null,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
+                },
+            },
+        };
+
+        it('keeps the usage of a native subagent out of the parent session', async () => {
+            const codexAcpAgent = mockFixture.getCodexAcpAgent();
+            await codexAcpAgent.initialize({
+                protocolVersion: 1,
+                clientCapabilities: {
+                    _meta: { jetbrains: { air: { version: 1, capabilities: ['nativeSubagentSessions'] } } },
+                },
+            });
+            const sessionState = createTestSessionState({ sessionId });
+            sessionState.subagents = new CodexSubagentEventRouter(
+                sessionId,
+                true,
+                new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+                () => {},
+            );
+            mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
+                turn: { id: 'turn-id', items: [], status: 'inProgress', error: null },
+            });
+            mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation(async () => {
+                for (const notification of [childSpawned, reasoningStarted(sessionId), parentUsage, childUsage, childCompleted]) {
+                    mockFixture.sendServerNotification(notification);
+                }
+                return {
+                    threadId: sessionId,
+                    turn: { id: 'turn-id', items: [], status: 'completed', error: null },
+                };
+            });
+            vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
+
+            const response = await codexAcpAgent.prompt({
+                sessionId,
+                prompt: [{ type: 'text', text: 'test prompt' }],
+            });
+
+            const usageUpdates = mockFixture.getAcpConnectionEvents([])
+                .filter(event => event.method === 'sessionUpdate' && event.args[0].update.sessionUpdate === 'usage_update')
+                .map(event => ({ sessionId: event.args[0].sessionId, used: event.args[0].update.used, size: event.args[0].update.size }));
+            expect(usageUpdates).toEqual([
+                { sessionId, used: 1000, size: 128000 },
+                { sessionId: childThreadId, used: 50000, size: 200000 },
+            ]);
+            expect(sessionState.lastTokenUsage?.totalTokens).toBe(1000);
+            expect(sessionState.totalTokenUsage?.totalTokens).toBe(1000);
+            expect(sessionState.modelContextWindow).toBe(128000);
+            expect(response.usage?.totalTokens).toBe(1000);
+        });
+
+        it('ignores the usage of a thread that is not the session or its subagent', async () => {
+            const sessionState = createTestSessionState({ sessionId });
+            const handler = createTestEventHandler(mockFixture.getAcpConnection(), sessionState);
+            sessionState.promptTokenUsage = new PromptTokenUsage(null);
+            sessionState.promptTokenUsage.observeModelOutput();
+
+            await handler.handleNotification(parentUsage);
+            await handler.handleNotification(childUsage);
+
+            const usageUpdates = mockFixture.getAcpConnectionEvents([])
+                .filter(event => event.method === 'sessionUpdate' && event.args[0].update.sessionUpdate === 'usage_update')
+                .map(event => ({ sessionId: event.args[0].sessionId, used: event.args[0].update.used, size: event.args[0].update.size }));
+            expect(usageUpdates).toEqual([{ sessionId, used: 1000, size: 128000 }]);
+            expect(sessionState.lastTokenUsage?.totalTokens).toBe(1000);
+            expect(sessionState.modelContextWindow).toBe(128000);
+            expect(sessionState.promptTokenUsage.usage()?.totalTokens).toBe(1000);
         });
     });
 });

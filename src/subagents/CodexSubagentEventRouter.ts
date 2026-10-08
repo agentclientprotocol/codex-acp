@@ -179,6 +179,11 @@ export class CodexSubagentEventRouter {
         return ignored;
     }
 
+    /** Whether the thread is a native subagent that has its own ACP session. */
+    isNativeSubagentThread(threadId: string): boolean {
+        return threadId !== this.rootSessionId && this.children.has(threadId);
+    }
+
     notificationSessionId(notification: ServerNotification): string {
         const threadId = (notification.params as {threadId?: unknown}).threadId;
         return typeof threadId === "string" && this.children.has(threadId)

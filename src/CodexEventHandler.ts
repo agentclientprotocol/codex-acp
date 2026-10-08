@@ -1169,10 +1169,20 @@ export class CodexEventHandler {
     }
 
     private createUsageUpdate(params: ThreadTokenUsageUpdatedNotification): UpdateSessionEvent | null {
-        this.handleTokenUsageUpdated(params);
-
-        const used = this.sessionState.lastTokenUsage?.totalTokens;
-        const size = this.sessionState.modelContextWindow;
+        let used: number | undefined;
+        let size: number | null;
+        if (params.threadId === this.sessionState.sessionId) {
+            this.handleTokenUsageUpdated(params);
+            used = this.sessionState.lastTokenUsage?.totalTokens;
+            size = this.sessionState.modelContextWindow;
+        } else if (this.subagents.isNativeSubagentThread(params.threadId)) {
+            // The usage of a native subagent belongs to its own session, where handleNotification routes the
+            // update. It must not change the usage of this session or its turn.
+            used = params.tokenUsage.last.totalTokens;
+            size = params.tokenUsage.modelContextWindow;
+        } else {
+            return null;
+        }
         if (used == null || size == null || size <= 0) {
             return null;
         }
