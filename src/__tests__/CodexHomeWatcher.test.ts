@@ -63,9 +63,12 @@ describe("CodexHomeWatcher", () => {
         const threadId = "01a0637c-5b99-7242-9064-04545d605fdb";
         const rollout = path.join(archive, `rollout-2026-10-08T13-21-48-${threadId}.jsonl`);
 
+        // Moves the rollout in and out by turns. The test tracks where it is, so it never checks the file first.
+        let present = false;
         await vi.waitFor(() => {
-            if (fs.existsSync(rollout)) fs.rmSync(rollout);
+            if (present) fs.rmSync(rollout);
             else fs.writeFileSync(rollout, "{}\n");
+            present = !present;
             expect(archiveMoved).toHaveBeenCalledWith(threadId);
         }, {timeout: 5_000, interval: 100});
         expect(archiveMoved.mock.calls.every(([id]) => id === threadId)).toBe(true);
