@@ -10,9 +10,7 @@
           "air": {
             "version": 1,
             "archived": false,
-            "gitBranch": "main",
             "lastPromptAt": "1970-01-01T00:05:00.000Z",
-            "createdAt": "1970-01-01T00:01:40.000Z",
             "model": "gpt-5.5",
             "forkedFrom": "01a0637c-5b99-7242-9064-04545d605fdd",
             "state": "running"
@@ -31,7 +29,6 @@
             "version": 1,
             "archived": false,
             "lastPromptAt": "1970-01-01T00:05:00.000Z",
-            "createdAt": "1970-01-01T00:01:40.000Z",
             "state": "requires_action"
           }
         }
@@ -48,7 +45,6 @@
             "version": 1,
             "archived": false,
             "lastPromptAt": "1970-01-01T00:05:00.000Z",
-            "createdAt": "1970-01-01T00:01:40.000Z",
             "state": "requires_action"
           }
         }
@@ -64,8 +60,7 @@
           "air": {
             "version": 1,
             "archived": false,
-            "lastPromptAt": "1970-01-01T00:05:00.000Z",
-            "createdAt": "1970-01-01T00:01:40.000Z"
+            "lastPromptAt": "1970-01-01T00:05:00.000Z"
           }
         }
       }
@@ -80,8 +75,7 @@
           "air": {
             "version": 1,
             "archived": false,
-            "lastPromptAt": "1970-01-01T00:05:00.000Z",
-            "createdAt": "1970-01-01T00:01:40.000Z"
+            "lastPromptAt": "1970-01-01T00:05:00.000Z"
           }
         }
       }
@@ -96,7 +90,6 @@
           "air": {
             "version": 1,
             "archived": false,
-            "createdAt": "1970-01-01T00:01:40.000Z",
             "state": "idle",
             "lastTurnEndedAt": "1970-01-01T00:08:20.000Z"
           }

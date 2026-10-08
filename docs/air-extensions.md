@@ -1054,9 +1054,7 @@ Every row carries `archived` in `_meta.jetbrains.air`, and these optional fields
 | Field | Value |
 | --- | --- |
 | `archived` | `true` for a thread from the archived Codex list, `false` otherwise, whatever the `archived` filter. Always present. |
-| `createdAt` | ISO time of `Thread.createdAt`. |
 | `lastPromptAt` | ISO time of `Thread.recencyAt`: Codex moves it when a turn starts and orders threads by it. |
-| `gitBranch` | `Thread.gitInfo.branch`. |
 | `model` | `Thread.model`. |
 | `forkedFrom` | `Thread.forkedFromId`. |
 | `state` | Only for a thread that this adapter has loaded: `running`, `requires_action` (waiting for an approval or for user input), or `idle`. Omitted otherwise, never `unknown`. |
@@ -1127,7 +1125,7 @@ The names and the semantics are the RFDs'. The transport differs:
 | `_meta.jetbrains.air.list.archived`: `"unarchived"`, `"archived"` or `"all"` | `session/list` `archived` (#2161) |
 | `SessionInfo.updatedAt` = `Thread.updatedAt` | `SessionInfo.updatedAt`, the last activity of any kind |
 | `SessionInfo._meta.jetbrains.air.lastPromptAt` = `Thread.recencyAt`, the order key | `SessionInfo.lastPromptAt`; the list order `lastPromptAt ?? updatedAt` |
-| `SessionInfo._meta.jetbrains.air.{createdAt, gitBranch, model, forkedFrom, state, lastTurnEndedAt}` | the `SessionInfo` fields of the same names |
+| `SessionInfo._meta.jetbrains.air.{model, forkedFrom, state, lastTurnEndedAt}` | the `SessionInfo` fields of the same names |
 | `SessionInfo._meta.jetbrains.air.archived` | `SessionInfo.archived` (#2161) |
 | `session_info_update._meta.jetbrains.air.archived` | `SessionInfoUpdate.archived` (#2161) |
 | `_session/archive`, `_session/unarchive` | `session/archive`, `session/unarchive` (#2161) |

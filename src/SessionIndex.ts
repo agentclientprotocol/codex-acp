@@ -25,11 +25,9 @@ export const SESSION_LIST_CHANGED_METHOD = "_session/list_changed";
 
 /** The `_meta.jetbrains.air` key of the list options in a `session/list` request. */
 export const AIR_SESSION_LIST_KEY = "list";
-export const AIR_GIT_BRANCH_KEY = "gitBranch";
 export const AIR_STATE_KEY = "state";
 export const AIR_LAST_TURN_ENDED_AT_KEY = "lastTurnEndedAt";
 export const AIR_LAST_PROMPT_AT_KEY = "lastPromptAt";
-export const AIR_CREATED_AT_KEY = "createdAt";
 export const AIR_MODEL_KEY = "model";
 export const AIR_FORKED_FROM_KEY = "forkedFrom";
 
@@ -419,11 +417,8 @@ export function sessionIndexSessionInfo(
     activity: SessionActivity | null,
 ): acp.SessionInfo {
     const airFields: Record<string, unknown> = {[AIR_ARCHIVED_KEY]: archived};
-    const branch = thread.gitInfo?.branch;
-    if (branch) airFields[AIR_GIT_BRANCH_KEY] = branch;
     // Codex moves `recencyAt` when a turn starts and orders threads by it: the time of the last prompt.
     if (thread.recencyAt !== null) airFields[AIR_LAST_PROMPT_AT_KEY] = isoTime(thread.recencyAt);
-    airFields[AIR_CREATED_AT_KEY] = isoTime(thread.createdAt);
     if (thread.model) airFields[AIR_MODEL_KEY] = thread.model;
     if (thread.forkedFromId) airFields[AIR_FORKED_FROM_KEY] = thread.forkedFromId;
     // `state` is omitted when unknown, never "unknown".
@@ -523,7 +518,10 @@ export function changesSessionIndex(notification: ServerNotification): boolean {
     return SESSION_INDEX_NOTIFICATIONS.has(notification.method);
 }
 
-/** A value that changes when a row of the page changes in a way the client shows. */
+/**
+ * A value that changes when a row of the page changes in a way the client shows: its ACP fields and its whole
+ * `_meta`, so exactly the AIR row fields that {@link sessionIndexSessionInfo} sends.
+ */
 export function sessionIndexPageSignature(sessions: acp.SessionInfo[], nextCursor: string | null | undefined): string {
     return JSON.stringify([
         sessions.map(session => [session.sessionId, session.cwd, session.title, session.updatedAt, session._meta ?? null]),
