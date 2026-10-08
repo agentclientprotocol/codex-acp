@@ -71,6 +71,17 @@ describe("CodexHomeWatcher", () => {
         expect(archiveMoved.mock.calls.every(([id]) => id === threadId)).toBe(true);
     }, 10_000);
 
+    it("reports an append to the session name log, which a rename writes", async () => {
+        const log = path.join(home, "session_index.jsonl");
+        fs.writeFileSync(log, "");
+        const {stateChanged} = createWatcher(home);
+
+        await vi.waitFor(() => {
+            fs.appendFileSync(log, "{\"id\":\"a\"}\n");
+            expect(stateChanged).toHaveBeenCalled();
+        }, {timeout: 5_000, interval: 100});
+    }, 10_000);
+
     it("watches archived_sessions once Codex creates it", async () => {
         const {archiveMoved} = createWatcher(home, 50);
         const threadId = "01a0637c-5b99-7242-9064-04545d605fdc";

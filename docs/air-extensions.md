@@ -1171,9 +1171,14 @@ still re-reads the list now and then, and a lost change shows up there.
   `session/list` answers it. A row counts as changed when `title`, `lastPromptAt`, `state`, `lastTurnEndedAt`,
   `model`, `forkedFrom`, `archived` or `usage` differs from the row the subscription last got. A change of `updatedAt` alone
   sends nothing; the new `updatedAt` comes with the next change. Archive and unarchive are row changes.
-  `removed` lists the ids of deleted threads. Both arrays are always present, and one of them is not empty.
-- The rows the client is assumed to have when it subscribes are the 50 most recently updated threads of the scope,
-  unarchived and archived. The first change of an older thread sends its row even when only `updatedAt` moved.
+  `removed` lists the ids of deleted threads. A thread that this agent deleted but whose cwd it does not know is
+  listed to every subscription; a client ignores an id it does not have. Both arrays are always present, and one
+  of them is not empty.
+- When the client subscribes, the agent takes it to have the current rows of the 50 most recently updated threads
+  of the scope, unarchived and archived, and of every other thread of the scope whose row the agent computed for a
+  subscription of the same cwd before. The first change of any other thread sends its row even when only
+  `updatedAt` moved.
+- A change never goes out before the answer to `_session/list/subscribe`: the changes of that time follow it.
 - A thread is sent at most once a second; a later change of it waits and goes out with its row of that time. One
   delivery sends one notification per subscription, with all its rows.
 - There is no resync and no sequence number. Changes made while the Codex app-server was down can be missed;
@@ -1197,8 +1202,8 @@ How the agent sees changes:
   write, and at most 1 s after the first, it sends one `thread/list` without `cwd`, with `sortKey: "updated_at"`,
   for unarchived threads and one for archived threads, and reads newest first until the threads are older than
   the newest one it saw before. Threads of the same second as that one are read again.
-- A rename moves no `updated_at`. The agent reads the renames that any process appends to
-  `<CODEX_HOME>/session_index.jsonl` and reads those threads with `thread/read`. Archive moves no `updated_at`
+- A rename moves no `updated_at`. The agent watches `<CODEX_HOME>/session_index.jsonl`, to which any process
+  appends its renames, reads what was appended with the next scan, and reads those threads with `thread/read`. Archive moves no `updated_at`
   either: the agent watches `<CODEX_HOME>/archived_sessions/` and reads each thread whose rollout appears or goes
   there.
 - A thread that another process deletes is not seen unless it was archived. Clients re-read the list now and then

@@ -458,6 +458,16 @@ export function sessionIndexSessionInfo(
     };
 }
 
+/** A row with another usage, or without one for `null`. The rest of the row stays as it is. */
+export function withSessionIndexUsage(row: acp.SessionInfo, usage: SessionUsage | null): acp.SessionInfo {
+    if (usage !== null) return {...row, _meta: withAirMeta(row._meta, AIR_USAGE_KEY, usage)};
+    const jetbrains = asRecord(asRecord(row._meta)[JETBRAINS_META_KEY]);
+    const air = asRecord(jetbrains[AIR_META_KEY]);
+    if (!(AIR_USAGE_KEY in air)) return row;
+    const {[AIR_USAGE_KEY]: _dropped, ...rest} = air;
+    return {...row, _meta: {...asRecord(row._meta), [JETBRAINS_META_KEY]: {...jetbrains, [AIR_META_KEY]: rest}}};
+}
+
 /** The ISO time of a Codex time in seconds. */
 function isoTime(seconds: number): string {
     return new Date(seconds * 1000).toISOString();

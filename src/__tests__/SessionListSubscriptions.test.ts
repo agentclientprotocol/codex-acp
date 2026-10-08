@@ -105,7 +105,11 @@ interface Setup {
     scopes: Map<string, string[]>;
 }
 
-function setup(home: string | null = HOME, codex = new FakeCodex()): Setup {
+function setup(
+    home: string | null = HOME,
+    codex = new FakeCodex(),
+    withLatestUsage: (row: acp.SessionInfo) => acp.SessionInfo = (row) => row,
+): Setup {
     const sent: SessionListChanges[] = [];
     let listener: CodexHomeWatcherListener | null = null;
     const stops = vi.fn();
@@ -113,7 +117,8 @@ function setup(home: string | null = HOME, codex = new FakeCodex()): Setup {
     const subscriptions = new SessionListSubscriptions({
         reader: () => codex,
         codexHome: () => home,
-        rows: async (entries) => entries.map(({thread: value, archived}) => sessionIndexSessionInfo(value, archived, null)),
+        rows: async (entries) => entries.map(({thread: value, archived}) => withLatestUsage(sessionIndexSessionInfo(value, archived, null))),
+        withLatestUsage,
         scopeCwds: (cwd) => scopes.get(cwd) ?? [cwd],
         notify: async (changes) => {
             sent.push(changes);
@@ -385,6 +390,132 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("keeps the quiet time of a WAL write when an own notification flushes earlier", async () => {
+        const {codex, subscriptions, listener} = setup();
+        codex.put(thread("a"));
+        await subscriptions.subscribe("/repo");
+        const scansBefore = codex.scans().length;
+
+        listener().stateChanged();
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
+        expect(codex.threadRead).toHaveBeenCalledTimes(1);
+        expect(codex.scans().length).toBe(scansBefore);
+
+        await vi.advanceTimersByTimeAsync(timings.quietMs);
+        expect(codex.scans().length - scansBefore).toBe(2);
+        subscriptions.dispose();
+    });
+
+    it("counts the second between two changes of a thread from when the first went out, after slow reads", async () => {
+        const {codex, subscriptions, sent} = setup();
+        codex.put(thread("a"));
+        await subscriptions.subscribe("/repo");
+        const read = codex.threadRead.getMockImplementation()!;
+        codex.threadRead.mockImplementationOnce(async (params) => {
+            await new Promise(resolve => setTimeout(resolve, 1_100));
+            return await read(params);
+        });
+        const sentAt: number[] = [];
+        const start = Date.now();
+
+        codex.update("a", {name: "one"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(1_200);
+        sentAt.push(Date.now() - start);
+        codex.update("a", {name: "two"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(100);
+        expect(sent.map(changes => changes.sessions[0]!.title)).toEqual(["one"]);
+
+        await vi.advanceTimersByTimeAsync(timings.minChangeIntervalMs);
+        expect(sent.map(changes => changes.sessions[0]!.title)).toEqual(["one", "two"]);
+        subscriptions.dispose();
+    });
+
+    it("sends a change that the second limit held back to a subscription that started meanwhile", async () => {
+        const {codex, subscriptions, sent} = setup();
+        codex.put(thread("a"));
+        const first = await subscriptions.subscribe("/repo");
+        codex.update("a", {name: "one"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
+        codex.update("a", {name: "two"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
+
+        // The client of the second subscription listed the thread before its second rename.
+        const second = await subscriptions.subscribe("/repo");
+        await vi.advanceTimersByTimeAsync(timings.minChangeIntervalMs);
+
+        expect(sent).toHaveLength(3);
+        expect([sent[0]!.subscriptionId, sent[0]!.sessions[0]!.title]).toEqual([first, "one"]);
+        expect(sent.slice(1).map(changes => changes.subscriptionId).sort()).toEqual([first, second].sort());
+        expect(sent.slice(1).every(changes => changes.sessions[0]!.title === "two")).toBe(true);
+        subscriptions.dispose();
+    });
+
+    it("sends no change before subscribe answers, and the changes of that time right after", async () => {
+        const {codex, subscriptions, sent} = setup();
+        codex.put(thread("a"));
+        const held: Array<() => void> = [];
+        const releaseMarks = () => held.forEach(release => release());
+        const list = codex.threadList.getMockImplementation()!;
+        codex.threadList.mockImplementation(async (params) => {
+            if (params.cwd === undefined) await new Promise<void>(resolve => held.push(resolve));
+            return await list(params);
+        });
+        let answered = false;
+        const subscribing = subscriptions.subscribe("/repo").then((id) => {
+            answered = true;
+            return id;
+        });
+        await vi.advanceTimersByTimeAsync(10);
+
+        codex.update("a", {name: "during subscribe"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(100);
+        expect(answered).toBe(false);
+        expect(sent).toEqual([]);
+
+        codex.threadList.mockImplementation(list);
+        releaseMarks();
+        const subscriptionId = await subscribing;
+        expect(sent).toEqual([]);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sent).toEqual([{subscriptionId, sessions: [expect.objectContaining({title: "during subscribe"})], removed: []}]);
+        subscriptions.dispose();
+    });
+
+    it("gives a late usage read the row last sent, and nothing to a deleted thread", async () => {
+        const usages = new Map<string, unknown>();
+        const {codex, subscriptions, sent} = setup(HOME, new FakeCodex(), (row) => usages.has(row.sessionId)
+            ? {...row, _meta: {jetbrains: {air: {...(row._meta as any).jetbrains.air, usage: usages.get(row.sessionId)}}}}
+            : row);
+        codex.put(thread("a"));
+        codex.put(thread("b"));
+        await subscriptions.subscribe("/repo");
+        codex.update("a", {name: "renamed"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
+        codex.threads.delete("b");
+        subscriptions.observe(own("thread/deleted", {threadId: "b"}));
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
+        sent.length = 0;
+
+        usages.set("a", {inputTokens: 1});
+        usages.set("b", {inputTokens: 2});
+        subscriptions.usageRead(["a", "b"]);
+        await vi.advanceTimersByTimeAsync(timings.minChangeIntervalMs);
+
+        expect(sent.flatMap(changes => changes.sessions)).toEqual([expect.objectContaining({
+            sessionId: "a",
+            title: "renamed",
+            _meta: {jetbrains: {air: expect.objectContaining({usage: {inputTokens: 1}})}},
+        })]);
+        subscriptions.dispose();
+    });
+
     it("leaves no watch and no timer after the last unsubscribe or dispose", async () => {
         const {codex, subscriptions, listener, stops} = setup();
         codex.put(thread("a"));
@@ -431,6 +562,7 @@ describe("SessionListSubscriptions", () => {
             reader: () => running ? codex : null,
             codexHome: () => null,
             rows: async (entries) => entries.map(({thread: value, archived}) => sessionIndexSessionInfo(value, archived, null)),
+        withLatestUsage: (row) => row,
             scopeCwds: (cwd) => [cwd],
             notify: async (changes) => {
                 sent.push(changes);

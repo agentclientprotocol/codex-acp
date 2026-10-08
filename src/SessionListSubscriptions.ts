@@ -88,6 +88,8 @@ export interface SessionListSubscriptionDeps {
     codexHome(): string | null;
     /** The rows of threads, in their order, exactly as `session/list` answers them. */
     rows(threads: ThreadEntry[]): Promise<acp.SessionInfo[]>;
+    /** A row with the usage last read for its thread, see `SessionUsageIndex`. */
+    withLatestUsage(row: acp.SessionInfo): acp.SessionInfo;
     /** The cwds whose threads a subscription of `cwd` covers. */
     scopeCwds(cwd: string): string[];
     notify(changes: SessionListChanges): Promise<void>;
@@ -97,14 +99,22 @@ export interface SessionListSubscriptionDeps {
     now?: () => number;
 }
 
+interface GroupRow {
+    row: acp.SessionInfo;
+    signature: string;
+}
+
 interface Group {
     cwd: string;
     scope: Set<string>;
     subscriptions: Set<Subscription>;
-    /** The signature of the row last computed for each thread of the scope that the group has seen. */
-    rows: Map<string, string>;
+    /** The row last sent or read as the baseline for each thread of the scope that the group has seen. */
+    rows: Map<string, GroupRow>;
     /** Resolves when the baseline rows are read. Never rejects. */
     ready: Promise<void>;
+    baselined: boolean;
+    /** The {@link SessionListSubscriptions.epoch} when the baseline was read: an older read does not count. */
+    baselineEpoch: number;
 }
 
 interface Subscription {
@@ -112,6 +122,11 @@ interface Subscription {
     group: Group;
     /** The signature of the row that the client has for each thread: the baseline, then what was sent. */
     sent: Map<string, string>;
+    /** The baseline is in {@link sent}. */
+    baselined: boolean;
+    /** The client has the id: `subscribe` answered. Changes before that wait in {@link held}. */
+    ready: boolean;
+    held: SessionListChanges | null;
 }
 
 export interface ThreadEntry {
@@ -135,8 +150,10 @@ export class SessionListSubscriptions {
 
     /** Threads to read with `thread/read` in the next flush. */
     private readonly pendingThreads = new Set<string>();
-    /** Threads whose row may have changed without a change of the thread, such as its usage, see {@link rowsChanged}. */
-    private readonly pendingEntries = new Map<string, ThreadEntry>();
+    /** Threads whose usage was read, see {@link usageRead}. */
+    private readonly pendingUsage = new Set<string>();
+    /** Counts reads and baselines, so that a read that started before a baseline does not override it. */
+    private epoch = 0;
     /** Deleted threads, with whether this adapter deleted them: then a client that never got the row hears of it too. */
     private readonly deletedThreads = new Map<string, boolean>();
     private scanRequested = false;
@@ -182,18 +199,42 @@ export class SessionListSubscriptions {
                 subscriptions: new Set(),
                 rows: new Map(),
                 ready: Promise.resolve(),
+                baselined: false,
+                baselineEpoch: 0,
             };
-            created.ready = this.readBaseline(created);
             this.groups.set(key, created);
             group = created;
+            this.startWatching();
+            created.ready = this.readBaseline(created);
         }
-        const subscription: Subscription = {id: randomUUID(), group, sent: new Map()};
+        const subscription: Subscription = {id: randomUUID(), group, sent: new Map(), baselined: false, ready: false, held: null};
         this.subscriptions.set(subscription.id, subscription);
         group.subscriptions.add(subscription);
+        // The client has what it listed: the rows the group knows now, or the baseline once it is read.
+        if (group.baselined) this.takeBaseline(subscription);
         this.startWatching();
         await Promise.all([group.ready, this.marksReady]);
-        subscription.sent = new Map(group.rows);
+        if (this.subscriptions.get(subscription.id) === subscription) {
+            subscription.ready = true;
+            // After the answer to `subscribe`, which goes out before any timer.
+            if (subscription.held !== null) {
+                const delivery = setTimeout(() => void this.deliverHeld(subscription), 0);
+                delivery.unref?.();
+            }
+        }
         return subscription.id;
+    }
+
+    private takeBaseline(subscription: Subscription): void {
+        subscription.sent = new Map([...subscription.group.rows].map(([threadId, {signature}]) => [threadId, signature]));
+        subscription.baselined = true;
+    }
+
+    private async deliverHeld(subscription: Subscription): Promise<void> {
+        const held = subscription.held;
+        subscription.held = null;
+        if (held === null || this.disposed || this.subscriptions.get(subscription.id) !== subscription) return;
+        await this.send(held);
     }
 
     /** Ends a subscription. Idempotent: an unknown id changes nothing. */
@@ -258,10 +299,13 @@ export class SessionListSubscriptions {
         }
     }
 
-    /** The rows of these threads may have changed, though the threads did not: their usage was read. */
-    rowsChanged(entries: ThreadEntry[]): void {
+    /**
+     * The usage of these threads was read: their rows, as last sent, get it. The rest of a row stays as it was,
+     * since the thread that the usage was read for can be older than the row.
+     */
+    usageRead(threadIds: string[]): void {
         if (this.subscriptions.size === 0) return;
-        for (const entry of entries) this.pendingEntries.set(entry.thread.id, entry);
+        for (const threadId of threadIds) this.pendingUsage.add(threadId);
         this.requestThreads(0);
     }
 
@@ -351,7 +395,7 @@ export class SessionListSubscriptions {
         this.scanDueAt = null;
         this.threadsDueAt = null;
         this.pendingThreads.clear();
-        this.pendingEntries.clear();
+        this.pendingUsage.clear();
         this.deletedThreads.clear();
         this.lastChangeAt.clear();
         this.ignoredThreads.clear();
@@ -381,27 +425,36 @@ export class SessionListSubscriptions {
                 useStateDbOnly: true,
             }).then(page => page.data.map(thread => ({thread, archived})))));
             for (const row of await this.deps.rows(pages.flat())) {
-                group.rows.set(row.sessionId, sessionIndexRowSignature(row));
+                group.rows.set(row.sessionId, {row, signature: sessionIndexRowSignature(row)});
             }
         });
+        group.baselined = true;
+        group.baselineEpoch = ++this.epoch;
+        for (const subscription of group.subscriptions) {
+            if (!subscription.baselined) this.takeBaseline(subscription);
+        }
     }
 
     private async flush(): Promise<void> {
-        const now = this.now();
-        const scan = this.scanRequested;
-        this.scanRequested = false;
-        this.firstStateChangeAt = null;
-        this.scanDueAt = null;
+        const startedAt = this.now();
+        // A flush for own threads leaves a scan that is not due yet for later: the WAL keeps its quiet time.
+        const scan = this.scanRequested && this.scanDueAt !== null && this.scanDueAt <= startedAt;
+        if (scan) {
+            this.scanRequested = false;
+            this.firstStateChangeAt = null;
+            this.scanDueAt = null;
+        }
         this.threadsDueAt = null;
         const requested = new Set(this.pendingThreads);
         this.pendingThreads.clear();
         const deleted = new Map(this.deletedThreads);
         this.deletedThreads.clear();
-        const rowEntries = [...this.pendingEntries.values()];
-        this.pendingEntries.clear();
+        const usageRead = [...this.pendingUsage];
+        this.pendingUsage.clear();
         for (const [threadId, at] of this.lastChangeAt) {
-            if (now - at >= this.timings.minChangeIntervalMs) this.lastChangeAt.delete(threadId);
+            if (startedAt - at >= this.timings.minChangeIntervalMs) this.lastChangeAt.delete(threadId);
         }
+        const readEpoch = ++this.epoch;
 
         const found = new Map<string, ThreadEntry>();
         await this.withReader(async (reader) => {
@@ -421,53 +474,25 @@ export class SessionListSubscriptions {
                 }));
             }
         });
-        for (const entry of rowEntries) {
-            if (!found.has(entry.thread.id) && !deleted.has(entry.thread.id) && !requested.has(entry.thread.id)) {
-                found.set(entry.thread.id, entry);
-            }
-        }
         if (this.disposed || this.subscriptions.size === 0) return;
         await Promise.all([...this.groups.values()].map(group => group.ready));
 
         const batches = new Map<Subscription, SessionListChanges>();
-        const batchOf = (subscription: Subscription): SessionListChanges => {
-            let batch = batches.get(subscription);
-            if (batch === undefined) {
-                batch = {subscriptionId: subscription.id, sessions: [], removed: []};
-                batches.set(subscription, batch);
-            }
-            return batch;
-        };
-
+        // A baseline read after these reads started is newer than they are.
         const inScope = [...found.values()]
-            .map(entry => ({entry, groups: this.groupsOf(entry.thread.cwd)}))
+            .map(entry => ({entry, groups: this.groupsOf(entry.thread.cwd).filter(group => group.baselineEpoch < readEpoch)}))
             .filter(({groups}) => groups.length > 0);
         const rows = inScope.length === 0 ? [] : await this.deps.rows(inScope.map(({entry}) => entry));
         for (const [index, {entry, groups}] of inScope.entries()) {
-            const threadId = entry.thread.id;
-            const row = rows[index]!;
-            const signature = sessionIndexRowSignature(row);
-            const behind: Subscription[] = [];
-            for (const group of groups) {
-                group.rows.set(threadId, signature);
-                for (const subscription of group.subscriptions) {
-                    if (subscription.sent.get(threadId) !== signature) behind.push(subscription);
-                }
-            }
-            if (behind.length === 0) continue;
-            const last = this.lastChangeAt.get(threadId);
-            if (last !== undefined && now - last < this.timings.minChangeIntervalMs) {
-                // Read again when the thread may go out: it can have changed once more by then.
-                this.pendingThreads.add(threadId);
-                const due = last + this.timings.minChangeIntervalMs;
-                this.threadsDueAt = this.threadsDueAt === null ? due : Math.min(this.threadsDueAt, due);
-                continue;
-            }
-            this.lastChangeAt.set(threadId, now);
-            for (const subscription of behind) {
-                subscription.sent.set(threadId, signature);
-                batchOf(subscription).sessions.push(row);
-            }
+            this.offer(entry.thread.id, groups.map(group => ({group, row: rows[index]!})), batches);
+        }
+        for (const threadId of usageRead) {
+            if (found.has(threadId) || deleted.has(threadId)) continue;
+            const offers = [...this.groups.values()].flatMap(group => {
+                const known = group.rows.get(threadId);
+                return known === undefined ? [] : [{group, row: this.deps.withLatestUsage(known.row)}];
+            });
+            if (offers.length > 0) this.offer(threadId, offers, batches);
         }
 
         for (const [threadId, own] of deleted) {
@@ -479,17 +504,57 @@ export class SessionListSubscriptions {
             for (const group of this.groups.values()) group.rows.delete(threadId);
             for (const subscription of targets) {
                 subscription.sent.delete(threadId);
-                batchOf(subscription).removed.push(threadId);
+                batchOf(batches, subscription).removed.push(threadId);
             }
         }
 
-        for (const batch of batches.values()) {
-            if (this.disposed || !this.subscriptions.has(batch.subscriptionId)) continue;
-            try {
-                await this.deps.notify(batch);
-            } catch (error) {
-                logger.log("Failed to send session list changes", {subscriptionId: batch.subscriptionId, error: String(error)});
+        for (const [subscription, batch] of batches) {
+            if (this.disposed || this.subscriptions.get(subscription.id) !== subscription) continue;
+            if (subscription.ready) {
+                await this.send(batch);
+            } else {
+                subscription.held = subscription.held === null ? batch : mergeChanges(subscription.held, batch);
             }
+        }
+    }
+
+    /**
+     * Puts the row of a thread into the batch of each subscription of its groups that has another row. A thread
+     * that went out less than {@link SessionListSubscriptionTimings.minChangeIntervalMs} ago is read again then.
+     */
+    private offer(threadId: string, offers: Array<{group: Group, row: acp.SessionInfo}>, batches: Map<Subscription, SessionListChanges>): void {
+        const behind: Array<{subscription: Subscription, row: acp.SessionInfo, signature: string}> = [];
+        const signed = offers.map(({group, row}) => ({group, row, signature: sessionIndexRowSignature(row)}));
+        for (const {group, row, signature} of signed) {
+            for (const subscription of group.subscriptions) {
+                if (subscription.baselined && subscription.sent.get(threadId) !== signature) behind.push({subscription, row, signature});
+            }
+        }
+        if (behind.length > 0) {
+            const now = this.now();
+            const last = this.lastChangeAt.get(threadId);
+            if (last !== undefined && now - last < this.timings.minChangeIntervalMs) {
+                // Read again when the thread may go out: it can have changed once more by then. The groups keep
+                // the rows they had, so a subscription that starts meanwhile still gets this change.
+                this.pendingThreads.add(threadId);
+                const due = last + this.timings.minChangeIntervalMs;
+                this.threadsDueAt = this.threadsDueAt === null ? due : Math.min(this.threadsDueAt, due);
+                return;
+            }
+            this.lastChangeAt.set(threadId, now);
+        }
+        for (const {group, row, signature} of signed) group.rows.set(threadId, {row, signature});
+        for (const {subscription, row, signature} of behind) {
+            subscription.sent.set(threadId, signature);
+            batchOf(batches, subscription).sessions.push(row);
+        }
+    }
+
+    private async send(changes: SessionListChanges): Promise<void> {
+        try {
+            await this.deps.notify(changes);
+        } catch (error) {
+            logger.log("Failed to send session list changes", {subscriptionId: changes.subscriptionId, error: String(error)});
         }
     }
 
@@ -550,6 +615,11 @@ export class SessionListSubscriptions {
             logger.log("Session list subscription cannot read a thread", {threadId, error: String(error)});
             return null;
         }
+        if (thread.ephemeral || !isInteractiveSource(thread)) {
+            // A helper thread of the own app-server, which the list never shows: its notifications are skipped.
+            this.ignore(threadId);
+            return null;
+        }
         if (!isListedThread(thread)) return null;
         return {thread, archived: thread.path !== null && isArchivedRolloutPath(thread.path, this.deps.codexHome())};
     }
@@ -575,4 +645,22 @@ function isInteractiveSource(thread: Thread): boolean {
  */
 export function isListedThread(thread: Thread): boolean {
     return !thread.ephemeral && isInteractiveSource(thread) && thread.preview !== "" && thread.path !== null;
+}
+
+function batchOf(batches: Map<Subscription, SessionListChanges>, subscription: Subscription): SessionListChanges {
+    let batch = batches.get(subscription);
+    if (batch === undefined) {
+        batch = {subscriptionId: subscription.id, sessions: [], removed: []};
+        batches.set(subscription, batch);
+    }
+    return batch;
+}
+
+/** The changes of two batches of one subscription as one: the later row of a thread wins, and a removal ends it. */
+function mergeChanges(earlier: SessionListChanges, later: SessionListChanges): SessionListChanges {
+    const rows = new Map(earlier.sessions.map(row => [row.sessionId, row]));
+    for (const threadId of later.removed) rows.delete(threadId);
+    for (const row of later.sessions) rows.set(row.sessionId, row);
+    const removed = new Set([...earlier.removed, ...later.removed].filter(threadId => !rows.has(threadId)));
+    return {subscriptionId: earlier.subscriptionId, sessions: [...rows.values()], removed: [...removed]};
 }

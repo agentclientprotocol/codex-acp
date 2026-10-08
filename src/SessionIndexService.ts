@@ -32,6 +32,7 @@ import {
     SESSION_UNARCHIVE_METHOD,
     SessionIndexActivity,
     sessionIndexSessionInfo,
+    withSessionIndexUsage,
     type SessionArchiveRequest,
     type SessionIndexListOptions,
     type SessionRenameRequest,
@@ -85,7 +86,7 @@ export class SessionIndexService {
                 }
             },
             // A row whose usage was read late reaches the client as a change of its subscription.
-            onRead: (subjects) => this.subscriptions.rowsChanged(subjects),
+            onRead: (subjects) => this.subscriptions.usageRead(subjects.map(subject => subject.thread.id)),
         });
         this.subscriptions = new SessionListSubscriptions({
             reader: () => {
@@ -94,6 +95,10 @@ export class SessionIndexService {
             },
             codexHome: () => host.client().getHomePath(),
             rows: async (entries) => await this.rows(entries),
+            withLatestUsage: (row) => {
+                const usage = this.usage.latestUsage(row.sessionId);
+                return usage === undefined ? row : withSessionIndexUsage(row, usage);
+            },
             scopeCwds: (cwd) => linkedWorktreeCwds(cwd),
             notify: async (changes) => {
                 await host.connection().notify(SESSION_LIST_CHANGES_METHOD, changes);
