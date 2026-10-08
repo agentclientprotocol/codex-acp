@@ -92,13 +92,15 @@ function limiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
     let running = 0;
     const waiting: Array<() => void> = [];
     return async <T>(task: () => Promise<T>): Promise<T> => {
+        // A finished task hands its slot to the next waiting one, so a new caller cannot take it meanwhile.
         if (running >= limit) await new Promise<void>(resolve => waiting.push(resolve));
-        running++;
+        else running++;
         try {
             return await task();
         } finally {
-            running--;
-            waiting.shift()?.();
+            const next = waiting.shift();
+            if (next !== undefined) next();
+            else running--;
         }
     };
 }

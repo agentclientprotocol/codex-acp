@@ -122,6 +122,15 @@ describe("rollout reads", () => {
         expect(scan.threadIds).toEqual([OTHER, CHILD]);
     });
 
+    it("keeps the file order of spawns of both formats within one chunk", async () => {
+        const collab = JSON.stringify({type: "event_msg", payload: {type: "item_completed", thread_id: PARENT, item: {
+            type: "CollabAgentToolCall", tool: "spawn_agent", sender_thread_id: PARENT, receiver_thread_ids: [OTHER],
+        }}});
+        const file = write("mixed.jsonl", [collab, spawn(PARENT, CHILD)]);
+
+        expect((await scanSpawnedThreads(file, PARENT, null, 1024 * 1024)).threadIds).toEqual([OTHER, CHILD]);
+    });
+
     it("reads the first token_count of a rollout past long lines", async () => {
         const file = write("fork.jsonl", [
             filler(700 * 1024),
@@ -150,7 +159,8 @@ describe("rollout reads", () => {
         const record = spawn(PARENT, OTHER);
         fs.appendFileSync(file, record.slice(0, 50));
         const partial = await scanSpawnedThreads(file, PARENT, first, 64 * 1024 * 1024);
-        expect(partial).toEqual({...first, done: false});
+        // Done all the same: a cut last line is read when the file changes, not polled.
+        expect(partial).toEqual(first);
         fs.appendFileSync(file, record.slice(50) + "\n");
         expect((await scanSpawnedThreads(file, PARENT, partial, 64 * 1024 * 1024)).threadIds).toEqual([CHILD, OTHER]);
     });

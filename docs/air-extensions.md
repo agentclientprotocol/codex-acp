@@ -1105,8 +1105,10 @@ The adapter sends no `cost`: Codex reports none.
   subagents found so far, and the row is sent again when it finds more.
 - The adapter reads usage in the background, so a list never waits for it. A row carries the usage read for its
   thread; the first list of a thread has none, and a thread that changed keeps the usage of the last read until
-  the new one is done. A subscription gets the row again when its usage was read, see
-  [Session list subscription](#session-list-subscription). A thread whose `updatedAt` and rollout did not change is
+  the new one is done. When the usage of a thread is read, a subscription gets the row again if the agent has
+  that row for the subscription's cwd: one of its baseline rows or a row it sent or computed before, see
+  [Session list subscription](#session-list-subscription). Another thread, such as one from a later list page,
+  shows its usage with its next change or the next list. A thread whose `updatedAt` and rollout did not change is
   not read again, and a rollout is read again only when its size or time changed. A thread read within 2 s of its
   `updatedAt` is read once more after that, since `updatedAt` has whole seconds.
 - The usage of a subagent is read again when its parent thread changes: a subagent that works while its parent

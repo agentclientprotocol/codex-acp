@@ -187,7 +187,7 @@ export interface SpawnScan {
     offset: number;
     /** The spawned thread ids, in the order of their first record. */
     threadIds: string[];
-    /** The scan reached the end of the file. */
+    /** The scan reached the end of the file, but for a last line without its newline. */
     done: boolean;
 }
 
@@ -228,23 +228,27 @@ export async function scanSpawnedThreads(
             }
             // Only complete lines: the rest is read with the next chunk.
             const view = buffer.subarray(0, lastNewline + 1);
+            // The lines with a marker, in file order, each once.
+            const lineStarts = new Set<number>();
             for (const marker of SPAWN_MARKERS) {
-                let at = view.indexOf(marker);
-                while (at >= 0) {
-                    const lineEnd = view.indexOf(NEWLINE, at);
-                    const line = view.toString("utf8", view.lastIndexOf(NEWLINE, at) + 1, lineEnd);
-                    for (const id of spawnedBy(line, threadId)) {
-                        if (seen.has(id)) continue;
-                        seen.add(id);
-                        scan.threadIds.push(id);
-                    }
-                    at = view.indexOf(marker, lineEnd + 1);
+                for (let at = view.indexOf(marker); at >= 0; at = view.indexOf(marker, view.indexOf(NEWLINE, at) + 1)) {
+                    lineStarts.add(view.lastIndexOf(NEWLINE, at) + 1);
+                }
+            }
+            for (const lineStart of [...lineStarts].sort((left, right) => left - right)) {
+                const line = view.toString("utf8", lineStart, view.indexOf(NEWLINE, lineStart));
+                for (const id of spawnedBy(line, threadId)) {
+                    if (seen.has(id)) continue;
+                    seen.add(id);
+                    scan.threadIds.push(id);
                 }
             }
             position += view.length;
             scan.offset = position;
         }
-        scan.done = scan.offset >= size;
+        // Not done only when the budget ended the scan: a last line that Codex is still writing, or that a crash
+        // cut, is read when the file changes, not by polling it.
+        scan.done = !(position >= limit && limit < size);
         return scan;
     } finally {
         await handle.close();
