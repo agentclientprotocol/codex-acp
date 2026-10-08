@@ -516,6 +516,59 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("resolves the worktrees of each group again, also when another group has the cwd", async () => {
+        const {codex, subscriptions, sent, listener, scopes} = setup();
+        const repo = await subscriptions.subscribe("/repo");
+        // A worktree created after the first subscription, and subscribed on its own.
+        scopes.set("/repo", ["/repo", "/repo-wt"]);
+        scopes.set("/repo-wt", ["/repo-wt", "/repo"]);
+        const worktree = await subscriptions.subscribe("/repo-wt");
+        await vi.advanceTimersByTimeAsync(10_000);
+
+        codex.put(thread("w", {cwd: "/repo-wt", updatedAt: 5_000}));
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+
+        expect(sent.map(changes => changes.subscriptionId).sort()).toEqual([repo, worktree].sort());
+        subscriptions.dispose();
+    });
+
+    it("counts the second between two changes from when the notification went out, after a slow send", async () => {
+        const codex = new FakeCodex();
+        const sentAt: Array<[string, number]> = [];
+        let slow = true;
+        const subscriptions = new SessionListSubscriptions({
+            reader: () => codex,
+            codexHome: () => null,
+            rows: async (entries) => entries.map(({thread: value, archived}) => sessionIndexSessionInfo(value, archived, null)),
+            withLatestUsage: (row) => row,
+            scopeCwds: (cwd) => [cwd],
+            notify: async (changes) => {
+                if (slow) {
+                    slow = false;
+                    await new Promise(resolve => setTimeout(resolve, 1_500));
+                }
+                sentAt.push([changes.sessions[0]!.title ?? "", Date.now()]);
+            },
+            timings,
+        });
+        codex.put(thread("a"));
+        await subscriptions.subscribe("/repo");
+        await subscriptions.subscribe("/repo");
+
+        codex.update("a", {name: "one"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(1_600);
+        codex.update("a", {name: "two"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(3_000);
+
+        const lastOne = Math.max(...sentAt.filter(([title]) => title === "one").map(([, at]) => at));
+        const firstTwo = Math.min(...sentAt.filter(([title]) => title === "two").map(([, at]) => at));
+        expect(firstTwo - lastOne).toBeGreaterThanOrEqual(timings.minChangeIntervalMs);
+        subscriptions.dispose();
+    });
+
     it("leaves no watch and no timer after the last unsubscribe or dispose", async () => {
         const {codex, subscriptions, listener, stops} = setup();
         codex.put(thread("a"));

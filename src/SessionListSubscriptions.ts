@@ -115,6 +115,8 @@ interface Group {
     baselined: boolean;
     /** The {@link SessionListSubscriptions.epoch} when the baseline was read: an older read does not count. */
     baselineEpoch: number;
+    /** When {@link scope} was resolved. */
+    scopeResolvedAt: number;
 }
 
 interface Subscription {
@@ -167,7 +169,6 @@ export class SessionListSubscriptions {
     private readonly lastChangeAt = new Map<string, number>();
     /** Threads of the own app-server that the list never shows: ephemeral, subagent and other helper threads. */
     private readonly ignoredThreads = new Set<string>();
-    private scopesRefreshedAt = 0;
     private disposed = false;
 
     constructor(private readonly deps: SessionListSubscriptionDeps) {
@@ -201,6 +202,7 @@ export class SessionListSubscriptions {
                 ready: Promise.resolve(),
                 baselined: false,
                 baselineEpoch: 0,
+                scopeResolvedAt: this.now(),
             };
             this.groups.set(key, created);
             group = created;
@@ -235,6 +237,7 @@ export class SessionListSubscriptions {
         subscription.held = null;
         if (held === null || this.disposed || this.subscriptions.get(subscription.id) !== subscription) return;
         await this.send(held);
+        this.markSent([held]);
     }
 
     /** Ends a subscription. Idempotent: an unknown id changes nothing. */
@@ -414,6 +417,8 @@ export class SessionListSubscriptions {
 
     /** The most recently updated rows of a new group, unarchived and archived: what its client has. */
     private async readBaseline(group: Group): Promise<void> {
+        // A read that starts after this one can be newer than the baseline; one that started before cannot.
+        const epoch = ++this.epoch;
         await this.withReader(async (reader) => {
             const pages = await Promise.all([false, true].map(archived => reader.threadList({
                 limit: BASELINE_ROWS,
@@ -429,7 +434,7 @@ export class SessionListSubscriptions {
             }
         });
         group.baselined = true;
-        group.baselineEpoch = ++this.epoch;
+        group.baselineEpoch = epoch;
         for (const subscription of group.subscriptions) {
             if (!subscription.baselined) this.takeBaseline(subscription);
         }
@@ -478,10 +483,13 @@ export class SessionListSubscriptions {
         await Promise.all([...this.groups.values()].map(group => group.ready));
 
         const batches = new Map<Subscription, SessionListChanges>();
-        // A baseline read after these reads started is newer than they are.
-        const inScope = [...found.values()]
-            .map(entry => ({entry, groups: this.groupsOf(entry.thread.cwd).filter(group => group.baselineEpoch < readEpoch)}))
-            .filter(({groups}) => groups.length > 0);
+        // A baseline read that started after these reads can be newer than they are: such a thread is read again.
+        const inScope = [...found.values()].flatMap(entry => {
+            const groups = this.groupsOf(entry.thread.cwd);
+            const current = groups.filter(group => group.baselineEpoch < readEpoch);
+            if (current.length < groups.length) this.readAgain(entry.thread.id, this.now());
+            return current.length === 0 ? [] : [{entry, groups: current}];
+        });
         const rows = inScope.length === 0 ? [] : await this.deps.rows(inScope.map(({entry}) => entry));
         for (const [index, {entry, groups}] of inScope.entries()) {
             this.offer(entry.thread.id, groups.map(group => ({group, row: rows[index]!})), batches);
@@ -510,12 +518,27 @@ export class SessionListSubscriptions {
 
         for (const [subscription, batch] of batches) {
             if (this.disposed || this.subscriptions.get(subscription.id) !== subscription) continue;
-            if (subscription.ready) {
+            // Held changes go first: a batch joins them until they are sent.
+            if (subscription.ready && subscription.held === null) {
                 await this.send(batch);
             } else {
                 subscription.held = subscription.held === null ? batch : mergeChanges(subscription.held, batch);
             }
         }
+        // The second between two changes of a thread counts from when the last notification with it went out.
+        this.markSent([...batches.values()]);
+    }
+
+    private markSent(batches: SessionListChanges[]): void {
+        const now = this.now();
+        for (const batch of batches) {
+            for (const row of batch.sessions) this.lastChangeAt.set(row.sessionId, now);
+        }
+    }
+
+    private readAgain(threadId: string, at: number): void {
+        this.pendingThreads.add(threadId);
+        this.threadsDueAt = this.threadsDueAt === null ? at : Math.min(this.threadsDueAt, at);
     }
 
     /**
@@ -536,9 +559,7 @@ export class SessionListSubscriptions {
             if (last !== undefined && now - last < this.timings.minChangeIntervalMs) {
                 // Read again when the thread may go out: it can have changed once more by then. The groups keep
                 // the rows they had, so a subscription that starts meanwhile still gets this change.
-                this.pendingThreads.add(threadId);
-                const due = last + this.timings.minChangeIntervalMs;
-                this.threadsDueAt = this.threadsDueAt === null ? due : Math.min(this.threadsDueAt, due);
+                this.readAgain(threadId, last + this.timings.minChangeIntervalMs);
                 return;
             }
             this.lastChangeAt.set(threadId, now);
@@ -624,12 +645,14 @@ export class SessionListSubscriptions {
         return {thread, archived: thread.path !== null && isArchivedRolloutPath(thread.path, this.deps.codexHome())};
     }
 
-    /** The groups whose scope has the cwd. Resolves the worktrees again, now and then, for a cwd of none. */
+    /** The groups whose scope has the cwd. The worktrees of a group are resolved again every 10 s at most. */
     private groupsOf(cwd: string): Group[] {
-        const groups = [...this.groups.values()].filter(group => group.scope.has(cwd));
-        if (groups.length > 0 || this.now() - this.scopesRefreshedAt < SCOPE_REFRESH_MS) return groups;
-        this.scopesRefreshedAt = this.now();
-        for (const group of this.groups.values()) group.scope = new Set(this.deps.scopeCwds(group.cwd));
+        const now = this.now();
+        for (const group of this.groups.values()) {
+            if (group.scope.has(cwd) || now - group.scopeResolvedAt < SCOPE_REFRESH_MS) continue;
+            group.scopeResolvedAt = now;
+            group.scope = new Set(this.deps.scopeCwds(group.cwd));
+        }
         return [...this.groups.values()].filter(group => group.scope.has(cwd));
     }
 }
