@@ -747,6 +747,35 @@ describe("_session/list/subscribe", () => {
         agent.sessionIndex.dispose();
     });
 
+    it("delivers the fork parent read from the rollout, after a first row without it", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-fork-"));
+        try {
+            const parent = "01a0637c-5b99-7242-9064-04545d605fdd";
+            const rollout = path.join(dir, "rollout.jsonl");
+            fs.writeFileSync(rollout, `${JSON.stringify({type: "session_meta", payload: {id: threadId, forked_from_id: parent}})}\n`);
+            // As `thread/list` answers it: no forkedFromId.
+            const listed = createThread({path: rollout});
+            const {fixture, agent, threadList, appServer} = await createAgent("sessionIndex", [listed]);
+            threadList.mockImplementation(async (params) => ({data: params.archived ? [] : [listed], nextCursor: null, backwardsCursor: null}));
+            vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: listed});
+            const {subscriptionId} = await agent.sessionIndex.subscribeList({cwd: "/repo/project"});
+
+            const first = await agent.listSessions({cwd: "/repo/project"});
+            expect((first.sessions[0]!._meta as any).jetbrains.air.forkedFrom).toBeUndefined();
+
+            await vi.waitFor(() => expect(listChanges(fixture)).toEqual([{
+                subscriptionId,
+                sessions: [expect.objectContaining({sessionId: threadId, _meta: {jetbrains: {air: expect.objectContaining({forkedFrom: parent})}}})],
+                removed: [],
+            }]));
+            const page = await agent.listSessions({cwd: "/repo/project"});
+            expect(page.sessions[0]!._meta).toMatchObject({jetbrains: {air: {forkedFrom: parent}}});
+            agent.sessionIndex.dispose();
+        } finally {
+            fs.rmSync(dir, {recursive: true, force: true});
+        }
+    });
+
     it("covers the canonical path of a cwd outside a Git checkout", async () => {
         const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-scope-")));
         try {

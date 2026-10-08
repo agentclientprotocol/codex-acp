@@ -334,6 +334,17 @@ export class SessionListSubscriptions {
         if (this.pendingThreads.size > 0) this.requestThreads(this.timings.ownChangeDelayMs);
     }
 
+    /**
+     * These threads have more to show than their last rows did, as a fork parent read from the rollout: they are
+     * read again, as for a change of their own.
+     */
+    threadsChanged(threadIds: string[]): void {
+        if (this.subscriptions.size === 0) return;
+        for (const threadId of threadIds) {
+            if (!this.ignoredThreads.has(threadId)) this.threadChanged(threadId);
+        }
+    }
+
     private threadChanged(threadId: string): void {
         // Named by a change of its own: no longer only a thread that a scan found.
         this.scanRetries.delete(threadId);

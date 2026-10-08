@@ -1068,7 +1068,7 @@ Every row carries these fields in `_meta.jetbrains.air`; all but `archived` only
 | `archived` | `true` for a thread from the archived Codex list, `false` otherwise, whatever the `archived` filter. Always present. |
 | `lastPromptAt` | ISO time of `Thread.recencyAt`: Codex moves it when a turn starts and orders threads by it. |
 | `model` | `Thread.model`. |
-| `forkedFrom` | `Thread.forkedFromId`. |
+| `forkedFrom` | The thread it was forked from: `Thread.forkedFromId` when Codex gives it, which `thread/read` does and `thread/list` does not. Otherwise `payload.forked_from_id` of the first line of the rollout at `Thread.path`, `session_meta`, which the adapter reads in the background, once per thread, so a list never waits for it: the first row of a fork can come without `forkedFrom`, and a subscription gets the row again once it is read. |
 | `state` | Only for a thread that this adapter has loaded, see [Row state](#row-state): `requires_action`, `reviewing`, `running`, `error` or `idle`. Omitted otherwise, never `unknown`. |
 | `lastTurnEndedAt` | ISO time of the last `turn/completed` that this adapter saw for a session of this connection. Forgotten when the thread is deleted. |
 
