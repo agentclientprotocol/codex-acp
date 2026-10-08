@@ -1059,7 +1059,7 @@ The request can carry `_meta.jetbrains.air.list`:
   `nextCursor` until it is `null`, whatever the page holds. A Codex cursor that Codex repeats ends that list.
 - The list does not check the login, so it never fails with `auth_required`. `thread/list` reads the local state DB.
 
-Every row carries `archived` in `_meta.jetbrains.air`, and these optional fields when known:
+Every row carries these fields in `_meta.jetbrains.air`; all but `archived` only when known:
 
 | Field | Value |
 | --- | --- |
@@ -1113,9 +1113,9 @@ The adapter sends no `cost`: Codex reports none.
 
 The adapter sends `_session/list_changed {cwd}` when page 1 of a list that the client read changed.
 
-- A watch is per `cwd` and `includeWorktrees`. A `session/list` of page 1 starts or renews it, with that
-  request's `limit` and `archived` value, which the adapter uses to read page 1 again. It expires after 10
-  minutes. At most 32 are kept.
+- A watch is per `cwd`, `includeWorktrees` and `archived`. A `session/list` of page 1 starts or renews it, with
+  that request's `limit`; the adapter reads page 1 again with the same options. It expires after 10 minutes. At
+  most 32 are kept. Watches of one `cwd` that change between two checks send one notification.
 - A list without `cwd`, or with a relative one, is not watched.
 - Triggers: a write to `<CODEX_HOME>/state_<n>.sqlite-wal` by any Codex process, a thread notification of its own
   app-server, and a check of the WAL size and time every 30 s.

@@ -65,6 +65,18 @@ describe("SessionListChangedWatcher", () => {
         watcher.dispose();
     });
 
+    it("sends one notification for the watches of a cwd that changed in one check", async () => {
+        const {watcher, notify} = createWatcher(new Map([["/repo/a", "new"]]));
+        watcher.observeList({cwd: "/repo/a", options: {limit: 50, archived: "unarchived", includeWorktrees: false}}, "old");
+        watcher.observeList({cwd: "/repo/a", options: {limit: 50, archived: "archived", includeWorktrees: false}}, "old");
+
+        watcher.trigger();
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(notify.mock.calls).toEqual([["/repo/a"]]);
+        watcher.dispose();
+    });
+
     it("does not notify again when nothing changed since the last notification", async () => {
         const signatures = new Map([["/repo/a", "a2"]]);
         const {watcher, notify, readSignature} = createWatcher(signatures);
@@ -154,14 +166,16 @@ describe("SessionListChangedWatcher", () => {
         watcher.dispose();
     });
 
-    it("keys a watch by cwd and worktree scope, renewed by the latest list of that scope", () => {
+    it("keys a watch by cwd, worktree scope and archived value, renewed by the latest list of that key", () => {
         const {watcher} = createWatcher(new Map());
         watcher.observeList({cwd: "/repo/a", options: {limit: 50, archived: "unarchived", includeWorktrees: false}}, "");
-        watcher.observeList({cwd: "/repo/a", options: {limit: 10, archived: "all", includeWorktrees: false}}, "");
+        watcher.observeList({cwd: "/repo/a", options: {limit: 10, archived: "archived", includeWorktrees: false}}, "");
+        watcher.observeList({cwd: "/repo/a", options: {limit: 15, archived: "unarchived", includeWorktrees: false}}, "");
         watcher.observeList({cwd: "/repo/a", options: {limit: 20, archived: "archived", includeWorktrees: true}}, "");
 
         expect(watcher.watchedLists()).toEqual([
-            {cwd: "/repo/a", options: {limit: 10, archived: "all", includeWorktrees: false}},
+            {cwd: "/repo/a", options: {limit: 10, archived: "archived", includeWorktrees: false}},
+            {cwd: "/repo/a", options: {limit: 15, archived: "unarchived", includeWorktrees: false}},
             {cwd: "/repo/a", options: {limit: 20, archived: "archived", includeWorktrees: true}},
         ]);
         watcher.dispose();

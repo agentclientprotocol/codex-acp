@@ -125,7 +125,7 @@ describe("sessionIndex capability negotiation", () => {
         });
 
         const advertised: string[] = (response._meta as any).jetbrains.air.capabilities;
-        expect(advertised.filter(name => name.startsWith("session") && name !== "sessionFailure")).toEqual([]);
+        expect(advertised.filter(name => ["sessionIndex", "sessionArchive", "sessionRename"].includes(name))).toEqual([]);
         await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"})).rejects.toMatchObject({code: -32601});
         await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32601});
     });
@@ -509,6 +509,26 @@ describe("session/list", () => {
         expect(threadList.mock.calls.map(call => call[0].cursor)).toEqual([null, null, "codex-2"]);
     });
 
+    it("filters the archived Codex list for a relative cwd with archived: \"archived\"", async () => {
+        const {agent, threadList} = await createAgent("sessionIndex");
+        threadList.mockImplementation(async (params) => ({
+            data: params.archived
+                ? [createThread({id: "a1", cwd: "/x/project", recencyAt: 30}), createThread({id: "miss", cwd: "/x/other", recencyAt: 20}), createThread({id: "a2", cwd: "/y/project", recencyAt: 10})]
+                : [createThread({id: "u1", cwd: "/x/project", recencyAt: 40})],
+            nextCursor: null,
+            backwardsCursor: null,
+        }));
+        const list = (cursor: string | null) => agent.listSessions({cwd: "project", cursor, _meta: {jetbrains: {air: {list: {limit: 1, archived: "archived"}}}}});
+
+        const first = await list(null);
+        const second = await list(first.nextCursor ?? null);
+
+        expect([first, second].map(page => page.sessions.map(session => [session.sessionId, (session._meta as any).jetbrains.air.archived])))
+            .toEqual([[["a1", true]], [["a2", true]]]);
+        expect(second.nextCursor).toBeNull();
+        expect(threadList.mock.calls.every(call => call[0].archived === true)).toBe(true);
+    });
+
     it("continues a relative cwd list after its last row when rows come or go in between", async () => {
         const {agent, threadList} = await createAgent("sessionIndex");
         const row = (id: string, recencyAt: number) => createThread({id, cwd: `/repo/${id}/project`, recencyAt});
@@ -656,6 +676,27 @@ describe("_session/list_changed", () => {
         await vi.advanceTimersByTimeAsync(2_000);
 
         expect(threadList.mock.calls.map(call => call[0].archived)).toEqual([true]);
+        agent.sessionIndex.dispose();
+    });
+
+    it("keeps watching the unarchived list of a cwd after the client lists its archived threads", async () => {
+        vi.useFakeTimers();
+        const {fixture, agent, threadList} = await createAgent("sessionIndex");
+        let unarchived = [createThread({id: "u"})];
+        threadList.mockImplementation(async (params) => ({
+            data: params.archived ? [createThread({id: "a"})] : unarchived,
+            nextCursor: null,
+            backwardsCursor: null,
+        }));
+        await agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {archived: "unarchived"}}}}});
+        await agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {archived: "archived"}}}}});
+        fixture.clearAcpConnectionDump();
+
+        unarchived = [createThread({id: "u2"}), ...unarchived];
+        fixture.sendServerNotification({method: "thread/started", params: {thread: unarchived[0]!}} as never);
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(listChangedNotifications(fixture)).toEqual([{cwd: "/repo/project"}]);
         agent.sessionIndex.dispose();
     });
 

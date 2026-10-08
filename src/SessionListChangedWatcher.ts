@@ -295,11 +295,13 @@ export class SessionListChangedWatcher {
 }
 
 /**
- * A watch is per cwd and worktree scope. A later list of the same scope, with another `limit` or `archived`,
- * renews the watch and its page becomes the one that is compared.
+ * A watch is per cwd, worktree scope and `archived` value: the `"unarchived"` and `"archived"` lists hold
+ * different threads, so a watch of one would miss the changes of the other. A later list of the same key, with
+ * another `limit`, renews the watch and its page becomes the one that is compared. Lists of one cwd that change
+ * between two checks get one notification.
  */
 function watchKey(list: WatchedSessionList): string {
-    return JSON.stringify([list.cwd, list.options.includeWorktrees]);
+    return JSON.stringify([list.cwd, list.options.includeWorktrees, list.options.archived]);
 }
 
 /** The size and modification time of every state DB WAL in CODEX_HOME. */
