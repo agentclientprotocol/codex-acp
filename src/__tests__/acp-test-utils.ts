@@ -337,6 +337,7 @@ export function createCodexMockTestFixture(
             connection: {connection: mockCodexConnection, process},
             codexPath: undefined,
             config: undefined,
+            appServerStartupArgs: ["app-server"],
             modelProvider: undefined,
             stderr: "",
         }} : {}),

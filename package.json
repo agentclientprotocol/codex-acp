@@ -57,6 +57,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/node": "^26.1.0",
     "ajv": "^8.20.0",
     "esbuild": "^0.28.2",
@@ -68,6 +69,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.5.0",
     "@openai/codex": "^0.160.1",
+    "cross-spawn": "^7.0.6",
     "diff": "^9.0.0",
     "open": "^11.0.1",
     "vscode-jsonrpc": "^9.0.1",

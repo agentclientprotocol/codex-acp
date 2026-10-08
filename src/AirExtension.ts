@@ -29,6 +29,7 @@ export const AIR_PERMISSION_KEY = "permission";
 export const AIR_CONTEXT_COMPACTION_KEY = "contextCompaction";
 export const AIR_RAW_INPUT_RENDERING_KEY = "rawInputRendering";
 export const AIR_PLAN_CONTENT_DELTA_KEY = "planContentDelta";
+export const AIR_CODEX_HOOKS_KEY = "codexHooks";
 export const AIR_CONTENT_DELTA_KEY = "contentDelta";
 export const AIR_SUBAGENT_KEY = "subagent";
 export const AIR_CUSTOM_ANSWER_KEY = "customAnswer";

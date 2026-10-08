@@ -132,6 +132,8 @@ import {
 } from "./subagents/AcpSubagents";
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import {nameFromAgentPath} from "./subagents/CodexAgentPath";
+import {listCodexHooks, trustCodexHooks, type CodexHookIdentity} from "./CodexHookTrust";
+import type {HooksListEntry} from "./app-server/v2/HooksListEntry";
 import {
     accountFromUpdated,
     fromAccount,
@@ -145,6 +147,7 @@ import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
     AIR_ASYNC_TASKS_KEY,
+    AIR_CODEX_HOOKS_KEY,
     AIR_DIFF_PATCH_KEY,
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     AIR_PLAN_CONTENT_DELTA_KEY,
@@ -302,6 +305,7 @@ export interface CodexProcessState {
     connection: CodexConnection;
     codexPath: string | undefined;
     config: JsonObject | undefined;
+    appServerStartupArgs: string[];
     modelProvider: string | undefined;
     stderr: string;
     stderrProcess?: CodexConnection["process"];
@@ -483,12 +487,23 @@ export class CodexAcpServer {
                                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
                                 AIR_RAW_INPUT_RENDERING_KEY,
                                 AIR_PLAN_CONTENT_DELTA_KEY,
+                                AIR_CODEX_HOOKS_KEY,
                             ],
                         },
                     },
                 } : {}),
             },
         };
+    }
+
+    async listHooks(cwd: string): Promise<HooksListEntry> {
+        if (this.providerUpdate !== null) await this.providerUpdate;
+        return await this.runWithProcessCheck(() => listCodexHooks(this.codexAcpClient.appServerClient, cwd));
+    }
+
+    async trustHooks(cwd: string, hooks: CodexHookIdentity[]): Promise<{trusted: boolean}> {
+        if (this.providerUpdate !== null) await this.providerUpdate;
+        return {trusted: await this.runWithProcessCheck(() => trustCodexHooks(this.codexAcpClient.appServerClient, cwd, hooks))};
     }
 
     async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -1386,7 +1401,7 @@ export class CodexAcpServer {
         clearTimeout(forceKill);
 
         state.stderr = "";
-        state.connection = startCodexConnection(state.codexPath);
+        state.connection = startCodexConnection(state.codexPath, undefined, state.appServerStartupArgs);
         this.captureStderr();
         this.observeCodexProcess();
         return new CodexAcpClient(

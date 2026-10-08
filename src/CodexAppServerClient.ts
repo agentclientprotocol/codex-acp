@@ -12,9 +12,13 @@ import type {
     CancelLoginAccountResponse,
     ConfigReadParams,
     ConfigReadResponse,
+    ConfigBatchWriteParams,
+    ConfigWriteResponse,
     GetAccountParams,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
+    HooksListParams,
+    HooksListResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
     LoginAccountParams,
@@ -777,6 +781,13 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "config/read", params: params });
     }
 
+    async hooksList(params: HooksListParams): Promise<HooksListResponse> {
+        return await this.sendRequest({method: "hooks/list", params});
+    }
+
+    async configBatchWrite(params: ConfigBatchWriteParams): Promise<ConfigWriteResponse> {
+        return await this.sendRequest({method: "config/batchWrite", params});
+    }
     async accountRead(params: GetAccountParams): Promise<GetAccountResponse> {
         return await this.sendRequest({ method: "account/read", params: params });
     }

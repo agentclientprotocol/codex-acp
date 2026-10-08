@@ -133,7 +133,8 @@ The `initialize` response carries the agent side of the extension only when the 
           "asyncTasks",
           "recommendedValue",
           "rawInputRendering",
-          "planContentDelta"
+          "planContentDelta",
+          "codexHooks"
         ]
       }
     }
@@ -157,9 +158,32 @@ A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initi
 | `agentFileChangeReport` | Accepts a report request on `session/prompt` and sends the changed file list. | [Agent file-change report](#agent-file-change-report) |
 | `sessionFailure` | Sends warnings and errors as typed transcript records. | [Session failure](#session-failure) |
 | `nativeSubagentSessions` | Reports a Codex subagent as a native ACP child session. | [Native subagent sessions](#native-subagent-sessions) |
+| `codexHooks` | Lets AIR review and trust startup hooks before it opens a session. | [Hook trust](#hook-trust) |
 
 The goal extension has no client capability.
 The agent advertises the `goal` object, and the client uses the control method when it wants to.
+
+### Hook trust
+
+The adapter passes `CODEX_CONFIG.hooks` to Codex App Server at startup as a TOML override and removes them from the later thread config.
+This lets AIR review the same process that will open the session. The adapter keeps other session config fields unchanged.
+Codex validates the hooks itself. If they are malformed, App Server exits at startup and `initialize` fails with the Codex error.
+
+AIR sends `_codex/hooks/list` with `{ "cwd": "/project" }` after `initialize`. The response contains only `sessionFlags` hooks.
+Each hook includes its key, event, matcher, source path, status, timeout, enabled/managed state, current hash, trust status, and handler metadata.
+Command hooks include the command; MCP hooks include the server and tool.
+Codex does not expose the prompt or agent definition in this list response.
+AIR can show their metadata and hash but cannot display or compare their full definitions.
+The response also carries Codex warnings and path-specific errors; these do not hide hooks that Codex could list.
+
+After consent, AIR sends `_codex/hooks/trust` with the directory and a list of `{ "key": "...", "currentHash": "..." }` values.
+The adapter lists the hooks again. It writes only unchanged `sessionFlags` hashes and then checks that Codex reports `trusted`.
+The response is `{ "trusted": true }` only when every requested hook is trusted. The adapter exposes no general config write method.
+
+Codex stores the accepted hash in `hooks.state."<key>".trusted_hash` in `$CODEX_HOME/config.toml`.
+This state is shared by Codex CLI and all projects using that Codex home; it is not scoped to a project.
+If different project hooks or hook versions reuse a key, accepting a new hash replaces the old hash for that key.
+The earlier definition will then need consent again. Project-specific bundled skills should account for this shared trust state.
 
 ## AIR metadata keys
 
