@@ -336,7 +336,7 @@ export class SessionListSubscriptions {
 
     /**
      * These threads have more to show than their last rows did, as a fork parent read from the rollout: they are
-     * read again, as for a change of their own.
+     * read again, as for a change of their own. Without a subscription nothing is kept: a later list has them.
      */
     threadsChanged(threadIds: string[]): void {
         if (this.subscriptions.size === 0) return;
