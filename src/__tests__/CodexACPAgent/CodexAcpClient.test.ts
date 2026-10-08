@@ -274,7 +274,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
-    it('should cancel ChatGPT device code login when URL elicitation is declined', async () => {
+    it.each(["decline", "cancel"] as const)('should cancel ChatGPT device code login when URL elicitation is answered with %s', async (action) => {
         const { deviceFixture, codexAppServerClient } = createDeviceCodeFixture();
         const codexAcpAgent = deviceFixture.getCodexAcpAgent();
         await codexAcpAgent.initialize({
@@ -283,14 +283,37 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
         const cancelSpy = vi.spyOn(codexAppServerClient, "accountLoginCancel")
             .mockResolvedValue({ status: "canceled" });
-        deviceFixture.setElicitationResponse({ action: "decline" });
+        deviceFixture.setElicitationResponse({ action });
 
         await expect(codexAcpAgent.authenticate({ methodId: "chat-gpt-device-code" }, 42))
-            .rejects.toThrow();
+            .rejects.toMatchObject({
+                code: -32800,
+                message: "Request cancelled: ChatGPT device code sign-in was cancelled",
+                data: { methodId: "chat-gpt-device-code", action },
+            });
         expect(cancelSpy).toHaveBeenCalledWith({ loginId: "login-1" });
         expect(deviceFixture.getAcpConnectionEvents([])
             .some(event => event.method === "completeElicitation"))
             .toBe(false);
+    });
+
+    it('should report an incomplete sign-in when ChatGPT device code login fails', async () => {
+        const { deviceFixture, completeLogin, loginCompletedSubscribed } = createDeviceCodeFixture();
+        const codexAcpAgent = deviceFixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: { elicitation: { url: {} } },
+        });
+        deviceFixture.setElicitationResponse({ action: "accept" });
+
+        const authPromise = codexAcpAgent.authenticate({ methodId: "chat-gpt-device-code" }, 42);
+        await vi.waitFor(() => expect(loginCompletedSubscribed()).toBe(true));
+        completeLogin(false);
+        await expect(authPromise).rejects.toMatchObject({
+            code: -32000,
+            message: "Authentication required: Sign-in did not complete",
+            data: { methodId: "chat-gpt-device-code" },
+        });
     });
 
     it('should complete URL elicitation when login finishes before the elicitation response', async () => {
