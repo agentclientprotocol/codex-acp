@@ -6,7 +6,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import type {ServerNotification} from "../app-server";
 import type {Thread, ThreadListParams, ThreadListResponse} from "../app-server/v2";
 import type {CodexHomeWatcherListener} from "../CodexHomeWatcher";
-import {sessionIndexSessionInfo} from "../SessionIndex";
+import {activityStateOf, sessionIndexSessionInfo} from "../SessionIndex";
 import {SESSION_NAME_LOG_FILE} from "../SessionNameLog";
 import {
     MAX_SESSION_LIST_SUBSCRIPTIONS,
@@ -117,7 +117,10 @@ function setup(
     const subscriptions = new SessionListSubscriptions({
         reader: () => codex,
         codexHome: () => home,
-        rows: async (entries) => entries.map(({thread: value, archived}) => withLatestUsage(sessionIndexSessionInfo(value, archived, null))),
+        rows: async (entries) => entries.map(({thread: value, archived}) => {
+            const state = activityStateOf(value.status);
+            return withLatestUsage(sessionIndexSessionInfo(value, archived, state === undefined ? null : {state}));
+        }),
         withLatestUsage,
         scopeCwds: (cwd) => scopes.get(cwd) ?? [cwd],
         notify: async (changes) => {
@@ -180,7 +183,7 @@ describe("SessionListSubscriptions", () => {
         expect(codex.threadRead).toHaveBeenCalledTimes(1);
         expect(sent).toEqual([{
             subscriptionId,
-            sessions: [sessionIndexSessionInfo(codex.threads.get("a")!.thread, false, null)],
+            sessions: [sessionIndexSessionInfo(codex.threads.get("a")!.thread, false, {state: "running"})],
             removed: [],
         }]);
         subscriptions.dispose();
@@ -386,6 +389,22 @@ describe("SessionListSubscriptions", () => {
         await vi.advanceTimersByTimeAsync(5 * timings.maxWaitMs);
 
         expect(sent.flatMap(changes => changes.sessions.map(row => row.title))).toEqual(["changed"]);
+        subscriptions.dispose();
+    });
+
+    it("reads again every row with a state when the app-server was replaced", async () => {
+        const {codex, subscriptions, sent} = setup(HOME, new FakeCodex(), (row) => row);
+        codex.put(thread("loaded", {status: {type: "active", activeFlags: []}}));
+        codex.put(thread("foreign"));
+        await subscriptions.subscribe("/repo");
+        // The replacement has not loaded the thread.
+        codex.update("loaded", {status: {type: "notLoaded"}});
+
+        subscriptions.refreshLoadedThreads([]);
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
+
+        expect(codex.threadRead.mock.calls.map(call => call[0].threadId)).toEqual(["loaded"]);
+        expect(sent.flatMap(changes => ids(changes.sessions))).toEqual(["loaded"]);
         subscriptions.dispose();
     });
 

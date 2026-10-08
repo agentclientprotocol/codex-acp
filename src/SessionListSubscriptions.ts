@@ -328,10 +328,19 @@ export class SessionListSubscriptions {
         this.requestThreads(0);
     }
 
-    /** These threads may show another state now: they are read again. */
-    refreshThreads(threadIds: string[]): void {
+    /**
+     * The app-server was replaced: every row with a `state`, which only threads loaded there have, is read again,
+     * and so are the given threads.
+     */
+    refreshLoadedThreads(threadIds: string[]): void {
         if (this.subscriptions.size === 0) return;
-        for (const threadId of threadIds) this.threadChanged(threadId);
+        const loaded = [...this.groups.values()].flatMap(group => [...group.rows]
+            .filter(([, {row}]) => {
+                const meta = row._meta as Record<string, any> | undefined;
+                return meta?.["jetbrains"]?.["air"]?.["state"] !== undefined;
+            })
+            .map(([threadId]) => threadId));
+        for (const threadId of new Set([...threadIds, ...loaded])) this.threadChanged(threadId);
     }
 
     private threadChanged(threadId: string): void {
@@ -559,7 +568,8 @@ export class SessionListSubscriptions {
             const knowing = [...this.subscriptions.values()]
                 .filter(subscription => subscription.sent.has(threadId) || subscription.group.rows.has(threadId));
             const cwd = [...this.groups.values()].map(group => group.rows.get(threadId)?.row.cwd).find(known => known !== undefined);
-            const covering = cwd === undefined ? [] : this.groupsOf(cwd);
+            // A deletion has no later change to wait for: the groups resolve their worktrees now.
+            const covering = cwd === undefined ? [] : this.placeCwd(cwd, true).groups;
             // Every subscription whose scope has the cwd of the thread, which can be in a list that its client read
             // further down. A deleted thread that no group has seen has an unknown scope: every subscription hears
             // of it.
@@ -743,12 +753,12 @@ export class SessionListSubscriptions {
     }
 
     /** {@link groupsOf}, and whether a group without the cwd could not resolve its worktrees yet. */
-    private placeCwd(cwd: string): {groups: Group[], deferred: boolean} {
+    private placeCwd(cwd: string, force = false): {groups: Group[], deferred: boolean} {
         const now = this.now();
         let deferred = false;
         for (const group of this.groups.values()) {
             const age = now - group.scopeResolvedAt;
-            if (age >= SCOPE_REFRESH_MS || (!group.scope.has(cwd) && age >= SCOPE_RETRY_MS)) {
+            if (age >= SCOPE_REFRESH_MS || (!group.scope.has(cwd) && (force || age >= SCOPE_RETRY_MS))) {
                 group.scopeResolvedAt = now;
                 group.scope = new Set(this.deps.scopeCwds(group.cwd));
             } else if (!group.scope.has(cwd)) {
