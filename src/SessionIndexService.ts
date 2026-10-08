@@ -36,10 +36,11 @@ import {
     type SessionIndexListOptions,
     type SessionRenameRequest,
 } from "./SessionIndex";
-import {deleteThread, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
+import {deleteThread, isMissingThreadError, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
 import {SessionIndexTitles} from "./SessionIndexTitles";
 import {canonicalCwds, linkedWorktreeCwds} from "./SessionIndexWorktrees";
-import {SessionListSubscriptions, type SessionListSubscriptionTimings} from "./SessionListSubscriptions";
+import {SessionListSubscriptions, type SessionListSubscriptionTimings, type ThreadEntry} from "./SessionListSubscriptions";
+import {SessionUsageIndex} from "./SessionUsage";
 import {SessionWriteQueue} from "./SessionWriteQueue";
 import type {SerializeTitleWrite} from "./TitleGenerator";
 
@@ -65,19 +66,34 @@ export class SessionIndexService {
     private readonly writes = new SessionWriteQueue();
     private readonly titles: SessionIndexTitles;
     private readonly subscriptions: SessionListSubscriptions;
+    private readonly usage: SessionUsageIndex;
     /** The app-server clients whose notifications reach the session index, each once. */
     private readonly observedClients = new WeakSet<CodexAcpClient>();
 
     constructor(private readonly host: SessionIndexHost, subscriptionTimings?: SessionListSubscriptionTimings) {
         this.activity = new SessionIndexActivity(threadId => host.session(threadId) !== undefined);
         this.titles = new SessionIndexTitles(host, this.writes);
+        this.usage = new SessionUsageIndex({
+            readThread: async (threadId) => {
+                const appServer = host.client().appServerClient;
+                if (appServer.connectionLoss.lost) throw new Error("The Codex app-server is not running");
+                try {
+                    return (await appServer.threadRead({threadId})).thread;
+                } catch (error) {
+                    if (isMissingThreadError(error)) return null;
+                    throw error;
+                }
+            },
+            // A row whose usage was read late reaches the client as a change of its subscription.
+            onRead: (subjects) => this.subscriptions.rowsChanged(subjects),
+        });
         this.subscriptions = new SessionListSubscriptions({
             reader: () => {
                 const appServer = host.client().appServerClient;
                 return appServer.connectionLoss.lost ? null : appServer;
             },
             codexHome: () => host.client().getHomePath(),
-            row: async (thread, archived) => this.row(thread, archived),
+            rows: async (entries) => await this.rows(entries),
             scopeCwds: (cwd) => linkedWorktreeCwds(cwd),
             notify: async (changes) => {
                 await host.connection().notify(SESSION_LIST_CHANGES_METHOD, changes);
@@ -242,6 +258,7 @@ export class SessionIndexService {
     /** Ends the session list subscriptions. The connection is gone. */
     dispose(): void {
         this.subscriptions.dispose();
+        this.usage.dispose();
     }
 
     private require(method: string): void {
@@ -265,17 +282,20 @@ export class SessionIndexService {
             relativeCwd === null ? undefined : (thread) => arePathBasenamesEqual(thread.cwd, relativeCwd),
             cwd === null || relativeCwd !== null ? cwd : path.resolve(cwd),
         ));
-        return {
-            sessions: await Promise.all(page.threads.map(entry => this.row(entry.thread, entry.archived))),
-            nextCursor: page.nextCursor,
-        };
+        return {sessions: await this.rows(page.threads), nextCursor: page.nextCursor};
     }
 
-    /** The list row of a thread, for `session/list` and `_session/list/changes` alike. */
-    private async row(thread: Thread, archived: boolean): Promise<acp.SessionInfo> {
-        return this.withActiveAdditionalDirectories(
-            sessionIndexSessionInfo(thread, archived, this.activity.activityOf(thread)),
-        );
+    /**
+     * The list rows of threads, for `session/list` and `_session/list/changes` alike. A row carries the token
+     * usage known for its thread; one that is not read yet is read in the background, see `SessionUsageIndex`.
+     */
+    private async rows(entries: ThreadEntry[]): Promise<acp.SessionInfo[]> {
+        return entries.map(entry => this.withActiveAdditionalDirectories(sessionIndexSessionInfo(
+            entry.thread,
+            entry.archived,
+            this.activity.activityOf(entry.thread),
+            this.usage.usageOf(entry) ?? null,
+        )));
     }
 
     private withActiveAdditionalDirectories(session: acp.SessionInfo): acp.SessionInfo {

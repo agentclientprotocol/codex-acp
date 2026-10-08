@@ -113,7 +113,7 @@ function setup(home: string | null = HOME, codex = new FakeCodex()): Setup {
     const subscriptions = new SessionListSubscriptions({
         reader: () => codex,
         codexHome: () => home,
-        row: async (value, archived) => sessionIndexSessionInfo(value, archived, null),
+        rows: async (entries) => entries.map(({thread: value, archived}) => sessionIndexSessionInfo(value, archived, null)),
         scopeCwds: (cwd) => scopes.get(cwd) ?? [cwd],
         notify: async (changes) => {
             sent.push(changes);
@@ -430,7 +430,7 @@ describe("SessionListSubscriptions", () => {
         const subscriptions = new SessionListSubscriptions({
             reader: () => running ? codex : null,
             codexHome: () => null,
-            row: async (value, archived) => sessionIndexSessionInfo(value, archived, null),
+            rows: async (entries) => entries.map(({thread: value, archived}) => sessionIndexSessionInfo(value, archived, null)),
             scopeCwds: (cwd) => [cwd],
             notify: async (changes) => {
                 sent.push(changes);

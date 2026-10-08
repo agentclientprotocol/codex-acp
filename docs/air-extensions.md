@@ -1071,8 +1071,39 @@ Every row carries these fields in `_meta.jetbrains.air`; all but `archived` only
 | `forkedFrom` | `Thread.forkedFromId`. |
 | `state` | Only for a thread that this adapter has loaded: `running`, `requires_action` (waiting for an approval or for user input), or `idle`. Omitted otherwise, never `unknown`. |
 | `lastTurnEndedAt` | ISO time of the last `turn/completed` that this adapter saw for a session of this connection. Forgotten when the thread is deleted. |
+| `usage` | The token usage of the thread, see [Token usage](#token-usage). Omitted until the adapter has read it, and for a thread whose rollout has no token count. |
 
 The adapter sends no `cost`: Codex reports none.
+
+#### Token usage
+
+```json
+{ "inputTokens": 704734, "cachedReadTokens": 31875072, "cachedWriteTokens": 0, "outputTokens": 61728, "reasoningTokens": 27252,
+  "model": "gpt-6.1-sol",
+  "subagents": [ { "sessionId": "01a0f43d-…", "model": "gpt-6.1-sol", "inputTokens": 257928, "cachedReadTokens": 13756160, "cachedWriteTokens": 0, "outputTokens": 20889, "reasoningTokens": 6150 } ] }
+```
+
+- The counts are cumulative for the thread. They come from `info.total_token_usage` of the last `event_msg`
+  `token_count` record in the thread's rollout, the file at `Thread.path`. The adapter reads the last 16 KB of it,
+  and up to 1 MB when that holds no record.
+- `inputTokens` is fresh input only: Codex's input minus the cache reads and the cache writes, at least 0, as
+  `PromptResponse.usage` counts it. `cachedReadTokens` and `cachedWriteTokens` are the cache reads and writes.
+  `outputTokens` includes `reasoningTokens`.
+- `model` is `Thread.model`, the thread's latest model.
+- A fork counts only its own work. The first record of a fork carries the total of the history it inherited
+  plus the usage of its own first request, so the adapter subtracts that first total minus its
+  `last_token_usage`. A fork whose first record is not in the first 8 MB of its rollout gets no `usage`.
+- `subagents` lists the threads that the thread spawned, in the order it spawned them, each with its own counts
+  and `model`; they are not part of the thread's counts. The adapter finds them in the thread's rollout, from the
+  `agent_thread_id` of its `SubAgentActivity` items, and reads each one with `thread/read` for its rollout and
+  model. A subagent without a token count is left out; a thread that spawned none has `subagents: []`.
+- The adapter reads usage in the background, so a list never waits for it. A row carries the usage read for its
+  thread; the first list of a thread has none, and a thread that changed keeps the usage of the last read until
+  the new one is done. A subscription gets the row again when its usage was read, see
+  [Session list subscription](#session-list-subscription). A thread whose `updatedAt` and rollout did not change is
+  not read again, and a rollout is read again only when its size or time changed.
+- The usage of a subagent is read again when its parent thread changes: a subagent that works while its parent
+  waits shows its new counts once the parent writes again.
 
 ### Requests
 
@@ -1131,7 +1162,7 @@ still re-reads the list now and then, and a lost change shows up there.
   archived or not. The agent applies no archive filter: the client filters by the `archived` field of the row.
 - `_session/list/changes` carries, for each thread in scope that appeared or changed, its whole row exactly as
   `session/list` answers it. A row counts as changed when `title`, `lastPromptAt`, `state`, `lastTurnEndedAt`,
-  `model`, `forkedFrom` or `archived` differs from the row the subscription last got. A change of `updatedAt` alone
+  `model`, `forkedFrom`, `archived` or `usage` differs from the row the subscription last got. A change of `updatedAt` alone
   sends nothing; the new `updatedAt` comes with the next change. Archive and unarchive are row changes.
   `removed` lists the ids of deleted threads. Both arrays are always present, and one of them is not empty.
 - The rows the client is assumed to have when it subscribes are the 50 most recently updated threads of the scope,
@@ -1150,7 +1181,9 @@ How the agent sees changes:
 
 - Threads of its own Codex app-server: at once, from the app-server notifications `thread/started`,
   `thread/status/changed`, `thread/name/updated`, `thread/archived`, `thread/unarchived`, `thread/deleted`,
-  `thread/closed`, `turn/started` and `turn/completed`. The agent reads the thread with `thread/read`.
+  `thread/closed`, `turn/started`, `turn/completed` and `thread/tokenUsage/updated`. The agent reads the thread
+  with `thread/read`.
+- Token usage that the agent read in the background: the row is sent again when its usage differs.
 - Threads of other Codex processes: every change of a thread writes the state DB WAL,
   `<CODEX_HOME>/state_<n>.sqlite-wal`. The agent watches the WAL files and CODEX_HOME for WAL files that appear or
   go, and checks the WAL size and time every 30 s in case the file system drops an event. 150 ms after the last

@@ -86,8 +86,8 @@ export interface SessionListSubscriptionDeps {
     reader(): SessionListReader | null;
     /** CODEX_HOME, or `null` when the app-server did not report it: then only own notifications count. */
     codexHome(): string | null;
-    /** The row of a thread, exactly as `session/list` answers it. */
-    row(thread: Thread, archived: boolean): Promise<acp.SessionInfo>;
+    /** The rows of threads, in their order, exactly as `session/list` answers them. */
+    rows(threads: ThreadEntry[]): Promise<acp.SessionInfo[]>;
     /** The cwds whose threads a subscription of `cwd` covers. */
     scopeCwds(cwd: string): string[];
     notify(changes: SessionListChanges): Promise<void>;
@@ -114,7 +114,7 @@ interface Subscription {
     sent: Map<string, string>;
 }
 
-interface ThreadEntry {
+export interface ThreadEntry {
     thread: Thread;
     archived: boolean;
 }
@@ -135,6 +135,8 @@ export class SessionListSubscriptions {
 
     /** Threads to read with `thread/read` in the next flush. */
     private readonly pendingThreads = new Set<string>();
+    /** Threads whose row may have changed without a change of the thread, such as its usage, see {@link rowsChanged}. */
+    private readonly pendingEntries = new Map<string, ThreadEntry>();
     /** Deleted threads, with whether this adapter deleted them: then a client that never got the row hears of it too. */
     private readonly deletedThreads = new Map<string, boolean>();
     private scanRequested = false;
@@ -248,11 +250,19 @@ export class SessionListSubscriptions {
             case "thread/closed":
             case "turn/started":
             case "turn/completed":
+            case "thread/tokenUsage/updated":
                 if (!this.ignoredThreads.has(notification.params.threadId)) this.threadChanged(notification.params.threadId);
                 return;
             default:
                 return;
         }
+    }
+
+    /** The rows of these threads may have changed, though the threads did not: their usage was read. */
+    rowsChanged(entries: ThreadEntry[]): void {
+        if (this.subscriptions.size === 0) return;
+        for (const entry of entries) this.pendingEntries.set(entry.thread.id, entry);
+        this.requestThreads(0);
     }
 
     private threadChanged(threadId: string): void {
@@ -341,6 +351,7 @@ export class SessionListSubscriptions {
         this.scanDueAt = null;
         this.threadsDueAt = null;
         this.pendingThreads.clear();
+        this.pendingEntries.clear();
         this.deletedThreads.clear();
         this.lastChangeAt.clear();
         this.ignoredThreads.clear();
@@ -369,8 +380,8 @@ export class SessionListSubscriptions {
                 cwd: [...group.scope],
                 useStateDbOnly: true,
             }).then(page => page.data.map(thread => ({thread, archived})))));
-            for (const entry of pages.flat()) {
-                group.rows.set(entry.thread.id, sessionIndexRowSignature(await this.deps.row(entry.thread, entry.archived)));
+            for (const row of await this.deps.rows(pages.flat())) {
+                group.rows.set(row.sessionId, sessionIndexRowSignature(row));
             }
         });
     }
@@ -386,6 +397,8 @@ export class SessionListSubscriptions {
         this.pendingThreads.clear();
         const deleted = new Map(this.deletedThreads);
         this.deletedThreads.clear();
+        const rowEntries = [...this.pendingEntries.values()];
+        this.pendingEntries.clear();
         for (const [threadId, at] of this.lastChangeAt) {
             if (now - at >= this.timings.minChangeIntervalMs) this.lastChangeAt.delete(threadId);
         }
@@ -408,6 +421,11 @@ export class SessionListSubscriptions {
                 }));
             }
         });
+        for (const entry of rowEntries) {
+            if (!found.has(entry.thread.id) && !deleted.has(entry.thread.id) && !requested.has(entry.thread.id)) {
+                found.set(entry.thread.id, entry);
+            }
+        }
         if (this.disposed || this.subscriptions.size === 0) return;
         await Promise.all([...this.groups.values()].map(group => group.ready));
 
@@ -421,10 +439,13 @@ export class SessionListSubscriptions {
             return batch;
         };
 
-        for (const [threadId, entry] of found) {
-            const groups = this.groupsOf(entry.thread.cwd);
-            if (groups.length === 0) continue;
-            const row = await this.deps.row(entry.thread, entry.archived);
+        const inScope = [...found.values()]
+            .map(entry => ({entry, groups: this.groupsOf(entry.thread.cwd)}))
+            .filter(({groups}) => groups.length > 0);
+        const rows = inScope.length === 0 ? [] : await this.deps.rows(inScope.map(({entry}) => entry));
+        for (const [index, {entry, groups}] of inScope.entries()) {
+            const threadId = entry.thread.id;
+            const row = rows[index]!;
             const signature = sessionIndexRowSignature(row);
             const behind: Subscription[] = [];
             for (const group of groups) {
