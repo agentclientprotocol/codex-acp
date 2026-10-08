@@ -122,8 +122,8 @@ export class SessionUsageIndex {
     private readonly fileTokens = new Map<string, CachedFileTokens>();
     private readonly inherited = new Map<string, RawTokens | null>();
     /**
-     * The thread each rollout was forked from, or `null` for no fork: `thread/list` leaves `forkedFromId` out. Not
-     * evicted, unlike the other caches: a row must not lose its `forkedFrom` while its usage is current.
+     * The thread each listed thread was forked from, or `null` for no fork: `thread/list` leaves `forkedFromId` out.
+     * Dropped with the usage of the thread, so a row does not lose its `forkedFrom` while its usage is current.
      */
     private readonly origins = new Map<string, string | null>();
     private readonly spawnScans = new Map<string, SpawnScan>();
@@ -138,6 +138,8 @@ export class SessionUsageIndex {
     private disposed = false;
     private readonly nowSeconds: () => number;
     private readonly subagentReads = limiter(READ_CONCURRENCY);
+    /** The newest thread that each thread was listed as: a later read uses it, not the one it was scheduled for. */
+    private readonly latest = new Map<string, UsageSubject>();
 
     constructor(private readonly deps: SessionUsageIndexDeps) {
         this.nowSeconds = deps.nowSeconds ?? (() => Date.now() / 1000);
@@ -151,6 +153,7 @@ export class SessionUsageIndex {
         const cached = this.usages.get(subject.thread.id);
         const current = cached !== undefined && cached.updatedAt === subject.thread.updatedAt
             && cached.path === subject.thread.path;
+        remember(this.latest, subject.thread.id, subject);
         if (!current || (cached.recheckAt !== null && this.nowSeconds() >= cached.recheckAt)) this.schedule(subject);
         // The model is the thread's latest, which can change without a new token count.
         return cached?.usage ? {...cached.usage, model: subject.thread.model} : cached?.usage;
@@ -214,8 +217,9 @@ export class SessionUsageIndex {
         this.laterTimer.unref?.();
     }
 
-    private schedule(subject: UsageSubject): void {
+    private schedule(scheduled: UsageSubject): void {
         if (this.disposed) return;
+        const subject = this.latest.get(scheduled.thread.id) ?? scheduled;
         if (this.later.delete(subject.thread.id)) this.armLater();
         this.pending.set(subject.thread.id, subject);
         if (this.timer !== null || this.running) return;
@@ -233,7 +237,7 @@ export class SessionUsageIndex {
                 const batch = [...this.pending.values()];
                 this.pending.clear();
                 const changed: UsageSubject[] = [];
-                for (let start = 0; start < batch.length; start += READ_CONCURRENCY) {
+                for (let start = 0; start < batch.length && !this.disposed; start += READ_CONCURRENCY) {
                     await Promise.all(batch.slice(start, start + READ_CONCURRENCY).map(async (subject) => {
                         if (await this.read(subject)) changed.push(subject);
                     }));
@@ -250,6 +254,9 @@ export class SessionUsageIndex {
     /** Reads the usage of a thread; true when it differs from the usage known before. */
     private async read(subject: UsageSubject): Promise<boolean> {
         const {thread} = subject;
+        // Whether a record can still come within the second of `updatedAt` is up to when the rollout is read,
+        // not when the subagents are done.
+        const recheckAt = this.recheckTime(thread);
         let usage: SessionUsage | null = null;
         let originRead = false;
         if (thread.path !== null) {
@@ -272,8 +279,9 @@ export class SessionUsageIndex {
             }
         }
         const before = this.usages.get(thread.id);
-        const recheckAt = this.recheckTime(thread);
-        remember(this.usages, thread.id, {updatedAt: thread.updatedAt, path: thread.path, usage, recheckAt});
+        const evicted = remember(this.usages, thread.id, {updatedAt: thread.updatedAt, path: thread.path, usage, recheckAt});
+        // The fork origin of a row lives as long as its usage.
+        if (evicted !== undefined) this.origins.delete(evicted);
         // Another record can come within the second of `updatedAt` without moving it: read once more after it.
         if (recheckAt !== null) this.readLater(subject, Math.max(0, recheckAt - this.nowSeconds()) * 1000);
         return originRead || (before === undefined ? usage !== null : JSON.stringify(before.usage) !== JSON.stringify(usage));
@@ -288,7 +296,10 @@ export class SessionUsageIndex {
         const scan = await scanSpawnedThreads(file, threadId, this.spawnScans.get(threadId) ?? null, SPAWN_SCAN_BYTES);
         remember(this.spawnScans, threadId, scan);
         if (!scan.done) this.readLater(subject, SPAWN_SCAN_PAUSE_MS);
-        const usages = await Promise.all(scan.threadIds.map(childId => this.subagentReads(() => this.subagentUsage(childId))));
+        // A read that waits for its turn after the connection closed does nothing.
+        const usages = await Promise.all(scan.threadIds.map(childId => this.subagentReads(
+            async () => this.disposed ? null : await this.subagentUsage(childId),
+        )));
         return usages.filter((usage): usage is SubagentUsage => usage !== null);
     }
 
@@ -364,7 +375,6 @@ export class SessionUsageIndex {
                 const read = await readForkOrigin(file);
                 if (read === undefined) return null;
                 origin = read;
-                this.origins.set(threadId, origin);
             }
             const first = origin === null ? null : await readFirstTokenCount(file);
             inherited = origin === null
@@ -393,12 +403,12 @@ async function stampOf(file: string): Promise<string> {
     return `${file}:${stats.size}:${stats.mtimeMs}`;
 }
 
-/** Keeps a value, most recent last, and drops the oldest beyond {@link MAX_CACHED}. */
-function remember<T>(cache: Map<string, T>, key: string, value: T): void {
+/** Keeps a value, most recent last, and drops the oldest beyond {@link MAX_CACHED}; returns the dropped key. */
+function remember<T>(cache: Map<string, T>, key: string, value: T): string | undefined {
     cache.delete(key);
     cache.set(key, value);
-    if (cache.size > MAX_CACHED) {
-        const oldest = cache.keys().next().value;
-        if (oldest !== undefined) cache.delete(oldest);
-    }
+    if (cache.size <= MAX_CACHED) return undefined;
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+    return oldest;
 }

@@ -349,6 +349,23 @@ describe("SessionUsageIndex", () => {
         expect(onRead).toHaveBeenCalledTimes(1);
     });
 
+    it("starts no more reads of a batch after dispose", async () => {
+        const files = Array.from({length: 20}, (_, index) => write(`t${index}.jsonl`, [tokenCount({input: index, output: 1})]));
+        const {index} = createIndex(new Map());
+        const realOpen = fs.promises.open.bind(fs.promises);
+        // The connection closes as the first read starts.
+        const open = vi.spyOn(fs.promises, "open").mockImplementation(async (...args: Parameters<typeof fs.promises.open>) => {
+            index.dispose();
+            return await realOpen(...args);
+        });
+        files.forEach((file, position) => index.usageOf({thread: thread(`01a0f439-251d-74a1-b2e7-${String(position).padStart(12, "0")}`, file), archived: false}));
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        // Fork origin, tail and spawn scan of at most the first eight threads.
+        expect(open.mock.calls.length).toBeLessThanOrEqual(8 * 3);
+        open.mockRestore();
+    });
+
     it("reads nothing after dispose", async () => {
         vi.useFakeTimers();
         const file = write("a.jsonl", [tokenCount({input: 10, output: 1})]);
