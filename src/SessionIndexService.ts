@@ -43,6 +43,8 @@ import type {SerializeTitleWrite} from "./TitleGenerator";
 export interface SessionIndexHost {
     connection(): AcpClientConnection;
     client(): CodexAcpClient;
+    /** Starts the app-server again when it crashed; resolves when one runs. */
+    ensureAppServer(): Promise<void>;
     runWithProcessCheck<T>(operation: () => Promise<T>): Promise<T>;
     session(sessionId: string): SessionState | undefined;
     hasLocalSession(sessionId: string): boolean;
@@ -115,6 +117,7 @@ export class SessionIndexService {
     /** `_session/rename`. */
     async rename({sessionId, title}: SessionRenameRequest): Promise<Record<string, never>> {
         this.require(SESSION_RENAME_METHOD);
+        await this.host.ensureAppServer();
         await this.titles.rename(sessionId, title);
         this.watcher?.trigger();
         return {};
@@ -130,6 +133,7 @@ export class SessionIndexService {
     async setArchived({sessionId}: SessionArchiveRequest, archived: boolean): Promise<Record<string, never>> {
         this.require(archived ? SESSION_ARCHIVE_METHOD : SESSION_UNARCHIVE_METHOD);
         logger.log(archived ? "Archiving session..." : "Unarchiving session...", {sessionId});
+        await this.host.ensureAppServer();
         await this.writes.run(sessionId, async () => {
             if (archived && this.host.hasLocalSession(sessionId)) {
                 throw sessionActiveRequestError(sessionId);

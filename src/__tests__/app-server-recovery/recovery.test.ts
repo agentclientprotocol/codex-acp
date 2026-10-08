@@ -60,6 +60,34 @@ describe("app-server recovery", () => {
         })]);
     });
 
+    it("feeds the thread notifications of a restarted app-server to the session index", async () => {
+        const fixture = createRecoveryFixture();
+        await openSession(fixture);
+        const observe = vi.spyOn(fixture.agent.sessionIndex, "observe");
+
+        await fixture.kill();
+        await fixture.agent.listSessions({});
+
+        expect(observe).toHaveBeenCalledTimes(1);
+        expect(observe.mock.calls[0]![0].appServerClient).not.toBe(undefined);
+    });
+
+    it("starts the app-server again for a rename or an archive of the session index", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture, true, {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure", "sessionIndex"]}}}});
+        fixture.answers.set("thread/read", (params) => ({thread: {...resumed((params as {threadId: string}).threadId).thread, path: "/codex-home/sessions/t.jsonl"}}));
+
+        await fixture.kill();
+        await fixture.agent.sessionIndex.rename({sessionId: "thread-a", title: "New title"});
+        expect(fixture.servers).toHaveLength(2);
+        expect(requestsOf(fixture.current(), "thread/name/set")).toEqual([expect.objectContaining({threadId: "thread-a"})]);
+
+        await fixture.kill();
+        await fixture.agent.sessionIndex.setArchived({sessionId: "thread-a"}, true);
+        expect(fixture.servers).toHaveLength(3);
+        expect(requestsOf(fixture.current(), "thread/archive")).toHaveLength(1);
+    });
+
     it("starts one app-server for concurrent requests", async () => {
         const fixture = createRecoveryFixture();
         await openSession(fixture);

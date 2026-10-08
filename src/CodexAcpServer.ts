@@ -370,6 +370,9 @@ export class CodexAcpServer {
     readonly sessionIndex = new SessionIndexService({
         connection: () => this.connection,
         client: () => this.codexAcpClient,
+        ensureAppServer: async () => {
+            await this.ensureAppServer();
+        },
         runWithProcessCheck: (operation) => this.runWithProcessCheck(operation),
         session: (sessionId) => this.sessions.get(sessionId),
         hasLocalSession: (sessionId) => this.hasLocalSession(sessionId),
@@ -1592,6 +1595,8 @@ export class CodexAcpServer {
         // A `providers/set` can have changed the routing of the old client while the restart ran.
         client.adoptRoutingFrom(this.codexAcpClient);
         this.codexAcpClient = client;
+        // The session index watches the thread notifications of the app-server that runs now.
+        this.sessionIndex.observe(client);
         this.availableCommands = this.createAvailableCommands(client);
         for (const session of this.sessions.values()) {
             session.asyncTasks.setAppServer(client.appServerClient);
