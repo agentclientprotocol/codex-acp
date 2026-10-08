@@ -1,6 +1,6 @@
 /**
  * The AIR `sessionIndex` extension as `CodexAcpServer` serves it: the session list, `_session/rename`,
- * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list_changed`. Nothing here runs
+ * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`. Nothing here runs
  * for a client that does not declare `sessionIndex`. See `SessionIndex.ts` and `docs/air-extensions.md`.
  */
 
@@ -15,20 +15,22 @@ import type {SessionState} from "./CodexAcpServer";
 import {sessionActiveRequestError, sessionNotFoundRequestError} from "./CodexThreadErrors";
 import {logger} from "./Logger";
 import {arePathBasenamesEqual, isAbsolutePathLike} from "./PathUtils";
+import type {Thread} from "./app-server/v2";
 import {
     AIR_ARCHIVED_KEY,
     AIR_SESSION_ARCHIVE_KEY,
     AIR_SESSION_INDEX_KEY,
+    AIR_SESSION_LIST_SUBSCRIBE_KEY,
     AIR_SESSION_RENAME_KEY,
-    changesSessionIndex,
     readSessionIndexListOptions,
     readSessionIndexPage,
     SESSION_ARCHIVE_METHOD,
-    SESSION_LIST_CHANGED_METHOD,
+    SESSION_LIST_CHANGES_METHOD,
+    SESSION_LIST_SUBSCRIBE_METHOD,
+    SESSION_LIST_UNSUBSCRIBE_METHOD,
     SESSION_RENAME_METHOD,
     SESSION_UNARCHIVE_METHOD,
     SessionIndexActivity,
-    sessionIndexPageSignature,
     sessionIndexSessionInfo,
     type SessionArchiveRequest,
     type SessionIndexListOptions,
@@ -37,7 +39,7 @@ import {
 import {deleteThread, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
 import {SessionIndexTitles} from "./SessionIndexTitles";
 import {canonicalCwds, linkedWorktreeCwds} from "./SessionIndexWorktrees";
-import {SessionListChangedWatcher} from "./SessionListChangedWatcher";
+import {SessionListSubscriptions, type SessionListSubscriptionTimings} from "./SessionListSubscriptions";
 import {SessionWriteQueue} from "./SessionWriteQueue";
 import type {SerializeTitleWrite} from "./TitleGenerator";
 
@@ -62,14 +64,26 @@ export class SessionIndexService {
     private readonly activity: SessionIndexActivity;
     private readonly writes = new SessionWriteQueue();
     private readonly titles: SessionIndexTitles;
-    /** Created on the first `session/list` of page 1 for an absolute cwd. */
-    private watcher: SessionListChangedWatcher | null = null;
-    /** The connection is gone, see {@link dispose}. */
-    private disposed = false;
+    private readonly subscriptions: SessionListSubscriptions;
+    /** The app-server clients whose notifications reach the session index, each once. */
+    private readonly observedClients = new WeakSet<CodexAcpClient>();
 
-    constructor(private readonly host: SessionIndexHost) {
+    constructor(private readonly host: SessionIndexHost, subscriptionTimings?: SessionListSubscriptionTimings) {
         this.activity = new SessionIndexActivity(threadId => host.session(threadId) !== undefined);
         this.titles = new SessionIndexTitles(host, this.writes);
+        this.subscriptions = new SessionListSubscriptions({
+            reader: () => {
+                const appServer = host.client().appServerClient;
+                return appServer.connectionLoss.lost ? null : appServer;
+            },
+            codexHome: () => host.client().getHomePath(),
+            row: async (thread, archived) => this.row(thread, archived),
+            scopeCwds: (cwd) => linkedWorktreeCwds(cwd),
+            notify: async (changes) => {
+                await host.connection().notify(SESSION_LIST_CHANGES_METHOD, changes);
+            },
+            ...(subscriptionTimings ? {timings: subscriptionTimings} : {}),
+        });
     }
 
     /** Reads the client capabilities of `initialize`. */
@@ -82,19 +96,23 @@ export class SessionIndexService {
      * `sessionRename` name the requests that come with it; the client need not declare them.
      */
     agentCapabilities(): string[] {
-        return this.enabled ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY] : [];
+        return this.enabled
+            ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY]
+            : [];
     }
 
-    /** Feeds the thread notifications of an app-server, for every thread, to the session index. */
+    /**
+     * Feeds the thread notifications of an app-server, for every thread, to the session index. Each client is
+     * observed once, and only the client that runs now counts: a crashed one that still reports is ignored.
+     */
     observe(client: CodexAcpClient): void {
-        if (!this.enabled) return;
+        if (!this.enabled || this.observedClients.has(client)) return;
+        this.observedClients.add(client);
         client.appServerClient.onClientTransportEvent((event) => {
-            if (event.eventType !== "notification") return;
+            if (event.eventType !== "notification" || this.host.client() !== client) return;
             const notification = event as unknown as ServerNotification;
             this.activity.observe(notification);
-            if (changesSessionIndex(notification)) {
-                this.watcher?.trigger();
-            }
+            this.subscriptions.observe(notification);
         });
     }
 
@@ -111,12 +129,40 @@ export class SessionIndexService {
     async list(params: acp.ListSessionsRequest): Promise<SessionPage> {
         const options = readSessionIndexListOptions(params._meta);
         const cwd = params.cwd?.trim() || null;
-        const page = await this.readRows(cwd, options, params.cursor ?? null);
-        // A relative cwd is filtered by the adapter, page by page, which is too costly to repeat on every change.
-        if (cwd !== null && !params.cursor && isAbsolutePathLike(cwd)) {
-            this.watch(cwd, options, sessionIndexPageSignature(page.sessions, page.nextCursor));
+        return await this.readRows(cwd, options, params.cursor ?? null);
+    }
+
+    /**
+     * `_session/list/subscribe {cwd}`: answers `{subscriptionId}` and then sends `_session/list/changes` for the
+     * threads of the cwd and its worktrees, see `SessionListSubscriptions`.
+     *
+     * @throws RequestError `invalidParams` for a `cwd` that is missing, not a string or not absolute, and with
+     *   `data.reason: "too_many_subscriptions"` beyond the limit of the connection.
+     */
+    async subscribeList(params: Record<string, unknown>): Promise<{subscriptionId: string}> {
+        this.require(SESSION_LIST_SUBSCRIBE_METHOD);
+        const cwd = params["cwd"];
+        if (typeof cwd !== "string" || !isAbsolutePathLike(cwd)) {
+            throw RequestError.invalidParams({cwd: cwd ?? null}, "cwd must be an absolute path");
         }
-        return page;
+        await this.host.ensureAppServer();
+        return {subscriptionId: await this.subscriptions.subscribe(cwd)};
+    }
+
+    /** `_session/list/unsubscribe {subscriptionId}`: idempotent. */
+    unsubscribeList(params: Record<string, unknown>): Record<string, never> {
+        this.require(SESSION_LIST_UNSUBSCRIBE_METHOD);
+        const subscriptionId = params["subscriptionId"];
+        if (typeof subscriptionId !== "string") {
+            throw RequestError.invalidParams({subscriptionId: subscriptionId ?? null}, "subscriptionId must be a string");
+        }
+        this.subscriptions.unsubscribe(subscriptionId);
+        return {};
+    }
+
+    /** The subscriptions of the connection, for tests. */
+    subscriptionResources(): ReturnType<SessionListSubscriptions["resources"]> {
+        return this.subscriptions.resources();
     }
 
     /** `_session/rename`. */
@@ -124,7 +170,6 @@ export class SessionIndexService {
         this.require(SESSION_RENAME_METHOD);
         await this.host.ensureAppServer();
         await this.titles.rename(sessionId, title);
-        this.watcher?.trigger();
         return {};
     }
 
@@ -168,7 +213,6 @@ export class SessionIndexService {
                 _meta: withAirMeta(undefined, AIR_ARCHIVED_KEY, archived),
             });
         }
-        this.watcher?.trigger();
         return {};
     }
 
@@ -192,15 +236,12 @@ export class SessionIndexService {
             }
             this.activity.forget(sessionId);
             this.titles.forget(sessionId);
-            this.watcher?.trigger();
         });
     }
 
-    /** Stops the session list watcher. The connection is gone. */
+    /** Ends the session list subscriptions. The connection is gone. */
     dispose(): void {
-        this.disposed = true;
-        this.watcher?.dispose();
-        this.watcher = null;
+        this.subscriptions.dispose();
     }
 
     private require(method: string): void {
@@ -225,11 +266,16 @@ export class SessionIndexService {
             cwd === null || relativeCwd !== null ? cwd : path.resolve(cwd),
         ));
         return {
-            sessions: page.threads.map(entry => this.withActiveAdditionalDirectories(
-                sessionIndexSessionInfo(entry.thread, entry.archived, this.activity.activityOf(entry.thread)),
-            )),
+            sessions: await Promise.all(page.threads.map(entry => this.row(entry.thread, entry.archived))),
             nextCursor: page.nextCursor,
         };
+    }
+
+    /** The list row of a thread, for `session/list` and `_session/list/changes` alike. */
+    private async row(thread: Thread, archived: boolean): Promise<acp.SessionInfo> {
+        return this.withActiveAdditionalDirectories(
+            sessionIndexSessionInfo(thread, archived, this.activity.activityOf(thread)),
+        );
     }
 
     private withActiveAdditionalDirectories(session: acp.SessionInfo): acp.SessionInfo {
@@ -238,21 +284,5 @@ export class SessionIndexService {
             return session;
         }
         return {...session, additionalDirectories: activeSession.additionalDirectories};
-    }
-
-    private watch(cwd: string, options: SessionIndexListOptions, signature: string): void {
-        // A list that was in flight when the connection closed must not start the watcher again.
-        if (this.disposed) return;
-        this.watcher ??= new SessionListChangedWatcher({
-            codexHome: () => this.host.client().getHomePath(),
-            readSignature: async (watched) => {
-                const page = await this.readRows(watched.cwd, watched.options, null);
-                return sessionIndexPageSignature(page.sessions, page.nextCursor);
-            },
-            notify: async (changedCwd) => {
-                await this.host.connection().notify(SESSION_LIST_CHANGED_METHOD, {cwd: changedCwd});
-            },
-        });
-        this.watcher.observeList({cwd, options}, signature);
     }
 }

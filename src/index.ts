@@ -20,7 +20,16 @@ import {
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
-import {SESSION_ARCHIVE_METHOD, SESSION_RENAME_METHOD, SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, sessionRenameParamsParser} from "./SessionIndex";
+import {
+    SESSION_ARCHIVE_METHOD,
+    SESSION_LIST_SUBSCRIBE_METHOD,
+    SESSION_LIST_UNSUBSCRIBE_METHOD,
+    SESSION_RENAME_METHOD,
+    SESSION_UNARCHIVE_METHOD,
+    sessionArchiveParamsParser,
+    sessionListSubscriptionParamsParser,
+    sessionRenameParamsParser,
+} from "./SessionIndex";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -184,5 +193,7 @@ function startAcpServer() {
         .onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent().sessionIndex.rename(ctx.params))
         .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, true))
         .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, false))
+        .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
+        .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params))
         .connect(acpJsonStream);
 }

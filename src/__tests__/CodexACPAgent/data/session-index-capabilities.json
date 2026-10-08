@@ -10,7 +10,8 @@
     "planContentDelta",
     "sessionIndex",
     "sessionArchive",
-    "sessionRename"
+    "sessionRename",
+    "sessionListSubscribe"
   ],
   "airWithoutSessionIndex": [
     "sessionFailure",

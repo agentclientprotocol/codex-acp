@@ -3,6 +3,7 @@ import {describe, expect, it, vi} from "vitest";
 import {ConnectionError, ConnectionErrors, ResponseError} from "vscode-jsonrpc/node";
 import {createRecoveryFixture, initialize, MODEL, type RecoveryFixture, requestsOf} from "./recovery-fixture";
 import {AppServerRecovery} from "../../app-server-recovery/AppServerRecovery";
+import type {CodexAcpClient} from "../../CodexAcpClient";
 
 const resumed = (id: string) => ({
     thread: {id, turns: [], historyMode: "paginated", status: {type: "idle"}, preview: "", ephemeral: false, modelProvider: "openai",
@@ -70,6 +71,40 @@ describe("app-server recovery", () => {
 
         expect(observe).toHaveBeenCalledTimes(1);
         expect(observe.mock.calls[0]![0].appServerClient).not.toBe(undefined);
+    });
+
+    it("keeps a session list subscription across a crash and reads each change of the new app-server once", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture, true, {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure", "sessionIndex"]}}}});
+        fixture.answers.set("thread/read", (params) => ({thread: {
+            ...resumed((params as {threadId: string}).threadId).thread,
+            preview: "hi", source: "vscode", path: "/codex-home/sessions/t.jsonl", recencyAt: null, name: `title ${fixture.servers.length}`,
+        }}));
+        const {subscriptionId} = await fixture.agent.sessionIndex.subscribeList({cwd: "/work"});
+        const changes = () => fixture.acp.notify.mock.calls.filter(call => (call as unknown[])[0] === "_session/list/changes")
+            .map(call => (call as unknown[])[1]);
+
+        await fixture.kill();
+        await fixture.agent.listSessions({});
+        expect(fixture.servers).toHaveLength(2);
+        // Observing the running client again adds no second listener.
+        const running = (fixture.agent as unknown as {codexAcpClient: CodexAcpClient}).codexAcpClient;
+        const listeners = () => (running.appServerClient as unknown as {codexEventHandlers: unknown[]}).codexEventHandlers.length;
+        const before = listeners();
+        fixture.agent.sessionIndex.observe(running);
+        expect(listeners()).toBe(before);
+        fixture.current().rpc.notify({method: "thread/name/updated", params: {threadId: "thread-a"}});
+
+        await vi.waitFor(() => expect(changes()).toEqual([{
+            subscriptionId,
+            sessions: [expect.objectContaining({sessionId: "thread-a", title: "title 2"})],
+            removed: [],
+        }]));
+        await new Promise(resolve => setTimeout(resolve, 100));
+        expect(changes()).toHaveLength(1);
+        expect(requestsOf(fixture.current(), "thread/read")).toHaveLength(1);
+        expect(fixture.agent.sessionIndex.subscriptionResources()).toMatchObject({subscriptions: 1, groups: 1});
+        fixture.agent.sessionIndex.dispose();
     });
 
     it("starts the app-server again for a rename or an archive of the session index", async () => {

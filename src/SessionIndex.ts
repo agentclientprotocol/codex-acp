@@ -25,7 +25,11 @@ export const AIR_SESSION_RENAME_KEY = "sessionRename";
 export const SESSION_RENAME_METHOD = "_session/rename";
 export const SESSION_ARCHIVE_METHOD = "_session/archive";
 export const SESSION_UNARCHIVE_METHOD = "_session/unarchive";
-export const SESSION_LIST_CHANGED_METHOD = "_session/list_changed";
+/** Agent capability: `_session/list/subscribe`, `_session/list/unsubscribe` and `_session/list/changes`. */
+export const AIR_SESSION_LIST_SUBSCRIBE_KEY = "sessionListSubscribe";
+export const SESSION_LIST_SUBSCRIBE_METHOD = "_session/list/subscribe";
+export const SESSION_LIST_UNSUBSCRIBE_METHOD = "_session/list/unsubscribe";
+export const SESSION_LIST_CHANGES_METHOD = "_session/list/changes";
 
 /** The `_meta.jetbrains.air` key of the list options in a `session/list` request. */
 export const AIR_SESSION_LIST_KEY = "list";
@@ -95,6 +99,12 @@ export const sessionRenameParamsParser = z.object({
 export const sessionArchiveParamsParser = z.object({
     sessionId: z.string(),
 }).passthrough();
+
+/** The params of `_session/list/subscribe` and `_session/list/unsubscribe`, which the service validates. */
+export const sessionListSubscriptionParamsParser = z.preprocess(
+    (params) => params ?? {},
+    z.record(z.string(), z.unknown()),
+);
 
 /**
  * Reads `_meta.jetbrains.air.list` of a `session/list` request.
@@ -505,31 +515,20 @@ export class SessionIndexActivity {
     }
 }
 
-const SESSION_INDEX_NOTIFICATIONS: ReadonlySet<ServerNotification["method"]> = new Set<ServerNotification["method"]>([
-    "thread/started",
-    "thread/status/changed",
-    "thread/name/updated",
-    "thread/archived",
-    "thread/unarchived",
-    "thread/deleted",
-    "thread/closed",
-    "turn/started",
-    "turn/completed",
-]);
-
-/** True for an app-server notification that can change a row of the session index of this process. */
-export function changesSessionIndex(notification: ServerNotification): boolean {
-    return SESSION_INDEX_NOTIFICATIONS.has(notification.method);
-}
-
 /**
- * A value that changes when a row of the page changes in a way the client shows: its ACP fields and its whole
- * `_meta`, so exactly the AIR row fields that {@link sessionIndexSessionInfo} sends.
+ * What the client shows of a row, without `updatedAt`: a row whose signature did not change is not sent again.
+ * `title` and the AIR fields `lastPromptAt`, `state`, `lastTurnEndedAt`, `model`, `forkedFrom` and `archived`.
  */
-export function sessionIndexPageSignature(sessions: acp.SessionInfo[], nextCursor: string | null | undefined): string {
+export function sessionIndexRowSignature(row: acp.SessionInfo): string {
+    const air = asRecord(asRecord(asRecord(row._meta)[JETBRAINS_META_KEY])[AIR_META_KEY]);
     return JSON.stringify([
-        sessions.map(session => [session.sessionId, session.cwd, session.title, session.updatedAt, session._meta ?? null]),
-        nextCursor !== null && nextCursor !== undefined,
+        row.title ?? null,
+        air[AIR_LAST_PROMPT_AT_KEY] ?? null,
+        air[AIR_STATE_KEY] ?? null,
+        air[AIR_LAST_TURN_ENDED_AT_KEY] ?? null,
+        air[AIR_MODEL_KEY] ?? null,
+        air[AIR_FORKED_FROM_KEY] ?? null,
+        air[AIR_ARCHIVED_KEY] ?? null,
     ]);
 }
 

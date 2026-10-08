@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {createCodexMockTestFixture, createTestModel, deferred, type CodexMockTestFixture} from "../acp-test-utils";
 import type {Thread, ThreadListParams, ThreadListResponse} from "../../app-server/v2";
-import {SESSION_LIST_CHANGED_METHOD} from "../../SessionIndex";
+import {SESSION_LIST_CHANGES_METHOD} from "../../SessionIndex";
 
 const threadId = "01a0637c-5b99-7242-9064-04545d605fdb";
 const otherThreadId = "01a0637c-5b99-7242-9064-04545d605fdc";
@@ -87,9 +87,9 @@ async function openLocalSession(fixture: CodexMockTestFixture, sessionId: string
     fixture.clearAcpConnectionDump();
 }
 
-function listChangedNotifications(fixture: CodexMockTestFixture): unknown[] {
+function listChanges(fixture: CodexMockTestFixture): any[] {
     return fixture.getAcpConnectionEvents([])
-        .filter(event => event.method === "notify" && event.args[0] === SESSION_LIST_CHANGED_METHOD)
+        .filter(event => event.method === "notify" && event.args[0] === SESSION_LIST_CHANGES_METHOD)
         .map(event => event.args[1]);
 }
 
@@ -128,6 +128,8 @@ describe("sessionIndex capability negotiation", () => {
         expect(advertised.filter(name => ["sessionIndex", "sessionArchive", "sessionRename"].includes(name))).toEqual([]);
         await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"})).rejects.toMatchObject({code: -32601});
         await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32601});
+        await expect(agent.sessionIndex.subscribeList({cwd: "/repo/project"})).rejects.toMatchObject({code: -32601});
+        expect(() => agent.sessionIndex.unsubscribeList({subscriptionId: "x"})).toThrow(expect.objectContaining({code: -32601}));
     });
 });
 
@@ -613,19 +615,6 @@ describe("session/list", () => {
         expect(threadList).toHaveBeenCalledTimes(70);
     });
 
-    it("does not watch a relative cwd", async () => {
-        vi.useFakeTimers();
-        const {fixture, agent, threadList} = await createAgent("sessionIndex", [createThread({cwd: "/repo/project"})]);
-        await agent.listSessions({cwd: "project"});
-        threadList.mockClear();
-
-        fixture.sendServerNotification({method: "thread/status/changed", params: {threadId, status: {type: "active", activeFlags: []}}});
-        await vi.advanceTimersByTimeAsync(5_000);
-
-        expect(threadList).not.toHaveBeenCalled();
-        agent.sessionIndex.dispose();
-    });
-
     it("does not check the login for a sessionIndex client", async () => {
         const {agent, readAuthRequirement} = await createAgent("sessionIndex");
         readAuthRequirement.mockResolvedValue({required: true, account: null});
@@ -642,103 +631,74 @@ describe("session/list", () => {
     });
 });
 
-describe("_session/list_changed", () => {
-    it("notifies a sessionIndex client when page 1 of a listed cwd changes", async () => {
+describe("_session/list/subscribe", () => {
+    it("validates the cwd: required, a string and absolute", async () => {
+        const {agent} = await createAgent("sessionIndex");
+        for (const params of [{}, {cwd: null}, {cwd: 42}, {cwd: "project"}, {cwd: ""}]) {
+            await expect(agent.sessionIndex.subscribeList(params)).rejects.toMatchObject({code: -32602});
+        }
+        expect(() => agent.sessionIndex.unsubscribeList({})).toThrow(expect.objectContaining({code: -32602}));
+        expect(agent.sessionIndex.subscriptionResources()).toMatchObject({subscriptions: 0, watching: false});
+    });
+
+    it("sends the full row of an own thread that changed, and nothing after unsubscribe", async () => {
         vi.useFakeTimers();
-        const {fixture, agent, threadList} = await createAgent("sessionIndex");
-        await agent.listSessions({cwd: "/repo/project"});
+        const {fixture, agent, appServer} = await createAgent("sessionIndex");
+        const {subscriptionId} = await agent.sessionIndex.subscribeList({cwd: "/repo/project"});
+        fixture.clearAcpConnectionDump();
+        const running = createThread({
+            status: {type: "active", activeFlags: []},
+            recencyAt: 400,
+            updatedAt: 400,
+            path: "/codex-home/sessions/rollout.jsonl",
+        });
+        const threadRead = vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: running});
+
+        fixture.sendServerNotification({method: "thread/status/changed", params: {threadId, status: {type: "active", activeFlags: []}}});
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(threadRead).toHaveBeenCalledWith({threadId});
+        vi.mocked(appServer.threadList).mockResolvedValue({data: [running], nextCursor: null, backwardsCursor: null});
+        const listed = await agent.listSessions({cwd: "/repo/project"});
+        expect(listChanges(fixture)).toEqual([{subscriptionId, sessions: listed.sessions, removed: []}]);
+
+        expect(agent.sessionIndex.unsubscribeList({subscriptionId})).toEqual({});
+        expect(agent.sessionIndex.unsubscribeList({subscriptionId})).toEqual({});
+        fixture.clearAcpConnectionDump();
+        fixture.sendServerNotification({method: "thread/status/changed", params: {threadId, status: {type: "idle"}}});
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(listChanges(fixture)).toEqual([]);
+        expect(agent.sessionIndex.subscriptionResources()).toEqual({subscriptions: 0, groups: 0, watching: false, timer: false});
+    });
+
+    it("sends removed for a thread that the client deletes", async () => {
+        vi.useFakeTimers();
+        const {fixture, agent, appServer} = await createAgent("sessionIndex");
+        const {subscriptionId} = await agent.sessionIndex.subscribeList({cwd: "/repo/project"});
+        vi.spyOn(appServer, "threadDelete").mockImplementation(async () => {
+            fixture.sendServerNotification({method: "thread/deleted", params: {threadId}});
+            return {};
+        });
         fixture.clearAcpConnectionDump();
 
-        // An own notification that does not change the page sends nothing.
-        fixture.sendServerNotification({method: "thread/status/changed", params: {threadId, status: {type: "notLoaded"}}});
-        await vi.advanceTimersByTimeAsync(2_000);
-        expect(listChangedNotifications(fixture)).toEqual([]);
+        await agent.deleteSession({sessionId: threadId});
+        await vi.advanceTimersByTimeAsync(100);
 
-        threadList.mockResolvedValue({
-            data: [createThread({status: {type: "active", activeFlags: []}})],
-            nextCursor: null,
-            backwardsCursor: null,
-        });
-        fixture.sendServerNotification({method: "thread/status/changed", params: {threadId, status: {type: "active", activeFlags: []}}});
-        await vi.advanceTimersByTimeAsync(2_000);
-
-        expect(listChangedNotifications(fixture)).toEqual([{cwd: "/repo/project"}]);
+        expect(listChanges(fixture)).toEqual([{subscriptionId, sessions: [], removed: [threadId]}]);
         agent.sessionIndex.dispose();
     });
 
-    it("reads page 1 again with the archived value of the request", async () => {
+    it("leaves no subscription, watch or timer when the connection closes", async () => {
         vi.useFakeTimers();
-        const {fixture, agent, threadList} = await createAgent("sessionIndex");
-        await agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {archived: "archived"}}}}});
-        threadList.mockClear();
-
-        fixture.sendServerNotification({method: "thread/status/changed", params: {threadId, status: {type: "active", activeFlags: []}}});
-        await vi.advanceTimersByTimeAsync(2_000);
-
-        expect(threadList.mock.calls.map(call => call[0].archived)).toEqual([true]);
-        agent.sessionIndex.dispose();
-    });
-
-    it("keeps watching the unarchived list of a cwd after the client lists its archived threads", async () => {
-        vi.useFakeTimers();
-        const {fixture, agent, threadList} = await createAgent("sessionIndex");
-        let unarchived = [createThread({id: "u"})];
-        threadList.mockImplementation(async (params) => ({
-            data: params.archived ? [createThread({id: "a"})] : unarchived,
-            nextCursor: null,
-            backwardsCursor: null,
-        }));
-        await agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {archived: "unarchived"}}}}});
-        await agent.listSessions({cwd: "/repo/project", _meta: {jetbrains: {air: {list: {archived: "archived"}}}}});
-        fixture.clearAcpConnectionDump();
-
-        unarchived = [createThread({id: "u2"}), ...unarchived];
-        fixture.sendServerNotification({method: "thread/started", params: {thread: unarchived[0]!}} as never);
-        await vi.advanceTimersByTimeAsync(2_000);
-
-        expect(listChangedNotifications(fixture)).toEqual([{cwd: "/repo/project"}]);
-        agent.sessionIndex.dispose();
-    });
-
-    it("starts no watcher for a list that was in flight when the connection closed", async () => {
-        vi.useFakeTimers();
-        const {fixture, agent, threadList} = await createAgent("sessionIndex");
-        const firstPage = deferred<ThreadListResponse>();
-        threadList.mockReturnValueOnce(firstPage.promise);
-        const listing = agent.listSessions({cwd: "/repo/project"});
+        const {fixture, agent} = await createAgent("sessionIndex");
+        await agent.sessionIndex.subscribeList({cwd: "/repo/project"});
+        await agent.sessionIndex.subscribeList({cwd: "/repo/other"});
+        fixture.sendServerNotification({method: "turn/started", params: {threadId, turn: {}}} as never);
 
         agent.sessionIndex.dispose();
-        firstPage.resolve({data: [createThread()], nextCursor: null, backwardsCursor: null});
-        await listing;
-        threadList.mockClear();
-        threadList.mockResolvedValue({
-            data: [createThread({status: {type: "active", activeFlags: []}})],
-            nextCursor: null,
-            backwardsCursor: null,
-        });
-        fixture.sendServerNotification({method: "thread/status/changed", params: {threadId, status: {type: "active", activeFlags: []}}});
-        await vi.advanceTimersByTimeAsync(5_000);
 
-        expect(threadList).not.toHaveBeenCalled();
-        expect(listChangedNotifications(fixture)).toEqual([]);
-    });
-
-    it("sends nothing to a client without sessionIndex", async () => {
-        vi.useFakeTimers();
-        const {fixture, agent, threadList} = await createAgent("airWithoutSessionIndex");
-        await agent.listSessions({cwd: "/repo/project"});
-        threadList.mockClear();
-        threadList.mockResolvedValue({
-            data: [createThread({status: {type: "active", activeFlags: []}})],
-            nextCursor: null,
-            backwardsCursor: null,
-        });
-
-        fixture.sendServerNotification({method: "thread/status/changed", params: {threadId, status: {type: "active", activeFlags: []}}});
-        await vi.advanceTimersByTimeAsync(5_000);
-
-        expect(threadList).not.toHaveBeenCalled();
-        expect(listChangedNotifications(fixture)).toEqual([]);
+        expect(agent.sessionIndex.subscriptionResources()).toEqual({subscriptions: 0, groups: 0, watching: false, timer: false});
+        await expect(agent.sessionIndex.subscribeList({cwd: "/repo/project"})).rejects.toBeDefined();
     });
 });
 

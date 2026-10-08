@@ -145,9 +145,9 @@ The `initialize` response carries the agent side of the extension only when the 
 
 The agent list does not depend on the client capability list, except for `sessionIndex`.
 The agent lists `sessionIndex` only when the client declared it, because AIR builds without it use
-`session/list` and `session/delete` the old way. Exactly then it also lists `sessionArchive` and `sessionRename`,
-which name requests of the session index; the client does not declare those two, and declaring them without
-`sessionIndex` enables nothing.
+`session/list` and `session/delete` the old way. Exactly then it also lists `sessionArchive`, `sessionRename` and
+`sessionListSubscribe`, which name requests of the session index; the client does not declare those three, and
+declaring them without `sessionIndex` enables nothing.
 An extension is active only when the client declared its capability.
 A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initialize` response.
 
@@ -164,14 +164,15 @@ A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initi
 | `sessionFailure` | Sends warnings and errors as typed transcript records. | [Session failure](#session-failure) |
 | `nativeSubagentSessions` | Reports a Codex subagent as a native ACP child session. | [Native subagent sessions](#native-subagent-sessions) |
 | `codexHooks` | Lets AIR review and trust startup hooks before it opens a session. | [Hook trust](#hook-trust) |
-| `sessionIndex` | Serves `session/list` as the session index of AIR, adds rename and archive requests, and sends `_session/list_changed`, as the ACP session list extensions RFD and RFD #2161 describe. | [Session index](#session-index) |
+| `sessionIndex` | Serves `session/list` as the session index of AIR, as the ACP session list extensions RFD and RFD #2161 describe, adds rename and archive requests, and pushes the changed rows of a cwd to a subscription. | [Session index](#session-index) |
 
-Two agent capabilities come with `sessionIndex` and are listed exactly when it is. The client does not declare them:
+Three agent capabilities come with `sessionIndex` and are listed exactly when it is. The client does not declare them:
 
 | Agent capability | What it tells the client | Section |
 | --- | --- | --- |
 | `sessionArchive` | The agent serves `_session/archive` and `_session/unarchive`. | [Requests](#requests) |
 | `sessionRename` | The agent serves `_session/rename`. | [Requests](#requests) |
+| `sessionListSubscribe` | The agent serves `_session/list/subscribe` and `_session/list/unsubscribe` and sends `_session/list/changes`. | [Session list subscription](#session-list-subscription) |
 
 The goal extension has no client capability.
 The agent advertises the `goal` object, and the client uses the control method when it wants to.
@@ -993,12 +994,13 @@ This section covers only the AIR bridge.
 
 AIR uses `session/list` as its index of Codex threads when it declares `sessionIndex`.
 Everything in this section applies only to such a client. The `initialize` answer to it lists `sessionIndex`,
-`sessionArchive` and `sessionRename` in `_meta.jetbrains.air.capabilities`.
+`sessionArchive`, `sessionRename` and `sessionListSubscribe` in `_meta.jetbrains.air.capabilities`.
 Another client, AIR included, keeps the old `session/list`, `session/delete` and `initialize` answers.
 
-The extension follows two ACP RFDs field for field: the session list extensions RFD (`limit`, order, row fields,
-`session/list_changed`) and [RFD #2161](https://github.com/agentclientprotocol/agent-client-protocol/pull/2161)
-(archive). Only the transport differs, see [Relation to the ACP RFDs](#relation-to-the-acp-rfds).
+The extension follows two ACP RFDs field for field: the session list extensions RFD (`limit`, order, row fields)
+and [RFD #2161](https://github.com/agentclientprotocol/agent-client-protocol/pull/2161)
+(archive). Only the transport differs, see [Relation to the ACP RFDs](#relation-to-the-acp-rfds). The
+[session list subscription](#session-list-subscription) is the adapter's own.
 
 ### List
 
@@ -1109,19 +1111,58 @@ The adapter sends no `cost`: Codex reports none.
   archiving the thread: old AIR builds send `session/delete` for "Done". Threads they closed that way show as
   archived to a `sessionIndex` client.
 
-### `_session/list_changed`
+### Session list subscription
 
-The adapter sends `_session/list_changed {cwd}` when page 1 of a list that the client read changed.
+The client subscribes to the rows of a cwd and the agent pushes the rows that change. It is best effort: the client
+still re-reads the list now and then, and a lost change shows up there.
 
-- A watch is per `cwd`, `includeWorktrees` and `archived`. A `session/list` of page 1 starts or renews it, with
-  that request's `limit`; the adapter reads page 1 again with the same options. It expires after 10 minutes. At
-  most 32 are kept. Watches of one `cwd` that change between two checks send one notification.
-- A list without `cwd`, or with a relative one, is not watched.
-- Triggers: a write to `<CODEX_HOME>/state_<n>.sqlite-wal` by any Codex process, a thread notification of its own
-  app-server, and a check of the WAL size and time every 30 s.
-- A trigger waits 1 s for more events, and at most 2 s after the first one. The adapter then reads page 1 of each
-  watched list again and notifies only the lists whose rows changed.
-- A lost notification is acceptable: the client also polls page 1.
+```json
+{ "method": "_session/list/subscribe", "params": { "cwd": "/repo" } }
+{ "result": { "subscriptionId": "6f1c…" } }
+{ "method": "_session/list/changes", "params": { "subscriptionId": "6f1c…", "sessions": [SessionInfo, …], "removed": ["<sessionId>", …] } }
+{ "method": "_session/list/unsubscribe", "params": { "subscriptionId": "6f1c…" } }
+{ "result": {} }
+```
+
+- `_session/list/subscribe {cwd}` answers `{subscriptionId}`. `cwd` is required and absolute; a missing `cwd`, one
+  that is not a string and a relative one fail with `-32602`. The request has no other parameters.
+- Scope: the threads whose cwd is `cwd`, its canonical path, or the same subdirectory in the primary checkout and
+  in each linked Git worktree, as `includeWorktrees: true` resolves it; from the interactive sources, as the list;
+  archived or not. The agent applies no archive filter: the client filters by the `archived` field of the row.
+- `_session/list/changes` carries, for each thread in scope that appeared or changed, its whole row exactly as
+  `session/list` answers it. A row counts as changed when `title`, `lastPromptAt`, `state`, `lastTurnEndedAt`,
+  `model`, `forkedFrom` or `archived` differs from the row the subscription last got. A change of `updatedAt` alone
+  sends nothing; the new `updatedAt` comes with the next change. Archive and unarchive are row changes.
+  `removed` lists the ids of deleted threads. Both arrays are always present, and one of them is not empty.
+- The rows the client is assumed to have when it subscribes are the 50 most recently updated threads of the scope,
+  unarchived and archived. The first change of an older thread sends its row even when only `updatedAt` moved.
+- A thread is sent at most once a second; a later change of it waits and goes out with its row of that time. One
+  delivery sends one notification per subscription, with all its rows.
+- There is no resync and no sequence number. Changes made while the Codex app-server was down can be missed;
+  the agent does not replay them.
+- `_session/list/unsubscribe {subscriptionId}` answers `{}` and is idempotent: an unknown id is not an error. A
+  subscription lives until it is unsubscribed or the connection closes; it has no time limit.
+- A connection has at most 128 subscriptions. One more fails with `-32602` and `data.reason: "too_many_subscriptions"`.
+- Subscriptions of the same cwd each have their own id, their own unsubscribe and their own notification. The
+  agent watches the cwd once for all of them.
+
+How the agent sees changes:
+
+- Threads of its own Codex app-server: at once, from the app-server notifications `thread/started`,
+  `thread/status/changed`, `thread/name/updated`, `thread/archived`, `thread/unarchived`, `thread/deleted`,
+  `thread/closed`, `turn/started` and `turn/completed`. The agent reads the thread with `thread/read`.
+- Threads of other Codex processes: every change of a thread writes the state DB WAL,
+  `<CODEX_HOME>/state_<n>.sqlite-wal`. The agent watches the WAL files and CODEX_HOME for WAL files that appear or
+  go, and checks the WAL size and time every 30 s in case the file system drops an event. 150 ms after the last
+  write, and at most 1 s after the first, it sends one `thread/list` without `cwd`, with `sortKey: "updated_at"`,
+  for unarchived threads and one for archived threads, and reads newest first until the threads are older than
+  the newest one it saw before. Threads of the same second as that one are read again.
+- A rename moves no `updated_at`. The agent reads the renames that any process appends to
+  `<CODEX_HOME>/session_index.jsonl` and reads those threads with `thread/read`. Archive moves no `updated_at`
+  either: the agent watches `<CODEX_HOME>/archived_sessions/` and reads each thread whose rollout appears or goes
+  there.
+- A thread that another process deletes is not seen unless it was archived. Clients re-read the list now and then
+  for what the agent misses.
 
 ### Relation to the ACP RFDs
 
@@ -1129,7 +1170,7 @@ The names and the semantics are the RFDs'. The transport differs:
 
 | Extension | RFD |
 | --- | --- |
-| capability `sessionIndex` in `_meta.jetbrains.air.capabilities` | `sessionCapabilities.list.limit`, `list.changes`; client `session.listChanged` |
+| capability `sessionIndex` in `_meta.jetbrains.air.capabilities` | `sessionCapabilities.list.limit` |
 | agent capability `sessionArchive` | agent capability `archive` (#2161): `sessionCapabilities.archive`, `capabilities.session.archive` in v2 |
 | agent capability `sessionRename` | the rename capability of RFD #1987, which it spells `sessionCapabilities.setTitle` |
 | `_meta.jetbrains.air.list.limit` | `session/list` `limit` |
@@ -1141,7 +1182,6 @@ The names and the semantics are the RFDs'. The transport differs:
 | `SessionInfo._meta.jetbrains.air.archived` | `SessionInfo.archived` (#2161) |
 | `session_info_update._meta.jetbrains.air.archived` | `SessionInfoUpdate.archived` (#2161) |
 | `_session/archive`, `_session/unarchive` | `session/archive`, `session/unarchive` (#2161) |
-| `_session/list_changed {cwd}` | `session/list_changed {cwd}` |
 | `_session/rename` | `session/set_title`, client-set titles (#1987) |
 
 Remaining differences:
@@ -1154,6 +1194,8 @@ Remaining differences:
   or omitted, and `"all"` is its `true`. `"archived"`, archived sessions only, has no #2161 counterpart.
 - The relative-`cwd` list can answer an empty page with `nextCursor` at its scan budget, see above.
 - `cost` is never sent.
+- The RFD's `session/list_changed {cwd}` asks the client to read page 1 again. Here the agent pushes the changed
+  rows themselves through the [session list subscription](#session-list-subscription).
 - `updatedAt` moves on unarchive, because Codex touches the rollout file then; #2161 says it should not. The order
   is not affected.
 
