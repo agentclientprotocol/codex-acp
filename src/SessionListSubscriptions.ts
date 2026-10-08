@@ -4,8 +4,8 @@
  *
  * A subscription covers the threads of its cwd and of the same subdirectory in the primary checkout and each
  * linked worktree, from the interactive sources, archived or not. Subscriptions of one cwd share one group:
- * the rows last computed for its threads. Each subscription keeps the signature of the rows it was sent, so
- * it gets a row when it differs from the one it has, and never one that differs only in `updatedAt`.
+ * the rows last computed for its threads. Each subscription keeps the signature of the rows it was sent: the
+ * first change of a thread goes out in full, a later one only when it differs in more than `updatedAt`.
  *
  * Changes come from two places:
  * - The thread notifications of this adapter's app-server. Each names a thread, which is read with
@@ -55,13 +55,13 @@ export const DEFAULT_SESSION_LIST_SUBSCRIPTION_TIMINGS: SessionListSubscriptionT
     fallbackIntervalMs: 30_000,
 };
 
+/** How long a scan that failed waits before it is tried again. */
+const SCAN_RETRY_MS = 1_000;
 /** The rows that a scan reads first, and then per page. */
 const SCAN_FIRST_PAGE = 20;
 const SCAN_NEXT_PAGE = 100;
 /** The most pages of one scan. Changes beyond them are not sent. */
 const SCAN_MAX_PAGES = 10;
-/** The most baseline rows of a group, per archive state. */
-const BASELINE_ROWS = 50;
 /** The most `thread/read` requests at a time. */
 const READ_CONCURRENCY = 8;
 /** The most helper threads remembered as not listed. */
@@ -110,13 +110,10 @@ interface Group {
     cwd: string;
     scope: Set<string>;
     subscriptions: Set<Subscription>;
-    /** The row last sent or read as the baseline for each thread of the scope that the group has seen. */
+    /** The row last sent or computed for each thread of the scope that the group has seen. */
     rows: Map<string, GroupRow>;
-    /** Resolves when the baseline rows are read. Never rejects. */
+    /** Resolves when the group is ready: when the first marks are read. Never rejects. */
     ready: Promise<void>;
-    baselined: boolean;
-    /** The {@link SessionListSubscriptions.epoch} when the baseline was read: an older read does not count. */
-    baselineEpoch: number;
     /** When {@link scope} was resolved. */
     scopeResolvedAt: number;
 }
@@ -124,14 +121,19 @@ interface Group {
 interface Subscription {
     id: string;
     group: Group;
-    /** The signature of the row that the client has for each thread: the baseline, then what was sent. */
+    /** The signature of the row last sent for each thread: none at first, so the first change goes out in full. */
     sent: Map<string, string>;
-    /** The baseline is in {@link sent}. */
-    baselined: boolean;
     /** The client has the id: `subscribe` answered. Changes before that wait in {@link held}. */
     ready: boolean;
     held: SessionListChanges | null;
     readyTimer: ReturnType<typeof setTimeout> | null;
+    /**
+     * The second of `updatedAt` when the subscription started: a thread that a scan alone found, updated no later,
+     * did not change since, unless the subscription has its row. `null` until it is ready.
+     */
+    startedSecond: number | null;
+    /** The {@link SessionListSubscriptions.epoch} when it started: a read that began before is older than its client's list. */
+    epoch: number;
 }
 
 export interface ThreadEntry {
@@ -150,6 +152,8 @@ export class SessionListSubscriptions {
     /** The newest `updatedAt` that a scan saw, per archive state; `null` before the first scan. */
     private marks: {unarchived: number, archived: number} | null = null;
     private marksReady: Promise<void> | null = null;
+    /** When the watching started, in the seconds of `updatedAt`: the mark of a scan without marks. */
+    private watchingSince = 0;
     /** Counts WAL changes: one that came after a scan stopped at its page limit asks for a scan from the top. */
     private stateChanges = 0;
     /** Where a scan that stopped at its page limit goes on, per archive state. */
@@ -159,14 +163,18 @@ export class SessionListSubscriptions {
 
     /** Threads to read with `thread/read` in the next flush. */
     private readonly pendingThreads = new Set<string>();
+    /** Threads read again after the second between changes that only a scan had found, see {@link offer}. */
+    private readonly scanRetries = new Set<string>();
     /** Usage reads that went to no group: tried once more when the groups may resolve their worktrees again. */
     private readonly usageRetries = new Map<string, {cwd: string, at: number}>();
     /** Threads whose usage was read, with their cwd, see {@link usageRead}. */
     private readonly pendingUsage = new Map<string, string>();
+    /** Counts flushes and subscriptions, so that a read is not offered to a subscription that started after it. */
+    private epoch = 0;
+    /** The epoch of the reads of the flush that runs. */
+    private readEpoch = 0;
     /** Counts the app-servers, see {@link refreshLoadedThreads}. */
     private appServerGeneration = 0;
-    /** Counts reads and baselines, so that a read that started before a baseline does not override it. */
-    private epoch = 0;
     /** Deleted threads, with whether this adapter deleted them. */
     private readonly deletedThreads = new Map<string, boolean>();
     private scanRequested = false;
@@ -188,13 +196,14 @@ export class SessionListSubscriptions {
     }
 
     /**
-     * Starts a subscription of an absolute cwd. Resolves when the rows that the client is assumed to have, the
-     * most recently updated ones of the scope, are read: a change after that is sent.
+     * Starts a subscription of an absolute cwd. It reads no rows: it resolves once the marks of the scans are
+     * read, and the first change of each thread after that goes out in full.
      *
      * @throws RequestError `invalidParams` with `data.reason: "too_many_subscriptions"` beyond
      *   {@link MAX_SESSION_LIST_SUBSCRIPTIONS}.
      */
     async subscribe(cwd: string): Promise<string> {
+        const startedSecond = Math.floor(this.now() / 1000);
         if (this.disposed) throw RequestError.internalError(undefined, "The connection is closed");
         if (this.subscriptions.size >= MAX_SESSION_LIST_SUBSCRIPTIONS) {
             throw RequestError.invalidParams(
@@ -211,22 +220,19 @@ export class SessionListSubscriptions {
                 subscriptions: new Set(),
                 rows: new Map(),
                 ready: Promise.resolve(),
-                baselined: false,
-                baselineEpoch: 0,
                 scopeResolvedAt: this.now(),
             };
             this.groups.set(key, created);
             group = created;
             this.startWatching();
-            created.ready = this.readBaseline(created);
+            created.ready = this.makeReady(created);
         }
-        const subscription: Subscription = {id: randomUUID(), group, sent: new Map(), baselined: false, ready: false, held: null, readyTimer: null};
+        const subscription: Subscription = {id: randomUUID(), group, sent: new Map(), ready: false, held: null, readyTimer: null, startedSecond: null, epoch: ++this.epoch};
         this.subscriptions.set(subscription.id, subscription);
         group.subscriptions.add(subscription);
-        // The client has what it listed: the rows the group knows now, or the baseline once it is read.
-        if (group.baselined) this.takeBaseline(subscription);
         this.startWatching();
         await Promise.all([group.ready, this.marksReady]);
+        subscription.startedSecond = startedSecond;
         // Ready once the answer to `subscribe` is out, which happens before any timer; the next flush sends
         // what was held meanwhile.
         if (this.subscriptions.get(subscription.id) === subscription) {
@@ -240,10 +246,7 @@ export class SessionListSubscriptions {
         return subscription.id;
     }
 
-    private takeBaseline(subscription: Subscription): void {
-        subscription.sent = new Map([...subscription.group.rows].map(([threadId, {signature}]) => [threadId, signature]));
-        subscription.baselined = true;
-    }
+
 
 
     /** Ends a subscription. Idempotent: an unknown id changes nothing. */
@@ -344,9 +347,13 @@ export class SessionListSubscriptions {
             })
             .map(([threadId]) => threadId));
         for (const threadId of new Set([...threadIds, ...loaded])) this.threadChanged(threadId);
+        // Threads whose reads failed with the old app-server, or waited for a new one, are read now.
+        if (this.pendingThreads.size > 0) this.requestThreads(this.timings.ownChangeDelayMs);
     }
 
     private threadChanged(threadId: string): void {
+        // Named by a change of its own: no longer only a thread that a scan found.
+        this.scanRetries.delete(threadId);
         this.pendingThreads.add(threadId);
         this.requestThreads(this.timings.ownChangeDelayMs);
     }
@@ -371,6 +378,14 @@ export class SessionListSubscriptions {
         this.scanRequested = true;
         this.firstStateChangeAt ??= now;
         this.scanDueAt = Math.min(now + this.timings.quietMs, this.firstStateChangeAt + this.timings.maxWaitMs);
+        this.arm();
+    }
+
+    /** Asks for a scan at a given time, after one that failed. */
+    private scanAt(at: number): void {
+        if (this.subscriptions.size === 0) return;
+        this.scanRequested = true;
+        this.scanDueAt = this.scanDueAt === null ? at : Math.min(this.scanDueAt, at);
         this.arm();
     }
 
@@ -402,8 +417,10 @@ export class SessionListSubscriptions {
 
     private startWatching(): void {
         if (this.marksReady === null) {
+            this.watchingSince = Math.floor(this.now() / 1000);
+            // Sets the marks; when it fails, the next scan reads from when the watching started.
             this.marksReady = this.withReader(async (reader) => {
-                await this.scan(reader);
+                await this.scan(reader, true);
             });
         }
         if (this.watcher !== null) return;
@@ -415,6 +432,8 @@ export class SessionListSubscriptions {
         this.watcher = watch(home, {
             stateChanged: () => this.stateChanged(),
             archiveMoved: (threadId) => {
+                // An archive or unarchive is a change of its own, not only a thread that a scan found.
+                this.scanRetries.delete(threadId);
                 if (this.subscriptions.size === 0) return;
                 this.pendingThreads.add(threadId);
                 this.stateChanged();
@@ -440,6 +459,7 @@ export class SessionListSubscriptions {
         this.pendingThreads.clear();
         this.pendingUsage.clear();
         this.usageRetries.clear();
+        this.scanRetries.clear();
         this.deletedThreads.clear();
         this.lastChangeAt.clear();
         this.ignoredThreads.clear();
@@ -456,40 +476,12 @@ export class SessionListSubscriptions {
         }
     }
 
-    /** The most recently updated rows of a new group, unarchived and archived: what its client has. */
-    private async readBaseline(group: Group): Promise<void> {
-        // The marks come first: a change after them is scanned, a change before them is in the baseline.
+    /**
+     * Makes a new group ready. It reads no rows: a subscription gets the first row of each thread that changes after
+     * it started in full, and compares only the later ones. It waits for the marks, so a change after them is scanned.
+     */
+    private async makeReady(group: Group): Promise<void> {
         await this.marksReady;
-        // A read that starts after this one can be newer than the baseline; one that started before cannot.
-        const epoch = ++this.epoch;
-        const appServerGeneration = this.appServerGeneration;
-        await this.withReader(async (reader) => {
-            const pages = await Promise.all([false, true].map(archived => reader.threadList({
-                limit: BASELINE_ROWS,
-                sortKey: "updated_at",
-                archived,
-                sourceKinds: [],
-                modelProviders: [],
-                cwd: [...group.scope],
-                useStateDbOnly: true,
-            }).then(page => page.data.map(thread => ({thread, archived})))));
-            for (const row of await this.deps.rows(pages.flat())) {
-                group.rows.set(row.sessionId, {row, signature: sessionIndexRowSignature(row)});
-            }
-        });
-        group.baselined = true;
-        group.baselineEpoch = epoch;
-        // Read from an app-server that went away meanwhile: the states of its rows are read again.
-        if (appServerGeneration !== this.appServerGeneration) {
-            for (const [threadId, {row}] of group.rows) {
-                if ((row._meta as Record<string, any> | undefined)?.["jetbrains"]?.["air"]?.["state"] !== undefined) {
-                    this.threadChanged(threadId);
-                }
-            }
-        }
-        for (const subscription of group.subscriptions) {
-            if (!subscription.baselined) this.takeBaseline(subscription);
-        }
     }
 
     private async flush(): Promise<void> {
@@ -503,7 +495,9 @@ export class SessionListSubscriptions {
         }
         this.threadsDueAt = null;
         const requested = new Set(this.pendingThreads);
-        this.pendingThreads.clear();
+        // Without an app-server, the threads wait for the next flush, which a restart brings.
+        if (this.deps.reader() !== null) this.pendingThreads.clear();
+        else requested.clear();
         const deleted = new Map(this.deletedThreads);
         this.deletedThreads.clear();
         const usageRead = new Map(this.pendingUsage);
@@ -518,16 +512,35 @@ export class SessionListSubscriptions {
         for (const [threadId, at] of this.lastChangeAt) {
             if (startedAt - at >= this.timings.minChangeIntervalMs) this.lastChangeAt.delete(threadId);
         }
-        const readEpoch = ++this.epoch;
         const appServerGeneration = this.appServerGeneration;
+        this.readEpoch = ++this.epoch;
 
         // A scan before the first marks would only set them: it waits for them instead.
         if (scan) await this.marksReady;
         const found = new Map<string, ThreadEntry>();
+        const scanned = new Set<string>();
+        // Threads that a scan found but the second between changes held back: still found by a scan.
+        const scanRetried = new Set([...requested].filter(threadId => this.scanRetries.delete(threadId)));
         await this.withReader(async (reader) => {
             if (scan) {
-                for (const entry of await this.scan(reader)) found.set(entry.thread.id, entry);
-                for (const threadId of this.nameLog?.readRenamedThreads() ?? []) requested.add(threadId);
+                // The renames first: a scan that follows them reads their names, and a rename after it is read
+                // with the next flush, as it writes the name log.
+                for (const threadId of this.nameLog?.readRenamedThreads() ?? []) {
+                    // A rename is a change of its own, not only a thread that a scan found.
+                    requested.add(threadId);
+                    scanRetried.delete(threadId);
+                    this.scanRetries.delete(threadId);
+                }
+                try {
+                    for (const entry of await this.scan(reader)) {
+                        found.set(entry.thread.id, entry);
+                        scanned.add(entry.thread.id);
+                    }
+                } catch (error) {
+                    // The renames are read all the same; the scan is tried again a second later.
+                    logger.log("Session list scan failed", {error: String(error)});
+                    this.scanAt(this.now() + SCAN_RETRY_MS);
+                }
             }
             const toRead = [...requested].filter(threadId => !found.has(threadId) && !deleted.has(threadId));
             for (let start = 0; start < toRead.length; start += READ_CONCURRENCY) {
@@ -535,36 +548,50 @@ export class SessionListSubscriptions {
                     const entry = await this.readThread(reader, threadId);
                     if (entry === "missing") {
                         deleted.set(threadId, false);
+                    } else if (entry === "failed") {
+                        // Kept for the next flush, as after a restart of the app-server; not polled. A scan retry
+                        // stays one.
+                        // A change named meanwhile stays a change of its own.
+                        if (scanRetried.has(threadId) && !this.pendingThreads.has(threadId)) this.scanRetries.add(threadId);
+                        this.pendingThreads.add(threadId);
                     } else if (entry !== null) {
                         found.set(threadId, entry);
                     }
                 }));
             }
         });
+        // Only a thread that the scan alone found: a notification, a rename or a usage read is a change of its own.
+        const onlyScanned = (threadId: string): boolean =>
+            ((scanned.has(threadId) && !requested.has(threadId)) || scanRetried.has(threadId)) && !usageRead.has(threadId);
         if (this.disposed || this.subscriptions.size === 0) return;
         await Promise.all([...this.groups.values()].map(group => group.ready));
         if (appServerGeneration !== this.appServerGeneration) {
             // Read from an app-server that is gone: its states no longer hold. Read again from the new one.
-            for (const threadId of found.keys()) this.readAgain(threadId, this.now());
+            for (const threadId of found.keys()) this.readAgainAsFound(threadId, onlyScanned(threadId));
             found.clear();
         }
 
         const batches = new Map<Subscription, SessionListChanges>();
-        // A baseline read that started after these reads can be newer than they are: such a thread is read again.
         const inScope = [...found.values()].flatMap(entry => {
             const groups = this.groupsOf(entry.thread.cwd);
-            const current = groups.filter(group => group.baselineEpoch < readEpoch);
-            if (current.length < groups.length) this.readAgain(entry.thread.id, this.now());
-            return current.length === 0 ? [] : [{entry, groups: current}];
+            if (groups.length === 0) return [];
+            // A thread that a scan alone found and no subscription counts as changed is not made a row: that
+            // would also read its usage.
+            if (onlyScanned(entry.thread.id) && groups.every(group => [...group.subscriptions]
+                .every(subscription => !this.takesScanned(subscription, entry)))) {
+                return [];
+            }
+            return [{entry, groups}];
         });
         const rows = inScope.length === 0 ? [] : await this.deps.rows(inScope.map(({entry}) => entry));
         if (appServerGeneration !== this.appServerGeneration) {
             // Replaced while the rows were made: read again from the new app-server.
-            for (const {entry} of inScope) this.readAgain(entry.thread.id, this.now());
+            for (const {entry} of inScope) this.readAgainAsFound(entry.thread.id, onlyScanned(entry.thread.id));
             inScope.length = 0;
         }
         for (const [index, {entry, groups}] of inScope.entries()) {
-            this.offer(entry.thread.id, groups.map(group => ({group, row: rows[index]!})), batches);
+            this.offer(entry.thread.id, groups.map(group => ({group, row: rows[index]!})), batches,
+                onlyScanned(entry.thread.id) ? entry : undefined);
         }
         for (const [threadId, cwd] of usageRead) {
             if (found.has(threadId) || deleted.has(threadId)) continue;
@@ -579,13 +606,22 @@ export class SessionListSubscriptions {
             }
             for (const group of groups) {
                 const known = group.rows.get(threadId);
-                if (known === undefined) unknown = true;
-                else offers.push({group, row: this.deps.withLatestUsage(known.row)});
+                // A subscription that got no row of the thread yet gets it read anew, not the group's last row,
+                // which can be older than what its client listed.
+                if (known === undefined || [...group.subscriptions].some(subscription => !subscription.sent.has(threadId))) {
+                    unknown = true;
+                } else {
+                    offers.push({group, row: this.deps.withLatestUsage(known.row)});
+                }
             }
             if (offers.length > 0) this.offer(threadId, offers, batches);
             // A group of the scope without a row of the thread, as for one from a later list page, gets it read
             // anew, which also tells whether it still is there.
-            if (unknown) this.readAgain(threadId, this.now());
+            if (unknown) {
+                // A usage read is a change of its own, not only a thread that a scan found.
+                this.scanRetries.delete(threadId);
+                this.readAgain(threadId, this.now());
+            }
         }
         let resolvedForDeletions = false;
         for (const threadId of deleted.keys()) {
@@ -638,6 +674,12 @@ export class SessionListSubscriptions {
         }
     }
 
+    /** Reads a thread again now, as found by a scan alone when it was. */
+    private readAgainAsFound(threadId: string, scanOnly: boolean): void {
+        if (scanOnly && !this.pendingThreads.has(threadId)) this.scanRetries.add(threadId);
+        this.readAgain(threadId, this.now());
+    }
+
     private readAgain(threadId: string, at: number): void {
         this.pendingThreads.add(threadId);
         this.threadsDueAt = this.threadsDueAt === null ? at : Math.min(this.threadsDueAt, at);
@@ -647,14 +689,28 @@ export class SessionListSubscriptions {
      * Puts the row of a thread into the batch of each subscription of its groups that has another row. A thread
      * that went out less than {@link SessionListSubscriptionTimings.minChangeIntervalMs} ago is read again then.
      */
-    private offer(threadId: string, offers: Array<{group: Group, row: acp.SessionInfo}>, batches: Map<Subscription, SessionListChanges>): void {
+    private offer(
+        threadId: string,
+        offers: Array<{group: Group, row: acp.SessionInfo}>,
+        batches: Map<Subscription, SessionListChanges>,
+        scanned?: ThreadEntry,
+    ): void {
         const behind: Array<{subscription: Subscription, row: acp.SessionInfo, signature: string}> = [];
         const signed = offers.map(({group, row}) => ({group, row, signature: sessionIndexRowSignature(row)}));
+        let stale = false;
         for (const {group, row, signature} of signed) {
             for (const subscription of group.subscriptions) {
-                if (subscription.baselined && subscription.sent.get(threadId) !== signature) behind.push({subscription, row, signature});
+                // Started after these reads: its client may have listed something newer; read again for it.
+                if (subscription.epoch > this.readEpoch) {
+                    stale = true;
+                    continue;
+                }
+                const sent = subscription.sent.get(threadId);
+                if (scanned !== undefined && !this.takesScanned(subscription, scanned)) continue;
+                if (sent !== signature) behind.push({subscription, row, signature});
             }
         }
+        if (stale) this.readAgainAsFound(threadId, scanned !== undefined);
         // Only a notification that goes out counts for the second: a subscription that is not ready yet holds the
         // row, and a newer one replaces it there.
         const last = this.lastChangeAt.get(threadId);
@@ -663,6 +719,8 @@ export class SessionListSubscriptions {
         if (throttled) {
             // Read again when the thread may go out: it can have changed once more by then. The groups keep
             // the rows they had, so a subscription that starts meanwhile still gets this change.
+            // A change named meanwhile, queued while this flush read, stays a change of its own.
+            if (scanned !== undefined && !this.pendingThreads.has(threadId)) this.scanRetries.add(threadId);
             this.readAgain(threadId, last + this.timings.minChangeIntervalMs);
         } else {
             for (const {group, row, signature} of signed) group.rows.set(threadId, {row, signature});
@@ -672,6 +730,15 @@ export class SessionListSubscriptions {
             subscription.sent.set(threadId, signature);
             batchOf(batches, subscription).sessions.push(row);
         }
+    }
+
+    /**
+     * A scan reads the threads of the second of its mark again: one of them that the subscription has no row of and
+     * that was not updated since the subscription started did not change for it.
+     */
+    private takesScanned(subscription: Subscription, scanned: ThreadEntry): boolean {
+        return subscription.sent.has(scanned.thread.id) || subscription.startedSecond === null
+            || scanned.thread.updatedAt > subscription.startedSecond;
     }
 
     private async send(changes: SessionListChanges): Promise<void> {
@@ -687,18 +754,21 @@ export class SessionListSubscriptions {
      * Threads of the second of the mark are read again: `updatedAt` has seconds, so one of them can have changed
      * after the last scan. The first scan only sets the marks.
      */
-    private async scan(reader: SessionListReader): Promise<ThreadEntry[]> {
+    /** @param first the read of the first marks: one page of each archive state, whose newest thread is the mark. */
+    private async scan(reader: SessionListReader, first = false): Promise<ThreadEntry[]> {
         const generation = this.watchGeneration;
         // A change after this, while a scan stopped at its page limit goes on, asks for a scan from the top.
         const changesAtStart = this.stateChanges;
         const marks = this.marks;
-        const sides = await Promise.all(([false, true] as const).map(async (archived) => {
+        // Both reads settle before a failure counts, so a retry never runs beside a read still out.
+        const settled = await Promise.allSettled(([false, true] as const).map(async (archived) => {
             const key: "archived" | "unarchived" = archived ? "archived" : "unarchived";
             const resume = this.resumes[key];
             // A scan that stopped at its page limit goes on where it stopped, down to the mark it had then.
-            const mark = resume?.cutoff ?? (marks === null ? null : marks[key]);
+            // Without marks yet, as when their first read failed, the threads updated since the watching started.
+            const mark: number = resume?.cutoff ?? (marks === null ? this.watchingSince : marks[key]);
             const entries: ThreadEntry[] = [];
-            let newest = resume?.newest ?? mark ?? 0;
+            let newest = resume?.newest ?? (marks === null ? 0 : mark);
             let cursor: string | null = resume?.cursor ?? null;
             let stoppedAt: string | null = null;
             for (let page = 0; page < SCAN_MAX_PAGES; page++) {
@@ -713,7 +783,9 @@ export class SessionListSubscriptions {
                 });
                 let reachedMark = false;
                 for (const thread of response.data) {
-                    if (mark !== null && thread.updatedAt < mark) {
+                    if (thread.updatedAt < mark) {
+                        // Without marks, the newest thread is the mark, older than the watching or not.
+                        if (marks === null) newest = Math.max(newest, thread.updatedAt);
                         reachedMark = true;
                         break;
                     }
@@ -721,7 +793,7 @@ export class SessionListSubscriptions {
                     newest = Math.max(newest, thread.updatedAt);
                 }
                 cursor = response.nextCursor;
-                if (reachedMark || mark === null || cursor === null) break;
+                if (first || reachedMark || cursor === null) break;
                 if (page === SCAN_MAX_PAGES - 1) {
                     logger.log("The session list scan goes on later from its page limit", {archived, pages: SCAN_MAX_PAGES});
                     stoppedAt = cursor;
@@ -729,12 +801,17 @@ export class SessionListSubscriptions {
             }
             return {key, mark, newest, stoppedAt, entries, resumed: resume?.changesAtStart ?? null};
         }));
+        const failed = settled.find((side): side is PromiseRejectedResult => side.status === "rejected");
+        if (failed !== undefined) throw failed.reason;
+        const sides = settled.map(side => (side as Exclude<typeof side, PromiseRejectedResult>).value);
         // The last subscription ended meanwhile and reset the marks: this scan must not set them again.
         if (generation !== this.watchGeneration) return [];
+        // The first marks are no later than the watching started: a change during the start is read by the next scan.
+        if (first) for (const side of sides) side.newest = Math.min(side.newest, this.watchingSince);
         const next = {unarchived: 0, archived: 0};
         let goOn = false;
         for (const side of sides) {
-            if (side.stoppedAt !== null && side.mark !== null) {
+            if (side.stoppedAt !== null) {
                 // The mark moves on only once the scan reached it: the rest goes on in the next scan.
                 this.resumes[side.key] = {cursor: side.stoppedAt, cutoff: side.mark, newest: side.newest, changesAtStart: side.resumed ?? changesAtStart};
                 next[side.key] = side.mark;
@@ -749,18 +826,18 @@ export class SessionListSubscriptions {
         }
         this.marks = next;
         if (goOn) this.requestScan();
-        return marks === null ? [] : sides.flatMap(side => side.entries);
+        return sides.flatMap(side => side.entries);
     }
 
     /** A thread by id, `"missing"` when Codex has none, `null` when the list does not show it or the read failed. */
-    private async readThread(reader: SessionListReader, threadId: string): Promise<ThreadEntry | "missing" | null> {
+    private async readThread(reader: SessionListReader, threadId: string): Promise<ThreadEntry | "missing" | "failed" | null> {
         let thread: Thread;
         try {
             thread = (await reader.threadRead({threadId})).thread;
         } catch (error) {
             if (isMissingThreadError(error)) return "missing";
             logger.log("Session list subscription cannot read a thread", {threadId, error: String(error)});
-            return null;
+            return "failed";
         }
         if (thread.ephemeral || !isInteractiveSource(thread)) {
             // A helper thread of the own app-server, which the list never shows: its notifications are skipped.

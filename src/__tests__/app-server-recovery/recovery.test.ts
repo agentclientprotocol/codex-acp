@@ -123,6 +123,35 @@ describe("app-server recovery", () => {
         expect((sessions[0]!._meta as any).jetbrains.air.state).toBe("idle");
     });
 
+    it("tells a subscription of the state of a listed row that the restart of the app-server changed", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture, true, {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure", "sessionIndex"]}}}});
+        const row = (status: {type: string}) => ({...resumed("thread-a").thread, preview: "hi", source: "vscode", recencyAt: null,
+            path: "/codex-home/sessions/t.jsonl", status});
+        let loaded = true;
+        fixture.answers.set("thread/list", (params) => ({
+            data: (params as {archived?: boolean, cwd?: unknown}).archived || (params as {cwd?: unknown}).cwd === undefined
+                ? [] : [row({type: loaded ? "idle" : "notLoaded"})],
+            nextCursor: null,
+        }));
+        fixture.answers.set("thread/read", () => ({thread: row({type: loaded ? "idle" : "notLoaded"})}));
+        const {subscriptionId} = await fixture.agent.sessionIndex.subscribeList({cwd: "/work"});
+        expect(((await fixture.agent.listSessions({cwd: "/work"})).sessions[0]!._meta as any).jetbrains.air.state).toBe("idle");
+
+        await fixture.kill();
+        loaded = false;
+        await fixture.agent.listSessions({cwd: "/work"});
+
+        await vi.waitFor(() => expect(fixture.acp.notify.mock.calls
+            .filter(call => (call as unknown[])[0] === "_session/list/changes")
+            .map(call => (call as unknown[])[1])).toEqual([{
+            subscriptionId,
+            sessions: [expect.objectContaining({sessionId: "thread-a"})],
+            removed: [],
+        }]));
+        fixture.agent.sessionIndex.dispose();
+    });
+
     it("starts the app-server again for a rename or an archive of the session index", async () => {
         const fixture = createRecoveryFixture();
         await initialize(fixture, true, {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure", "sessionIndex"]}}}});

@@ -72,6 +72,8 @@ export class SessionIndexService {
     /** The app-server clients whose notifications reach the session index, each once. */
     private readonly observedClients = new WeakSet<CodexAcpClient>();
     private anyClientObserved = false;
+    /** The threads whose last row had a state, as listed or sent: loaded here. */
+    private readonly rowsWithState = new Set<string>();
 
     constructor(private readonly host: SessionIndexHost, subscriptionTimings?: SessionListSubscriptionTimings) {
         this.activity = new SessionIndexActivity(threadId => host.session(threadId) !== undefined);
@@ -136,13 +138,21 @@ export class SessionIndexService {
     observe(client: CodexAcpClient): void {
         if (!this.enabled || this.observedClients.has(client)) return;
         // Another app-server: one that crashed sent no end of its turns or reviews.
-        if (this.anyClientObserved) this.subscriptions.refreshLoadedThreads(this.activity.resetLoaded());
+        if (this.anyClientObserved) {
+            this.subscriptions.refreshLoadedThreads([...this.activity.resetLoaded(), ...this.rowsWithState]);
+            this.rowsWithState.clear();
+        }
         this.anyClientObserved = true;
         this.observedClients.add(client);
         client.appServerClient.onClientTransportEvent((event) => {
             if (event.eventType !== "notification" || this.host.client() !== client) return;
             const notification = event as unknown as ServerNotification;
             this.activity.observe(notification);
+            // A thread deleted or unloaded here has no state to refresh after a restart.
+            if (notification.method === "thread/deleted" || notification.method === "thread/closed"
+                || (notification.method === "thread/status/changed" && notification.params.status.type === "notLoaded")) {
+                this.rowsWithState.delete(notification.params.threadId);
+            }
             this.subscriptions.observe(notification);
         });
     }
@@ -267,6 +277,7 @@ export class SessionIndexService {
             }
             this.activity.forget(sessionId);
             this.titles.forget(sessionId);
+            this.rowsWithState.delete(sessionId);
         });
     }
 
@@ -311,8 +322,12 @@ export class SessionIndexService {
             // `thread/list` answers no `forkedFromId`, `thread/read` does.
             const origin = this.usage.forkOrigin(entry.thread.id);
             const thread = origin === undefined ? entry.thread : {...entry.thread, forkedFromId: origin};
+            const activity = this.activity.activityOf(thread);
+            // A row with a state is of a thread loaded here: a restart of the app-server changes it.
+            if (activity?.state !== undefined) this.rowsWithState.add(thread.id);
+            else this.rowsWithState.delete(thread.id);
             return this.withActiveAdditionalDirectories(
-                sessionIndexSessionInfo(thread, entry.archived, this.activity.activityOf(thread), usage),
+                sessionIndexSessionInfo(thread, entry.archived, activity, usage),
             );
         });
     }

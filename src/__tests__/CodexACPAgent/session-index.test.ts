@@ -753,10 +753,13 @@ describe("_session/list/subscribe", () => {
             const rollout = path.join(dir, "rollout.jsonl");
             const total = {input_tokens: 100, cached_input_tokens: 60, cache_write_input_tokens: 10, output_tokens: 20, reasoning_output_tokens: 5, total_tokens: 120};
             fs.writeFileSync(rollout, `${JSON.stringify({type: "event_msg", payload: {type: "token_count", info: {total_token_usage: total, last_token_usage: total}}})}\n`);
-            const {fixture, agent, threadList} = await createAgent("sessionIndex");
+            const {fixture, agent, threadList, appServer} = await createAgent("sessionIndex");
             const listed = createThread({path: rollout, model: "gpt-5"});
             threadList.mockImplementation(async (params) => ({data: params.archived ? [] : [listed], nextCursor: null, backwardsCursor: null}));
+            vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: listed});
             const {subscriptionId} = await agent.sessionIndex.subscribeList({cwd: "/repo/project"});
+            // The list reads the usage in the background; the subscription gets the row with it.
+            await agent.listSessions({cwd: "/repo/project"});
             const usage = {inputTokens: 30, cachedReadTokens: 60, cachedWriteTokens: 10, outputTokens: 20, reasoningTokens: 5, model: "gpt-5", subagents: []};
 
             await vi.waitFor(() => expect(listChanges(fixture)).toEqual([{
@@ -778,12 +781,15 @@ describe("_session/list/subscribe", () => {
         try {
             const link = `${dir}-link`;
             fs.symlinkSync(dir, link);
-            const {agent, threadList} = await createAgent("sessionIndex");
-            threadList.mockClear();
+            vi.useFakeTimers();
+            const {fixture, agent, appServer} = await createAgent("sessionIndex");
             await agent.sessionIndex.subscribeList({cwd: link});
+            vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: createThread({cwd: dir, path: `${dir}/rollout.jsonl`})});
 
-            expect(threadList.mock.calls.map(call => call[0].cwd).filter(cwd => cwd !== undefined))
-                .toEqual([[link, dir], [link, dir]]);
+            fixture.sendServerNotification({method: "thread/name/updated", params: {threadId}} as never);
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(listChanges(fixture).flatMap(changes => changes.sessions.map((row: acp.SessionInfo) => row.cwd))).toEqual([dir]);
             agent.sessionIndex.dispose();
             fs.rmSync(link);
         } finally {

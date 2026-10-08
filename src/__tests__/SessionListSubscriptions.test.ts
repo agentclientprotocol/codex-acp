@@ -111,6 +111,7 @@ function setup(
     withLatestUsage: (row: acp.SessionInfo) => acp.SessionInfo = (row) => row,
 ): Setup {
     const sent: SessionListChanges[] = [];
+    const clockStart = Date.now();
     let listener: CodexHomeWatcherListener | null = null;
     const stops = vi.fn();
     const scopes = new Map<string, string[]>();
@@ -131,6 +132,8 @@ function setup(
             return {stop: stops};
         },
         timings,
+        // The clock of the tests starts at second 1,000 of `updatedAt`, where their threads are.
+        now: () => 1_000_000 + Date.now() - clockStart,
     });
     return {codex, subscriptions, sent, listener: () => listener!, stops, scopes};
 }
@@ -152,21 +155,27 @@ describe("SessionListSubscriptions", () => {
         vi.useRealTimers();
     });
 
-    it("reads the rows the client has when it subscribes and sends nothing while no thread changes", async () => {
+    it("reads no rows when it subscribes, sends nothing while no thread changes, and the first change in full", async () => {
         const {codex, subscriptions, sent, listener} = setup();
         codex.put(thread("a"));
         codex.put(thread("b"), true);
         codex.put(thread("other", {cwd: "/elsewhere"}));
 
         const subscriptionId = await subscriptions.subscribe("/repo");
+        // Only the marks: one small thread/list without cwd per archive state.
+        expect(codex.threadList.mock.calls.map(call => call[0])).toEqual([false, true].map(archived =>
+            expect.objectContaining({archived, limit: 20, sortKey: "updated_at"})));
         listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(sent).toEqual([]);
+
+        // The first event of a thread after subscribing sends its row, even with nothing changed in it.
+        subscriptions.observe(own("thread/status/changed", {threadId: "a", status: {type: "notLoaded"}}));
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
+        expect(sent).toEqual([{subscriptionId, sessions: [expect.objectContaining({sessionId: "a"})], removed: []}]);
         subscriptions.observe(own("thread/status/changed", {threadId: "a", status: {type: "notLoaded"}}));
         await vi.advanceTimersByTimeAsync(2_000);
-
-        expect(subscriptionId).toEqual(expect.any(String));
-        expect(codex.threadList.mock.calls.map(call => call[0]).filter(params => params.cwd !== undefined))
-            .toEqual([false, true].map(archived => expect.objectContaining({cwd: ["/repo"], archived, sortKey: "updated_at"})));
-        expect(sent).toEqual([]);
+        expect(sent).toHaveLength(1);
         subscriptions.dispose();
     });
 
@@ -219,6 +228,13 @@ describe("SessionListSubscriptions", () => {
         const {codex, subscriptions, sent, listener} = setup();
         codex.put(thread("a", {updatedAt: 1_000}));
         await subscriptions.subscribe("/repo");
+
+        // The first change after subscribing goes out in full, whatever changed.
+        codex.update("a", {updatedAt: 1_040});
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+        expect(sent).toHaveLength(1);
+        sent.length = 0;
 
         codex.update("a", {updatedAt: 1_050});
         listener().stateChanged();
@@ -339,15 +355,14 @@ describe("SessionListSubscriptions", () => {
         scopes.set("/repo-wt", ["/repo-wt", "/repo"]);
         codex.put(thread("old", {cwd: "/repo", updatedAt: 10}));
         const repo = await subscriptions.subscribe("/repo");
-        // Newer threads push "old" out of the baseline of the second subscription.
-        for (let index = 0; index < 60; index++) codex.put(thread(`new-${index}`, {cwd: "/repo-wt", updatedAt: 1_000 + index}));
         const worktree = await subscriptions.subscribe("/repo-wt");
 
+        // No group has a row of the thread yet: it is read, and both get it.
         subscriptions.usageRead([{threadId: "old", cwd: "/repo"}]);
         await vi.advanceTimersByTimeAsync(50);
         expect(codex.threadRead.mock.calls.map(call => call[0].threadId)).toEqual(["old"]);
-        expect(sent.filter(changes => changes.sessions.some(row => row.sessionId === "old")).map(changes => changes.subscriptionId))
-            .toEqual([worktree]);
+        expect(sent.filter(changes => changes.sessions.some(row => row.sessionId === "old")).map(changes => changes.subscriptionId).sort())
+            .toEqual([repo, worktree].sort());
 
         codex.threads.delete("old");
         subscriptions.observe(own("thread/deleted", {threadId: "old"}));
@@ -380,15 +395,21 @@ describe("SessionListSubscriptions", () => {
 
     it("reads past its page limit a change within the second of its mark", async () => {
         const {codex, subscriptions, sent, listener} = setup();
-        for (let index = 0; index < 1_000; index++) codex.put(thread(`same-${index}`, {updatedAt: 5_000, cwd: "/elsewhere"}));
         // Listed after the 1,000 others of its second, beyond the 920 rows of a scan.
         codex.put(thread("mine", {updatedAt: 4_999}));
         await subscriptions.subscribe("/repo");
-        codex.update("mine", {updatedAt: 5_000, name: "changed"});
+        for (let index = 0; index < 1_000; index++) codex.put(thread(`same-${index}`, {updatedAt: 5_000, cwd: "/elsewhere"}));
+        codex.threads.delete("mine");
+        codex.put(thread("mine", {updatedAt: 5_000, name: "changed"}));
         listener().stateChanged();
         await vi.advanceTimersByTimeAsync(5 * timings.maxWaitMs);
-
         expect(sent.flatMap(changes => changes.sessions.map(row => row.title))).toEqual(["changed"]);
+
+        // Changed again within the same second, which leaves the mark where it is.
+        codex.update("mine", {model: "gpt-6"});
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(5 * timings.maxWaitMs);
+        expect(sent.flatMap(changes => changes.sessions.map(row => row.title))).toEqual(["changed", "changed"]);
         subscriptions.dispose();
     });
 
@@ -397,6 +418,10 @@ describe("SessionListSubscriptions", () => {
         codex.put(thread("loaded", {status: {type: "active", activeFlags: []}}));
         codex.put(thread("foreign"));
         await subscriptions.subscribe("/repo");
+        subscriptions.observe(own("turn/started", {threadId: "loaded", turn: {}}));
+        await vi.advanceTimersByTimeAsync(timings.minChangeIntervalMs);
+        sent.length = 0;
+        codex.threadRead.mockClear();
         // The replacement has not loaded the thread.
         codex.update("loaded", {status: {type: "notLoaded"}});
 
@@ -424,8 +449,186 @@ describe("SessionListSubscriptions", () => {
         subscriptions.observe(own("turn/started", {threadId: "a", turn: {}}));
         await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
 
+        // Only the row read from the new app-server goes out, without the state of the old one.
         expect(codex.threadRead).toHaveBeenCalledTimes(2);
-        expect(sent.flatMap(changes => changes.sessions.map(row => (row._meta as any).jetbrains.air.state ?? null))).toEqual([]);
+        expect(sent.flatMap(changes => changes.sessions.map(row => (row._meta as any).jetbrains.air.state ?? null))).toEqual([null]);
+        subscriptions.dispose();
+    });
+
+    it("sends the first change that a notification names, also when a scan reads the thread in the same flush", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        codex.put(thread("a", {updatedAt: 1_000}));
+        await subscriptions.subscribe("/repo");
+        codex.update("a", {name: "renamed"});
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.quietMs - 10);
+        // Due after the scan: both go in one flush.
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
+
+        expect(sent.flatMap(changes => changes.sessions.map(row => row.title))).toContain("renamed");
+        subscriptions.dispose();
+    });
+
+    it("tries a failed scan again only after both of its reads settled, a second later", async () => {
+        const {codex, subscriptions, listener} = setup();
+        await subscriptions.subscribe("/repo");
+        const list = codex.threadList.getMockImplementation()!;
+        let release: () => void = () => {};
+        codex.threadList.mockImplementation(async (params) => {
+            if (params.archived) {
+                await new Promise<void>(resolve => {
+                    release = resolve;
+                });
+                return await list(params);
+            }
+            throw new Error("busy");
+        });
+        const before = codex.scans().length;
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(3_000);
+        expect(codex.scans().length - before).toBe(2);
+
+        codex.threadList.mockImplementation(list);
+        release();
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(codex.scans().length - before).toBe(4);
+        subscriptions.dispose();
+    });
+
+    it("reads the threads changed since subscribing when the first marks could not be read", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        codex.put(thread("old", {updatedAt: 100}));
+        codex.threadList.mockRejectedValueOnce(new Error("busy")).mockRejectedValueOnce(new Error("busy"));
+        await subscriptions.subscribe("/repo");
+
+        // A thread updated before subscribing, which the scans read as their mark, is no change.
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+        expect(sent).toEqual([]);
+
+        codex.put(thread("new", {updatedAt: Math.floor(Date.now() / 1000) + 5}));
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+        expect(sent.flatMap(changes => ids(changes.sessions))).toEqual(["new"]);
+        subscriptions.dispose();
+    });
+
+    it("reads one page per archive state for its first marks, however many threads are new", async () => {
+        const {codex, subscriptions} = setup();
+        const now = Math.floor(Date.now() / 1000);
+        for (let index = 0; index < 1_000; index++) codex.put(thread(`t-${index}`, {updatedAt: now, cwd: "/elsewhere"}));
+
+        await subscriptions.subscribe("/repo");
+
+        expect(codex.threadList).toHaveBeenCalledTimes(2);
+        subscriptions.dispose();
+    });
+
+    it("counts a thread updated before a subscription started as unchanged for it, whatever the marks", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        codex.put(thread("a", {updatedAt: 1_000}));
+        const first = await subscriptions.subscribe("/repo");
+        await vi.advanceTimersByTimeAsync(200_000);
+        // Changed by another process before the second subscription, with no scan in between.
+        codex.update("a", {updatedAt: 1_100, name: "changed"});
+        const second = await subscriptions.subscribe("/repo");
+
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+
+        expect(sent.map(changes => changes.subscriptionId)).toEqual([first]);
+        void second;
+        subscriptions.dispose();
+    });
+
+    it("sends a change that another process made while the first marks were read", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        codex.put(thread("b", {updatedAt: 1_000, cwd: "/elsewhere"}));
+        const list = codex.threadList.getMockImplementation()!;
+        codex.threadList.mockImplementationOnce(async (params) => {
+            // Two threads change while the first marks are read.
+            codex.put(thread("a", {updatedAt: 1_001}));
+            codex.update("b", {updatedAt: 1_002});
+            return await list(params);
+        });
+        await subscriptions.subscribe("/repo");
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+
+        expect(sent.flatMap(changes => ids(changes.sessions))).toEqual(["a"]);
+        subscriptions.dispose();
+    });
+
+    it("keeps a thread that only a scan found from a later subscription when the second held it back", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        codex.put(thread("a", {updatedAt: 1_000}));
+        const first = await subscriptions.subscribe("/repo");
+        await vi.advanceTimersByTimeAsync(100_000);
+        codex.update("a", {updatedAt: 1_050, name: "one"});
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs - 200);
+        // Changed again, then the second subscription starts, then a scan within the second of the first send.
+        codex.update("a", {updatedAt: 1_060, name: "two"});
+        const second = await subscriptions.subscribe("/repo");
+        await vi.advanceTimersByTimeAsync(100);
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(3 * timings.maxWaitMs);
+
+        expect(sent.map(changes => [changes.subscriptionId, changes.sessions[0]!.title])).toEqual([[first, "one"], [first, "two"]]);
+        void second;
+        subscriptions.dispose();
+    });
+
+    it("sends an archive by another process to a later subscription while a scan retry of the thread waits", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        codex.put(thread("a", {updatedAt: 1_000}));
+        const first = await subscriptions.subscribe("/repo");
+        await vi.advanceTimersByTimeAsync(100_000);
+        codex.update("a", {updatedAt: 1_050, name: "one"});
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs - 200);
+        codex.update("a", {updatedAt: 1_060, name: "two"});
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.quietMs);
+        // The scan found "two" within the second of "one": its retry waits. Then a new subscription, then an archive.
+        const second = await subscriptions.subscribe("/repo");
+        codex.update("a", {}, true);
+        listener().archiveMoved("a");
+        await vi.advanceTimersByTimeAsync(3 * timings.maxWaitMs);
+
+        expect(sent.filter(changes => changes.subscriptionId === second).flatMap(changes => changes.sessions)
+            .map(row => (row._meta as any).jetbrains.air.archived)).toEqual([true]);
+        void first;
+        subscriptions.dispose();
+    });
+
+    it("keeps a notification named while a scan read as a change of its own when the second holds the thread back", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        codex.put(thread("a", {updatedAt: 1_000}));
+        await subscriptions.subscribe("/repo");
+        await vi.advanceTimersByTimeAsync(100_000);
+        codex.update("a", {updatedAt: 1_050, name: "one"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
+        const second = await subscriptions.subscribe("/repo");
+        const list = codex.threadList.getMockImplementation()!;
+        codex.threadList.mockImplementation(async (params) => {
+            const response = await list(params);
+            // A notification while the scan reads.
+            if (!params.archived) {
+                codex.update("a", {status: {type: "active", activeFlags: ["waitingOnApproval"]}});
+                subscriptions.observe(own("thread/status/changed", {threadId: "a", status: {type: "active", activeFlags: ["waitingOnApproval"]}}));
+            }
+            return response;
+        });
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(3 * timings.maxWaitMs);
+
+        expect(sent.filter(changes => changes.subscriptionId === second).flatMap(changes => changes.sessions)
+            .map(row => (row._meta as any).jetbrains.air.state)).toEqual(["requires_action"]);
         subscriptions.dispose();
     });
 
@@ -487,7 +690,7 @@ describe("SessionListSubscriptions", () => {
         const first = await subscriptions.subscribe("/repo");
         const second = await subscriptions.subscribe("/repo/");
         expect(first).not.toBe(second);
-        expect(codex.threadList.mock.calls.filter(call => call[0].cwd !== undefined)).toHaveLength(2);
+        expect(codex.threadList.mock.calls.filter(call => call[0].cwd !== undefined)).toHaveLength(0);
         expect(subscriptions.resources()).toMatchObject({subscriptions: 2, groups: 1, watching: true});
         codex.threadList.mockClear();
 
@@ -640,10 +843,10 @@ describe("SessionListSubscriptions", () => {
         const held: Array<() => void> = [];
         const releaseMarks = () => held.forEach(release => release());
         const list = codex.threadList.getMockImplementation()!;
-        // The baseline reads the rows of its time, and answers late.
+        // The first marks come late.
         codex.threadList.mockImplementation(async (params) => {
             const rows = await list(params);
-            if (params.cwd !== undefined) await new Promise<void>(resolve => held.push(resolve));
+            if (params.cwd === undefined) await new Promise<void>(resolve => held.push(resolve));
             return rows;
         });
         let answered = false;
@@ -675,7 +878,7 @@ describe("SessionListSubscriptions", () => {
         const list = codex.threadList.getMockImplementation()!;
         codex.threadList.mockImplementation(async (params) => {
             const rows = await list(params);
-            if (params.cwd !== undefined) await new Promise<void>(resolve => held.push(resolve));
+            if (params.cwd === undefined) await new Promise<void>(resolve => held.push(resolve));
             return rows;
         });
         const subscribing = subscriptions.subscribe("/repo");
@@ -865,9 +1068,9 @@ describe("SessionListSubscriptions with a CODEX_HOME on disk", () => {
         const log = path.join(home, SESSION_NAME_LOG_FILE);
         fs.writeFileSync(log, `${JSON.stringify({id: "a", thread_name: "before", updated_at: "x"})}\n`);
         const {codex, subscriptions, sent, listener} = setup(home);
-        codex.put(thread("a", {name: "before"}));
+        codex.put(thread("a", {name: "before", updatedAt: 500}));
         // Newer than "a": a scan does not reach "a", whose updatedAt a rename does not move.
-        codex.put(thread("newer", {updatedAt: 5_000}));
+        codex.put(thread("newer", {updatedAt: 900}));
         await subscriptions.subscribe("/repo");
 
         codex.update("a", {name: "renamed elsewhere"});
@@ -876,6 +1079,23 @@ describe("SessionListSubscriptions with a CODEX_HOME on disk", () => {
         await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
 
         expect(codex.threadRead.mock.calls.map(call => call[0].threadId)).toEqual(["a"]);
+        expect(sent.flatMap(changes => changes.sessions.map(row => row.title))).toEqual(["renamed elsewhere"]);
+        subscriptions.dispose();
+    });
+
+    it("reads the renames of the name log also when the scan of the flush fails", async () => {
+        const log = path.join(home, SESSION_NAME_LOG_FILE);
+        fs.writeFileSync(log, "");
+        const {codex, subscriptions, sent, listener} = setup(home);
+        codex.put(thread("a", {name: "before"}));
+        await subscriptions.subscribe("/repo");
+        codex.threadList.mockRejectedValueOnce(new Error("app-server busy"));
+
+        codex.update("a", {name: "renamed elsewhere"});
+        fs.appendFileSync(log, `${JSON.stringify({id: "a", thread_name: "renamed elsewhere", updated_at: "x"})}\n`);
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+
         expect(sent.flatMap(changes => changes.sessions.map(row => row.title))).toEqual(["renamed elsewhere"]);
         subscriptions.dispose();
     });

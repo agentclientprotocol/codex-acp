@@ -1123,8 +1123,9 @@ A thread that is not loaded here has no `state`. A change of `state` is a row ch
 - The adapter reads usage in the background, so a list never waits for it. A row carries the usage read for its
   thread; the first list of a thread has none, and a thread that changed keeps the usage of the last read until
   the new one is done. When the usage of a thread of its scope is read, a subscription gets the row again, see
-  [Session list subscription](#session-list-subscription): the agent puts the usage into the row it has, or reads
-  the thread anew with `thread/read` when it has none, as for a thread from a later list page. A thread whose `updatedAt` and rollout did not change is
+  [Session list subscription](#session-list-subscription): the agent puts the usage into the row it sent, or reads
+  the thread anew with `thread/read` when it sent none yet, so the rows that a client lists after subscribing get
+  their usage pushed once it is read. A thread whose `updatedAt` and rollout did not change is
   not read again, and a rollout is read again only when its size or time changed. A thread read within 2 s of its
   `updatedAt` is read once more after that, since `updatedAt` has whole seconds.
 - The usage of a subagent is read again when its parent thread changes: a subagent that works while its parent
@@ -1196,10 +1197,12 @@ still re-reads the list now and then, and a lost change shows up there.
   deleted thread whose cwd the agent does not know is listed to every subscription; a client ignores an id it does
   not have. Both arrays are always present, and one
   of them is not empty.
-- When the client subscribes, the agent takes it to have the current rows of the 50 most recently updated
-  unarchived threads of the scope, of the 50 most recently updated archived ones, and of every other thread of the scope whose row the agent computed for a
-  subscription of the same cwd before. The first change of any other thread sends its row even when only
-  `updatedAt` moved.
+- Subscribing reads no rows: the agent only notes the newest `updatedAt` of the threads, with one small
+  `thread/list` per archive state for the first subscription of the connection. After subscribing, the first
+  change of each session is sent in full even if only `updatedAt` changed; later changes of it are compared with
+  the row sent last. A thread whose `updatedAt` is no later than when the subscription started counts as
+  unchanged for a scan, so its first change after subscribing within that same second can show only with its
+  next change.
 - A change never goes out before the answer to `_session/list/subscribe`: the changes of that time follow it.
 - A thread is sent at most once a second; a later change of it waits and goes out with its row of that time. One
   delivery sends one notification per subscription, with all its rows.
