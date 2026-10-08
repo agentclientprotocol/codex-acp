@@ -20,6 +20,8 @@ import time
 import traceback
 
 
+PATCH = "*** Begin Patch\n*** Update File: changed.txt\n@@\n-old line\n+native edited line\n*** End Patch\n"
+CALL_ID = "native-e2e-apply-patch"
 TIMEOUT = 35
 FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -67,6 +69,7 @@ class Model:
         self.pending = queue.Queue()
         self.seen, self.release = threading.Event(), threading.Event()
         self.lock = threading.Lock()
+        self.tool_route = None
         owner = self
 
         class Deny(http.server.BaseHTTPRequestHandler):
@@ -114,15 +117,40 @@ class Model:
                         owner.seen.set()
                         require(owner.release.wait(TIMEOUT), "Held request was not released")
                     events = [{"type": "response.created", "response": {"id": f"resp-{number}"}}]
-                    answer = '{"title":"Local native fixture"}' if title else f"LOCAL_ANSWER_{number}"
-                    if not title:
-                        owner.expected_answers.append(answer)
-                        if owner.wrong_reply and not owner.injected:
-                            answer = "INJECTED_WRONG_REPLY"
-                            owner.injected = True
-                    events.append({"type": "response.output_item.done", "item": {
-                        "type": "message", "role": "assistant", "id": f"msg-{number}",
-                        "content": [{"type": "output_text", "text": answer}]}})
+                    if action == "patch":
+                        found = []
+
+                        def inspect(tools, namespace=None):
+                            for tool in tools:
+                                if tool.get("type") == "namespace":
+                                    inspect(tool.get("tools", []), tool.get("name"))
+                                elif tool.get("name") == "apply_patch":
+                                    found.append((tool, namespace))
+
+                        inspect(body.get("tools", []))
+                        require(len(found) == 1 and found[0][0].get("type") == "custom",
+                                "Native must advertise one custom apply_patch tool")
+                        tool, namespace = found[0]
+                        owner.tool_route = {"name": tool["name"], "type": tool["type"], "namespace": namespace}
+                        item = {"type": "custom_tool_call", "id": "fc-" + CALL_ID, "call_id": CALL_ID,
+                                "name": "apply_patch", "input": PATCH}
+                        if namespace:
+                            item["namespace"] = namespace
+                        events.extend([
+                            {"type": "response.output_item.added", "item": {**item, "input": "", "status": "in_progress"}},
+                            {"type": "response.custom_tool_call_input.delta", "item_id": item["id"], "call_id": CALL_ID, "delta": PATCH},
+                            {"type": "response.output_item.done", "item": item},
+                        ])
+                    else:
+                        answer = '{"title":"Local native fixture"}' if title else f"LOCAL_ANSWER_{number}"
+                        if not title:
+                            owner.expected_answers.append(answer)
+                            if owner.wrong_reply and not owner.injected:
+                                answer = "INJECTED_WRONG_REPLY"
+                                owner.injected = True
+                        events.append({"type": "response.output_item.done", "item": {
+                            "type": "message", "role": "assistant", "id": f"msg-{number}",
+                            "content": [{"type": "output_text", "text": answer}]}})
                     events.append({"type": "response.completed", "response": {
                         "id": f"resp-{number}", "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}}})
                     data = "".join("data: " + json.dumps(event) + "\n\n" for event in events).encode()
@@ -177,7 +205,7 @@ class Rpc:
         self.init = self.call("initialize", {
             "protocolVersion": 1, "clientInfo": {"name": "isolated-native-e2e", "version": "1"},
             "clientCapabilities": {"_meta": {"jetbrains": {"air": {
-                "version": 1, "capabilities": []}}}}})
+                "version": 1, "capabilities": [] if probe.meta["mode"] == "rewind-only" else ["diffPatch"]}}}}})
 
     def reader(self):
         try:
@@ -238,8 +266,8 @@ class Rpc:
     def new(self):
         return self.call("session/new", {"cwd": str(self.probe.work), "mcpServers": []})["sessionId"]
 
-    def prompt(self, sid, text):
-        self.probe.model.arm("answer")
+    def prompt(self, sid, text, patch=False):
+        self.probe.model.arm(*(["patch", "answer"] if patch else ["answer"]))
         result = self.call("session/prompt", {"sessionId": sid, "prompt": [{"type": "text", "text": text}]})
         require(result.get("stopReason") == "end_turn", result)
         self.probe.model.check()
@@ -324,6 +352,7 @@ class Probe:
         self.env = dict(os.environ)  # Launcher already replaced, not merged, the user's environment.
         # Narrow runtime PATH to required programs and OS utilities.
         self.git = shutil.which("git")
+        require(self.git or self.meta["mode"] == "rewind-only", "Git is required for file revert")
         paths = [str(Path(self.meta["node"]).parent)]
         if self.git:
             paths.append(str(Path(self.git).parent))
@@ -336,7 +365,8 @@ class Probe:
         provider = {"name": "Native E2E loopback", "base_url": f"http://127.0.0.1:{self.model.server.server_port}/v1",
                     "wire_api": "responses", "requires_openai_auth": False,
                     "request_max_retries": 0, "stream_max_retries": 0}
-        # Select installed model metadata; all responses come from loopback.
+        # This installed model profile advertises the freeform native apply_patch.
+        # The profile name selects tool metadata only; no real model is contacted.
         config = {"model": "gpt-5.5", "model_provider": "mock", "model_providers": {"mock": provider},
                   "approval_policy": "never", "sandbox_mode": "danger-full-access",
                   "features": {"shell_snapshot": False, "remote_models": False, "plugins": False, "code_mode": False}}
@@ -475,11 +505,102 @@ class Probe:
         self.context(["AFTER_EXPLICIT_CANCEL"])
         self.step("explicit_cancel_and_same_session_continue")
 
+    def git_command(self, *args):
+        result = subprocess.run([self.git, *args], cwd=self.work, env=self.env,
+                                capture_output=True, timeout=30, creationflags=FLAGS)
+        require(result.returncode == 0, result.stderr.decode("utf8", errors="replace"))
+        return result.stdout
+
+    def files(self):
+        return {name: sha(self.work / name) for name in ("changed.txt", "user.txt", "untracked.txt", ".git/index")}
+
+    def file_revert(self):
+        self.git_command("init", "-q")
+        self.git_command("config", "core.autocrlf", "false")
+        (self.work / "changed.txt").write_bytes(b"old line\n")
+        (self.work / "user.txt").write_bytes(b"tracked original\n")
+        self.git_command("add", "--", "changed.txt", "user.txt")
+        self.git_command("-c", "user.name=Native E2E", "-c", "user.email=fixture@invalid",
+                         "-c", "commit.gpgsign=false", "commit", "-qm", "isolated fixture")
+        (self.work / "user.txt").write_bytes(b"unrelated staged user content\n")
+        self.git_command("add", "--", "user.txt")
+        (self.work / "user.txt").write_bytes(b"unrelated unstaged user content\n")
+        (self.work / "untracked.txt").write_bytes(b"unrelated untracked user content\n")
+        initial = self.files()
+        c = self.rpc
+        capability = c.init.get("_meta", {}).get("fileRevert", {})
+        require(capability.get("method") == "_session/files/revert" and capability.get("previewTokenRequired"), capability)
+        sid = c.new()
+        start = len(self.model.requests)
+        c.prompt(sid, "APPLY_SYNTHETIC_PATCH", patch=True)
+        require(len(self.model.requests) == start + 2, "Patch must issue tool call then consume native result")
+        require((self.work / "changed.txt").read_bytes() == b"native edited line\n", "Native patch did not edit bytes")
+        outputs = [item for item in self.model.requests[-1]["body"].get("input", [])
+                   if item.get("type") == "custom_tool_call_output" and item.get("call_id") == CALL_ID]
+        require(outputs, "Native apply_patch output did not reach model")
+        save(self.run / "native-tool-output.json", outputs)
+        live = [entry["message"]["params"]["update"] for entry in c.trace
+                if entry["direction"] == "in" and entry["message"].get("method") == "session/update"
+                and entry["message"]["params"]["sessionId"] == sid]
+
+        def verify_patch_events(updates):
+            edits = [value for value in updates if value.get("toolCallId") == CALL_ID]
+            require(any(value.get("kind") == "edit" for value in edits), edits)
+            require(any(value.get("status") == "completed" for value in edits), edits)
+            require("changed.txt" in json.dumps(edits), edits)
+            return edits
+
+        live = verify_patch_events(live)
+        c = self.restart()
+        replay = verify_patch_events(c.load(sid))
+        save(self.run / "file-change-events.json", {"live": live, "coldReplay": replay})
+        self.step("real_apply_patch_bytes_native_output_and_cold_file_change_replay", sessionId=sid,
+                  toolRoute=self.model.tool_route, hashes=self.files())
+        request = {"sessionId": sid, "toolCallId": CALL_ID, "dryRun": True}
+        count = len(self.model.requests)
+        before = self.files()
+        preview = c.call("_session/files/revert", request)
+        require(preview.get("canRevert") and not preview.get("reverted") and preview.get("previewToken"), preview)
+        require(self.files() == before, "Preview mutated files/index")
+        missing = c.raw("_session/files/revert", {**request, "dryRun": False})
+        require("error" in missing and self.files() == before, missing)
+        wrong = c.call("_session/files/revert", {**request, "dryRun": False, "previewToken": "sha256:" + "0" * 64})
+        require(wrong.get("reason") == "stale_preview" and not wrong.get("reverted") and self.files() == before, wrong)
+        unknown = c.call("_session/files/revert", {**request, "toolCallId": "unknown-tool"})
+        require(unknown.get("reason") == "completed_patch_not_found" and self.files() == before, unknown)
+        self.step("preview_is_read_only_and_missing_wrong_tokens_and_unknown_tool_refused", preview=preview)
+        # A deliberate same-line conflict is deterministic on both Git platforms.
+        # Restore only these fixture-owned bytes after verifying refusal.
+        (self.work / "changed.txt").write_bytes(b"synthetic conflicting external edit\n")
+        conflict_before = self.files()
+        stale = c.call("_session/files/revert", {**request, "dryRun": False, "previewToken": preview["previewToken"]})
+        require(stale.get("reason") == "stale_preview" and not stale.get("reverted"), stale)
+        conflict = c.call("_session/files/revert", request)
+        require(conflict.get("reason") == "patch_conflict" and not conflict.get("canRevert") and not conflict.get("reverted"), conflict)
+        require(self.files() == conflict_before, "Conflict/stale token mutated files/index")
+        self.step("external_edit_invalidates_token_and_conflict_is_non_mutating", stale=stale, conflict=conflict)
+        (self.work / "changed.txt").write_bytes(b"native edited line\n")
+        before = self.files()
+        fresh = c.call("_session/files/revert", request)
+        require(fresh.get("canRevert") and fresh.get("previewToken") and self.files() == before, fresh)
+        restored = c.call("_session/files/revert", {**request, "dryRun": False, "previewToken": fresh["previewToken"]})
+        require(restored.get("canRevert") and restored.get("reverted"), restored)
+        require(self.files() == initial, "Restore must recover changed.txt while preserving unrelated files/index bytes")
+        require(len(self.model.requests) == count, "File preview/revert called the model")
+        require([u["text"] for u in points(c.load(sid))] == ["APPLY_SYNTHETIC_PATCH"], "File revert changed conversation")
+        self.step("fresh_token_reverts_only_native_patch_preserving_index_and_independent_files", hashes=self.files())
+        c.prompt(sid, "AFTER_FILE_RESTORE")
+        self.context(["APPLY_SYNTHETIC_PATCH", "AFTER_FILE_RESTORE"])
+        require(self.files() == initial, "Continuing changed independent files/index")
+        self.step("file_restore_same_session_continues_with_conversation_intact")
+
     def run_all(self):
         report = {"success": False, "build": self.meta, "steps": self.steps}
         try:
             self.verify_build()
             self.history()
+            if self.meta["mode"] != "rewind-only":
+                self.file_revert()
             self.rpc.stop()
             self.verify_build()
             self.model.check()
@@ -493,7 +614,7 @@ class Probe:
             if os.name == "nt":
                 require(all(entry.get("windowsHide") is True for entry in spawns), "Runtime spawn missing windowsHide: inspect spawns.jsonl")
             require(not any(entry.get("shell") for entry in native), "Direct native executable must not use a shell")
-            self.step("native_identity_windowsHide_and_clean_process_shutdown", clients=len(self.clients), spawnCount=len(spawns))
+            self.step("runtime_native_identity_windowsHide_and_clean_process_shutdown", clients=len(self.clients), spawnCount=len(spawns))
             report["success"] = True
         except Exception as error:
             report["error"] = {"type": type(error).__name__, "message": str(error)}
@@ -531,5 +652,5 @@ class Probe:
 
 
 if __name__ == "__main__":
-    require(len(sys.argv) == 2, "Use npm run test:native:rewind (a fresh build manifest is required)")
+    require(len(sys.argv) == 2, "Use npm run test:native (a fresh build manifest is required)")
     raise SystemExit(Probe(Path(sys.argv[1])).run_all())

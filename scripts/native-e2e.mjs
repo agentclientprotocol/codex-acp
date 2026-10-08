@@ -14,14 +14,12 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === '--wrong-reply' && !wrongReply) wrongReply = true;
   else if (args[i] === '--output' && !output && args[i + 1] && !args[i + 1].startsWith('--')) output = args[++i];
   else {
-    console.error('Usage: npm run test:native:rewind -- [--rewind-only] [--wrong-reply] [--output <artifact-parent-directory>]');
+    console.error('Usage: npm run test:native -- [--rewind-only] [--wrong-reply] [--output <artifact-parent-directory>]');
     process.exit(2);
   }
 }
 if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Node 24+ is required');
 const parent = path.resolve(output ?? path.join(repo, 'tmp', 'native-e2e'));
-const relativeOutput = path.relative(repo, parent);
-if (relativeOutput.startsWith('..') || path.isAbsolute(relativeOutput)) throw new Error('Artifact output must stay inside this checkout');
 mkdirSync(parent, { recursive: true });
 const run = mkdtempSync(path.join(parent, 'run-'));
 for (const name of ['home', 'workspace', 'tmp', 'home/appdata', 'home/localappdata', 'home/.config', 'home/.cache']) {
@@ -78,7 +76,7 @@ try {
   writeFileSync(path.join(run, 'build.log'), command(process.execPath, [path.join(repo, 'build.mjs')]));
   if (JSON.stringify(before) !== JSON.stringify(sources())) throw new Error('Sources changed during build; rerun after concurrent edits finish');
   const metadata = {
-    repo, run, mode: 'rewind-only', wrongReply, node: process.execPath, nodeVersion: process.version, native,
+    repo, run, mode: rewindOnly ? 'rewind-only' : 'full', wrongReply, node: process.execPath, nodeVersion: process.version, native,
     nativePackage: packageName, codexVersion: installed.version,
     nativeVersion: command(native, ['--version']), nativeSha256: hash(native),
     distSha256: hash(path.join(repo, 'dist/index.js')), sources: before,

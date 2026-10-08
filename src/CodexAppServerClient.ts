@@ -1,3 +1,7 @@
+import type {SessionQueueAction, SessionQueueNative} from "./SessionQueue";
+import type {NativeThreadSearchParams, NativeThreadSearchResponse} from "./SessionDiscovery";
+import type {ThreadAttachmentListParams, ThreadAttachmentListResponse, ThreadAttachmentAddParams, ThreadAttachmentAddResponse, ThreadAttachmentRemoveParams, ThreadAttachmentRemoveResponse} from "./app-server/v2";
+import type {ThreadUnarchiveParams, ThreadUnarchiveResponse, PluginInstalledParams, PluginInstalledResponse, PluginReconcileParams, PluginReconcileResponse} from "./app-server/v2";
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
 import {McpStartupTracker} from "./mcp/McpStartupTracker";
@@ -729,6 +733,49 @@ export class CodexAppServerClient {
             }
             yield page;
         }
+    }
+
+    /** Invalid parameters only: proves method registration without a valid mutation target. */
+    async probeQueueAction(action: SessionQueueAction): Promise<boolean> {
+        try { await this.connection.sendRequest(`thread/queue/${action}`, {}); return false; }
+        catch (error) {
+            return typeof error === "object" && error !== null && "code" in error && error.code === -32600
+                && "message" in error && error.message === "Invalid request: missing field `threadId`";
+        }
+    }
+
+    queueNative(): SessionQueueNative {
+        return {
+            list: params => this.connection.sendRequest("thread/queue/list", params),
+            add: params => this.connection.sendRequest("thread/queue/add", params),
+            update: params => this.connection.sendRequest("thread/queue/update", params),
+            delete: params => this.connection.sendRequest("thread/queue/delete", params),
+            reorder: params => this.connection.sendRequest("thread/queue/reorder", params),
+            start: params => this.connection.sendRequest("thread/queue/start", params),
+        };
+    }
+
+    async threadSearch(params: NativeThreadSearchParams): Promise<NativeThreadSearchResponse> {
+        return this.connection.sendRequest<NativeThreadSearchResponse>("thread/search", {...params, sourceKinds: ["appServer", "cli", "vscode"]});
+    }
+    async threadAttachmentList(params: ThreadAttachmentListParams): Promise<ThreadAttachmentListResponse> {
+        return this.sendRequest({method: "thread/attachment/list", params});
+    }
+    async threadAttachmentAdd(params: ThreadAttachmentAddParams): Promise<ThreadAttachmentAddResponse> {
+        return this.sendRequest({method: "thread/attachment/add", params});
+    }
+    async threadAttachmentRemove(params: ThreadAttachmentRemoveParams): Promise<ThreadAttachmentRemoveResponse> {
+        return this.sendRequest({method: "thread/attachment/remove", params});
+    }
+
+    async threadUnarchive(params: ThreadUnarchiveParams): Promise<ThreadUnarchiveResponse> {
+        return this.sendRequest({method: "thread/unarchive", params});
+    }
+    async pluginInstalled(params: PluginInstalledParams): Promise<PluginInstalledResponse> {
+        return this.sendRequest({method: "plugin/installed", params});
+    }
+    async pluginReconcile(params: PluginReconcileParams): Promise<PluginReconcileResponse> {
+        return this.sendRequest({method: "plugin/reconcile", params});
     }
 
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {

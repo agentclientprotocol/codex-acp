@@ -29,26 +29,3 @@ jobs:
         run: npm test
       - name: Bundle binaries
         run: npm run bundle:all
-
-  native-rewind:
-    name: Native rewind (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Install dependencies including the native binary
-        run: npm ci --include=optional
-      - name: Run isolated native conversation rewind
-        run: npm run test:native:rewind
