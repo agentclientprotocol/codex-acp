@@ -145,7 +145,9 @@ The `initialize` response carries the agent side of the extension only when the 
 
 The agent list does not depend on the client capability list, except for `sessionIndex`.
 The agent lists `sessionIndex` only when the client declared it, because AIR builds without it use
-`session/list` and `session/delete` the old way.
+`session/list` and `session/delete` the old way. Exactly then it also lists `sessionArchive` and `sessionRename`,
+which name requests of the session index; the client does not declare those two, and declaring them without
+`sessionIndex` enables nothing.
 An extension is active only when the client declared its capability.
 A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initialize` response.
 
@@ -163,6 +165,13 @@ A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initi
 | `nativeSubagentSessions` | Reports a Codex subagent as a native ACP child session. | [Native subagent sessions](#native-subagent-sessions) |
 | `codexHooks` | Lets AIR review and trust startup hooks before it opens a session. | [Hook trust](#hook-trust) |
 | `sessionIndex` | Serves `session/list` as the session index of AIR, adds rename and archive requests, and sends `_session/list_changed`, as the ACP session list extensions RFD and RFD #2161 describe. | [Session index](#session-index) |
+
+Two agent capabilities come with `sessionIndex` and are listed exactly when it is. The client does not declare them:
+
+| Agent capability | What it tells the client | Section |
+| --- | --- | --- |
+| `sessionArchive` | The agent serves `_session/archive` and `_session/unarchive`. | [Requests](#requests) |
+| `sessionRename` | The agent serves `_session/rename`. | [Requests](#requests) |
 
 The goal extension has no client capability.
 The agent advertises the `goal` object, and the client uses the control method when it wants to.
@@ -983,7 +992,8 @@ This section covers only the AIR bridge.
 ## Session index
 
 AIR uses `session/list` as its index of Codex threads when it declares `sessionIndex`.
-Everything in this section applies only to such a client.
+Everything in this section applies only to such a client. The `initialize` answer to it lists `sessionIndex`,
+`sessionArchive` and `sessionRename` in `_meta.jetbrains.air.capabilities`.
 Another client, AIR included, keeps the old `session/list`, `session/delete` and `initialize` answers.
 
 The extension follows two ACP RFDs field for field: the session list extensions RFD (`limit`, order, row fields,
@@ -1119,7 +1129,9 @@ The names and the semantics are the RFDs'. The transport differs:
 
 | Extension | RFD |
 | --- | --- |
-| capability `sessionIndex` in `_meta.jetbrains.air.capabilities` | `sessionCapabilities.list.limit`, `list.changes`, `sessionCapabilities.archive`; client `session.listChanged` |
+| capability `sessionIndex` in `_meta.jetbrains.air.capabilities` | `sessionCapabilities.list.limit`, `list.changes`; client `session.listChanged` |
+| agent capability `sessionArchive` | agent capability `archive` (#2161): `sessionCapabilities.archive`, `capabilities.session.archive` in v2 |
+| agent capability `sessionRename` | the rename capability of RFD #1987, which it spells `sessionCapabilities.setTitle` |
 | `_meta.jetbrains.air.list.limit` | `session/list` `limit` |
 | `_meta.jetbrains.air.list.includeWorktrees` | `session/list` `includeWorktrees` |
 | `_meta.jetbrains.air.list.archived`: `"unarchived"`, `"archived"` or `"all"` | `session/list` `archived` (#2161) |
@@ -1130,11 +1142,12 @@ The names and the semantics are the RFDs'. The transport differs:
 | `session_info_update._meta.jetbrains.air.archived` | `SessionInfoUpdate.archived` (#2161) |
 | `_session/archive`, `_session/unarchive` | `session/archive`, `session/unarchive` (#2161) |
 | `_session/list_changed {cwd}` | `session/list_changed {cwd}` |
-| `_session/rename` | client-set titles, RFD #1987 |
+| `_session/rename` | `session/set_title`, client-set titles (#1987) |
 
 Remaining differences:
 
-- One capability string gates everything, for the client and the agent.
+- One client capability string, `sessionIndex`, gates everything. The agent lists `sessionArchive` and
+  `sessionRename` with it, never alone.
 - An AIR client without `sessionIndex` deletes as "Done", so the adapter keeps archiving on its `session/delete`.
   #2161 forbids that substitution for clients of the RFD; here it only keeps old AIR builds from losing threads.
 - `archived` of the list is a string with three values; #2161 has a boolean. `"unarchived"` is #2161's `false`

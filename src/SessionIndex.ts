@@ -18,6 +18,10 @@ import {normalizeSessionTitle} from "./SessionTitle";
 import {logger} from "./Logger";
 
 export const AIR_SESSION_INDEX_KEY = "sessionIndex";
+/** Agent capability: `_session/archive` and `_session/unarchive`. Advertised exactly with `sessionIndex`. */
+export const AIR_SESSION_ARCHIVE_KEY = "sessionArchive";
+/** Agent capability: `_session/rename`. Advertised exactly with `sessionIndex`. */
+export const AIR_SESSION_RENAME_KEY = "sessionRename";
 export const SESSION_RENAME_METHOD = "_session/rename";
 export const SESSION_ARCHIVE_METHOD = "_session/archive";
 export const SESSION_UNARCHIVE_METHOD = "_session/unarchive";

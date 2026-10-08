@@ -8,7 +8,9 @@
     "recommendedValue",
     "rawInputRendering",
     "planContentDelta",
-    "sessionIndex"
+    "sessionIndex",
+    "sessionArchive",
+    "sessionRename"
   ],
   "airWithoutSessionIndex": [
     "sessionFailure",

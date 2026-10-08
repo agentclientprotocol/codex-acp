@@ -115,6 +115,20 @@ describe("sessionIndex capability negotiation", () => {
             plain: await capabilitiesOf("plain"),
         }, null, 2)}\n`).toMatchFileSnapshot("data/session-index-capabilities.json");
     });
+
+    it("enables nothing for sessionArchive or sessionRename declared without sessionIndex", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const response = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionArchive", "sessionRename"]}}}},
+        });
+
+        const advertised: string[] = (response._meta as any).jetbrains.air.capabilities;
+        expect(advertised.filter(name => name.startsWith("session") && name !== "sessionFailure")).toEqual([]);
+        await expect(agent.sessionIndex.rename({sessionId: threadId, title: "A"})).rejects.toMatchObject({code: -32601});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).rejects.toMatchObject({code: -32601});
+    });
 });
 
 describe("session/list", () => {

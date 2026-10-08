@@ -17,7 +17,9 @@ import {logger} from "./Logger";
 import {arePathBasenamesEqual, isAbsolutePathLike} from "./PathUtils";
 import {
     AIR_ARCHIVED_KEY,
+    AIR_SESSION_ARCHIVE_KEY,
     AIR_SESSION_INDEX_KEY,
+    AIR_SESSION_RENAME_KEY,
     changesSessionIndex,
     readSessionIndexListOptions,
     readSessionIndexPage,
@@ -75,9 +77,12 @@ export class SessionIndexService {
         this.enabled = clientSupportsAirCapability(clientCapabilities, AIR_SESSION_INDEX_KEY);
     }
 
-    /** The AIR capabilities to answer: only a client that declares it gets it. */
+    /**
+     * The AIR capabilities to answer: only a client that declares `sessionIndex` gets them. `sessionArchive` and
+     * `sessionRename` name the requests that come with it; the client need not declare them.
+     */
     agentCapabilities(): string[] {
-        return this.enabled ? [AIR_SESSION_INDEX_KEY] : [];
+        return this.enabled ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY] : [];
     }
 
     /** Feeds the thread notifications of an app-server, for every thread, to the session index. */
