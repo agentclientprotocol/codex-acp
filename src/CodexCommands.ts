@@ -502,7 +502,10 @@ export class CodexCommands {
         const input = this.formatTokenCount(usage.inputTokens);
         const cachedInput = this.formatTokenCount(usage.cachedInputTokens);
         const output = this.formatTokenCount(usage.outputTokens);
-        return `${total} total  (${input} input + ${cachedInput} cached input, ${output} output)`;
+        const cacheWrite = usage.cacheWriteInputTokens > 0
+            ? ` + ${this.formatTokenCount(usage.cacheWriteInputTokens)} cache write`
+            : "";
+        return `${total} total  (${input} input + ${cachedInput} cached input${cacheWrite}, ${output} output)`;
     }
 
     private formatContextWindow(usage: TokenCount | null, contextWindow: number | null): string {

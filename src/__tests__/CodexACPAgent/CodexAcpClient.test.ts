@@ -2030,6 +2030,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 totalTokens: 41_500,
                 inputTokens: 40_000,
                 cachedInputTokens: 1_000,
+                cacheWriteInputTokens: 0,
                 outputTokens: 500,
                 reasoningOutputTokens: 100,
             },
@@ -2047,12 +2048,35 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         );
     });
 
+    it('shows cache write tokens in /status token usage', async () => {
+        const {mockFixture, sessionState} = setupPromptFixture({
+            totalTokenUsage: {
+                totalTokens: 24_210,
+                inputTokens: 3,
+                cachedInputTokens: 23_801,
+                cacheWriteInputTokens: 294,
+                outputTokens: 112,
+                reasoningOutputTokens: 40,
+            },
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId: sessionState.sessionId,
+            prompt: [{type: "text", text: "/status"}],
+        });
+
+        expect(mockFixture.getAcpConnectionDump([])).toContain(
+            "**Token usage:** 24.2K total  (3 input + 23.8K cached input + 294 cache write, 112 output)",
+        );
+    });
+
     it('resets the previous context usage before a model turn', async () => {
         const {mockFixture, sessionState} = setupPromptFixture({
             lastTokenUsage: {
                 totalTokens: 41_500,
                 inputTokens: 40_000,
                 cachedInputTokens: 1_000,
+                cacheWriteInputTokens: 0,
                 outputTokens: 500,
                 reasoningOutputTokens: 100,
             },
