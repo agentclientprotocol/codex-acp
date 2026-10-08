@@ -558,6 +558,11 @@ export class SessionListSubscriptions {
             return current.length === 0 ? [] : [{entry, groups: current}];
         });
         const rows = inScope.length === 0 ? [] : await this.deps.rows(inScope.map(({entry}) => entry));
+        if (appServerGeneration !== this.appServerGeneration) {
+            // Replaced while the rows were made: read again from the new app-server.
+            for (const {entry} of inScope) this.readAgain(entry.thread.id, this.now());
+            inScope.length = 0;
+        }
         for (const [index, {entry, groups}] of inScope.entries()) {
             this.offer(entry.thread.id, groups.map(group => ({group, row: rows[index]!})), batches);
         }
