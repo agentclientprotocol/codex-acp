@@ -90,8 +90,6 @@ export interface SessionListSubscriptionDeps {
     codexHome(): string | null;
     /** The rows of threads, in their order, exactly as `session/list` answers them. */
     rows(threads: ThreadEntry[]): Promise<acp.SessionInfo[]>;
-    /** A row with the usage last read for its thread, see `SessionUsageIndex`. */
-    withLatestUsage(row: acp.SessionInfo): acp.SessionInfo;
     /** The cwds whose threads a subscription of `cwd` covers. */
     scopeCwds(cwd: string): string[];
     notify(changes: SessionListChanges): Promise<void>;
@@ -165,10 +163,6 @@ export class SessionListSubscriptions {
     private readonly pendingThreads = new Set<string>();
     /** Threads read again after the second between changes that only a scan had found, see {@link offer}. */
     private readonly scanRetries = new Set<string>();
-    /** Usage reads that went to no group: tried once more when the groups may resolve their worktrees again. */
-    private readonly usageRetries = new Map<string, {cwd: string, at: number}>();
-    /** Threads whose usage was read, with their cwd, see {@link usageRead}. */
-    private readonly pendingUsage = new Map<string, string>();
     /** Counts flushes and subscriptions, so that a read is not offered to a subscription that started after it. */
     private epoch = 0;
     /** The epoch of the reads of the flush that runs. */
@@ -307,7 +301,6 @@ export class SessionListSubscriptions {
             case "thread/closed":
             case "turn/started":
             case "turn/completed":
-            case "thread/tokenUsage/updated":
                 if (!this.ignoredThreads.has(notification.params.threadId)) this.threadChanged(notification.params.threadId);
                 return;
             case "item/started":
@@ -321,16 +314,6 @@ export class SessionListSubscriptions {
             default:
                 return;
         }
-    }
-
-    /**
-     * The usage of these threads was read: their rows, as last sent, get it. The rest of a row stays as it was,
-     * since the thread that the usage was read for can be older than the row.
-     */
-    usageRead(threads: Array<{threadId: string, cwd: string}>): void {
-        if (this.subscriptions.size === 0) return;
-        for (const {threadId, cwd} of threads) this.pendingUsage.set(threadId, cwd);
-        this.requestThreads(0);
     }
 
     /**
@@ -457,8 +440,6 @@ export class SessionListSubscriptions {
         this.scanDueAt = null;
         this.threadsDueAt = null;
         this.pendingThreads.clear();
-        this.pendingUsage.clear();
-        this.usageRetries.clear();
         this.scanRetries.clear();
         this.deletedThreads.clear();
         this.lastChangeAt.clear();
@@ -500,15 +481,6 @@ export class SessionListSubscriptions {
         else requested.clear();
         const deleted = new Map(this.deletedThreads);
         this.deletedThreads.clear();
-        const usageRead = new Map(this.pendingUsage);
-        this.pendingUsage.clear();
-        const retriedUsage = new Set<string>();
-        for (const [threadId, {cwd, at}] of this.usageRetries) {
-            if (at > startedAt || usageRead.has(threadId)) continue;
-            this.usageRetries.delete(threadId);
-            usageRead.set(threadId, cwd);
-            retriedUsage.add(threadId);
-        }
         for (const [threadId, at] of this.lastChangeAt) {
             if (startedAt - at >= this.timings.minChangeIntervalMs) this.lastChangeAt.delete(threadId);
         }
@@ -560,9 +532,9 @@ export class SessionListSubscriptions {
                 }));
             }
         });
-        // Only a thread that the scan alone found: a notification, a rename or a usage read is a change of its own.
+        // Only a thread that the scan alone found: a notification or a rename is a change of its own.
         const onlyScanned = (threadId: string): boolean =>
-            ((scanned.has(threadId) && !requested.has(threadId)) || scanRetried.has(threadId)) && !usageRead.has(threadId);
+            (scanned.has(threadId) && !requested.has(threadId)) || scanRetried.has(threadId);
         if (this.disposed || this.subscriptions.size === 0) return;
         await Promise.all([...this.groups.values()].map(group => group.ready));
         if (appServerGeneration !== this.appServerGeneration) {
@@ -575,8 +547,7 @@ export class SessionListSubscriptions {
         const inScope = [...found.values()].flatMap(entry => {
             const groups = this.groupsOf(entry.thread.cwd);
             if (groups.length === 0) return [];
-            // A thread that a scan alone found and no subscription counts as changed is not made a row: that
-            // would also read its usage.
+            // A thread that a scan alone found and no subscription counts as changed is not made a row.
             if (onlyScanned(entry.thread.id) && groups.every(group => [...group.subscriptions]
                 .every(subscription => !this.takesScanned(subscription, entry)))) {
                 return [];
@@ -592,36 +563,6 @@ export class SessionListSubscriptions {
         for (const [index, {entry, groups}] of inScope.entries()) {
             this.offer(entry.thread.id, groups.map(group => ({group, row: rows[index]!})), batches,
                 onlyScanned(entry.thread.id) ? entry : undefined);
-        }
-        for (const [threadId, cwd] of usageRead) {
-            if (found.has(threadId) || deleted.has(threadId)) continue;
-            const offers: Array<{group: Group, row: acp.SessionInfo}> = [];
-            let unknown = false;
-            const {groups, deferred} = this.placeCwd(cwd);
-            if (deferred && !retriedUsage.has(threadId)) {
-                // Perhaps of a worktree that a group could not resolve yet: once more when it can.
-                this.usageRetries.delete(threadId);
-                this.usageRetries.set(threadId, {cwd, at: this.now() + SCOPE_RETRY_MS});
-                if (this.usageRetries.size > MAX_IGNORED_THREADS) this.usageRetries.delete(this.usageRetries.keys().next().value!);
-            }
-            for (const group of groups) {
-                const known = group.rows.get(threadId);
-                // A subscription that got no row of the thread yet gets it read anew, not the group's last row,
-                // which can be older than what its client listed.
-                if (known === undefined || [...group.subscriptions].some(subscription => !subscription.sent.has(threadId))) {
-                    unknown = true;
-                } else {
-                    offers.push({group, row: this.deps.withLatestUsage(known.row)});
-                }
-            }
-            if (offers.length > 0) this.offer(threadId, offers, batches);
-            // A group of the scope without a row of the thread, as for one from a later list page, gets it read
-            // anew, which also tells whether it still is there.
-            if (unknown) {
-                // A usage read is a change of its own, not only a thread that a scan found.
-                this.scanRetries.delete(threadId);
-                this.readAgain(threadId, this.now());
-            }
         }
         let resolvedForDeletions = false;
         for (const threadId of deleted.keys()) {
@@ -647,9 +588,6 @@ export class SessionListSubscriptions {
             }
         }
 
-        for (const {at} of this.usageRetries.values()) {
-            this.threadsDueAt = this.threadsDueAt === null ? at : Math.min(this.threadsDueAt, at);
-        }
         // A batch joins the changes held for a subscription; a ready subscription gets them all in one
         // notification. Sends happen only here, one flush at a time.
         for (const [subscription, batch] of batches) {

@@ -32,17 +32,14 @@ import {
     SESSION_UNARCHIVE_METHOD,
     SessionIndexActivity,
     sessionIndexSessionInfo,
-    withSessionIndexForkOrigin,
-    withSessionIndexUsage,
     type SessionArchiveRequest,
     type SessionIndexListOptions,
     type SessionRenameRequest,
 } from "./SessionIndex";
-import {deleteThread, isMissingThreadError, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
+import {deleteThread, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
 import {SessionIndexTitles} from "./SessionIndexTitles";
 import {canonicalCwds, linkedWorktreeCwds} from "./SessionIndexWorktrees";
 import {SessionListSubscriptions, type SessionListSubscriptionTimings, type ThreadEntry} from "./SessionListSubscriptions";
-import {SessionUsageIndex} from "./SessionUsage";
 import {SessionWriteQueue} from "./SessionWriteQueue";
 import type {SerializeTitleWrite} from "./TitleGenerator";
 
@@ -68,7 +65,6 @@ export class SessionIndexService {
     private readonly writes = new SessionWriteQueue();
     private readonly titles: SessionIndexTitles;
     private readonly subscriptions: SessionListSubscriptions;
-    private readonly usage: SessionUsageIndex;
     /** The app-server clients whose notifications reach the session index, each once. */
     private readonly observedClients = new WeakSet<CodexAcpClient>();
     private anyClientObserved = false;
@@ -78,22 +74,6 @@ export class SessionIndexService {
     constructor(private readonly host: SessionIndexHost, subscriptionTimings?: SessionListSubscriptionTimings) {
         this.activity = new SessionIndexActivity(threadId => host.session(threadId) !== undefined);
         this.titles = new SessionIndexTitles(host, this.writes);
-        this.usage = new SessionUsageIndex({
-            readThread: async (threadId) => {
-                const appServer = host.client().appServerClient;
-                if (appServer.connectionLoss.lost) throw new Error("The Codex app-server is not running");
-                try {
-                    return (await appServer.threadRead({threadId})).thread;
-                } catch (error) {
-                    if (isMissingThreadError(error)) return null;
-                    throw error;
-                }
-            },
-            // A row whose usage was read late reaches the client as a change of its subscription.
-            onRead: (subjects) => this.subscriptions.usageRead(
-                subjects.map(subject => ({threadId: subject.thread.id, cwd: subject.thread.cwd})),
-            ),
-        });
         this.subscriptions = new SessionListSubscriptions({
             reader: () => {
                 const appServer = host.client().appServerClient;
@@ -101,12 +81,6 @@ export class SessionIndexService {
             },
             codexHome: () => host.client().getHomePath(),
             rows: async (entries) => await this.rows(entries),
-            withLatestUsage: (row) => {
-                const usage = this.usage.latestUsage(row.sessionId);
-                const origin = this.usage.forkOrigin(row.sessionId);
-                const withOrigin = origin === undefined ? row : withSessionIndexForkOrigin(row, origin);
-                return usage === undefined ? withOrigin : withSessionIndexUsage(withOrigin, usage);
-            },
             // The canonical path too outside a Git checkout, where linkedWorktreeCwds gives the cwd alone.
             scopeCwds: (cwd) => [...new Set([...canonicalCwds(cwd), ...linkedWorktreeCwds(cwd)])],
             notify: async (changes) => {
@@ -284,7 +258,6 @@ export class SessionIndexService {
     /** Ends the session list subscriptions. The connection is gone. */
     dispose(): void {
         this.subscriptions.dispose();
-        this.usage.dispose();
     }
 
     private require(method: string): void {
@@ -311,23 +284,15 @@ export class SessionIndexService {
         return {sessions: await this.rows(page.threads), nextCursor: page.nextCursor};
     }
 
-    /**
-     * The list rows of threads, for `session/list` and `_session/list/changes` alike. A row carries the token
-     * usage known for its thread; one that is not read yet is read in the background, see `SessionUsageIndex`.
-     */
+    /** The list rows of threads, for `session/list` and `_session/list/changes` alike. */
     private async rows(entries: ThreadEntry[]): Promise<acp.SessionInfo[]> {
         return entries.map(entry => {
-            const usage = this.usage.usageOf(entry) ?? null;
-            // The fork origin comes from the rollout once it is read with the usage, for every row alike:
-            // `thread/list` answers no `forkedFromId`, `thread/read` does.
-            const origin = this.usage.forkOrigin(entry.thread.id);
-            const thread = origin === undefined ? entry.thread : {...entry.thread, forkedFromId: origin};
-            const activity = this.activity.activityOf(thread);
+            const activity = this.activity.activityOf(entry.thread);
             // A row with a state is of a thread loaded here: a restart of the app-server changes it.
-            if (activity?.state !== undefined) this.rowsWithState.add(thread.id);
-            else this.rowsWithState.delete(thread.id);
+            if (activity?.state !== undefined) this.rowsWithState.add(entry.thread.id);
+            else this.rowsWithState.delete(entry.thread.id);
             return this.withActiveAdditionalDirectories(
-                sessionIndexSessionInfo(thread, entry.archived, activity, usage),
+                sessionIndexSessionInfo(entry.thread, entry.archived, activity),
             );
         });
     }

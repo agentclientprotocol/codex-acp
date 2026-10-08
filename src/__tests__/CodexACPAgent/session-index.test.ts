@@ -747,35 +747,6 @@ describe("_session/list/subscribe", () => {
         agent.sessionIndex.dispose();
     });
 
-    it("delivers the token usage of a row once it is read, to the list and to a subscription", async () => {
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-rollout-"));
-        try {
-            const rollout = path.join(dir, "rollout.jsonl");
-            const total = {input_tokens: 100, cached_input_tokens: 60, cache_write_input_tokens: 10, output_tokens: 20, reasoning_output_tokens: 5, total_tokens: 120};
-            fs.writeFileSync(rollout, `${JSON.stringify({type: "event_msg", payload: {type: "token_count", info: {total_token_usage: total, last_token_usage: total}}})}\n`);
-            const {fixture, agent, threadList, appServer} = await createAgent("sessionIndex");
-            const listed = createThread({path: rollout, model: "gpt-5"});
-            threadList.mockImplementation(async (params) => ({data: params.archived ? [] : [listed], nextCursor: null, backwardsCursor: null}));
-            vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: listed});
-            const {subscriptionId} = await agent.sessionIndex.subscribeList({cwd: "/repo/project"});
-            // The list reads the usage in the background; the subscription gets the row with it.
-            await agent.listSessions({cwd: "/repo/project"});
-            const usage = {inputTokens: 30, cachedReadTokens: 60, cachedWriteTokens: 10, outputTokens: 20, reasoningTokens: 5, model: "gpt-5", subagents: []};
-
-            await vi.waitFor(() => expect(listChanges(fixture)).toEqual([{
-                subscriptionId,
-                sessions: [expect.objectContaining({sessionId: threadId, _meta: {jetbrains: {air: expect.objectContaining({usage})}}})],
-                removed: [],
-            }]));
-            const page = await agent.listSessions({cwd: "/repo/project"});
-            expect(page.sessions[0]!._meta).toMatchObject({jetbrains: {air: {usage}}});
-            expect(listChanges(fixture)[0].sessions[0]).toEqual(page.sessions[0]);
-            agent.sessionIndex.dispose();
-        } finally {
-            fs.rmSync(dir, {recursive: true, force: true});
-        }
-    });
-
     it("covers the canonical path of a cwd outside a Git checkout", async () => {
         const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-scope-")));
         try {

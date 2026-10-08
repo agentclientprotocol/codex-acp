@@ -15,7 +15,6 @@ import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadStatus, Turn} from "./app-server/v2";
 import {AIR_META_KEY, JETBRAINS_META_KEY, withAirMeta} from "./AirExtension";
 import {normalizeSessionTitle} from "./SessionTitle";
-import type {SessionUsage} from "./SessionUsage";
 import {logger} from "./Logger";
 
 export const AIR_SESSION_INDEX_KEY = "sessionIndex";
@@ -39,7 +38,6 @@ export const AIR_LAST_TURN_ENDED_AT_KEY = "lastTurnEndedAt";
 export const AIR_LAST_PROMPT_AT_KEY = "lastPromptAt";
 export const AIR_MODEL_KEY = "model";
 export const AIR_FORKED_FROM_KEY = "forkedFrom";
-export const AIR_USAGE_KEY = "usage";
 
 export const DEFAULT_SESSION_INDEX_LIMIT = 50;
 /** The largest page that the adapter asks Codex for. */
@@ -431,7 +429,6 @@ export function sessionIndexSessionInfo(
     thread: Thread,
     archived: boolean,
     activity: SessionActivity | null,
-    usage: SessionUsage | null = null,
 ): acp.SessionInfo {
     const airFields: Record<string, unknown> = {[AIR_ARCHIVED_KEY]: archived};
     // Codex moves `recencyAt` when a turn starts and orders threads by it: the time of the last prompt.
@@ -441,7 +438,6 @@ export function sessionIndexSessionInfo(
     // `state` is omitted when unknown, never "unknown".
     if (activity?.state !== undefined) airFields[AIR_STATE_KEY] = activity.state;
     if (activity?.lastTurnEndedAt !== undefined) airFields[AIR_LAST_TURN_ENDED_AT_KEY] = activity.lastTurnEndedAt;
-    if (usage !== null) airFields[AIR_USAGE_KEY] = usage;
     let meta: Record<string, unknown> | undefined;
     for (const [key, value] of Object.entries(airFields)) {
         meta = withAirMeta(meta, key, value);
@@ -456,29 +452,6 @@ export function sessionIndexSessionInfo(
         updatedAt: isoTime(thread.updatedAt),
         ...(meta ? {_meta: meta} : {}),
     };
-}
-
-/** A row with another `forkedFrom`, or without one for `null`. */
-export function withSessionIndexForkOrigin(row: acp.SessionInfo, forkedFrom: string | null): acp.SessionInfo {
-    const jetbrains = asRecord(asRecord(row._meta)[JETBRAINS_META_KEY]);
-    const air = asRecord(jetbrains[AIR_META_KEY]);
-    if ((air[AIR_FORKED_FROM_KEY] ?? null) === forkedFrom) return row;
-    const {[AIR_FORKED_FROM_KEY]: _dropped, ...rest} = air;
-    const next = forkedFrom === null ? rest : {...rest, [AIR_FORKED_FROM_KEY]: forkedFrom};
-    return {...row, _meta: {...asRecord(row._meta), [JETBRAINS_META_KEY]: {...jetbrains, [AIR_META_KEY]: next}}};
-}
-
-/** A row with another usage, or without one for `null`. The usage `model` is the row's `model`. */
-export function withSessionIndexUsage(row: acp.SessionInfo, usage: SessionUsage | null): acp.SessionInfo {
-    if (usage !== null) {
-        const model = asRecord(asRecord(asRecord(row._meta)[JETBRAINS_META_KEY])[AIR_META_KEY])[AIR_MODEL_KEY];
-        return {...row, _meta: withAirMeta(row._meta, AIR_USAGE_KEY, {...usage, model: typeof model === "string" ? model : null})};
-    }
-    const jetbrains = asRecord(asRecord(row._meta)[JETBRAINS_META_KEY]);
-    const air = asRecord(jetbrains[AIR_META_KEY]);
-    if (!(AIR_USAGE_KEY in air)) return row;
-    const {[AIR_USAGE_KEY]: _dropped, ...rest} = air;
-    return {...row, _meta: {...asRecord(row._meta), [JETBRAINS_META_KEY]: {...jetbrains, [AIR_META_KEY]: rest}}};
 }
 
 /** The ISO time of a Codex time in seconds. */
@@ -582,7 +555,7 @@ export class SessionIndexActivity {
 
 /**
  * What the client shows of a row, without `updatedAt`: a row whose signature did not change is not sent again.
- * `title` and the AIR fields `lastPromptAt`, `state`, `lastTurnEndedAt`, `model`, `forkedFrom`, `archived` and `usage`.
+ * `title` and the AIR fields `lastPromptAt`, `state`, `lastTurnEndedAt`, `model`, `forkedFrom` and `archived`.
  */
 export function sessionIndexRowSignature(row: acp.SessionInfo): string {
     const air = asRecord(asRecord(asRecord(row._meta)[JETBRAINS_META_KEY])[AIR_META_KEY]);
@@ -594,7 +567,6 @@ export function sessionIndexRowSignature(row: acp.SessionInfo): string {
         air[AIR_MODEL_KEY] ?? null,
         air[AIR_FORKED_FROM_KEY] ?? null,
         air[AIR_ARCHIVED_KEY] ?? null,
-        air[AIR_USAGE_KEY] ?? null,
     ]);
 }
 

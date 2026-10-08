@@ -108,7 +108,6 @@ interface Setup {
 function setup(
     home: string | null = HOME,
     codex = new FakeCodex(),
-    withLatestUsage: (row: acp.SessionInfo) => acp.SessionInfo = (row) => row,
 ): Setup {
     const sent: SessionListChanges[] = [];
     const clockStart = Date.now();
@@ -120,9 +119,8 @@ function setup(
         codexHome: () => home,
         rows: async (entries) => entries.map(({thread: value, archived}) => {
             const state = activityStateOf(value.status);
-            return withLatestUsage(sessionIndexSessionInfo(value, archived, state === undefined ? null : {state}));
+            return sessionIndexSessionInfo(value, archived, state === undefined ? null : {state});
         }),
-        withLatestUsage,
         scopeCwds: (cwd) => scopes.get(cwd) ?? [cwd],
         notify: async (changes) => {
             sent.push(changes);
@@ -298,19 +296,6 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
-    it("reads anew a thread of the scope whose usage was read but that no group has a row of", async () => {
-        const {codex, subscriptions, sent} = setup();
-        await subscriptions.subscribe("/repo");
-        codex.put(thread("paged", {updatedAt: 10}));
-
-        subscriptions.usageRead([{threadId: "paged", cwd: "/repo"}, {threadId: "elsewhere", cwd: "/other"}]);
-        await vi.advanceTimersByTimeAsync(10);
-
-        expect(codex.threadRead.mock.calls.map(call => call[0].threadId)).toEqual(["paged"]);
-        expect(sent.flatMap(changes => ids(changes.sessions))).toEqual(["paged"]);
-        subscriptions.dispose();
-    });
-
     it("places a thread of a worktree created right after the worktrees were resolved, and drops a removed one", async () => {
         const {codex, subscriptions, sent, listener, scopes} = setup();
         scopes.set("/repo", ["/repo", "/repo-old"]);
@@ -349,7 +334,7 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
-    it("tells every subscription whose scope has a thread of its deletion and its usage", async () => {
+    it("tells every subscription whose scope has a thread of its change and its deletion", async () => {
         const {codex, subscriptions, sent, scopes} = setup();
         scopes.set("/repo", ["/repo", "/repo-wt"]);
         scopes.set("/repo-wt", ["/repo-wt", "/repo"]);
@@ -358,8 +343,8 @@ describe("SessionListSubscriptions", () => {
         const worktree = await subscriptions.subscribe("/repo-wt");
 
         // No group has a row of the thread yet: it is read, and both get it.
-        subscriptions.usageRead([{threadId: "old", cwd: "/repo"}]);
-        await vi.advanceTimersByTimeAsync(50);
+        subscriptions.observe(own("thread/name/updated", {threadId: "old"}));
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
         expect(codex.threadRead.mock.calls.map(call => call[0].threadId)).toEqual(["old"]);
         expect(sent.filter(changes => changes.sessions.some(row => row.sessionId === "old")).map(changes => changes.subscriptionId).sort())
             .toEqual([repo, worktree].sort());
@@ -414,7 +399,7 @@ describe("SessionListSubscriptions", () => {
     });
 
     it("reads again every row with a state when the app-server was replaced", async () => {
-        const {codex, subscriptions, sent} = setup(HOME, new FakeCodex(), (row) => row);
+        const {codex, subscriptions, sent} = setup();
         codex.put(thread("loaded", {status: {type: "active", activeFlags: []}}));
         codex.put(thread("foreign"));
         await subscriptions.subscribe("/repo");
@@ -898,35 +883,6 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
-    it("gives a late usage read the row last sent, and nothing to a deleted thread", async () => {
-        const usages = new Map<string, unknown>();
-        const {codex, subscriptions, sent} = setup(HOME, new FakeCodex(), (row) => usages.has(row.sessionId)
-            ? {...row, _meta: {jetbrains: {air: {...(row._meta as any).jetbrains.air, usage: usages.get(row.sessionId)}}}}
-            : row);
-        codex.put(thread("a"));
-        codex.put(thread("b"));
-        await subscriptions.subscribe("/repo");
-        codex.update("a", {name: "renamed"});
-        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
-        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
-        codex.threads.delete("b");
-        subscriptions.observe(own("thread/deleted", {threadId: "b"}));
-        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
-        sent.length = 0;
-
-        usages.set("a", {inputTokens: 1});
-        usages.set("b", {inputTokens: 2});
-        subscriptions.usageRead([{threadId: "a", cwd: "/repo"}, {threadId: "b", cwd: "/repo"}]);
-        await vi.advanceTimersByTimeAsync(timings.minChangeIntervalMs);
-
-        expect(sent.flatMap(changes => changes.sessions)).toEqual([expect.objectContaining({
-            sessionId: "a",
-            title: "renamed",
-            _meta: {jetbrains: {air: expect.objectContaining({usage: {inputTokens: 1}})}},
-        })]);
-        subscriptions.dispose();
-    });
-
     it("resolves the worktrees of each group again, also when another group has the cwd", async () => {
         const {codex, subscriptions, sent, listener, scopes} = setup();
         const repo = await subscriptions.subscribe("/repo");
@@ -952,7 +908,6 @@ describe("SessionListSubscriptions", () => {
             reader: () => codex,
             codexHome: () => null,
             rows: async (entries) => entries.map(({thread: value, archived}) => sessionIndexSessionInfo(value, archived, null)),
-            withLatestUsage: (row) => row,
             scopeCwds: (cwd) => [cwd],
             notify: async (changes) => {
                 if (slow) {
@@ -1026,7 +981,6 @@ describe("SessionListSubscriptions", () => {
             reader: () => running ? codex : null,
             codexHome: () => null,
             rows: async (entries) => entries.map(({thread: value, archived}) => sessionIndexSessionInfo(value, archived, null)),
-        withLatestUsage: (row) => row,
             scopeCwds: (cwd) => [cwd],
             notify: async (changes) => {
                 sent.push(changes);
