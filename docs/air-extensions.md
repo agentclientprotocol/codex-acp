@@ -1080,12 +1080,12 @@ The adapter sends no `cost`: Codex reports none.
 `state` is set only for a thread that this adapter's app-server has loaded, by the first that holds:
 
 1. `requires_action`: the thread waits for an approval or for user input (`Thread.status` active with flags).
-2. `reviewing`: the thread is in Codex review mode (`/review`), from an `enteredReviewMode` item to its
+2. `reviewing`: a turn runs in Codex review mode (`/review`), from an `enteredReviewMode` item to its
    `exitedReviewMode` item. A turn that ends, or a new one that starts, ends it as well.
 3. `running`: a turn runs (`Thread.status` active).
 4. `error`: the thread is not running and its last turn ended with an error, not a user cancel: `turn/completed`
    with status `failed`, or with an `error` and a status other than `interrupted`; or `Thread.status` is
-   `systemError`. A new turn clears it.
+   `systemError`. A new turn clears it, and so does a close or unload of the thread here.
 5. `idle`: otherwise.
 
 A thread that is not loaded here has no `state`. A change of `state` is a row change for a subscription.

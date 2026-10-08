@@ -271,6 +271,14 @@ describe("session/list", () => {
         fixture.sendServerNotification({method: "item/started", params: {threadId, turnId: "turn-1", item: item("enteredReviewMode"), startedAtMs: 3}} as never);
         fixture.sendServerNotification({method: "turn/completed", params: {threadId, turn: turn("failed")}} as never);
         expect(await listWith({type: "idle"})).toBe("error");
+
+        // Closed here, the thread can go on elsewhere: loaded again, it starts over.
+        fixture.sendServerNotification({method: "thread/closed", params: {threadId}} as never);
+        expect(await listWith({type: "idle"})).toBe("idle");
+
+        // Review mode shows only while a turn runs: an app-server that went away mid-review sends no end.
+        fixture.sendServerNotification({method: "item/started", params: {threadId, turnId: "turn-2", item: item("enteredReviewMode"), startedAtMs: 4}} as never);
+        expect(await listWith({type: "idle"})).toBe("idle");
     });
 
     it("keeps the rows of a client without sessionIndex", async () => {

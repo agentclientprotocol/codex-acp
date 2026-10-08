@@ -498,8 +498,7 @@ export function activityStateOf(
     if (status.type === "notLoaded") return undefined;
     // requires_action > reviewing > running > error > idle.
     if (status.type === "active" && status.activeFlags.length > 0) return "requires_action";
-    if (reviewing) return "reviewing";
-    if (status.type === "active") return "running";
+    if (status.type === "active") return reviewing ? "reviewing" : "running";
     if (status.type === "systemError" || lastTurnFailed) return "error";
     return "idle";
 }
@@ -538,7 +537,9 @@ export class SessionIndexActivity {
             if (type === "exitedReviewMode") this.reviewing.delete(notification.params.threadId);
             return;
         }
-        if (notification.method === "turn/started") {
+        // A new turn, and a thread that is no longer loaded here, start over: the thread can go on elsewhere.
+        if (notification.method === "turn/started" || notification.method === "thread/closed"
+            || (notification.method === "thread/status/changed" && notification.params.status.type === "notLoaded")) {
             this.failed.delete(notification.params.threadId);
             this.reviewing.delete(notification.params.threadId);
             return;
