@@ -1085,7 +1085,8 @@ The adapter sends no `cost`: Codex reports none.
 3. `running`: a turn runs (`Thread.status` active).
 4. `error`: the thread is not running and its last turn ended with an error, not a user cancel: `turn/completed`
    with status `failed`, or with an `error` and a status other than `interrupted`; or `Thread.status` is
-   `systemError`. A new turn clears it, and so does a close or unload of the thread here.
+   `systemError`. A new turn clears it, and so does a close or unload of the thread here or a restart of the
+   app-server, which also ends review mode.
 5. `idle`: otherwise.
 
 A thread that is not loaded here has no `state`. A change of `state` is a row change for a subscription.
@@ -1184,14 +1185,15 @@ still re-reads the list now and then, and a lost change shows up there.
 - Scope: the threads whose cwd is `cwd`, its canonical path, or the same subdirectory in the primary checkout and
   in each linked Git worktree, as `includeWorktrees: true` resolves it; from the interactive sources, as the list;
   archived or not. The agent applies no archive filter: the client filters by the `archived` field of the row.
-  The agent resolves the worktrees again every 10 s, and at most once a second for a changed thread whose cwd is in
-  no scope, which it reads once more a second later when it could not resolve them then.
+  The agent resolves the worktrees of a subscription again every 10 s, and at most once a second for a changed
+  thread whose cwd is not in its scope; a thread that came too soon for that is offered again a second later.
 - `_session/list/changes` carries, for each thread in scope that appeared or changed, its whole row exactly as
   `session/list` answers it. A row counts as changed when `title`, `lastPromptAt`, `state`, `lastTurnEndedAt`,
   `model`, `forkedFrom`, `archived` or `usage` differs from the row the subscription last got. A change of `updatedAt` alone
   sends nothing; the new `updatedAt` comes with the next change. Archive and unarchive are row changes.
-  `removed` lists the ids of deleted threads. A deleted thread whose cwd the agent does not know is listed to every
-  subscription; a client ignores an id it does not have. Both arrays are always present, and one
+  `removed` lists the ids of deleted threads, to every subscription whose scope has the cwd of the thread. A
+  deleted thread whose cwd the agent does not know is listed to every subscription; a client ignores an id it does
+  not have. Both arrays are always present, and one
   of them is not empty.
 - When the client subscribes, the agent takes it to have the current rows of the 50 most recently updated
   unarchived threads of the scope, of the 50 most recently updated archived ones, and of every other thread of the scope whose row the agent computed for a

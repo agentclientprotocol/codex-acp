@@ -71,6 +71,7 @@ export class SessionIndexService {
     private readonly usage: SessionUsageIndex;
     /** The app-server clients whose notifications reach the session index, each once. */
     private readonly observedClients = new WeakSet<CodexAcpClient>();
+    private anyClientObserved = false;
 
     constructor(private readonly host: SessionIndexHost, subscriptionTimings?: SessionListSubscriptionTimings) {
         this.activity = new SessionIndexActivity(threadId => host.session(threadId) !== undefined);
@@ -134,6 +135,9 @@ export class SessionIndexService {
      */
     observe(client: CodexAcpClient): void {
         if (!this.enabled || this.observedClients.has(client)) return;
+        // Another app-server: one that crashed sent no end of its turns or reviews.
+        if (this.anyClientObserved) this.activity.resetLoaded();
+        this.anyClientObserved = true;
         this.observedClients.add(client);
         client.appServerClient.onClientTransportEvent((event) => {
             if (event.eventType !== "notification" || this.host.client() !== client) return;

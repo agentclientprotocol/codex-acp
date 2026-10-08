@@ -329,6 +329,30 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("tells every subscription whose scope has a thread of its deletion and its usage", async () => {
+        const {codex, subscriptions, sent, scopes} = setup();
+        scopes.set("/repo", ["/repo", "/repo-wt"]);
+        scopes.set("/repo-wt", ["/repo-wt", "/repo"]);
+        codex.put(thread("old", {cwd: "/repo", updatedAt: 10}));
+        const repo = await subscriptions.subscribe("/repo");
+        // Newer threads push "old" out of the baseline of the second subscription.
+        for (let index = 0; index < 60; index++) codex.put(thread(`new-${index}`, {cwd: "/repo-wt", updatedAt: 1_000 + index}));
+        const worktree = await subscriptions.subscribe("/repo-wt");
+
+        subscriptions.usageRead([{threadId: "old", cwd: "/repo"}]);
+        await vi.advanceTimersByTimeAsync(50);
+        expect(codex.threadRead.mock.calls.map(call => call[0].threadId)).toEqual(["old"]);
+        expect(sent.filter(changes => changes.sessions.some(row => row.sessionId === "old")).map(changes => changes.subscriptionId))
+            .toEqual([worktree]);
+
+        codex.threads.delete("old");
+        subscriptions.observe(own("thread/deleted", {threadId: "old"}));
+        await vi.advanceTimersByTimeAsync(timings.minChangeIntervalMs);
+        expect(sent.filter(changes => changes.removed.includes("old")).map(changes => changes.subscriptionId).sort())
+            .toEqual([repo, worktree].sort());
+        subscriptions.dispose();
+    });
+
     it("sends a thread at most once a second, with its latest row", async () => {
         const {codex, subscriptions, sent} = setup();
         codex.put(thread("a"));

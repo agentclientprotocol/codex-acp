@@ -565,6 +565,12 @@ export class SessionIndexActivity {
         };
     }
 
+    /** The app-server went away: what its turns said of its loaded threads no longer holds. */
+    resetLoaded(): void {
+        this.failed.clear();
+        this.reviewing.clear();
+    }
+
     forget(threadId: string): void {
         this.lastTurnEndedAt.delete(threadId);
         this.failed.delete(threadId);

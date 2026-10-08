@@ -159,8 +159,11 @@ export class SessionListSubscriptions {
     private readonly pendingThreads = new Set<string>();
     /** Threads whose usage was read, with their cwd, see {@link usageRead}. */
     private readonly pendingUsage = new Map<string, string>();
-    /** Threads read again once because the worktrees of a group were resolved too recently to place them. */
-    private readonly scopeRetried = new Set<string>();
+    /**
+     * Threads that groups whose worktrees were resolved too recently could not take: offered to them again when
+     * they may resolve again.
+     */
+    private readonly scopeRetries = new Map<string, {entry: ThreadEntry, at: number}>();
     /** Counts reads and baselines, so that a read that started before a baseline does not override it. */
     private epoch = 0;
     /** Deleted threads, with whether this adapter deleted them. */
@@ -414,7 +417,7 @@ export class SessionListSubscriptions {
         this.threadsDueAt = null;
         this.pendingThreads.clear();
         this.pendingUsage.clear();
-        this.scopeRetried.clear();
+        this.scopeRetries.clear();
         this.deletedThreads.clear();
         this.lastChangeAt.clear();
         this.ignoredThreads.clear();
@@ -505,7 +508,7 @@ export class SessionListSubscriptions {
         const batches = new Map<Subscription, SessionListChanges>();
         // A baseline read that started after these reads can be newer than they are: such a thread is read again.
         const inScope = [...found.values()].flatMap(entry => {
-            const groups = this.groupsOf(entry.thread.cwd, entry.thread.id);
+            const groups = this.groupsOf(entry.thread.cwd, entry);
             const current = groups.filter(group => group.baselineEpoch < readEpoch);
             if (current.length < groups.length) this.readAgain(entry.thread.id, this.now());
             return current.length === 0 ? [] : [{entry, groups: current}];
@@ -516,25 +519,44 @@ export class SessionListSubscriptions {
         }
         for (const [threadId, cwd] of usageRead) {
             if (found.has(threadId) || deleted.has(threadId)) continue;
-            const offers = [...this.groups.values()].flatMap(group => {
+            const offers: Array<{group: Group, row: acp.SessionInfo}> = [];
+            let unknown = false;
+            for (const group of this.groupsOf(cwd)) {
                 const known = group.rows.get(threadId);
-                return known === undefined ? [] : [{group, row: this.deps.withLatestUsage(known.row)}];
-            });
-            if (offers.length > 0) {
-                this.offer(threadId, offers, batches);
-            } else if (this.groupsOf(cwd).length > 0) {
-                // A thread of the scope that no group has a row of, such as one from a later list page: its row is
-                // read anew, which also tells whether it still is there.
-                this.readAgain(threadId, this.now());
+                if (known === undefined) unknown = true;
+                else offers.push({group, row: this.deps.withLatestUsage(known.row)});
             }
+            if (offers.length > 0) this.offer(threadId, offers, batches);
+            // A group of the scope without a row of the thread, as for one from a later list page, gets it read
+            // anew, which also tells whether it still is there.
+            if (unknown) this.readAgain(threadId, this.now());
+        }
+        // The threads that groups could not take for their worktrees a moment ago.
+        const retries = [...this.scopeRetries].filter(([threadId, {at}]) =>
+            at <= this.now() && !found.has(threadId) && !deleted.has(threadId));
+        for (const [threadId] of retries) this.scopeRetries.delete(threadId);
+        const retried = retries.flatMap(([, {entry}]) => {
+            const groups = this.groupsOf(entry.thread.cwd).filter(group => group.baselineEpoch < readEpoch);
+            return groups.length === 0 ? [] : [{entry, groups}];
+        });
+        const retriedRows = retried.length === 0 ? [] : await this.deps.rows(retried.map(({entry}) => entry));
+        for (const [index, {entry, groups}] of retried.entries()) {
+            this.offer(entry.thread.id, groups.map(group => ({group, row: retriedRows[index]!})), batches);
+        }
+        for (const {at} of this.scopeRetries.values()) {
+            this.threadsDueAt = this.threadsDueAt === null ? at : Math.min(this.threadsDueAt, at);
         }
 
         for (const threadId of deleted.keys()) {
             const knowing = [...this.subscriptions.values()]
                 .filter(subscription => subscription.sent.has(threadId) || subscription.group.rows.has(threadId));
-            // A deleted thread that no group has seen can still be in a list that the client read further down: its
-            // scope is unknown, so every subscription hears of it.
-            const targets = knowing.length > 0 ? knowing : [...this.subscriptions.values()];
+            const cwd = [...this.groups.values()].map(group => group.rows.get(threadId)?.row.cwd).find(known => known !== undefined);
+            // Every subscription whose scope has the cwd of the thread, which can be in a list that its client read
+            // further down. A deleted thread that no group has seen has an unknown scope: every subscription hears
+            // of it.
+            const targets = cwd === undefined
+                ? (knowing.length > 0 ? knowing : [...this.subscriptions.values()])
+                : [...new Set([...knowing, ...[...this.subscriptions.values()].filter(subscription => subscription.group.scope.has(cwd))])];
             for (const group of this.groups.values()) group.rows.delete(threadId);
             for (const subscription of targets) {
                 subscription.sent.delete(threadId);
@@ -697,7 +719,7 @@ export class SessionListSubscriptions {
     }
 
     /** The groups whose scope has the cwd. The worktrees of a group are resolved again every 10 s at most. */
-    private groupsOf(cwd: string, threadId?: string): Group[] {
+    private groupsOf(cwd: string, entry?: ThreadEntry): Group[] {
         const now = this.now();
         const resolve = (group: Group): void => {
             group.scopeResolvedAt = now;
@@ -707,23 +729,24 @@ export class SessionListSubscriptions {
         for (const group of this.groups.values()) {
             if (now - group.scopeResolvedAt >= SCOPE_REFRESH_MS) resolve(group);
         }
-        const matching = () => [...this.groups.values()].filter(group => group.scope.has(cwd));
-        let groups = matching();
-        if (groups.length > 0) return groups;
-        // A cwd of no group can be a new worktree: the groups resolve again, at most once a second.
-        let skipped = false;
+        // A group without the cwd can miss a new worktree: it resolves again, at most once a second.
+        let retryAt: number | null = null;
         for (const group of this.groups.values()) {
-            if (now - group.scopeResolvedAt >= SCOPE_RETRY_MS) resolve(group);
-            else skipped = true;
+            if (group.scope.has(cwd)) continue;
+            if (now - group.scopeResolvedAt >= SCOPE_RETRY_MS) {
+                resolve(group);
+            } else {
+                const at = group.scopeResolvedAt + SCOPE_RETRY_MS;
+                retryAt = retryAt === null ? at : Math.min(retryAt, at);
+            }
         }
-        groups = matching();
-        if (groups.length === 0 && skipped && threadId !== undefined && !this.scopeRetried.has(threadId)) {
-            // Read once more when the groups may resolve again.
-            this.scopeRetried.add(threadId);
-            if (this.scopeRetried.size > MAX_IGNORED_THREADS) this.scopeRetried.delete(this.scopeRetried.values().next().value!);
-            this.readAgain(threadId, now + SCOPE_RETRY_MS);
+        if (retryAt !== null && entry !== undefined) {
+            this.scopeRetries.delete(entry.thread.id);
+            this.scopeRetries.set(entry.thread.id, {entry, at: retryAt});
+            if (this.scopeRetries.size > MAX_IGNORED_THREADS) this.scopeRetries.delete(this.scopeRetries.keys().next().value!);
+            this.threadsDueAt = this.threadsDueAt === null ? retryAt : Math.min(this.threadsDueAt, retryAt);
         }
-        return groups;
+        return [...this.groups.values()].filter(group => group.scope.has(cwd));
     }
 }
 

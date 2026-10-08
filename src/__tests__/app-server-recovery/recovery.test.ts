@@ -107,6 +107,22 @@ describe("app-server recovery", () => {
         fixture.agent.sessionIndex.dispose();
     });
 
+    it("forgets the failed turns and reviews of a crashed app-server in the session index", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture, true, {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure", "sessionIndex"]}}}});
+        const row = {...resumed("thread-a").thread, preview: "hi", source: "vscode", recencyAt: null, status: {type: "idle"}};
+        fixture.answers.set("thread/list", (params) => ({data: (params as {archived?: boolean}).archived ? [] : [row], nextCursor: null}));
+        fixture.current().rpc.notify({method: "turn/completed", params: {threadId: "thread-a", turn: {
+            id: "t", items: [], status: "failed", error: {message: "boom", codexErrorInfo: null, additionalDetails: null},
+            startedAt: null, completedAt: null, durationMs: null,
+        }}});
+        await vi.waitFor(async () => expect(((await fixture.agent.listSessions({cwd: "/work"})).sessions[0]!._meta as any).jetbrains.air.state).toBe("error"));
+
+        await fixture.kill();
+        const sessions = (await fixture.agent.listSessions({cwd: "/work"})).sessions;
+        expect((sessions[0]!._meta as any).jetbrains.air.state).toBe("idle");
+    });
+
     it("starts the app-server again for a rename or an archive of the session index", async () => {
         const fixture = createRecoveryFixture();
         await initialize(fixture, true, {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure", "sessionIndex"]}}}});
