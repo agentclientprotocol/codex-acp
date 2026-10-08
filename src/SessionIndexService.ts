@@ -87,7 +87,9 @@ export class SessionIndexService {
                 }
             },
             // A row whose usage was read late reaches the client as a change of its subscription.
-            onRead: (subjects) => this.subscriptions.usageRead(subjects.map(subject => subject.thread.id)),
+            onRead: (subjects) => this.subscriptions.usageRead(
+                subjects.map(subject => ({threadId: subject.thread.id, cwd: subject.thread.cwd})),
+            ),
         });
         this.subscriptions = new SessionListSubscriptions({
             reader: () => {

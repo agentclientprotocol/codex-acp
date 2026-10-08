@@ -1121,10 +1121,9 @@ A thread that is not loaded here has no `state`. A change of `state` is a row ch
   subagents found so far, and the row is sent again when it finds more.
 - The adapter reads usage in the background, so a list never waits for it. A row carries the usage read for its
   thread; the first list of a thread has none, and a thread that changed keeps the usage of the last read until
-  the new one is done. When the usage of a thread is read, a subscription gets the row again if the agent has
-  that row for the subscription's cwd: one of its baseline rows or a row it sent or computed before, see
-  [Session list subscription](#session-list-subscription). Another thread, such as one from a later list page,
-  shows its usage with its next change or the next list. A thread whose `updatedAt` and rollout did not change is
+  the new one is done. When the usage of a thread of its scope is read, a subscription gets the row again, see
+  [Session list subscription](#session-list-subscription): the agent puts the usage into the row it has, or reads
+  the thread anew with `thread/read` when it has none, as for a thread from a later list page. A thread whose `updatedAt` and rollout did not change is
   not read again, and a rollout is read again only when its size or time changed. A thread read within 2 s of its
   `updatedAt` is read once more after that, since `updatedAt` has whole seconds.
 - The usage of a subagent is read again when its parent thread changes: a subagent that works while its parent
@@ -1185,15 +1184,17 @@ still re-reads the list now and then, and a lost change shows up there.
 - Scope: the threads whose cwd is `cwd`, its canonical path, or the same subdirectory in the primary checkout and
   in each linked Git worktree, as `includeWorktrees: true` resolves it; from the interactive sources, as the list;
   archived or not. The agent applies no archive filter: the client filters by the `archived` field of the row.
+  The agent resolves the worktrees again every 10 s, and at most once a second for a changed thread whose cwd is in
+  no scope, which it reads once more a second later when it could not resolve them then.
 - `_session/list/changes` carries, for each thread in scope that appeared or changed, its whole row exactly as
   `session/list` answers it. A row counts as changed when `title`, `lastPromptAt`, `state`, `lastTurnEndedAt`,
   `model`, `forkedFrom`, `archived` or `usage` differs from the row the subscription last got. A change of `updatedAt` alone
   sends nothing; the new `updatedAt` comes with the next change. Archive and unarchive are row changes.
-  `removed` lists the ids of deleted threads. A thread that this agent deleted but whose cwd it does not know is
-  listed to every subscription; a client ignores an id it does not have. Both arrays are always present, and one
+  `removed` lists the ids of deleted threads. A deleted thread whose cwd the agent does not know is listed to every
+  subscription; a client ignores an id it does not have. Both arrays are always present, and one
   of them is not empty.
-- When the client subscribes, the agent takes it to have the current rows of the 50 most recently updated threads
-  of the scope, unarchived and archived, and of every other thread of the scope whose row the agent computed for a
+- When the client subscribes, the agent takes it to have the current rows of the 50 most recently updated
+  unarchived threads of the scope, of the 50 most recently updated archived ones, and of every other thread of the scope whose row the agent computed for a
   subscription of the same cwd before. The first change of any other thread sends its row even when only
   `updatedAt` moved.
 - A change never goes out before the answer to `_session/list/subscribe`: the changes of that time follow it.

@@ -279,6 +279,56 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("reads anew a thread of the scope whose usage was read but that no group has a row of", async () => {
+        const {codex, subscriptions, sent} = setup();
+        await subscriptions.subscribe("/repo");
+        codex.put(thread("paged", {updatedAt: 10}));
+
+        subscriptions.usageRead([{threadId: "paged", cwd: "/repo"}, {threadId: "elsewhere", cwd: "/other"}]);
+        await vi.advanceTimersByTimeAsync(10);
+
+        expect(codex.threadRead.mock.calls.map(call => call[0].threadId)).toEqual(["paged"]);
+        expect(sent.flatMap(changes => ids(changes.sessions))).toEqual(["paged"]);
+        subscriptions.dispose();
+    });
+
+    it("places a thread of a worktree created right after the worktrees were resolved, and drops a removed one", async () => {
+        const {codex, subscriptions, sent, listener, scopes} = setup();
+        scopes.set("/repo", ["/repo", "/repo-old"]);
+        await subscriptions.subscribe("/repo");
+        codex.put(thread("x", {cwd: "/elsewhere", updatedAt: 3_000}));
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+        // The worktree appears just after the groups resolved theirs for "/elsewhere".
+        scopes.set("/repo", ["/repo", "/repo-new"]);
+        codex.put(thread("w", {cwd: "/repo-new", updatedAt: 3_100}));
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(3_000);
+        expect(sent.flatMap(changes => ids(changes.sessions))).toEqual(["w"]);
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        codex.put(thread("old", {cwd: "/repo-old", updatedAt: 4_000}));
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+        expect(sent.flatMap(changes => ids(changes.sessions))).toEqual(["w"]);
+        subscriptions.dispose();
+    });
+
+    it("starts a scan from the top again after one that went on from its page limit", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        codex.put(thread("mine", {updatedAt: 1_000}));
+        await subscriptions.subscribe("/repo");
+        for (let index = 0; index < 1_000; index++) codex.put(thread(`other-${index}`, {updatedAt: 2_000 + index, cwd: "/elsewhere"}));
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(timings.quietMs);
+        // A new thread while the scan goes on below its first pages.
+        codex.put(thread("new", {updatedAt: 9_000}));
+        await vi.advanceTimersByTimeAsync(3 * timings.maxWaitMs);
+
+        expect(sent.flatMap(changes => ids(changes.sessions))).toContain("new");
+        subscriptions.dispose();
+    });
+
     it("sends a thread at most once a second, with its latest row", async () => {
         const {codex, subscriptions, sent} = setup();
         codex.put(thread("a"));
@@ -505,6 +555,33 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("replaces a held row with a newer one instead of holding the newer one back a second", async () => {
+        const {codex, subscriptions, sent} = setup();
+        codex.put(thread("a"));
+        const held: Array<() => void> = [];
+        const list = codex.threadList.getMockImplementation()!;
+        codex.threadList.mockImplementation(async (params) => {
+            const rows = await list(params);
+            if (params.cwd !== undefined) await new Promise<void>(resolve => held.push(resolve));
+            return rows;
+        });
+        const subscribing = subscriptions.subscribe("/repo");
+        await vi.advanceTimersByTimeAsync(10);
+        codex.update("a", {name: "B"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(50);
+        codex.update("a", {name: "C"});
+        subscriptions.observe(own("thread/name/updated", {threadId: "a"}));
+        await vi.advanceTimersByTimeAsync(50);
+
+        codex.threadList.mockImplementation(list);
+        held.forEach(release => release());
+        await subscribing;
+        await vi.advanceTimersByTimeAsync(10);
+        expect(sent.map(changes => changes.sessions.map(row => row.title))).toEqual([["C"]]);
+        subscriptions.dispose();
+    });
+
     it("gives a late usage read the row last sent, and nothing to a deleted thread", async () => {
         const usages = new Map<string, unknown>();
         const {codex, subscriptions, sent} = setup(HOME, new FakeCodex(), (row) => usages.has(row.sessionId)
@@ -523,7 +600,7 @@ describe("SessionListSubscriptions", () => {
 
         usages.set("a", {inputTokens: 1});
         usages.set("b", {inputTokens: 2});
-        subscriptions.usageRead(["a", "b"]);
+        subscriptions.usageRead([{threadId: "a", cwd: "/repo"}, {threadId: "b", cwd: "/repo"}]);
         await vi.advanceTimersByTimeAsync(timings.minChangeIntervalMs);
 
         expect(sent.flatMap(changes => changes.sessions)).toEqual([expect.objectContaining({
@@ -706,7 +783,7 @@ describe("SessionListSubscriptions with a CODEX_HOME on disk", () => {
         subscriptions.dispose();
     });
 
-    it("sends removed for a thread that another process deleted only to the subscriptions that know it", async () => {
+    it("sends removed for a thread that another process deleted, also one of unknown scope to every subscription", async () => {
         const {codex, subscriptions, sent, listener} = setup(home);
         codex.put(thread("a"));
         const subscriptionId = await subscriptions.subscribe("/repo");
@@ -716,7 +793,7 @@ describe("SessionListSubscriptions with a CODEX_HOME on disk", () => {
         listener().archiveMoved("never-seen");
         await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
 
-        expect(sent).toEqual([{subscriptionId, sessions: [], removed: ["a"]}]);
+        expect(sent).toEqual([{subscriptionId, sessions: [], removed: expect.arrayContaining(["a", "never-seen"])}]);
         subscriptions.dispose();
     });
 });
