@@ -40,10 +40,31 @@ export const MAX_SESSION_INDEX_LIMIT = 100;
 /** The `_meta.jetbrains.air` key of the archive state of a session list row or `session_info_update`. */
 export const AIR_ARCHIVED_KEY = "archived";
 
+/** The `archived` list option: which Codex lists the session index reads. */
+export type SessionIndexArchivedFilter = "unarchived" | "archived" | "all";
+
+const ARCHIVED_FILTERS: readonly SessionIndexArchivedFilter[] = ["unarchived", "archived", "all"];
+
+/** The Codex lists of a filter, by their `thread/list` `archived` value, unarchived first. */
+function archivedSides(filter: SessionIndexArchivedFilter): boolean[] {
+    switch (filter) {
+        case "unarchived":
+            return [false];
+        case "archived":
+            return [true];
+        case "all":
+            return [false, true];
+    }
+}
+
+function isArchivedFilter(value: unknown): value is SessionIndexArchivedFilter {
+    return typeof value === "string" && (ARCHIVED_FILTERS as readonly string[]).includes(value);
+}
+
 export interface SessionIndexListOptions {
     limit: number;
-    /** `false`: unarchived sessions only. `true`: unarchived and archived sessions in one list. */
-    archived: boolean;
+    /** `unarchived` or `archived`: that Codex list only. `all`: both in one list. */
+    archived: SessionIndexArchivedFilter;
     /** Also list the sessions of the linked Git worktrees of the cwd. */
     includeWorktrees: boolean;
 }
@@ -76,15 +97,16 @@ export const sessionArchiveParamsParser = z.object({
 /**
  * Reads `_meta.jetbrains.air.list` of a `session/list` request.
  *
- * @throws RequestError `invalidParams` for a `limit` that is not an integer of at least 1, or an `archived` or
- *   `includeWorktrees` that is not a boolean. Omitted and `null` mean the default for each.
+ * @throws RequestError `invalidParams` for a `limit` that is not an integer of at least 1, an `archived` that is
+ *   not `"unarchived"`, `"archived"` or `"all"`, or an `includeWorktrees` that is not a boolean. Omitted and
+ *   `null` mean the default for each.
  */
 export function readSessionIndexListOptions(meta: Record<string, unknown> | null | undefined): SessionIndexListOptions {
     const jetbrains = asRecord(asRecord(meta)[JETBRAINS_META_KEY]);
     const list = asRecord(asRecord(jetbrains[AIR_META_KEY])[AIR_SESSION_LIST_KEY]);
     return {
         limit: readLimit(list["limit"]),
-        archived: readBoolean(list, "archived"),
+        archived: readArchivedFilter(list["archived"]),
         includeWorktrees: readBoolean(list, "includeWorktrees"),
     };
 }
@@ -94,6 +116,15 @@ function readBoolean(list: Record<string, unknown>, key: string): boolean {
     const value = list[key] ?? false;
     if (typeof value !== "boolean") {
         throw RequestError.invalidParams({[key]: value}, `${key} must be a boolean`);
+    }
+    return value;
+}
+
+/** `archived`: omitted or `null` is `"unarchived"`, anything else that is not a filter name is an error. */
+function readArchivedFilter(value: unknown): SessionIndexArchivedFilter {
+    if (value === undefined || value === null) return "unarchived";
+    if (!isArchivedFilter(value)) {
+        throw RequestError.invalidParams({archived: value}, `archived must be one of ${ARCHIVED_FILTERS.map(filter => `"${filter}"`).join(", ")}`);
     }
     return value;
 }
@@ -146,7 +177,7 @@ export const SESSION_INDEX_SCAN_BUDGET_MS = 300;
 /** The prefix of the adapter cursor, see {@link readSessionIndexPage}. */
 const ADAPTER_CURSOR_PREFIX = "air-list:";
 
-/** Where one Codex list, the unarchived or the archived threads, goes on. */
+/** Where one Codex list, the unarchived or the archived threads, goes on. Which one follows from the filter. */
 interface SideCursor {
     /** The Codex page to read, read again when the client has not got all its rows yet. */
     codexCursor: string | null;
@@ -161,10 +192,10 @@ interface SideCursor {
 interface AdapterCursor {
     /** The requested cwd, or `null` for a list without one. */
     scope: string | null;
-    archived: boolean;
+    archived: SessionIndexArchivedFilter;
     includeWorktrees: boolean;
     filtered: boolean;
-    /** The unarchived list, then the archived one when `archived` is true. */
+    /** One per Codex list of the filter, in the order of {@link archivedSides}. */
     sides: SideCursor[];
     /** The recency of the last row that the client has, and the ids of its rows with that recency. */
     after: {recency: number, ids: string[]} | null;
@@ -180,10 +211,10 @@ interface SidePage {
 /**
  * Reads one page of the session index, newest first.
  *
- * Codex lists the unarchived and the archived threads apart, so with `archived` the adapter reads both and
- * merges them. It answers a row only when no unread Codex page can hold a newer one. `keep` filters the rows
- * after the read, for the filters that Codex cannot apply; such a read asks Codex for the largest pages and
- * cuts the kept rows to the limit.
+ * Codex lists the unarchived and the archived threads apart. `archived: "unarchived"` and `"archived"` read
+ * one of the two lists; `"all"` reads both and merges them, ties unarchived first. It answers a row only
+ * when no unread Codex page can hold a newer one. `keep` filters the rows after the read, for the filters
+ * that Codex cannot apply; such a read asks Codex for the largest pages and cuts the kept rows to the limit.
  *
  * The cursor is the adapter's: the Codex pages to read next and the last rows that the client has, kept by
  * their recency and ids rather than by a count, so rows that come or go between two requests do not shift
@@ -213,7 +244,7 @@ export async function readSessionIndexPage(
             archived: options.archived,
             includeWorktrees: options.includeWorktrees,
             filtered,
-            sides: (options.archived ? [false, true] : [false]).map(() => ({codexCursor: null, done: false})),
+            sides: archivedSides(options.archived).map(() => ({codexCursor: null, done: false})),
             after: null,
         }
         : decodeAdapterCursor(cursor);
@@ -223,7 +254,8 @@ export async function readSessionIndexPage(
     }
 
     const pageLimit = filtered ? MAX_SESSION_INDEX_LIMIT : options.limit;
-    const sideArchived = (index: number) => index === 1;
+    const sideFlags = archivedSides(state.archived);
+    const sideArchived = (index: number): boolean => sideFlags[index]!;
     const readCursors = state.sides.map(side => new Set(side.codexCursor === null ? [] : [side.codexCursor]));
     const pages = new Map<number, SidePage>();
     /** Moves a Codex list on to its next page, or ends it. */
@@ -256,7 +288,7 @@ export async function readSessionIndexPage(
     };
 
     for (let round = 1; ; round++) {
-        // The unarchived and the archived lists are read at the same time.
+        // With `all`, the unarchived and the archived lists are read at the same time.
         await Promise.all([...state.sides.entries()].map(async ([index, side]) => {
             if (side.done || pages.has(index)) return;
             const response = await threadList(sessionIndexThreadListParams(cwds, pageLimit, sideArchived(index), side.codexCursor));
@@ -356,8 +388,8 @@ function decodeAdapterCursor(cursor: string): AdapterCursor {
     }
     if (!Array.isArray(value) || value.length !== 6) throw invalidCursorError(cursor);
     const [scope, archived, includeWorktrees, filtered, sides, after] = value as unknown[];
-    if ((scope !== null && typeof scope !== "string") || typeof archived !== "boolean" || typeof includeWorktrees !== "boolean" || typeof filtered !== "boolean"
-        || !Array.isArray(sides) || sides.length !== (archived ? 2 : 1)) {
+    if ((scope !== null && typeof scope !== "string") || !isArchivedFilter(archived) || typeof includeWorktrees !== "boolean" || typeof filtered !== "boolean"
+        || !Array.isArray(sides) || sides.length !== archivedSides(archived).length) {
         throw invalidCursorError(cursor);
     }
     const sideCursors = sides.map((side: unknown): SideCursor => {

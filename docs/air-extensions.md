@@ -995,14 +995,17 @@ The extension follows two ACP RFDs field for field: the session list extensions 
 The request can carry `_meta.jetbrains.air.list`:
 
 ```json
-{ "cwd": "/repo", "cursor": null, "_meta": { "jetbrains": { "air": { "list": { "limit": 50, "archived": false, "includeWorktrees": false } } } } }
+{ "cwd": "/repo", "cursor": null, "_meta": { "jetbrains": { "air": { "list": { "limit": 50, "archived": "unarchived", "includeWorktrees": false } } } } }
 ```
 
 - `limit`: omitted or `null` is `50`. An integer of at least 1 is clamped to `100`; the adapter never answers more
   rows. Anything else (a string, a fraction, `0`, a negative number, `NaN`, `Infinity`, a boolean, an object) fails
   with `-32602`.
-- `archived` is a boolean. Omitted, `null` or `false`: unarchived threads only. `true`: unarchived and archived
-  threads in one list. Any other value fails with `-32602`.
+- `archived` is a string with three values. Omitted or `null` is `"unarchived"`. Any other value fails with
+  `-32602`.
+  - `"unarchived"`: unarchived threads only, one `thread/list` with `archived: false`.
+  - `"archived"`: archived threads only, one `thread/list` with `archived: true`.
+  - `"all"`: unarchived and archived threads in one list, see below.
 - `includeWorktrees` is a boolean. Omitted or `null` is `false`. Any other value fails with `-32602`.
   - `false`: `cwd` matches exactly, plus its canonical path when that differs (symlinks).
   - `true`: also the same relative subdirectory of `cwd` in the primary checkout and in each linked Git
@@ -1013,10 +1016,11 @@ The request can carry `_meta.jetbrains.air.list`:
 - The adapter sends `thread/list`
   `{cwd, limit, sortKey: "recency_at", archived, sourceKinds: [], modelProviders: [], useStateDbOnly: true, cursor}`.
   - `cwd` is a string for a single path and an array otherwise.
-  - Codex lists unarchived and archived threads apart, so `archived: true` sends one request with `archived: false`
-    and one with `archived: true` at the same time, and merges the two by recency. A row is answered only when no
-    unread Codex page can hold a newer one. An empty Codex page that has a cursor tells nothing about that, so the
-    adapter reads on in that list first; these reads count against the budget below.
+  - `archived` of `thread/list` is a boolean: `false` for `"unarchived"`, `true` for `"archived"`.
+  - Codex lists unarchived and archived threads apart, so `"all"` sends one request with `archived: false` and one
+    with `archived: true` at the same time, and merges the two by recency, ties unarchived first. A row is answered
+    only when no unread Codex page can hold a newer one. An empty Codex page that has a cursor tells nothing about
+    that, so the adapter reads on in that list first; these reads count against the budget below.
   - `sourceKinds: []` means the interactive sources, so `codex exec` runs and subagent threads are not listed.
   - `modelProviders: []` means every provider, whatever the login of the agent.
   - Codex deletes a thread with `thread/delete`, so a deleted thread is never listed, whatever `archived` is.
@@ -1033,8 +1037,9 @@ The request can carry `_meta.jetbrains.air.list`:
   `lastPromptAt`.
 - The cursor is the adapter's own: the Codex cursor of each list it reads and the last rows the client got (their
   recency and ids), so rows that come or go before them do not shift the next page. It is tied to the scope of
-  the list: `cwd` (resolved, so `/repo/` and `/repo` are the same; a relative `cwd` as sent), `archived` and
-  `includeWorktrees`. A malformed cursor, a Codex cursor or a cursor of another scope fails with `-32602`.
+  the list: `cwd` (resolved, so `/repo/` and `/repo` are the same; a relative `cwd` as sent), `archived` (an
+  omitted or `null` value counts as `"unarchived"`) and `includeWorktrees`. A malformed cursor, a Codex cursor or
+  a cursor of another scope, such as one of an `"all"` list sent with `"archived"`, fails with `-32602`.
   `limit` may change between pages.
 - A page with `nextCursor` is not empty, with one exception. The adapter reads the next Codex pages while a page
   has no row left and the cursors advance, for at most 50 rounds and 300 ms. A relative-`cwd` list, which the
@@ -1048,7 +1053,7 @@ Every row carries `archived` in `_meta.jetbrains.air`, and these optional fields
 
 | Field | Value |
 | --- | --- |
-| `archived` | `true` for a thread from the archived Codex list. Always present. |
+| `archived` | `true` for a thread from the archived Codex list, `false` otherwise, whatever the `archived` filter. Always present. |
 | `createdAt` | ISO time of `Thread.createdAt`. |
 | `lastPromptAt` | ISO time of `Thread.recencyAt`: Codex moves it when a turn starts and orders threads by it. |
 | `gitBranch` | `Thread.gitInfo.branch`. |
@@ -1101,7 +1106,8 @@ The adapter sends no `cost`: Codex reports none.
 The adapter sends `_session/list_changed {cwd}` when page 1 of a list that the client read changed.
 
 - A watch is per `cwd` and `includeWorktrees`. A `session/list` of page 1 starts or renews it, with that
-  request's `limit` and `archived`, and it expires after 10 minutes. At most 32 are kept.
+  request's `limit` and `archived` value, which the adapter uses to read page 1 again. It expires after 10
+  minutes. At most 32 are kept.
 - A list without `cwd`, or with a relative one, is not watched.
 - Triggers: a write to `<CODEX_HOME>/state_<n>.sqlite-wal` by any Codex process, a thread notification of its own
   app-server, and a check of the WAL size and time every 30 s.
@@ -1118,7 +1124,7 @@ The names and the semantics are the RFDs'. The transport differs:
 | capability `sessionIndex` in `_meta.jetbrains.air.capabilities` | `sessionCapabilities.list.limit`, `list.changes`, `sessionCapabilities.archive`; client `session.listChanged` |
 | `_meta.jetbrains.air.list.limit` | `session/list` `limit` |
 | `_meta.jetbrains.air.list.includeWorktrees` | `session/list` `includeWorktrees` |
-| `_meta.jetbrains.air.list.archived` | `session/list` `archived` (#2161) |
+| `_meta.jetbrains.air.list.archived`: `"unarchived"`, `"archived"` or `"all"` | `session/list` `archived` (#2161) |
 | `SessionInfo.updatedAt` = `Thread.updatedAt` | `SessionInfo.updatedAt`, the last activity of any kind |
 | `SessionInfo._meta.jetbrains.air.lastPromptAt` = `Thread.recencyAt`, the order key | `SessionInfo.lastPromptAt`; the list order `lastPromptAt ?? updatedAt` |
 | `SessionInfo._meta.jetbrains.air.{createdAt, gitBranch, model, forkedFrom, state, lastTurnEndedAt}` | the `SessionInfo` fields of the same names |
@@ -1133,6 +1139,8 @@ Remaining differences:
 - One capability string gates everything, for the client and the agent.
 - An AIR client without `sessionIndex` deletes as "Done", so the adapter keeps archiving on its `session/delete`.
   #2161 forbids that substitution for clients of the RFD; here it only keeps old AIR builds from losing threads.
+- `archived` of the list is a string with three values; #2161 has a boolean. `"unarchived"` is #2161's `false`
+  or omitted, and `"all"` is its `true`. `"archived"`, archived sessions only, has no #2161 counterpart.
 - The relative-`cwd` list can answer an empty page with `nextCursor` at its scan budget, see above.
 - `cost` is never sent.
 - `updatedAt` moves on unarchive, because Codex touches the rollout file then; #2161 says it should not. The order
