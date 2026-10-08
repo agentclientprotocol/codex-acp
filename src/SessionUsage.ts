@@ -259,10 +259,11 @@ export class SessionUsageIndex {
         const recheckAt = this.recheckTime(thread);
         let usage: SessionUsage | null = null;
         let originRead = false;
+        let origin = this.origins.get(thread.id);
         if (thread.path !== null) {
             try {
-                if (!this.origins.has(thread.id)) {
-                    const origin = await readForkOrigin(thread.path);
+                if (origin === undefined) {
+                    origin = await readForkOrigin(thread.path);
                     if (origin !== undefined) {
                         this.origins.set(thread.id, origin);
                         originRead = origin !== null;
@@ -280,8 +281,9 @@ export class SessionUsageIndex {
         }
         const before = this.usages.get(thread.id);
         const evicted = remember(this.usages, thread.id, {updatedAt: thread.updatedAt, path: thread.path, usage, recheckAt});
-        // The fork origin of a row lives as long as its usage.
+        // The fork origin of a row lives as long as its usage; another read can have dropped it meanwhile.
         if (evicted !== undefined) this.origins.delete(evicted);
+        if (origin !== undefined) this.origins.set(thread.id, origin);
         // Another record can come within the second of `updatedAt` without moving it: read once more after it.
         if (recheckAt !== null) this.readLater(subject, Math.max(0, recheckAt - this.nowSeconds()) * 1000);
         return originRead || (before === undefined ? usage !== null : JSON.stringify(before.usage) !== JSON.stringify(usage));
@@ -318,8 +320,11 @@ export class SessionUsageIndex {
             try {
                 stamp = await stampOf(child.path);
             } catch (again) {
-                // Codex writes the rollout of a new thread later.
-                if (isMissingFile(again)) return null;
+                // Codex writes the rollout of a new thread later: read the thread again then.
+                if (isMissingFile(again)) {
+                    this.subagents.delete(childId);
+                    return null;
+                }
                 throw again;
             }
         }
