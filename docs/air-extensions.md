@@ -1090,9 +1090,10 @@ The adapter sends no `cost`: Codex reports none.
   `PromptResponse.usage` counts it. `cachedReadTokens` and `cachedWriteTokens` are the cache reads and writes.
   `outputTokens` includes `reasoningTokens`.
 - `model` is `Thread.model`, the thread's latest model.
-- A fork counts only its own work. The first record of a fork carries the total of the history it inherited
-  plus the usage of its own first request, so the adapter subtracts that first total minus its
-  `last_token_usage`. A fork whose first record is not in the first 8 MB of its rollout gets no `usage`.
+- A fork counts only its own work. A rollout whose first line, `session_meta`, names a `forked_from_id` is a
+  fork; `Thread.forkedFromId` does not tell, as `thread/list` leaves it out. The first record of a fork carries
+  the total of the history it inherited plus the usage of its own first request, so the adapter subtracts that
+  first total minus its `last_token_usage`. A fork whose first record is not in the first 8 MB of its rollout gets no `usage`.
 - `subagents` lists the threads that the thread spawned, in the order it spawned them, each with its own counts
   and `model`; they are not part of the thread's counts. The adapter finds them in the thread's own records in
   its rollout: a `SubAgentActivity` item of kind `started` names the child in `agent_thread_id`, and in older

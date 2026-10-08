@@ -16,13 +16,14 @@ import type {Thread} from "./app-server/v2";
 import {logger} from "./Logger";
 import {
     minus,
-    readFirstTokenCount,
+    readForkStart,
     readLastTokenTotal,
     scanSpawnedThreads,
     type RawTokens,
     type SessionUsageTokens,
     type SpawnScan,
     usageTokens,
+    ZERO_TOKENS,
 } from "./RolloutUsage";
 
 export type {SessionUsageTokens} from "./RolloutUsage";
@@ -82,7 +83,6 @@ interface CachedFileTokens {
 interface Subagent {
     path: string;
     model: string | null;
-    forked: boolean;
     /** The stamp of the rollout when the thread was read: a subagent whose rollout changed is read again. */
     stamp: string | null;
 }
@@ -241,7 +241,7 @@ export class SessionUsageIndex {
         let usage: SessionUsage | null = null;
         if (thread.path !== null) {
             try {
-                const own = await this.tokensOf(thread.id, thread.path, thread.forkedFromId !== null);
+                const own = await this.tokensOf(thread.id, thread.path);
                 if (own !== null) {
                     usage = {...own, model: thread.model, subagents: await this.subagentUsages(subject, thread.path)};
                 }
@@ -301,7 +301,7 @@ export class SessionUsageIndex {
             child = {...child, stamp};
             remember(this.subagents, childId, child);
         }
-        const tokens = await this.tokensOf(childId, child.path, child.forked);
+        const tokens = await this.tokensOf(childId, child.path);
         return tokens === null ? null : {sessionId: childId, model: child.model, ...tokens};
     }
 
@@ -312,7 +312,7 @@ export class SessionUsageIndex {
             this.subagents.delete(threadId);
             return null;
         }
-        const subagent: Subagent = {path: thread.path, model: thread.model, forked: thread.forkedFromId !== null, stamp: null};
+        const subagent: Subagent = {path: thread.path, model: thread.model, stamp: null};
         remember(this.subagents, threadId, subagent);
         return subagent;
     }
@@ -321,26 +321,28 @@ export class SessionUsageIndex {
      * The own usage of a thread from its rollout, or `null` when it has no `token_count`. The rollout is read
      * again only when its path, size or modification time changed.
      */
-    private async tokensOf(threadId: string, file: string, forked: boolean): Promise<SessionUsageTokens | null> {
+    private async tokensOf(threadId: string, file: string): Promise<SessionUsageTokens | null> {
         const stamp = await stampOf(file);
         const cached = this.fileTokens.get(threadId);
         if (cached !== undefined && cached.stamp === stamp) {
             remember(this.fileTokens, threadId, cached);
             return cached.tokens;
         }
-        const tokens = await this.readTokens(threadId, file, forked);
+        const tokens = await this.readTokens(threadId, file);
         remember(this.fileTokens, threadId, {stamp, tokens});
         return tokens;
     }
 
-    private async readTokens(threadId: string, file: string, forked: boolean): Promise<SessionUsageTokens | null> {
+    private async readTokens(threadId: string, file: string): Promise<SessionUsageTokens | null> {
         const total = await readLastTokenTotal(file);
         if (total === null) return null;
-        if (!forked) return usageTokens(total);
         let inherited = this.inherited.get(threadId);
         if (inherited === undefined) {
-            const first = await readFirstTokenCount(file);
-            inherited = first === null ? null : first.last === null ? first.total : minus(first.total, first.last);
+            // A fork tells from its own session_meta: `thread/list` leaves out `Thread.forkedFromId`.
+            const start = await readForkStart(file);
+            inherited = start === "notForked"
+                ? ZERO_TOKENS
+                : start === null ? null : start.last === null ? start.total : minus(start.total, start.last);
             remember(this.inherited, threadId, inherited);
         }
         // A fork whose first record is beyond the read start of its rollout: its own part is unknown.

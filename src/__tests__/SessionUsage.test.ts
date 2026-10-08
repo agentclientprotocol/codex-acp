@@ -214,25 +214,32 @@ describe("SessionUsageIndex", () => {
         });
     });
 
-    it("counts only the own work of a fork", async () => {
-        const file = write("fork.jsonl", [
+    it("counts only the own work of a fork, which its session_meta names, whatever the listed thread says", async () => {
+        const meta = (forkedFrom: string | null) => JSON.stringify({type: "session_meta", payload: {id: PARENT, forked_from_id: forkedFrom}});
+        const lines = [
             // The first total is the inherited 1000/100 plus the fork's first request of 50/5.
             tokenCount({input: 1050, cached: 800, output: 105}, {input: 50, output: 5}),
             tokenCount({input: 1200, cached: 900, output: 130}),
-        ]);
+        ];
+        const fork = write("fork.jsonl", [meta(OTHER), ...lines]);
+        const plain = write("plain.jsonl", [meta(null), ...lines]);
         const {index} = createIndex(new Map());
-        const subject = {thread: thread(PARENT, file, {forkedFromId: OTHER}), archived: false};
-        index.usageOf(subject);
+        // `thread/list` gives no forkedFromId.
+        const forkSubject = {thread: thread(PARENT, fork), archived: false};
+        const plainSubject = {thread: thread(CHILD, plain), archived: false};
+        index.usageOf(forkSubject);
+        index.usageOf(plainSubject);
         await settle(index);
 
-        expect(index.usageOf(subject)).toMatchObject({inputTokens: 100, cachedReadTokens: 100, outputTokens: 30});
+        expect(index.usageOf(forkSubject)).toMatchObject({inputTokens: 100, cachedReadTokens: 100, outputTokens: 30});
+        expect(index.usageOf(plainSubject)).toMatchObject({inputTokens: 300, cachedReadTokens: 900, outputTokens: 130});
     });
 
     it("lists the subagents apart, each with its own usage and model, and leaves out a thread without usage", async () => {
         const childFile = write("child.jsonl", [tokenCount({input: 40, output: 4})]);
         const parentFile = write("parent.jsonl", [spawn(PARENT, CHILD), spawn(PARENT, OTHER), tokenCount({input: 10, output: 1})]);
         const threads = new Map([
-            [CHILD, thread(CHILD, childFile, {model: "gpt-5-mini", forkedFromId: PARENT})],
+            [CHILD, thread(CHILD, childFile, {model: "gpt-5-mini"})],
             [OTHER, thread(OTHER, null)],
         ]);
         const {index} = createIndex(threads);

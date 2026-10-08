@@ -130,6 +130,37 @@ export async function readLastTokenTotal(file: string): Promise<RawTokens | null
     }
 }
 
+export const ZERO_TOKENS: Readonly<RawTokens> = Object.freeze({input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0});
+
+/** How much of the start of a rollout is read for its `session_meta` line. */
+const SESSION_META_LIMIT = 1024 * 1024;
+
+/**
+ * `"notForked"` for a rollout whose `session_meta`, its first line, has no `forked_from_id`; otherwise the
+ * first `token_count` of the fork, see {@link readFirstTokenCount}.
+ */
+export async function readForkStart(file: string): Promise<{total: RawTokens, last: RawTokens | null} | "notForked" | null> {
+    const handle = await fs.open(file, "r");
+    let firstLine: string;
+    try {
+        const buffer = Buffer.alloc(SESSION_META_LIMIT);
+        const {bytesRead} = await handle.read(buffer, 0, SESSION_META_LIMIT, 0);
+        const end = buffer.subarray(0, bytesRead).indexOf(NEWLINE);
+        firstLine = buffer.toString("utf8", 0, end < 0 ? bytesRead : end);
+    } finally {
+        await handle.close();
+    }
+    let meta: unknown;
+    try {
+        meta = JSON.parse(firstLine);
+    } catch {
+        return "notForked";
+    }
+    const forkedFrom = field(field(meta, "payload"), "forked_from_id");
+    if (field(meta, "type") !== "session_meta" || typeof forkedFrom !== "string" || forkedFrom === "") return "notForked";
+    return await readFirstTokenCount(file);
+}
+
 /** The first `token_count` of the rollout, read from its start, or `null` within {@link HEAD_LIMIT}. */
 export async function readFirstTokenCount(file: string): Promise<{total: RawTokens, last: RawTokens | null} | null> {
     const handle = await fs.open(file, "r");
