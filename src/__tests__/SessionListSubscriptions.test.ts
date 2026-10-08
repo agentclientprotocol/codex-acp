@@ -263,6 +263,22 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("goes on with a scan that stopped at its page limit before it reached the mark", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        codex.put(thread("mine", {updatedAt: 1_000}));
+        await subscriptions.subscribe("/repo");
+        codex.update("mine", {updatedAt: 1_500, name: "changed"});
+        // More changes elsewhere than one scan reads, all newer than the change of "mine".
+        for (let index = 0; index < 1_000; index++) codex.put(thread(`other-${index}`, {updatedAt: 2_000 + index, cwd: "/elsewhere"}));
+
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(2 * timings.maxWaitMs);
+
+        expect(sent.flatMap(changes => changes.sessions.map(row => row.title))).toEqual(["changed"]);
+        expect(codex.scans().filter(params => params.archived === false).length).toBeGreaterThan(11);
+        subscriptions.dispose();
+    });
+
     it("sends a thread at most once a second, with its latest row", async () => {
         const {codex, subscriptions, sent} = setup();
         codex.put(thread("a"));

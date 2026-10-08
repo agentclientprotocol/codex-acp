@@ -121,7 +121,10 @@ export class SessionUsageIndex {
     private readonly usages = new Map<string, CachedUsage>();
     private readonly fileTokens = new Map<string, CachedFileTokens>();
     private readonly inherited = new Map<string, RawTokens | null>();
-    /** The thread each rollout was forked from, or `null` for no fork: `thread/list` leaves `forkedFromId` out. */
+    /**
+     * The thread each rollout was forked from, or `null` for no fork: `thread/list` leaves `forkedFromId` out. Not
+     * evicted, unlike the other caches: a row must not lose its `forkedFrom` while its usage is current.
+     */
     private readonly origins = new Map<string, string | null>();
     private readonly spawnScans = new Map<string, SpawnScan>();
     private readonly subagents = new Map<string, Subagent>();
@@ -254,7 +257,7 @@ export class SessionUsageIndex {
                 if (!this.origins.has(thread.id)) {
                     const origin = await readForkOrigin(thread.path);
                     if (origin !== undefined) {
-                        remember(this.origins, thread.id, origin);
+                        this.origins.set(thread.id, origin);
                         originRead = origin !== null;
                     }
                 }
@@ -361,7 +364,7 @@ export class SessionUsageIndex {
                 const read = await readForkOrigin(file);
                 if (read === undefined) return null;
                 origin = read;
-                remember(this.origins, threadId, origin);
+                this.origins.set(threadId, origin);
             }
             const first = origin === null ? null : await readFirstTokenCount(file);
             inherited = origin === null

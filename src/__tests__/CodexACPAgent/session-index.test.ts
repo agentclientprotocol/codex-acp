@@ -714,6 +714,24 @@ describe("_session/list/subscribe", () => {
         }
     });
 
+    it("covers the canonical path of a cwd outside a Git checkout", async () => {
+        const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-scope-")));
+        try {
+            const link = `${dir}-link`;
+            fs.symlinkSync(dir, link);
+            const {agent, threadList} = await createAgent("sessionIndex");
+            threadList.mockClear();
+            await agent.sessionIndex.subscribeList({cwd: link});
+
+            expect(threadList.mock.calls.map(call => call[0].cwd).filter(cwd => cwd !== undefined))
+                .toEqual([[link, dir], [link, dir]]);
+            agent.sessionIndex.dispose();
+            fs.rmSync(link);
+        } finally {
+            fs.rmSync(dir, {recursive: true, force: true});
+        }
+    });
+
     it("leaves no subscription, watch or timer when the connection closes", async () => {
         vi.useFakeTimers();
         const {fixture, agent} = await createAgent("sessionIndex");

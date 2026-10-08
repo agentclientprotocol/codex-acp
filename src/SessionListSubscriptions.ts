@@ -148,6 +148,8 @@ export class SessionListSubscriptions {
     /** The newest `updatedAt` that a scan saw, per archive state; `null` before the first scan. */
     private marks: {unarchived: number, archived: number} | null = null;
     private marksReady: Promise<void> | null = null;
+    /** Where a scan that stopped at its page limit goes on, per archive state. */
+    private resumes: Record<"unarchived" | "archived", {cursor: string, cutoff: number, newest: number} | null> = {unarchived: null, archived: null};
     /** Moves on when the watching stops, so that a scan that was running then does not set the marks again. */
     private watchGeneration = 0;
 
@@ -388,6 +390,7 @@ export class SessionListSubscriptions {
         this.watcher = null;
         this.nameLog = null;
         this.marks = null;
+        this.resumes = {unarchived: null, archived: null};
         this.marksReady = null;
         this.watchGeneration++;
         if (this.timer !== null) clearTimeout(this.timer);
@@ -596,14 +599,18 @@ export class SessionListSubscriptions {
         const generation = this.watchGeneration;
         const marks = this.marks;
         const sides = await Promise.all(([false, true] as const).map(async (archived) => {
-            const mark = marks === null ? null : marks[archived ? "archived" : "unarchived"];
+            const key: "archived" | "unarchived" = archived ? "archived" : "unarchived";
+            const resume = this.resumes[key];
+            // A scan that stopped at its page limit goes on where it stopped, down to the mark it had then.
+            const mark = resume?.cutoff ?? (marks === null ? null : marks[key]);
             const entries: ThreadEntry[] = [];
-            let newest = mark ?? 0;
-            let cursor: string | null = null;
+            let newest = resume?.newest ?? mark ?? 0;
+            let cursor: string | null = resume?.cursor ?? null;
+            let stoppedAt: string | null = null;
             for (let page = 0; page < SCAN_MAX_PAGES; page++) {
                 const response: ThreadListResponse = await reader.threadList({
                     cursor,
-                    limit: page === 0 ? SCAN_FIRST_PAGE : SCAN_NEXT_PAGE,
+                    limit: page === 0 && resume === null ? SCAN_FIRST_PAGE : SCAN_NEXT_PAGE,
                     sortKey: "updated_at",
                     archived,
                     sourceKinds: [],
@@ -622,15 +629,29 @@ export class SessionListSubscriptions {
                 cursor = response.nextCursor;
                 if (reachedMark || mark === null || cursor === null) break;
                 if (page === SCAN_MAX_PAGES - 1) {
-                    logger.log("The session list scan stops at its page limit", {archived, pages: SCAN_MAX_PAGES});
+                    logger.log("The session list scan goes on later from its page limit", {archived, pages: SCAN_MAX_PAGES});
+                    stoppedAt = cursor;
                 }
             }
-            return {entries, newest};
+            return {key, mark, newest, stoppedAt, entries};
         }));
         // The last subscription ended meanwhile and reset the marks: this scan must not set them again.
-        if (generation === this.watchGeneration) {
-            this.marks = {unarchived: sides[0]!.newest, archived: sides[1]!.newest};
+        if (generation !== this.watchGeneration) return [];
+        const next = {unarchived: 0, archived: 0};
+        let goOn = false;
+        for (const side of sides) {
+            if (side.stoppedAt !== null && side.mark !== null) {
+                // The mark moves on only once the scan reached it: the rest goes on in the next scan.
+                this.resumes[side.key] = {cursor: side.stoppedAt, cutoff: side.mark, newest: side.newest};
+                next[side.key] = side.mark;
+                goOn = true;
+            } else {
+                this.resumes[side.key] = null;
+                next[side.key] = side.newest;
+            }
         }
+        this.marks = next;
+        if (goOn) this.stateChanged();
         return marks === null ? [] : sides.flatMap(side => side.entries);
     }
 

@@ -102,7 +102,8 @@ export class SessionIndexService {
                 const withOrigin = origin === undefined ? row : withSessionIndexForkOrigin(row, origin);
                 return usage === undefined ? withOrigin : withSessionIndexUsage(withOrigin, usage);
             },
-            scopeCwds: (cwd) => linkedWorktreeCwds(cwd),
+            // The canonical path too outside a Git checkout, where linkedWorktreeCwds gives the cwd alone.
+            scopeCwds: (cwd) => [...new Set([...canonicalCwds(cwd), ...linkedWorktreeCwds(cwd)])],
             notify: async (changes) => {
                 await host.connection().notify(SESSION_LIST_CHANGES_METHOD, changes);
             },
