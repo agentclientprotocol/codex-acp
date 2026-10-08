@@ -1226,7 +1226,7 @@ export class CodexAcpServer {
         const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
         if (!isAuthenticated) {
             logger.log("Authenticate request failed");
-            throw RequestError.invalidParams();
+            throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
         }
         await this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params));
         logger.log("Authenticate request completed");

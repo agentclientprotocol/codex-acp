@@ -293,7 +293,10 @@ export class CodexAcpClient {
 
         if (!acp.CreateElicitationResponse.isAccept(first.response)) {
             await this.codexClient.accountLoginCancel({loginId: loginResponse.loginId});
-            return false;
+            throw RequestError.requestCancelled(
+                {methodId: "chat-gpt-device-code", action: first.response.action},
+                "ChatGPT device code sign-in was cancelled",
+            );
         }
 
         const result = await loginCompletedPromise;
