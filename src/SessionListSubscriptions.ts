@@ -163,6 +163,8 @@ export class SessionListSubscriptions {
     private readonly usageRetries = new Map<string, {cwd: string, at: number}>();
     /** Threads whose usage was read, with their cwd, see {@link usageRead}. */
     private readonly pendingUsage = new Map<string, string>();
+    /** Counts the app-servers, see {@link refreshLoadedThreads}. */
+    private appServerGeneration = 0;
     /** Counts reads and baselines, so that a read that started before a baseline does not override it. */
     private epoch = 0;
     /** Deleted threads, with whether this adapter deleted them. */
@@ -333,6 +335,7 @@ export class SessionListSubscriptions {
      * and so are the given threads.
      */
     refreshLoadedThreads(threadIds: string[]): void {
+        this.appServerGeneration++;
         if (this.subscriptions.size === 0) return;
         const loaded = [...this.groups.values()].flatMap(group => [...group.rows]
             .filter(([, {row}]) => {
@@ -459,6 +462,7 @@ export class SessionListSubscriptions {
         await this.marksReady;
         // A read that starts after this one can be newer than the baseline; one that started before cannot.
         const epoch = ++this.epoch;
+        const appServerGeneration = this.appServerGeneration;
         await this.withReader(async (reader) => {
             const pages = await Promise.all([false, true].map(archived => reader.threadList({
                 limit: BASELINE_ROWS,
@@ -475,6 +479,14 @@ export class SessionListSubscriptions {
         });
         group.baselined = true;
         group.baselineEpoch = epoch;
+        // Read from an app-server that went away meanwhile: the states of its rows are read again.
+        if (appServerGeneration !== this.appServerGeneration) {
+            for (const [threadId, {row}] of group.rows) {
+                if ((row._meta as Record<string, any> | undefined)?.["jetbrains"]?.["air"]?.["state"] !== undefined) {
+                    this.threadChanged(threadId);
+                }
+            }
+        }
         for (const subscription of group.subscriptions) {
             if (!subscription.baselined) this.takeBaseline(subscription);
         }
@@ -507,6 +519,7 @@ export class SessionListSubscriptions {
             if (startedAt - at >= this.timings.minChangeIntervalMs) this.lastChangeAt.delete(threadId);
         }
         const readEpoch = ++this.epoch;
+        const appServerGeneration = this.appServerGeneration;
 
         // A scan before the first marks would only set them: it waits for them instead.
         if (scan) await this.marksReady;
@@ -530,6 +543,11 @@ export class SessionListSubscriptions {
         });
         if (this.disposed || this.subscriptions.size === 0) return;
         await Promise.all([...this.groups.values()].map(group => group.ready));
+        if (appServerGeneration !== this.appServerGeneration) {
+            // Read from an app-server that is gone: its states no longer hold. Read again from the new one.
+            for (const threadId of found.keys()) this.readAgain(threadId, this.now());
+            found.clear();
+        }
 
         const batches = new Map<Subscription, SessionListChanges>();
         // A baseline read that started after these reads can be newer than they are: such a thread is read again.
@@ -564,12 +582,17 @@ export class SessionListSubscriptions {
             // anew, which also tells whether it still is there.
             if (unknown) this.readAgain(threadId, this.now());
         }
+        let resolvedForDeletions = false;
         for (const threadId of deleted.keys()) {
             const knowing = [...this.subscriptions.values()]
                 .filter(subscription => subscription.sent.has(threadId) || subscription.group.rows.has(threadId));
             const cwd = [...this.groups.values()].map(group => group.rows.get(threadId)?.row.cwd).find(known => known !== undefined);
-            // A deletion has no later change to wait for: the groups resolve their worktrees now.
-            const covering = cwd === undefined ? [] : this.placeCwd(cwd, true).groups;
+            // A deletion has no later change to wait for: the groups resolve their worktrees now, once a flush.
+            if (cwd !== undefined && !resolvedForDeletions) {
+                resolvedForDeletions = true;
+                this.placeCwd("", true);
+            }
+            const covering = cwd === undefined ? [] : [...this.groups.values()].filter(group => group.scope.has(cwd));
             // Every subscription whose scope has the cwd of the thread, which can be in a list that its client read
             // further down. A deleted thread that no group has seen has an unknown scope: every subscription hears
             // of it.

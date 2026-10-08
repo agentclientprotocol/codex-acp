@@ -408,6 +408,27 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("reads again from the new app-server what a flush read from the one that was replaced", async () => {
+        const {codex, subscriptions, sent} = setup();
+        codex.put(thread("a"));
+        await subscriptions.subscribe("/repo");
+        const read = codex.threadRead.getMockImplementation()!;
+        codex.threadRead.mockImplementationOnce(async (params) => {
+            const response = await read(params);
+            // The app-server is replaced while the read is out.
+            codex.update("a", {status: {type: "notLoaded"}});
+            subscriptions.refreshLoadedThreads([]);
+            return response;
+        });
+        codex.update("a", {status: {type: "active", activeFlags: []}});
+        subscriptions.observe(own("turn/started", {threadId: "a", turn: {}}));
+        await vi.advanceTimersByTimeAsync(timings.maxWaitMs);
+
+        expect(codex.threadRead).toHaveBeenCalledTimes(2);
+        expect(sent.flatMap(changes => changes.sessions.map(row => (row._meta as any).jetbrains.air.state ?? null))).toEqual([]);
+        subscriptions.dispose();
+    });
+
     it("does not go on forever with pages of threads all of the second of its mark", async () => {
         const {codex, subscriptions, listener} = setup();
         for (let index = 0; index < 1_001; index++) codex.put(thread(`same-${index}`, {updatedAt: 5_000, cwd: "/elsewhere"}));
