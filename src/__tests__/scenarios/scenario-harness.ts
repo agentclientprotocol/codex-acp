@@ -29,6 +29,7 @@ export const AIR_CAPABILITY_NAMES = [
     "rawInputRendering",
     "planContentDelta",
     "codexHooks",
+    "sessionRewind",
 ];
 
 /** The client capabilities of each client profile. */
@@ -96,7 +97,10 @@ export async function runScenario(
         }
         const messages = await runInWorkspace(replaceText(scenario, WS, workspace), profile, workspace);
         // A Git patch names the paths without the leading slash.
-        return replaceText(replaceText(messages, workspace, WS), workspace.slice(1), WS.slice(1));
+        // Native locations use platform separators; Git patch headers always use '/'.
+        const local = replaceText(replaceText(messages, workspace, WS), workspace.replaceAll("\\", "/"), WS);
+        return JSON.parse(JSON.stringify(local, (_key, value) => typeof value === "string"
+            ? value.replaceAll("/workspace\\", "/workspace/").replaceAll("/workspace/src\\", "/workspace/src/").replaceAll("a//workspace/", "a/workspace/").replaceAll("b//workspace/", "b/workspace/").replaceAll("from /workspace/", "from workspace/").replaceAll("to /workspace/", "to workspace/") : value));
     } finally {
         fs.rmSync(workspace, {recursive: true, force: true});
     }

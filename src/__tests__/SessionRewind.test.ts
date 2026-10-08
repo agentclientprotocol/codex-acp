@@ -1,254 +1,138 @@
+import {createHash} from "node:crypto";
 import {describe, expect, it, vi} from "vitest";
-import type {CodexAppServerClient} from "../CodexAppServerClient";
+import {rewindSession, type SessionHistoryPoint} from "../SessionRewind";
 import {CodexAcpClient} from "../CodexAcpClient";
-import {rewindSession} from "../SessionRewind";
+import type {CodexAppServerClient} from "../CodexAppServerClient";
+import type {Thread, Turn, ThreadItem, UserInput} from "../app-server/v2";
+import {userInputVisibleText} from "../UserInputContent";
+
+const hash = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
+const point = (id: string, text: string, occurrence = 1): SessionHistoryPoint => ({messageId: id, messageFingerprint: hash(text), messageOccurrence: occurrence});
+function turn(id: string, text: string, items: ThreadItem[] = []): Turn {
+    return {id, items: [{type: "userMessage", id: `u-${id}`, clientId: null, content: [{type: "text", text, text_elements: []}]}, ...items], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null};
+}
+function answer(id: string, text: string): ThreadItem {
+    return {type: "agentMessage", id, text, phase: null, memoryCitation: null, delivery: null, questions: null};
+}
+function fixture(turns: Turn[], mode: "legacy" | "paginated" = "paginated") {
+    const thread = {id: "session", historyMode: mode, turns} as Thread;
+    const client = {
+        threadReadWithHistory: vi.fn(async () => ({thread: structuredClone(thread)})),
+        threadRevert: vi.fn(async ({beforeTurnId}: {beforeTurnId: string}) => {
+            thread.turns = thread.turns.slice(0, thread.turns.findIndex(t => t.id === beforeTurnId));
+            return {thread: {...thread, turns: []}};
+        }),
+        threadRollback: vi.fn(async ({numTurns}: {numTurns: number}) => {
+            thread.turns = thread.turns.slice(0, -numTurns);
+            return {thread};
+        }),
+    };
+    const run = (beforeMessage: SessionHistoryPoint, resumeAtMessage?: SessionHistoryPoint, hooks?: Parameters<typeof rewindSession>[2]) =>
+        rewindSession({sessionId: "session", beforeMessage, ...(resumeAtMessage ? {resumeAtMessage} : {})}, client as unknown as CodexAppServerClient, hooks);
+    return {client, thread, run};
+}
 
 describe("session rewind", () => {
-    it("reverts the same Codex thread before the selected user turn", async () => {
-        const client = {
-            threadReadWithHistory: vi.fn().mockResolvedValue({
-                thread: {
-                    turns: [
-                        {id: "turn-1", items: [{type: "userMessage", id: "user-1", content: [{type: "text", text: "one"}]}]},
-                        {id: "turn-2", items: [{type: "userMessage", id: "user-2", content: [{type: "text", text: "two"}]}]},
-                    ],
-                },
-            }),
-            threadRevert: vi.fn().mockResolvedValue({}),
-        } as unknown as CodexAppServerClient;
-
-        const result = await rewindSession({
-            sessionId: "thread-1",
-            beforeMessage: {
-                messageId: "user-2",
-                messageFingerprint: "sha256:3fc4ccfe745870e2c0d99f71f30ff0656c8d1ed5d3f3b71b17a64d1c0d9a4f5f",
-                messageOccurrence: 1,
-            },
-        }, client);
-
-        expect(result).toEqual({rewound: true});
-        expect(client.threadRevert).toHaveBeenCalledWith({threadId: "thread-1", beforeTurnId: "turn-2"});
+    it.each([0, 1, 2])("keeps the same ID and precise prefix before turn %i", async index => {
+        const f = fixture([turn("1", "one"), turn("2", "two"), turn("3", "three")]);
+        await expect(f.run(point(`u-${index + 1}`, ["one", "two", "three"][index]!))).resolves.toEqual({rewound: true});
+        expect(f.thread.id).toBe("session");
+        expect(f.thread.turns).toHaveLength(index);
+        expect(f.client.threadRollback).not.toHaveBeenCalled();
     });
-
-    it("resolves a restored message through its fingerprint occurrence", async () => {
-        const client = {
-            threadReadWithHistory: vi.fn().mockResolvedValue({
-                thread: {
-                    turns: [
-                        {id: "turn-1", items: [{type: "userMessage", id: "new-1", content: [{type: "text", text: "repeat"}]}]},
-                        {id: "turn-2", items: [{type: "userMessage", id: "new-2", content: [{type: "text", text: "repeat"}]}]},
-                    ],
-                },
-            }),
-            threadRevert: vi.fn().mockResolvedValue({}),
-        } as unknown as CodexAppServerClient;
-
-        const result = await rewindSession({
-            sessionId: "thread-1",
-            beforeMessage: {
-                messageId: "stale-id",
-                messageFingerprint: "sha256:25e2b6b106523880e27763084ffa6a0756335be0d7106022535365b9ad39b4b1",
-                messageOccurrence: 2,
-            },
-        }, client);
-
-        expect(result).toEqual({rewound: true});
-        expect(client.threadRevert).toHaveBeenCalledWith({threadId: "thread-1", beforeTurnId: "turn-2"});
+    it("supports repeated edits after the retained prefix is persisted", async () => {
+        const f = fixture([turn("1", "one"), turn("2", "two")]);
+        await f.run(point("u-2", "two"));
+        f.thread.turns.push(turn("3", "replacement"));
+        await f.run(point("u-3", "replacement"));
+        expect(f.thread.turns.map(t => t.id)).toEqual(["1"]);
     });
-
-    it("prefers the exact segmented message id over its protocol id fallback", async () => {
-        const client = {
-            threadReadWithHistory: vi.fn().mockResolvedValue({
-                thread: {
-                    turns: [
-                        {id: "turn-1", items: [{type: "userMessage", id: "user-1", content: [{type: "text", text: "fallback"}]}]},
-                        {id: "turn-2", items: [{type: "userMessage", id: "user-1:segment:0", content: [{type: "text", text: "exact"}]}]},
-                    ],
-                },
-            }),
-            threadRevert: vi.fn().mockResolvedValue({}),
-        } as unknown as CodexAppServerClient;
-
-        await rewindSession({
-            sessionId: "thread-1",
-            beforeMessage: {
-                messageId: "user-1:segment:0",
-                messageFingerprint: `sha256:${"0".repeat(64)}`,
-                messageOccurrence: 1,
-            },
-        }, client);
-
-        expect(client.threadRevert).toHaveBeenCalledWith({threadId: "thread-1", beforeTurnId: "turn-2"});
+    it("rejects stale content even when the exact ID still exists", async () => {
+        const f = fixture([turn("1", "new")]);
+        await expect(f.run(point("u-1", "old"))).rejects.toThrow("fingerprint changed");
+        expect(f.client.threadRevert).not.toHaveBeenCalled();
     });
-
-    it("does not fingerprint history when an exact message id is found", async () => {
-        const unreadableItem = Object.defineProperty({type: "userMessage", id: "other"}, "content", {
-            enumerable: true,
-            get: () => {
-                throw new Error("fingerprint fallback should not run");
-            },
-        });
-        const client = {
-            threadReadWithHistory: vi.fn().mockResolvedValue({
-                thread: {
-                    turns: [
-                        {id: "turn-1", items: [unreadableItem]},
-                        {id: "turn-2", items: [{type: "userMessage", id: "exact", content: [{type: "text", text: "selected"}]}]},
-                    ],
-                },
-            }),
-            threadRevert: vi.fn().mockResolvedValue({}),
-        } as unknown as CodexAppServerClient;
-
-        await rewindSession({
-            sessionId: "thread-1",
-            beforeMessage: {
-                messageId: "exact",
-                messageFingerprint: `sha256:${"0".repeat(64)}`,
-                messageOccurrence: 1,
-            },
-        }, client);
-
-        expect(client.threadRevert).toHaveBeenCalledWith({threadId: "thread-1", beforeTurnId: "turn-2"});
+    it("prefers the exact segmented ID before its protocol ID fallback", async () => {
+        const a = turn("1", "fallback"), b = turn("2", "exact");
+        b.items[0]!.id = "u-1:segment:0";
+        const f = fixture([a, b]);
+        await f.run(point("u-1:segment:0", "exact"));
+        expect(f.thread.turns.map(t => t.id)).toEqual(["1"]);
     });
-
-    it("uses the visible replay text when fingerprinting multimodal and skill inputs", async () => {
-        const client = {
-            threadReadWithHistory: vi.fn().mockResolvedValue({
-                thread: {
-                    historyMode: "paginated",
-                    turns: [{
-                        id: "turn-1",
-                        items: [{
-                            type: "userMessage",
-                            id: "new-id",
-                            content: [
-                                {type: "text", text: "look"},
-                                {type: "image", url: "https://example.com/image.png"},
-                                {type: "skill", name: "review", path: "/tmp/SKILL.md"},
-                            ],
-                        }],
-                    }],
-                },
-            }),
-            threadRevert: vi.fn().mockResolvedValue({}),
-        } as unknown as CodexAppServerClient;
-
-        await rewindSession({
-            sessionId: "thread-1",
-            beforeMessage: {
-                messageId: "stale-id",
-                messageFingerprint: "sha256:d0425f232dd6a5d6a18eee0fb305ff976368b93fb5ad3da67a4b41d919f7e2de",
-                messageOccurrence: 1,
-            },
-        }, client);
-
-        expect(client.threadRevert).toHaveBeenCalledWith({threadId: "thread-1", beforeTurnId: "turn-1"});
+    it("resolves a unique restored text fingerprint", async () => {
+        const f = fixture([turn("1", "one")]);
+        await f.run(point("stale-id", "one"));
+        expect(f.thread.turns).toEqual([]);
     });
-
-    it("uses turn-count rollback for legacy thread history", async () => {
-        const client = {
-            threadReadWithHistory: vi.fn().mockResolvedValue({
-                thread: {
-                    historyMode: "legacy",
-                    turns: [
-                        {id: "turn-1", items: [{type: "userMessage", id: "user-1", content: [{type: "text", text: "one"}]}]},
-                        {id: "turn-2", items: [{type: "userMessage", id: "user-2", content: [{type: "text", text: "two"}]}]},
-                        {id: "turn-3", items: [{type: "userMessage", id: "user-3", content: [{type: "text", text: "three"}]}]},
-                    ],
-                },
-            }),
-            threadRollback: vi.fn().mockResolvedValue({}),
-            threadRevert: vi.fn(),
-        } as unknown as CodexAppServerClient;
-
-        await rewindSession({
-            sessionId: "thread-1",
-            beforeMessage: {
-                messageId: "user-2",
-                messageFingerprint: "sha256:3fc4ccfe745870e2c0d99f71f30ff0656c8d1ed5d3f3b71b17a64d1c0d9a4f5f",
-                messageOccurrence: 1,
-            },
-        }, client);
-
-        expect(client.threadRollback).toHaveBeenCalledWith({threadId: "thread-1", numTurns: 2});
-        expect(client.threadRevert).not.toHaveBeenCalled();
+    it("requires a current retained boundary for repeated fingerprint fallback", async () => {
+        const f = fixture([turn("1", "repeat", [answer("a-1", "answer")]), turn("2", "repeat")]);
+        await expect(f.run(point("stale", "repeat", 2))).rejects.toThrow("retained boundary");
+        expect(f.client.threadRevert).not.toHaveBeenCalled();
+        await f.run(point("stale", "repeat", 2), point("a-1", "answer"));
+        expect(f.thread.turns.map(t => t.id)).toEqual(["1"]);
     });
-
-    it("rejects rewinding a steer inside an existing turn", async () => {
-        const client = {
-            threadReadWithHistory: vi.fn().mockResolvedValue({
-                thread: {
-                    historyMode: "paginated",
-                    turns: [{
-                        id: "turn-1",
-                        items: [
-                            {type: "userMessage", id: "user-1", content: [{type: "text", text: "first"}]},
-                            {type: "agentMessage", id: "assistant-1", text: "working"},
-                            {type: "userMessage", id: "steer-1", content: [{type: "text", text: "steer"}]},
-                        ],
-                    }],
-                },
-            }),
-            threadRevert: vi.fn(),
-        } as unknown as CodexAppServerClient;
-
-        await expect(rewindSession({
-            sessionId: "thread-1",
-            beforeMessage: {
-                messageId: "steer-1",
-                messageFingerprint: "sha256:57fce44d7c6df51ad8525da1580a246e9d1142d79d1d1f176b1d29643d61ed44",
-                messageOccurrence: 1,
-            },
-            resumeAtMessage: {
-                messageId: "assistant-1",
-                messageFingerprint: `sha256:${"0".repeat(64)}`,
-                messageOccurrence: 1,
-            },
-        }, client)).rejects.toThrow("does not start a turn");
-        expect(client.threadRevert).not.toHaveBeenCalled();
+    it("rejects a stale retained boundary without mutating", async () => {
+        const f = fixture([turn("1", "one", [answer("a-1", "answer")]), turn("2", "two")]);
+        await expect(f.run(point("u-2", "two"), point("deleted-anchor", "answer"))).rejects.toThrow("boundary changed");
+        expect(f.client.threadRevert).not.toHaveBeenCalled();
     });
-
-    it("does not revert when the selected message is absent", async () => {
-        const client = {
-            threadReadWithHistory: vi.fn().mockResolvedValue({thread: {turns: []}}),
-            threadRevert: vi.fn(),
-        } as unknown as CodexAppServerClient;
-
-        await expect(rewindSession({
-            sessionId: "thread-1",
-            beforeMessage: {
-                messageId: "missing",
-                messageFingerprint: `sha256:${"0".repeat(64)}`,
-                messageOccurrence: 1,
-            },
-        }, client)).rejects.toThrow("Rewind message missing was not found");
-        expect(client.threadRevert).not.toHaveBeenCalled();
+    it("rejects midturn steering rather than discarding the containing turn", async () => {
+        const f = fixture([turn("1", "one", [answer("a-1", "working"), ...turn("steer", "steer").items])]);
+        await expect(f.run(point("u-steer", "steer"))).rejects.toThrow("does not start a turn");
+        expect(f.client.threadRevert).not.toHaveBeenCalled();
     });
-
-    it("drains queued session notifications before acknowledging rewind", async () => {
-        const appServerClient = {
-            threadReadWithHistory: vi.fn().mockResolvedValue({
-                thread: {
-                    historyMode: "paginated",
-                    turns: [{id: "turn-1", items: [{type: "userMessage", id: "user-1", content: [{type: "text", text: "one"}]}]}],
-                },
-            }),
-            threadRevert: vi.fn().mockResolvedValue({}),
-        } as unknown as CodexAppServerClient;
-        const client = new CodexAcpClient(appServerClient);
-        const waitForNotifications = vi.spyOn(client, "waitForSessionNotifications").mockResolvedValue();
-
-        await client.rewindSession({
-            sessionId: "thread-1",
-            beforeMessage: {
-                messageId: "user-1",
-                messageFingerprint: `sha256:${"0".repeat(64)}`,
-                messageOccurrence: 1,
-            },
-        });
-
-        expect(waitForNotifications).toHaveBeenCalledWith("thread-1");
-        expect(appServerClient.threadRevert).toHaveBeenCalledBefore(waitForNotifications);
+    it("shares current replay text for multimodal and skill inputs", async () => {
+        const f = fixture([turn("1", "look")]);
+        const content: UserInput[] = [{type:"text", text:"look", text_elements:[]}, {type:"image", url:"https://example.test/i.png"}, {type:"skill", name:"review", path:"/tmp/skill"}];
+        (f.thread.turns[0]!.items[0] as Extract<ThreadItem, {type:"userMessage"}>).content = content;
+        await f.run(point("stale", userInputVisibleText(content)));
+        expect(f.thread.turns).toEqual([]);
+    });
+    it("requires exact identity when replay text omits a resource", async () => {
+        const f = fixture([turn("1", "")]);
+        (f.thread.turns[0]!.items[0] as Extract<ThreadItem, {type:"userMessage"}>).content = [{type:"mention", name:"file", path:"/tmp/file"}];
+        await expect(f.run(point("stale", ""))).rejects.toThrow("attachment identity");
+        await f.run(point("u-1", ""));
+        expect(f.thread.turns).toEqual([]);
+    });
+    it("uses rollback only for explicit legacy metadata", async () => {
+        const f = fixture([turn("1", "one"), turn("2", "two"), turn("3", "three")], "legacy");
+        await f.run(point("u-2", "two"));
+        expect(f.client.threadRollback).toHaveBeenCalledWith({threadId: "session", numTurns: 2});
+        expect(f.client.threadRevert).not.toHaveBeenCalled();
+    });
+    it.each([{}, {code:-32601}, new Error("legacy rollback suggested"), new Error("reload failed")])("never falls back based on a revert error shape %j", async error => {
+        const f = fixture([turn("1", "one")]);
+        f.client.threadRevert.mockRejectedValue(error);
+        await expect(f.run(point("u-1", "one"))).rejects.toEqual(error);
+        expect(f.client.threadRollback).not.toHaveBeenCalled();
+    });
+    it("rejects unknown native history mode before dispatch", async () => {
+        const f = fixture([turn("1", "one")]);
+        (f.thread as {historyMode: unknown}).historyMode = undefined;
+        await expect(f.run(point("u-1", "one"))).rejects.toThrow("Unknown history mode");
+        expect(f.client.threadRevert).not.toHaveBeenCalled();
+    });
+    it("validates before cancelling and rejects a changed prefix after settlement", async () => {
+        const f = fixture([turn("1", "one"), turn("2", "two")]);
+        const stop = vi.fn(async () => {f.thread.turns[0] = turn("replaced", "other");});
+        await expect(f.run(point("u-2", "two"), undefined, {beforeMutation:stop})).rejects.toThrow("history changed");
+        expect(stop).toHaveBeenCalledOnce();
+        expect(f.client.threadRevert).not.toHaveBeenCalled();
+        await expect(f.run(point("missing", "absent"), undefined, {beforeMutation:stop})).rejects.toThrow("not found");
+        expect(stop).toHaveBeenCalledOnce();
+    });
+    it("checks the actual retained prefix instead of trusting empty response turns", async () => {
+        const f = fixture([turn("1", "one"), turn("2", "two")]);
+        f.client.threadRevert.mockResolvedValue({thread:{...f.thread, turns:[]}});
+        await expect(f.run(point("u-2", "two"))).rejects.toThrow("expected prefix");
+    });
+    it("drains native notifications after persisted-prefix verification", async () => {
+        const f = fixture([turn("1", "one")]);
+        const client = new CodexAcpClient(f.client as unknown as CodexAppServerClient);
+        const drain = vi.spyOn(client, "waitForSessionNotifications").mockResolvedValue();
+        await client.rewindSession({sessionId:"session",beforeMessage:point("u-1","one")});
+        expect(f.client.threadRevert).toHaveBeenCalledBefore(drain);
+        expect(drain).toHaveBeenCalledWith("session");
     });
 });

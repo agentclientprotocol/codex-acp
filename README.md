@@ -21,6 +21,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Typed warnings and errors through the opt-in [AIR session failure extension](docs/air-extensions.md#session-failure).
 - All AIR extensions, capabilities, and `_meta` keys: [AIR extensions](docs/air-extensions.md).
 - A per-turn [agent file-change report](docs/air-extensions.md#agent-file-change-report) after capability negotiation.
+- In-place message editing through the AIR [session rewind extension](docs/session-rewind-extension.md), without a provider fork.
 - Client-provided MCP servers over command-based stdio config and HTTP transport.
 - Slash commands: `/status`, `/mcp` (with `/mcp reconnect`), `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.
 
@@ -107,3 +108,5 @@ See [AIR extensions](docs/air-extensions.md#async-tasks) for the capability, lif
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.
+
+Local native-session test extensions: [English](docs/native-session-extensions.md) | [简体中文](docs/native-session-extensions.zh-CN.md).

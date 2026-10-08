@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import {SESSION_FILE_REVERT_METHOD, sessionFileRevertParser} from "./SessionFileRevert";
+import {SESSION_QUEUE_METHOD, parseSessionQueueRequest} from "./SessionQueue";
+import {SESSION_SEARCH_METHOD, SESSION_ATTACHMENTS_METHOD, sessionSearchParser, sessionAttachmentsParser} from "./SessionDiscovery";
+import {SESSION_ARCHIVE_METHOD, SESSION_UNARCHIVE_METHOD, sessionArchiveParser} from "./SessionArchive";
 
 import * as acp from "@agentclientprotocol/sdk";
 import {z} from "zod";
@@ -19,6 +23,9 @@ import {
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+
+import {RUNTIME_READ_METHOD, RUNTIME_CONTROL_METHOD, runtimeReadParser, runtimeControlParser} from "./SessionRuntime";
+import {SESSION_REWIND_METHOD} from "./SessionRewind";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -50,6 +57,17 @@ const goalControlParamsParser = z.discriminatedUnion("action", [
 const asyncTaskStopParamsParser = z.object({
     sessionId: z.string().trim().min(1),
     asyncTaskId: z.string().trim().min(1),
+}).passthrough();
+
+const sessionHistoryPointParser = z.object({
+    messageId: z.string().trim().min(1),
+    messageFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    messageOccurrence: z.number().int().positive(),
+});
+const sessionRewindParamsParser = z.object({
+    sessionId: z.string().trim().min(1),
+    beforeMessage: sessionHistoryPointParser,
+    resumeAtMessage: sessionHistoryPointParser.optional(),
 }).passthrough();
 
 const hooksListParamsParser = z.object({cwd: z.string().trim().min(1)});
@@ -178,6 +196,15 @@ function startAcpServer() {
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
+        .onRequest(SESSION_FILE_REVERT_METHOD, sessionFileRevertParser, (ctx) => getAgent().revertFiles(ctx.params))
+        .onRequest(SESSION_QUEUE_METHOD, z.unknown().transform(value => parseSessionQueueRequest(value)), (ctx) => getAgent().manageSessionQueue(ctx.params, ctx.signal))
+        .onRequest(SESSION_SEARCH_METHOD, sessionSearchParser, (ctx) => getAgent().searchSessionHistory(ctx.params))
+        .onRequest(SESSION_ATTACHMENTS_METHOD, sessionAttachmentsParser, (ctx) => getAgent().manageSessionAttachments(ctx.params))
+        .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParser, (ctx) => getAgent().archiveSession(ctx.params.sessionId, true))
+        .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParser, (ctx) => getAgent().archiveSession(ctx.params.sessionId, false))
+        .onRequest(RUNTIME_READ_METHOD, runtimeReadParser, (ctx) => getAgent().readSessionRuntime(ctx.params, ctx.signal))
+        .onRequest(RUNTIME_CONTROL_METHOD, runtimeControlParser, (ctx) => getAgent().controlSessionRuntime(ctx.params))
+        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent().extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
         .onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
