@@ -4,6 +4,8 @@ import {CodexElicitationHandler} from "../CodexElicitationHandler";
 import type {AcpClientConnection} from "../ACPSessionConnection";
 import type {ServerNotification} from "../app-server";
 import {PermissionLifecycleContext} from "../permissions/lifecycle";
+import {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
+import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 
 function sessionState(): SessionState {
     return {
@@ -27,6 +29,7 @@ function mcpStarted(id: string, turnId: string, threadId = "thread"): ServerNoti
                 status: "inProgress",
                 arguments: {},
                 appContext: null,
+                mcpAppUi: null,
                 readOnlyHint: null,
                 pluginId: null,
                 result: null,
@@ -188,10 +191,13 @@ describe("PermissionLifecycleContext", () => {
         const connection = {
             request: vi.fn().mockResolvedValue({action: "decline"}),
         } as unknown as AcpClientConnection;
+        const clientCapabilities = {elicitation: {form: {}}};
         const handler = new CodexElicitationHandler(
             connection,
             prompt,
-            {elicitation: {form: {}}},
+            clientCapabilities,
+            undefined,
+            new AcpToolCallRenderer(ClientCapabilities.from(clientCapabilities)),
         );
 
         await handler.handleElicitation({
@@ -218,7 +224,13 @@ describe("PermissionLifecycleContext", () => {
             }),
             notify: vi.fn(),
         } as unknown as AcpClientConnection;
-        const handler = new CodexElicitationHandler(connection, prompt);
+        const handler = new CodexElicitationHandler(
+            connection,
+            prompt,
+            null,
+            undefined,
+            new AcpToolCallRenderer(ClientCapabilities.DEFAULT),
+        );
         const approval = {
             threadId: "thread",
             turnId: "turn-1",

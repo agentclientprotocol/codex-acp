@@ -1,6 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import {
     createCodexMockTestFixture,
+    createTestEventHandler,
     createTestModel,
     createTestSessionState,
     mockPromptTurn,
@@ -8,13 +9,13 @@ import {
     type MethodCallEvent,
 } from "../acp-test-utils";
 import {
+    accountFromUpdated,
     AUTH_STATUS_META_KEY,
     AUTH_STATUS_UPDATE_METHOD,
     type AuthStatus,
 } from "../../AuthStatusMeta";
 import {ModelId} from "../../ModelId";
 import {PROTOCOL_VERSION} from "@agentclientprotocol/sdk";
-import {CodexEventHandler} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import type {Account, AccountUpdatedNotification} from "../../app-server/v2";
 
@@ -66,7 +67,7 @@ async function createPromptableSession(fixture: CodexMockTestFixture): Promise<s
     const agent = fixture.getCodexAcpAgent();
     const client = fixture.getCodexAcpClient();
     const model = createTestModel();
-    vi.spyOn(client, "authRequired").mockResolvedValue(false);
+    vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
     vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
     vi.spyOn(client, "newSession").mockResolvedValue({
         sessionId: "turn-session",
@@ -417,15 +418,9 @@ describe("authStatus extension", () => {
                 notify: vi.fn(async () => {}),
                 request: vi.fn(),
             } as unknown as AcpClientConnection;
-            const handler = new CodexEventHandler(
-                connection,
-                createTestSessionState(),
-                false,
-                false,
-                "epoch",
-                undefined,
-                (notification: AccountUpdatedNotification) => received.push(notification),
-            );
+            const handler = createTestEventHandler(connection, createTestSessionState(), {
+                onAccountUpdated: (notification: AccountUpdatedNotification) => received.push(notification),
+            });
 
             await handler.handleNotification({
                 method: "account/updated",
@@ -434,5 +429,25 @@ describe("authStatus extension", () => {
 
             expect(received).toEqual([{authMode: "chatgpt", planType: "plus"}]);
         });
+    });
+});
+
+describe("accountFromUpdated", () => {
+    const chatGpt: Account = {type: "chatgpt", email: "user@example.com", planType: "plus"};
+
+    it("clears the account on a logout", () => {
+        expect(accountFromUpdated({authMode: null, planType: null}, chatGpt)).toBeNull();
+    });
+
+    it("keeps the email of a ChatGPT account and takes the new plan", () => {
+        expect(accountFromUpdated({authMode: "chatgpt", planType: "pro"}, chatGpt))
+            .toEqual({type: "chatgpt", email: "user@example.com", planType: "pro"});
+        expect(accountFromUpdated({authMode: "chatgpt", planType: null}, {type: "apiKey"}))
+            .toEqual({type: "chatgpt", email: null, planType: "unknown"});
+    });
+
+    it("maps an API key and keeps the account for a mode with no account shape", () => {
+        expect(accountFromUpdated({authMode: "apikey", planType: null}, chatGpt)).toEqual({type: "apiKey"});
+        expect(accountFromUpdated({authMode: "headers", planType: null}, chatGpt)).toBe(chatGpt);
     });
 });

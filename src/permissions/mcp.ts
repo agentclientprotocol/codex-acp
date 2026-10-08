@@ -7,6 +7,8 @@ import type {
 import {optionPermissionMeta} from "./metadata";
 import {McpApprovalOptionId} from "./option-ids";
 import {isRecord} from "./json";
+import type {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
+import {ElicitationReporter} from "../tool-calls/reporters/ElicitationReporter";
 
 export type PersistValue = "session" | "always";
 
@@ -36,7 +38,17 @@ export function isMcpToolCallApproval(meta: unknown): boolean {
 export function buildMcpPermissionOptions(
     isToolApproval: boolean,
     persistOptions: Set<PersistValue>,
+    airClient: boolean,
 ): acp.PermissionOption[] {
+    const permissionOption = (
+        optionId: string,
+        name: string,
+        kind: acp.PermissionOptionKind,
+        description: string,
+    ): acp.PermissionOption => {
+        const meta = optionPermissionMeta(airClient, description);
+        return {optionId, name, kind, ...(meta ? {_meta: meta} : {})};
+    };
     const options: acp.PermissionOption[] = [permissionOption(
         isToolApproval ? McpApprovalOptionId.AllowOnce : "accept",
         "Allow",
@@ -89,62 +101,30 @@ export function buildMcpPermissionRequest(
     params: McpServerElicitationRequestParams,
     context: McpElicitationContext,
     nextStandaloneToolCallId: () => string,
+    renderer: AcpToolCallRenderer,
 ): {request: acp.RequestPermissionRequest; correlatedCallId: string | undefined} {
-    const messageContent: acp.ToolCallContent = {
-        type: "content",
-        content: {type: "text", text: params.message},
-    };
-    const options = buildMcpPermissionOptions(context.isToolApproval, context.persistOptions);
-    if (params.mode === "form" || params.mode === "openai/form") {
-        if (context.correlatedCallId !== undefined) {
-            return {
-                request: {
-                    sessionId,
-                    toolCall: {
-                        toolCallId: context.correlatedCallId,
-                        kind: "execute",
-                        status: "pending",
-                    },
-                    _meta: {is_mcp_tool_approval: true},
-                    options,
-                },
-                correlatedCallId: context.correlatedCallId,
-            };
-        }
-        return {
-            request: {
-                sessionId,
-                toolCall: {
-                    toolCallId: nextStandaloneToolCallId(),
-                    kind: context.isToolApproval ? "execute" : "other",
-                    status: "pending",
-                    title: context.isToolApproval ? "MCP tool call approval" : "Question from MCP server",
-                    content: [messageContent],
-                    rawInput: {serverName: params.serverName, description: params.message, schema: params.requestedSchema},
-                },
-                ...(context.isToolApproval ? {_meta: {is_mcp_tool_approval: true}} : {}),
-                options,
-            },
-            correlatedCallId: undefined,
-        };
-    }
-    if (params.mode !== "url") {
-        throw new Error(`Unsupported MCP elicitation mode: ${params.mode}`);
-    }
+    const correlatedCallId = params.mode === "form" || params.mode === "openai/form"
+        ? context.correlatedCallId
+        : undefined;
+    const toolCall = renderer.renderPermissionToolCall(ElicitationReporter.permission(
+        params,
+        context.isToolApproval,
+        correlatedCallId,
+        nextStandaloneToolCallId,
+    ));
+    const toolApprovalMeta = context.isToolApproval && params.mode !== "url" ? {_meta: {is_mcp_tool_approval: true}} : {};
     return {
         request: {
             sessionId,
-            toolCall: {
-                toolCallId: `elicitation-${params.elicitationId}`,
-                kind: "fetch",
-                status: "pending",
-                title: "MCP server requests to open a URL",
-                content: [messageContent],
-                rawInput: {serverName: params.serverName, description: params.message, url: params.url},
-            },
-            options,
+            toolCall,
+            ...toolApprovalMeta,
+            options: buildMcpPermissionOptions(
+                context.isToolApproval,
+                context.persistOptions,
+                renderer.capabilities.airClient,
+            ),
         },
-        correlatedCallId: undefined,
+        correlatedCallId,
     };
 }
 
@@ -179,16 +159,6 @@ export function convertMcpPermissionResponse(
         default:
             return cancelledResponse();
     }
-}
-
-function permissionOption(
-    optionId: string,
-    name: string,
-    kind: acp.PermissionOptionKind,
-    description: string,
-): acp.PermissionOption {
-    const meta = optionPermissionMeta(description);
-    return {optionId, name, kind, ...(meta ? {_meta: meta} : {})};
 }
 
 function cancelledResponse(): McpServerElicitationRequestResponse {

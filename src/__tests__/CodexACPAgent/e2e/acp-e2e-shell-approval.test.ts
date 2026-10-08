@@ -103,17 +103,63 @@ describeE2E("E2E read-only mode shell permission tests", () => {
         await fixture.dispose();
     });
 
-    it("runs a workspace command without prompting for permission", async () => {
+    it("requests permission for a command that writes inside the workspace", async () => {
+        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowOnce));
         const sessionId = await writeToFile(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()));
 
-        expectNoPermissionRequests(fixture, sessionId);
+        expect(fixture.readPermissionRequests(sessionId, "execute").length).toBeGreaterThanOrEqual(1);
+        expect(fixture.readPermissionRequests(sessionId, "edit")).toHaveLength(0);
     });
+
+    it.each(["rejected", "cancelled"] as const)(
+        "does not write inside the workspace when shell permission is %s",
+        async (outcome) => {
+            fixture.setPermissionResponder(request => {
+                const reject = request.options.find(option => option.kind === "reject_once");
+                return outcome === "rejected" && reject
+                    ? {outcome: {outcome: "selected", optionId: reject.optionId}}
+                    : createPermissionResponse(null);
+            });
+            const filePath = path.join(fixture.workspaceDir, generateFileNameForTest());
+            const sessionId = (await fixture.createSession()).sessionId;
+            const response = await fixture.connection.prompt({
+                sessionId,
+                prompt: [{
+                    type: "text",
+                    text: `Use your shell tool to run exactly \`printf 'blocked' > '${filePath}'\`. Do not modify files any other way.`,
+                }],
+            });
+
+            // Refusing before requesting permission is also safe. Assert the write
+            // was blocked without requiring a particular model response or stop reason.
+            expect(fs.existsSync(filePath),
+                `stopReason=${response.stopReason}; agent said: ${fixture.readText(sessionId)}`,
+            ).toBe(false);
+        },
+    );
 
     it("requests permission for a command that writes outside the workspace", async () => {
         const dir = createDirOutsideWorkspace(fixture);
         fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowOnce));
         const sessionId = await writeToFile(fixture, path.join(dir, generateFileNameForTest()));
         expectPermissionRequests(fixture, sessionId, {execute: 1, edit: 0});
+    });
+});
+
+describeE2E("E2E workspace access mode shell permission tests", () => {
+    let fixture: SpawnedAgentFixture;
+
+    beforeEach(async () => {
+        fixture = await createAuthenticatedFixture(AgentMode.WorkspaceWrite);
+    });
+
+    afterEach(async () => {
+        await fixture.dispose();
+    });
+
+    it("runs a workspace command without prompting for permission", async () => {
+        const sessionId = await writeToFile(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()));
+        expectNoPermissionRequests(fixture, sessionId);
     });
 });
 

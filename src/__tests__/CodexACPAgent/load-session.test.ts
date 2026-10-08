@@ -1,18 +1,121 @@
 import { describe, it, expect, vi } from "vitest";
 import type * as acp from "@agentclientprotocol/sdk";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
-import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
+import type { Model, Thread, ThreadGoal, UserInput } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
+    it("preserves every native user input kind during history replay", async () => {
+        const cases: Array<{input: UserInput, content: acp.ContentBlock}> = [
+            {input: {type: "text", text: "Request", text_elements: []}, content: {type: "text", text: "Request"}},
+            {input: {type: "image", url: "https://example.com/image.png"}, content: {type: "text", text: "[@image](https://example.com/image.png)"}},
+            {input: {type: "image", fileId: "saved-image"}, content: {type: "text", text: "image:saved-image"}},
+            {input: {type: "localImage", path: "/workspace/image #1.png"}, content: {type: "resource_link", name: "image #1.png", uri: "file:///workspace/image%20%231.png"}},
+            {input: {type: "audio", url: "https://example.com/audio.wav"}, content: {type: "text", text: "[@audio](https://example.com/audio.wav)"}},
+            {input: {type: "localAudio", path: "/workspace/audio.wav"}, content: {type: "resource_link", name: "audio.wav", uri: "file:///workspace/audio.wav"}},
+            {input: {type: "mention", name: "Document", path: "/workspace/document.pdf"}, content: {type: "resource_link", name: "Document", uri: "file:///workspace/document.pdf"}},
+            {input: {type: "mention", name: "", path: "/workspace/document.pdf"}, content: {type: "resource_link", name: "document.pdf", uri: "file:///workspace/document.pdf"}},
+            {input: {type: "mention", name: "File URI", path: "file:///workspace/document%20one.pdf"}, content: {type: "resource_link", name: "File URI", uri: "file:///workspace/document%20one.pdf"}},
+            {input: {type: "mention", name: "Issue", path: "https://example.com/issue"}, content: {type: "text", text: "[@Issue](https://example.com/issue)"}},
+            {input: {type: "skill", name: "Review", path: "/workspace/SKILL.md"}, content: {type: "text", text: "skill:Review (/workspace/SKILL.md)"}},
+            {input: {type: "localImage", path: "image.png"}, content: {type: "text", text: "[@image.png](image.png)"}},
+            {input: {type: "localAudio", path: "audio.wav"}, content: {type: "text", text: "[@audio.wav](audio.wav)"}},
+            {input: {type: "mention", name: "Relative file", path: "document.pdf"}, content: {type: "text", text: "[@Relative file](document.pdf)"}},
+        ];
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        const thread = {
+            id: "native-input-history", historyMode: "legacy", turns: [{
+                id: "turn-1", itemsView: "full", status: "completed", items: cases.map(({input}, index) => ({
+                    type: "userMessage", id: `native-${index}`, clientId: null, content: [input],
+                })),
+            }],
+        } as unknown as Thread;
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread, model: model.id, modelProvider: "openai", cwd: "/workspace",
+            approvalPolicy: "never", sandbox: {type: "dangerFullAccess"}, reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread});
+        await agent.initialize({protocolVersion: 1, clientCapabilities: {}});
+        await agent.loadSession({sessionId: thread.id, cwd: "/workspace", mcpServers: []});
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(updates.map(update => ({messageId: update.messageId, content: update.content}))).toEqual(
+            cases.map(({content}, index) => ({messageId: `native-${index}`, content})),
+        );
+    });
+
+    it("replays Desktop attachments as resources in the original user message", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        const texts = [
+            '\n# Files pasted by the user:\n\n## "Error log": /workspace/pasted-text.txt\n\n## My request:\nFix job\\_id\n',
+            '# Files pasted by the user:\n\n## "Request": /workspace/request.txt\n\nPasted text contains the user\'s request.\n\n## My request:\n\n',
+            '# Files mentioned by the user:\n\n## unknown: relative.txt\n\n## My request:\nKeep this text',
+            '# Files mentioned by the user:\n\n## screenshot.png: /workspace/screen #1.png\nImage attachment: true\n\n## My request:\nCompare',
+        ];
+        const thread = {
+            id: "attachment-history", historyMode: "legacy", turns: [{
+                id: "turn-1", itemsView: "full", status: "completed", items: texts.map((text, index) => ({
+                    type: "userMessage", id: `user-${index}`, clientId: null,
+                    content: [
+                        ...(index === 3 ? [
+                            {type: "localImage", path: "/workspace/screen #1.png"},
+                            {type: "localAudio", path: "/workspace/screen #1.png"},
+                            {type: "mention", name: "Same image", path: "/workspace/screen #1.png"},
+                        ] : []),
+                        {type: "text", text, text_elements: []},
+                        ...(index === 3 ? [{type: "localImage", path: "/workspace/other.png"}] : []),
+                    ],
+                })),
+            }],
+        } as unknown as Thread;
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread, model: model.id, modelProvider: "openai", cwd: "/workspace",
+            approvalPolicy: "never", sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread});
+
+        await agent.initialize({protocolVersion: 1, clientCapabilities: {}});
+        await agent.loadSession({sessionId: thread.id, cwd: "/workspace", mcpServers: []});
+
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update.sessionUpdate === "user_message_chunk");
+        expect(updates.map(update => ({messageId: update.messageId, content: update.content}))).toEqual([
+            {messageId: "user-0", content: {type: "resource_link", name: "Error log", uri: "file:///workspace/pasted-text.txt"}},
+            {messageId: "user-0", content: {type: "text", text: "Fix job\\_id\n"}},
+            {messageId: "user-1", content: {type: "resource_link", name: "Request", uri: "file:///workspace/request.txt"}},
+            {messageId: "user-2", content: {type: "text", text: texts[2]}},
+            {messageId: "user-3", content: {type: "resource_link", name: "screenshot.png", uri: "file:///workspace/screen%20%231.png"}},
+            {messageId: "user-3", content: {type: "text", text: "Compare"}},
+            {messageId: "user-3", content: {type: "resource_link", name: "other.png", uri: "file:///workspace/other.png"}},
+        ]);
+    });
+
     it("replays native child history and disconnects an orphan", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
-        client.authRequired = vi.fn().mockResolvedValue(false);
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
         client.listSkills = vi.fn().mockResolvedValue({data: []});
         const model = createTestModel();
@@ -147,9 +250,11 @@ describe("CodexACPAgent - loadSession", () => {
             sandbox: {type: "dangerFullAccess"},
             reasoningEffort: model.defaultReasoningEffort,
         });
-        appServer.threadReadWithHistory = vi.fn().mockImplementation((threadId) => {
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread: root});
+        // The adapter reads one turn of a child for each generation.
+        appServer.threadRead = vi.fn().mockImplementation(({threadId}) => {
             if (threadId === "orphan-history") return Promise.reject(new Error("missing child history"));
-            return Promise.resolve({thread: threadId === root.id ? root : child});
+            return Promise.resolve({thread: {...child, historyMode: "legacy"}});
         });
         appServer.threadBackgroundTerminalsList = vi.fn().mockImplementation(({threadId}) => Promise.resolve({
             data: threadId === "child-history"
@@ -197,7 +302,7 @@ describe("CodexACPAgent - loadSession", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
             account: null,
             requiresOpenaiAuth: false,
@@ -212,6 +317,7 @@ describe("CodexACPAgent - loadSession", () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
+            availableAccessPrograms: null,
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -277,6 +383,7 @@ describe("CodexACPAgent - loadSession", () => {
                             content: [
                                 { type: "text", text: "Hi", text_elements: [] },
                                 { type: "image", url: "https://example.com/image.png" },
+                                { type: "image", fileId: "file-saved-image" },
                             ],
                         },
                         {
@@ -329,6 +436,7 @@ describe("CodexACPAgent - loadSession", () => {
                             status: "completed",
                             arguments: {},
                             appContext: null,
+                            mcpAppUi: null,
                             readOnlyHint: null,
                             pluginId: null,
                             result: null,
@@ -424,13 +532,99 @@ describe("CodexACPAgent - loadSession", () => {
         );
     });
 
+    it("closes the session again when a history page fails after the replay started", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread: {id: "session-1", historyMode: "paginated", turns: [], cwd: "/test/project", name: null, preview: ""},
+            itemsBackwardsCursor: "item:last",
+            model: model.id,
+            modelProvider: "openai",
+            cwd: "/test/project",
+            approvalPolicy: "never",
+            sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        const message = (id: string) => ({turnId: "turn-1", item: {type: "agentMessage", id, text: id, phase: null, memoryCitation: null, delivery: null, questions: null}});
+        appServer.threadItemsList = vi.fn()
+            .mockResolvedValueOnce({data: [message("last")], nextCursor: null, backwardsCursor: null})
+            .mockResolvedValueOnce({data: [message("first")], nextCursor: "page-2", backwardsCursor: null})
+            .mockRejectedValueOnce(new Error("History unavailable"));
+        const closeSpy = vi.spyOn(client, "closeSession").mockResolvedValue(undefined as never);
+
+        await agent.initialize({protocolVersion: 1});
+        await expect(agent.loadSession({sessionId: "session-1", cwd: "/test/project", mcpServers: []}))
+            .rejects.toThrow("History unavailable");
+
+        expect(closeSpy).toHaveBeenCalledWith("session-1");
+        expect(() => agent.getSessionState("session-1")).toThrow();
+    });
+
+    it("stops the history read when the client closes the session during the load", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread: {id: "session-1", historyMode: "paginated", turns: [], cwd: "/test/project", name: null, preview: ""},
+            itemsBackwardsCursor: "item:last",
+            model: model.id,
+            modelProvider: "openai",
+            cwd: "/test/project",
+            approvalPolicy: "never",
+            sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        const message = (id: string) => ({turnId: "turn-1", item: {type: "agentMessage", id, text: id, phase: null, memoryCitation: null, delivery: null, questions: null}});
+        let closed: Promise<unknown> = Promise.resolve();
+        appServer.threadItemsList = vi.fn()
+            .mockResolvedValueOnce({data: [message("last")], nextCursor: null, backwardsCursor: null})
+            .mockResolvedValueOnce({data: [message("first")], nextCursor: "page-2", backwardsCursor: null})
+            .mockResolvedValueOnce({data: [message("second")], nextCursor: "page-3", backwardsCursor: null})
+            // The adapter reads this page while it sends the page before it.
+            .mockImplementationOnce(async () => {
+                closed = agent.closeSession({sessionId: "session-1"});
+                await closed;
+                return {data: [message("third")], nextCursor: "page-4", backwardsCursor: null};
+            })
+            .mockResolvedValue({data: [message("more")], nextCursor: "page-4", backwardsCursor: null});
+        const closeSpy = vi.spyOn(client, "closeSession").mockResolvedValue(undefined as never);
+
+        await agent.initialize({protocolVersion: 1});
+        await expect(agent.loadSession({sessionId: "session-1", cwd: "/test/project", mcpServers: []}))
+            .rejects.toMatchObject({code: -32600, data: "Session session-1 is closing"});
+        await closed;
+
+        // The page that the close interrupted is the last page read. The load does not close the session again.
+        expect(appServer.threadItemsList).toHaveBeenCalledTimes(4);
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+        const texts = JSON.stringify(fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0]));
+        expect(texts).toContain("first");
+        expect(texts).not.toContain("second");
+        expect(texts).not.toContain("third");
+    });
+
     it("should not recover session mcp servers during loadSession when request omits them", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
             account: null,
             requiresOpenaiAuth: false,
@@ -445,6 +639,7 @@ describe("CodexACPAgent - loadSession", () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
+            availableAccessPrograms: null,
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -515,282 +710,13 @@ describe("CodexACPAgent - loadSession", () => {
         expect(codexAcpAgent.getSessionState("session-1").sessionMcpServers).toEqual([]);
     });
 
-    it("should recover response item function calls when app-server history omits tool items", async () => {
-        const fixture = createCodexMockTestFixture();
-        const codexAcpAgent = fixture.getCodexAcpAgent();
-        const codexAcpClient = fixture.getCodexAcpClient();
-        const codexAppServerClient = fixture.getCodexAppServerClient();
-        const tempDir = await mkdtemp(join(tmpdir(), "codex-acp-rollout-history-"));
-
-        try {
-            const rolloutPath = join(tempDir, "rollout.jsonl");
-            const rolloutRecords = [
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "message",
-                        role: "user",
-                        content: [{ type: "input_text", text: "# AGENTS.md\n\nHidden bootstrap context" }],
-                    },
-                },
-                {
-                    type: "event_msg",
-                    payload: {
-                        type: "user_message",
-                        message: "List the files",
-                        images: [],
-                        local_images: [],
-                        text_elements: [],
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "message",
-                        role: "user",
-                        content: [{ type: "input_text", text: "List the files" }],
-                    },
-                },
-                {
-                    type: "event_msg",
-                    payload: {
-                        type: "agent_reasoning",
-                        text: "Need to inspect the directory.",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "reasoning",
-                        summary: [],
-                        content: [],
-                        encrypted_content: null,
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call",
-                        name: "exec_command",
-                        arguments: JSON.stringify({
-                            cmd: "rg \"Service\" src | head -n 20",
-                            workdir: "/test/project",
-                            yield_time_ms: 1000,
-                        }),
-                        call_id: "call-rg",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call_output",
-                        call_id: "call-rg",
-                        output: "Chunk ID: search123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nsrc/service.ts:export class Service {}\n",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call",
-                        name: "exec_command",
-                        arguments: JSON.stringify({
-                            cmd: "rg \"Missing\" src",
-                            workdir: "/test/project",
-                            yield_time_ms: 1000,
-                        }),
-                        call_id: "call-rg-failed",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call_output",
-                        call_id: "call-rg-failed",
-                        output: "Chunk ID: search456\nWall time: 0.0000 seconds\nProcess exited with code 1\nOutput:\n",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call",
-                        name: "exec_command",
-                        arguments: JSON.stringify({
-                            cmd: "nl -ba src/index.ts | sed -n '1,40p'",
-                            workdir: "/test/project",
-                            yield_time_ms: 1000,
-                        }),
-                        call_id: "call-read",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call_output",
-                        call_id: "call-read",
-                        output: "Chunk ID: read123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\n     1\tconsole.log('hi');\n",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call",
-                        name: "exec_command",
-                        arguments: JSON.stringify({
-                            cmd: "ls",
-                            workdir: "/test/project",
-                            yield_time_ms: 1000,
-                        }),
-                        call_id: "call-ls",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "function_call_output",
-                        call_id: "call-ls",
-                        output: "Chunk ID: abc123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nREADME.md\nsrc\n",
-                    },
-                },
-                {
-                    type: "response_item",
-                    payload: {
-                        type: "message",
-                        role: "assistant",
-                        content: [{ type: "output_text", text: "The directory contains README.md and src." }],
-                        phase: "final_answer",
-                    },
-                },
-            ];
-            await writeFile(
-                rolloutPath,
-                `${rolloutRecords.map((record) => JSON.stringify(record)).join("\n")}\n`,
-                "utf8",
-            );
-
-            codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
-            codexAcpClient.getAccount = vi.fn().mockResolvedValue({
-                account: null,
-                requiresOpenaiAuth: false,
-            });
-            codexAcpClient.listSkills = vi.fn().mockResolvedValue({ data: [] });
-
-            const model = createTestModel({ id: "gpt-5.2", displayName: "GPT-5.2" });
-            codexAppServerClient.listModels = vi.fn().mockResolvedValue({
-                data: [model],
-                nextCursor: null,
-            });
-
-            const thread: Thread = {
-                id: "session-legacy",
-                sessionId: "session-legacy",
-                parentThreadId: null,
-                threadSource: null,
-                originator: null,
-                forkedFromId: null,
-                preview: "List the files",
-                ephemeral: false,
-                modelProvider: "openai",
-                model: null,
-                reasoningEffort: null,
-                createdAt: 123,
-                updatedAt: 124,
-                recencyAt: null,
-                status: { type: "idle" },
-                path: rolloutPath,
-                cwd: "/test/project",
-                cliVersion: "0.139.0",
-                section: null,
-                sectionEnteredAt: null,
-                projectId: null,
-                historyMode: "legacy",
-                source: "vscode",
-                agentNickname: null,
-                agentRole: null,
-                gitInfo: null,
-                name: null,
-                turns: [
-                    {
-                        id: "turn-1",
-                        itemsView: "full",
-                        status: "completed",
-                        error: null,
-                        startedAt: null,
-                        completedAt: null,
-                        durationMs: null,
-                        items: [
-                            {
-                                type: "userMessage",
-                                id: "item-user-1",
-                                clientId: null,
-                                content: [{ type: "text", text: "List the files", text_elements: [] }],
-                            },
-                            {
-                                type: "reasoning",
-                                id: "item-reasoning-1",
-                                summary: ["Need to inspect the directory."],
-                                content: [],
-                            },
-                            {
-                                type: "plan",
-                                id: "item-plan-1",
-                                text: "Inspect project files",
-                            },
-                            {
-                                type: "agentMessage",
-                                id: "item-agent-1",
-                                text: "The directory contains README.md and src.",
-                                phase: null,
-                                memoryCitation: null,
-                                delivery: null,
-                                questions: null,
-                            },
-                        ],
-                    },
-                ],
-            };
-
-            codexAppServerClient.threadResume = vi.fn().mockResolvedValue({
-                thread,
-                model: model.id,
-                modelProvider: "openai",
-                cwd: "/test/project",
-                approvalPolicy: "never",
-                sandbox: { type: "dangerFullAccess" },
-                reasoningEffort: model.defaultReasoningEffort,
-            });
-            codexAppServerClient.threadReadWithHistory = vi.fn().mockResolvedValue({
-                thread,
-            });
-
-            await codexAcpAgent.initialize({
-                protocolVersion: 1,
-                clientCapabilities: {
-                    _meta: {
-                        terminal_output: true,
-                    },
-                },
-            });
-            await codexAcpAgent.loadSession({
-                sessionId: thread.id,
-                cwd: "/test/project",
-                mcpServers: [],
-            });
-
-            await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
-                "data/load-session-response-item-history-fallback.json",
-            );
-        } finally {
-            await rm(tempDir, { recursive: true, force: true });
-        }
-    });
-
     it("publishes MCP startup failure for explicitly requested servers during loadSession", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAcpClient.getAccount = vi.fn().mockResolvedValue({
             account: null,
             requiresOpenaiAuth: false,
@@ -805,6 +731,7 @@ describe("CodexACPAgent - loadSession", () => {
             availabilityNux: null,
             modelSpecialty: null,
             multiAgentVersion: null,
+            availableAccessPrograms: null,
             displayName: "GPT-5.2",
             description: "Test model",
             hidden: false,
@@ -891,7 +818,7 @@ describe("CodexACPAgent - loadSession", () => {
 
         await vi.waitFor(() => {
             const dump = fixture.getAcpConnectionDump([]);
-            expect(dump).toContain('"toolCallId": "mcp_startup.broken-mcp"');
+            expect(dump).toMatch(/"toolCallId": "mcp_startup\.broken-mcp\.[0-9a-f-]{36}"/);
             expect(dump).toContain('MCP server `broken-mcp` failed to start: boom');
         });
     });

@@ -12,12 +12,13 @@ import packageJson from "../package.json";
 import {logger} from "./Logger";
 import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
+import {prepareCodexHookConfig} from "./CodexHookConfig";
+import {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD} from "./CodexHookTrust";
 import {
     GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
-import {SESSION_REWIND_METHOD} from "./SessionRewind";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -51,17 +52,11 @@ const asyncTaskStopParamsParser = z.object({
     asyncTaskId: z.string().trim().min(1),
 }).passthrough();
 
-const sessionHistoryPointParser = z.object({
-    messageId: z.string().trim().min(1),
-    messageFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
-    messageOccurrence: z.number().int().positive(),
+const hooksListParamsParser = z.object({cwd: z.string().trim().min(1)});
+const hooksTrustParamsParser = z.object({
+    cwd: z.string().trim().min(1),
+    hooks: z.array(z.object({key: z.string().min(1), currentHash: z.string().min(1)})).min(1),
 });
-
-const sessionRewindParamsParser = z.object({
-    sessionId: z.string().trim().min(1),
-    beforeMessage: sessionHistoryPointParser,
-    resumeAtMessage: sessionHistoryPointParser.optional(),
-}).passthrough();
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
@@ -94,6 +89,7 @@ function startAcpServer() {
     const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
     const modelProvider = process.env["MODEL_PROVIDER"];
     const config = configString ? JSON.parse(configString) : undefined;
+    const hookConfig = prepareCodexHookConfig(config);
     const parsedAuthRequest = authRequestString ? JSON.parse(authRequestString) : undefined;
     const defaultAuthRequest = parsedAuthRequest && isCodexAuthRequest(parsedAuthRequest) ? parsedAuthRequest : undefined;
 
@@ -108,9 +104,10 @@ function startAcpServer() {
     });
 
     const codexProcessState: CodexProcessState = {
-        connection: startCodexConnection(codexPath),
+        connection: startCodexConnection(codexPath, undefined, hookConfig.appServerStartupArgs),
         codexPath,
-        config,
+        config: hookConfig.sessionConfig,
+        appServerStartupArgs: hookConfig.appServerStartupArgs,
         modelProvider,
         stderr: "",
     };
@@ -130,7 +127,7 @@ function startAcpServer() {
 
     function createAgent(connection: acp.AgentContext): CodexAcpServer {
         const appServerClient = new CodexAppServerClient(codexProcessState.connection.connection);
-        const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
+        const codexClient = new CodexAcpClient(appServerClient, hookConfig.sessionConfig, modelProvider);
         return new CodexAcpServer(
             connection,
             codexClient,
@@ -181,7 +178,8 @@ function startAcpServer() {
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
-        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent().extMethod(SESSION_REWIND_METHOD, ctx.params))
+        .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
+        .onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .connect(acpJsonStream);
 }

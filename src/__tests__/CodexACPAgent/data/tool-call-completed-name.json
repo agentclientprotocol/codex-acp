@@ -8,9 +8,12 @@
         "toolCallId": "unifiedExecStartup-execute",
         "name": "exec_command",
         "status": "completed",
-        "rawOutput": {
-          "formatted_output": "",
-          "exit_code": null
+        "_meta": {
+          "terminal_exit": {
+            "exit_code": null,
+            "signal": null,
+            "terminal_id": "unifiedExecStartup-execute"
+          }
         }
       }
     }
