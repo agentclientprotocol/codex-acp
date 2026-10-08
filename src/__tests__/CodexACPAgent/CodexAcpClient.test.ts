@@ -1,4 +1,3 @@
-import path from "node:path";
 // noinspection ES6RedundantAwait
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -499,7 +498,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         expect(extraRootsSetSpy).toHaveBeenCalledWith({
-            extraRoots: [path.join("/skills/one", ".agents", "skills"), path.join("/skills/two", ".agents", "skills")],
+            extraRoots: ["/skills/one/.agents/skills", "/skills/two/.agents/skills"],
         });
         expect(extraRootsSetSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
         expect(listSkillsSpy).not.toHaveBeenCalled();
@@ -534,7 +533,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         expect(session.additionalDirectories).toEqual(["/workspace/extra"]);
         expect(extraRootsSetSpy).toHaveBeenCalledWith({
-            extraRoots: [path.join("/workspace/extra", ".agents", "skills")],
+            extraRoots: ["/workspace/extra/.agents/skills"],
         });
         expect(extraRootsSetSpy.mock.invocationCallOrder[0]!).toBeLessThan(threadStartSpy.mock.invocationCallOrder[0]!);
         expect(listSkillsSpy).not.toHaveBeenCalled();
@@ -1385,7 +1384,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
 
         expect(extraRootsSetSpy).toHaveBeenCalledWith({
-            extraRoots: [path.join("/workspace/extra", ".agents", "skills")],
+            extraRoots: ["/workspace/extra/.agents/skills"],
         });
         expect(listSkillsSpy).not.toHaveBeenCalledWith(expect.objectContaining({forceReload: true}));
         expect(turnStartSpy.mock.calls[0]![0].sandboxPolicy).toMatchObject({

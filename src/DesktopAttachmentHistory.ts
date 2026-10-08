@@ -20,7 +20,7 @@ export function attachmentFileUri(path: string): string | null {
             return null;
         }
     }
-    return path.startsWith("/") ? pathToFileURL(path, {windows: false}).href : null;
+    return path.startsWith("/") ? pathToFileURL(path).href : null;
 }
 
 /** Converts the known Desktop attachment envelope into history content blocks. */

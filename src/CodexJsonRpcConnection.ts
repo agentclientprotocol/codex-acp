@@ -66,26 +66,3 @@ function attachLogs(proc: ChildProcessWithoutNullStreams) {
         logger.log(`[EXIT] code: ${code?.toString()}`);
     });
 }
-
-/** Stops an unresponsive owned provider before allowing the client to reconnect. */
-export async function terminateCodexConnection(native: CodexConnection): Promise<void> {
-    native.connection.dispose();
-    const child = native.process;
-    if (child.exitCode !== null) return;
-    const exited = new Promise<void>(resolve => child.once("exit", () => resolve()));
-    if (process.platform === "win32" && child.pid !== undefined) {
-        // The bundled launcher is Node with a native child; kill the owned tree, not only Node.
-        const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {windowsHide: true, stdio: "ignore"});
-        await new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(() => { killer.kill(); reject(new Error("Provider tree termination timed out")); }, 5_000);
-            killer.once("error", error => {clearTimeout(timer); reject(error);});
-            killer.once("exit", code => {clearTimeout(timer); code === 0 || child.exitCode !== null ? resolve() : reject(new Error("Provider tree termination failed"));});
-        });
-    } else {
-        child.kill("SIGKILL");
-    }
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-        await Promise.race([exited, new Promise<never>((_, reject) => {timer = setTimeout(() => reject(new Error("Provider did not exit")), 5_000);})]);
-    } finally {if (timer) clearTimeout(timer);}
-}

@@ -58,10 +58,10 @@ After a successful response, the client can remove the same transcript suffix an
 
 ## Lifecycle and compatibility
 
-An active prompt is cancelled only after the target validates; the adapter waits for prompt cleanup before native mutation. A pending turn/start registration is rejected, because an unacknowledged native start could write after the rewind. Competing lifecycle/settings/steering/runtime operations are fenced. Provider replacement waits for an existing rewind.
+An active prompt is cancelled only after the target validates; the adapter waits for prompt cleanup before native mutation. A pending turn/start registration is rejected, because an unacknowledged native start could write after the rewind. Competing lifecycle/settings/steering operations are fenced. Provider replacement waits for an existing rewind.
 
 `thread/rollback` is used only when native history explicitly reports `legacy`. It is a separately typed compatibility request for old `CODEX_PATH` binaries, not part of current generated API types. Unknown history mode, arbitrary errors, malformed responses and `thread/revert` failures never trigger rollback.
 
-History rewind does not restore files. See [native session extensions](native-session-extensions.md) for the separate, previewed single-tool Git patch reversal.
+History rewind does not restore files.
 
 The interface and original implementation come from [Nikita Ashikhmin's PR #508](https://github.com/agentclientprotocol/codex-acp/pull/508), preserved as four commits in this branch. This local integration merges current main and adds validation/lifecycle safeguards; it is not a new incompatible rewind protocol.

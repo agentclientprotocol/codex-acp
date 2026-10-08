@@ -108,5 +108,3 @@ See [AIR extensions](docs/air-extensions.md#async-tasks) for the capability, lif
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.
-
-Local native-session test extensions: [English](docs/native-session-extensions.md) | [简体中文](docs/native-session-extensions.zh-CN.md).

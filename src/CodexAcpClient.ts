@@ -1,4 +1,3 @@
-import {probeSessionQueueSupport, type SessionQueueSupport} from "./SessionQueue";
 import {
     type ApiKeyAuthRequest,
     CODEX_API_KEY_ENV_VAR,
@@ -167,8 +166,6 @@ export class CodexAcpClient {
         return this.codexClient;
     }
 
-    queueSupport: SessionQueueSupport = {nativeVersion: null, actions: []};
-
     private readonly defaultClientInfo: ClientInfo = {
         name: `${packageJson.name}`, title: "Codex ACP", version: `${packageJson.version}`
     };
@@ -186,10 +183,6 @@ export class CodexAcpClient {
             }
         });
         this.configPath = response?.codexHome ?? null;
-        // Native userAgent uses the requesting client name when Desktop originator env is absent.
-        // Its /version segment is the running native version, not clientInfo.version.
-        const version = response?.userAgent?.match(/^[^/]+\/(\d+\.\d+\.\d+)\s+\(/)?.[1];
-        this.queueSupport = await probeSessionQueueSupport(version, action => action === "list" ? this.codexClient.probeQueueAction(action) : Promise.resolve(false));
     }
 
     getHomePath(): string | null {
@@ -796,20 +789,6 @@ export class CodexAcpClient {
             this.codexClient.clearThreadHandlers(sessionId);
             this.subagents.clear(sessionId);
         }
-    }
-
-    async archiveSession(sessionId: string): Promise<void> {
-        await this.codexClient.threadArchive({threadId: sessionId});
-    }
-    async unarchiveSession(sessionId: string): Promise<void> {
-        const response = await this.codexClient.threadUnarchive({threadId: sessionId});
-        if (response.thread.id !== sessionId) throw new Error("Unarchive returned a different thread");
-    }
-    async installedPlugins(cwds: string[]) {
-        return this.codexClient.pluginInstalled({cwds});
-    }
-    async reconcilePlugins() {
-        return this.codexClient.pluginReconcile({reason: "ACP runtime refresh"});
     }
 
     async deleteSession(sessionId: string): Promise<void> {

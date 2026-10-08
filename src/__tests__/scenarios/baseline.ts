@@ -1,7 +1,3 @@
-import {fileRevertCapability} from "../../SessionFileRevert";
-import {runtimeCapability} from "../../SessionRuntime";
-import {archiveCapability} from "../../SessionArchive";
-import {sessionDiscoveryCapability} from "../../SessionDiscovery";
 import {canonical, type RecordedMessage} from "./scenario-harness";
 
 /**
@@ -145,16 +141,6 @@ const MCP_COMMAND = {
 export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage[] {
     const baselineMcp = JSON.stringify(canonical(BASELINE_MCP_COMMAND));
     return messages.map(message => {
-        if (message.direction === "response" && message.method === "initialize") {
-            const params = structuredClone(message.params) as Json;
-            const meta = params["_meta"] as Json;
-            meta["runtime"] = runtimeCapability();
-            meta["archive"] = archiveCapability();
-            meta["fileRevert"] = fileRevertCapability();
-            meta["discovery"] = sessionDiscoveryCapability();
-            (meta["steering"] as Json)["idleBehavior"] = ["promptRequired"];
-            return {...message, params};
-        }
         const update = sessionUpdate(message);
         if (update === undefined || update["sessionUpdate"] !== "available_commands_update") return message;
         const commands = (update["availableCommands"] as unknown[]).map(command =>
