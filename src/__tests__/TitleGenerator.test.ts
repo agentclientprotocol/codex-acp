@@ -3,8 +3,14 @@ import {TitleGenerator} from "../TitleGenerator";
 import type {CodexAppServerClient} from "../CodexAppServerClient";
 import {deferred} from "./acp-test-utils";
 
-function createGenerator(client: Partial<CodexAppServerClient>) {
-    return new TitleGenerator(client as CodexAppServerClient, "thread-id", "/test/cwd", () => "unset");
+function createGenerator(client: Partial<CodexAppServerClient>, sessionUsesOpenAiProvider = true) {
+    return new TitleGenerator(
+        client as CodexAppServerClient,
+        "thread-id",
+        "/test/cwd",
+        () => "unset",
+        () => sessionUsesOpenAiProvider,
+    );
 }
 
 describe("TitleGenerator.waitForIdle", () => {
@@ -85,5 +91,32 @@ describe("TitleGenerator prompt", () => {
 
         const text: string = runTurn.mock.calls[0]![0].input[0].text;
         expect(text.endsWith(`User's first message:\n${"a".repeat(3_999)}`)).toBe(true);
+    });
+});
+
+describe("TitleGenerator model provider", () => {
+    it("requests a title from the title model for a session on the OpenAI provider", async () => {
+        const threadStart = vi.fn().mockResolvedValue({thread: {id: "ephemeral"}});
+        const runTurn = vi.fn().mockResolvedValue({turn: {items: []}});
+        const generator = createGenerator({threadStart, runTurn} as unknown as Partial<CodexAppServerClient>);
+
+        generator.onTurnCompleted("hello");
+        await generator.waitForIdle(1_000);
+
+        expect(threadStart).toHaveBeenCalledWith({cwd: "/test/cwd", ephemeral: true});
+        expect(runTurn).toHaveBeenCalledWith(expect.objectContaining({threadId: "ephemeral", model: "gpt-5.6-luna"}));
+    });
+
+    it("starts no title thread or turn for a session on another provider", async () => {
+        const threadStart = vi.fn().mockResolvedValue({thread: {id: "ephemeral"}});
+        const runTurn = vi.fn().mockResolvedValue({turn: {items: []}});
+        const generator = createGenerator({threadStart, runTurn} as unknown as Partial<CodexAppServerClient>, false);
+
+        generator.onTurnCompleted("hello");
+        generator.onTurnCompleted("second turn");
+        await generator.waitForIdle(1_000);
+
+        expect(threadStart).not.toHaveBeenCalled();
+        expect(runTurn).not.toHaveBeenCalled();
     });
 });

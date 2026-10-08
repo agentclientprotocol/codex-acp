@@ -39,6 +39,7 @@ export class TitleGenerator {
         private readonly mainThreadId: string,
         private readonly cwd: string,
         private readonly getSessionTitleSource: () => string,
+        private readonly sessionUsesOpenAiProvider: () => boolean,
     ) {}
 
     /**
@@ -62,7 +63,8 @@ export class TitleGenerator {
 
     /**
      * Fire-and-forget hook — call after each turn completes.
-     * Only acts on the first call for new sessions without an existing title.
+     * Only acts on the first call for new sessions without an existing title,
+     * and only when the session uses the OpenAI provider, which serves the title model.
      *
      * @param userPromptText  The text of the user's first message (from params.prompt,
      *                        not turn.items — turn.items contains only agent output).
@@ -74,6 +76,7 @@ export class TitleGenerator {
         // "unknown": resumed session with indeterminate history — skip
         if (src === "explicit" || src === "unknown") return;
         this.generated = true;
+        if (!this.sessionUsesOpenAiProvider()) return;
         const run = this.generateAndPersist(userPromptText)
             .catch(() => {
                 // title generation is best-effort; never surface errors to the user
