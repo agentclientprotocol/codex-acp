@@ -1069,11 +1069,26 @@ Every row carries these fields in `_meta.jetbrains.air`; all but `archived` only
 | `lastPromptAt` | ISO time of `Thread.recencyAt`: Codex moves it when a turn starts and orders threads by it. |
 | `model` | `Thread.model`. |
 | `forkedFrom` | The thread it was forked from: `forked_from_id` of the `session_meta` line of its rollout, which the adapter reads with the usage, see [Token usage](#token-usage). Until then `Thread.forkedFromId`, which `thread/read` answers and `thread/list` does not. |
-| `state` | Only for a thread that this adapter has loaded: `running`, `requires_action` (waiting for an approval or for user input), or `idle`. Omitted otherwise, never `unknown`. |
+| `state` | Only for a thread that this adapter has loaded, see [Row state](#row-state): `requires_action`, `reviewing`, `running`, `error` or `idle`. Omitted otherwise, never `unknown`. |
 | `lastTurnEndedAt` | ISO time of the last `turn/completed` that this adapter saw for a session of this connection. Forgotten when the thread is deleted. |
 | `usage` | The token usage of the thread, see [Token usage](#token-usage). Omitted until the adapter has read it, and for a thread whose rollout has no token count. |
 
 The adapter sends no `cost`: Codex reports none.
+
+#### Row state
+
+`state` is set only for a thread that this adapter's app-server has loaded, by the first that holds:
+
+1. `requires_action`: the thread waits for an approval or for user input (`Thread.status` active with flags).
+2. `reviewing`: the thread is in Codex review mode (`/review`), from an `enteredReviewMode` item to its
+   `exitedReviewMode` item. A turn that ends, or a new one that starts, ends it as well.
+3. `running`: a turn runs (`Thread.status` active).
+4. `error`: the thread is not running and its last turn ended with an error, not a user cancel: `turn/completed`
+   with status `failed`, or with an `error` and a status other than `interrupted`; or `Thread.status` is
+   `systemError`. A new turn clears it.
+5. `idle`: otherwise.
+
+A thread that is not loaded here has no `state`. A change of `state` is a row change for a subscription.
 
 #### Token usage
 
@@ -1244,6 +1259,7 @@ Remaining differences:
   or omitted, and `"all"` is its `true`. `"archived"`, archived sessions only, has no #2161 counterpart.
 - The relative-`cwd` list can answer an empty page with `nextCursor` at its scan budget, see above.
 - `cost` is never sent.
+- `state` has two values of its own: `reviewing` (Codex review mode) and `error` (the last turn failed).
 - The RFD's `session/list_changed {cwd}` asks the client to read page 1 again. Here the agent pushes the changed
   rows themselves through the [session list subscription](#session-list-subscription).
 - `updatedAt` moves on unarchive, because Codex touches the rollout file then; #2161 says it should not. The order

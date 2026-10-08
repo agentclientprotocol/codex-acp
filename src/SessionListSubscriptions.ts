@@ -299,6 +299,14 @@ export class SessionListSubscriptions {
             case "thread/tokenUsage/updated":
                 if (!this.ignoredThreads.has(notification.params.threadId)) this.threadChanged(notification.params.threadId);
                 return;
+            case "item/started":
+            case "item/completed":
+                // Review mode shows in the row state.
+                if ((notification.params.item.type === "enteredReviewMode" || notification.params.item.type === "exitedReviewMode")
+                    && !this.ignoredThreads.has(notification.params.threadId)) {
+                    this.threadChanged(notification.params.threadId);
+                }
+                return;
             default:
                 return;
         }

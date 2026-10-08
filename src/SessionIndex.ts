@@ -12,7 +12,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import {RequestError} from "@agentclientprotocol/sdk";
 import {z} from "zod";
 import type {ServerNotification} from "./app-server";
-import type {Thread, ThreadListParams, ThreadListResponse, ThreadStatus} from "./app-server/v2";
+import type {Thread, ThreadListParams, ThreadListResponse, ThreadStatus, Turn} from "./app-server/v2";
 import {AIR_META_KEY, JETBRAINS_META_KEY, withAirMeta} from "./AirExtension";
 import {normalizeSessionTitle} from "./SessionTitle";
 import type {SessionUsage} from "./SessionUsage";
@@ -83,7 +83,7 @@ export interface SessionIndexThread {
     archived: boolean;
 }
 
-export type SessionActivityState = "running" | "idle" | "requires_action";
+export type SessionActivityState = "running" | "idle" | "requires_action" | "reviewing" | "error";
 
 export interface SessionActivity {
     state?: SessionActivityState;
@@ -490,16 +490,23 @@ function isoTime(seconds: number): string {
  * The state of a thread that this app-server has loaded. A thread that is not loaded here belongs to
  * another process or to nobody, so its state is unknown and is omitted.
  */
-export function activityStateOf(status: ThreadStatus): SessionActivityState | undefined {
-    switch (status.type) {
-        case "active":
-            return status.activeFlags.length > 0 ? "requires_action" : "running";
-        case "idle":
-            return "idle";
-        case "notLoaded":
-        case "systemError":
-            return undefined;
-    }
+export function activityStateOf(
+    status: ThreadStatus,
+    lastTurnFailed = false,
+    reviewing = false,
+): SessionActivityState | undefined {
+    if (status.type === "notLoaded") return undefined;
+    // requires_action > reviewing > running > error > idle.
+    if (status.type === "active" && status.activeFlags.length > 0) return "requires_action";
+    if (reviewing) return "reviewing";
+    if (status.type === "active") return "running";
+    if (status.type === "systemError" || lastTurnFailed) return "error";
+    return "idle";
+}
+
+/** A turn that ended with an error rather than a user cancel: `failed`, or another end with an error. */
+export function turnFailed(turn: Turn): boolean {
+    return turn.status === "failed" || (turn.status !== "interrupted" && turn.status !== "inProgress" && turn.error !== null);
 }
 
 /**
@@ -509,6 +516,10 @@ export function activityStateOf(status: ThreadStatus): SessionActivityState | un
  */
 export class SessionIndexActivity {
     private readonly lastTurnEndedAt = new Map<string, string>();
+    /** Threads loaded here whose last turn ended with an error; a new turn clears it. */
+    private readonly failed = new Set<string>();
+    /** Threads loaded here in Codex review mode: from an `enteredReviewMode` item to its `exitedReviewMode`. */
+    private readonly reviewing = new Set<string>();
 
     /**
      * @param isSession true for a thread that is a session of this connection. Only those are recorded: the
@@ -521,14 +532,30 @@ export class SessionIndexActivity {
             this.forget(notification.params.threadId);
             return;
         }
-        if (notification.method !== "turn/completed" || !this.isSession(notification.params.threadId)) return;
+        if (notification.method === "item/started" || notification.method === "item/completed") {
+            const type = notification.params.item.type;
+            if (type === "enteredReviewMode") this.reviewing.add(notification.params.threadId);
+            if (type === "exitedReviewMode") this.reviewing.delete(notification.params.threadId);
+            return;
+        }
+        if (notification.method === "turn/started") {
+            this.failed.delete(notification.params.threadId);
+            this.reviewing.delete(notification.params.threadId);
+            return;
+        }
+        if (notification.method !== "turn/completed") return;
+        // A review ends with its turn, also one that failed or was cancelled before its exit item.
+        this.reviewing.delete(notification.params.threadId);
+        if (turnFailed(notification.params.turn)) this.failed.add(notification.params.threadId);
+        else this.failed.delete(notification.params.threadId);
+        if (!this.isSession(notification.params.threadId)) return;
         const completedAt = notification.params.turn.completedAt;
         const endedAt = completedAt === null ? new Date() : new Date(completedAt * 1000);
         this.lastTurnEndedAt.set(notification.params.threadId, endedAt.toISOString());
     }
 
     activityOf(thread: Thread): SessionActivity | null {
-        const state = activityStateOf(thread.status);
+        const state = activityStateOf(thread.status, this.failed.has(thread.id), this.reviewing.has(thread.id));
         const lastTurnEndedAt = this.lastTurnEndedAt.get(thread.id);
         if (state === undefined && lastTurnEndedAt === undefined) return null;
         return {
@@ -539,6 +566,8 @@ export class SessionIndexActivity {
 
     forget(threadId: string): void {
         this.lastTurnEndedAt.delete(threadId);
+        this.failed.delete(threadId);
+        this.reviewing.delete(threadId);
     }
 }
 

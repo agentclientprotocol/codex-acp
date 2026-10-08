@@ -222,6 +222,57 @@ describe("session/list", () => {
         await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot("data/session-index-list-rows.json");
     });
 
+    it("answers state error for a loaded thread whose last turn failed, until a new turn starts", async () => {
+        const turn = (status: string, error: unknown) => ({
+            id: "turn-1", items: [], itemsView: "notLoaded", status, error, startedAt: 400, completedAt: 500, durationMs: 100000,
+        });
+        const failure = {message: "boom", codexErrorInfo: null, additionalDetails: null, misalignment: null};
+        const threads = [
+            createThread({id: "failed", status: {type: "idle"}}),
+            createThread({id: "errored", status: {type: "idle"}}),
+            createThread({id: "cancelled", status: {type: "idle"}}),
+            createThread({id: "broken", status: {type: "systemError"}}),
+            createThread({id: "foreign", status: {type: "notLoaded"}}),
+        ];
+        const {fixture, agent, threadList} = await createAgent("sessionIndex", threads);
+        fixture.sendServerNotification({method: "turn/completed", params: {threadId: "failed", turn: turn("failed", failure)}} as never);
+        fixture.sendServerNotification({method: "turn/completed", params: {threadId: "errored", turn: turn("completed", failure)}} as never);
+        fixture.sendServerNotification({method: "turn/completed", params: {threadId: "cancelled", turn: turn("interrupted", failure)}} as never);
+        fixture.sendServerNotification({method: "turn/completed", params: {threadId: "foreign", turn: turn("failed", failure)}} as never);
+        const stateOf = async () => Object.fromEntries((await agent.listSessions({cwd: "/repo/project"})).sessions
+            .map(row => [row.sessionId, (row._meta as any)?.jetbrains?.air?.state ?? null]));
+
+        expect(await stateOf()).toEqual({failed: "error", errored: "error", cancelled: "idle", broken: "error", foreign: null});
+
+        fixture.sendServerNotification({method: "turn/started", params: {threadId: "failed", turn: turn("inProgress", null)}} as never);
+        threadList.mockResolvedValue({data: [createThread({id: "failed", status: {type: "active", activeFlags: []}})], nextCursor: null, backwardsCursor: null});
+        expect(await stateOf()).toEqual({failed: "running"});
+        threadList.mockResolvedValue({data: [createThread({id: "failed", status: {type: "idle"}})], nextCursor: null, backwardsCursor: null});
+        expect(await stateOf()).toEqual({failed: "idle"});
+    });
+
+    it("answers state reviewing in Codex review mode, under requires_action and over running and error", async () => {
+        const item = (type: string) => ({type, id: `${type}-1`, review: "Review the diff"});
+        const turn = (status: string) => ({id: "turn-1", items: [], itemsView: "notLoaded", status, error: status === "failed" ? {message: "boom", codexErrorInfo: null, additionalDetails: null, misalignment: null} : null, startedAt: 400, completedAt: 500, durationMs: 1});
+        const {fixture, agent, threadList} = await createAgent("sessionIndex");
+        const listWith = async (status: Thread["status"]) => {
+            threadList.mockResolvedValue({data: [createThread({status})], nextCursor: null, backwardsCursor: null});
+            return ((await agent.listSessions({cwd: "/repo/project"})).sessions[0]!._meta as any).jetbrains.air.state;
+        };
+        fixture.sendServerNotification({method: "turn/started", params: {threadId, turn: turn("inProgress")}} as never);
+        fixture.sendServerNotification({method: "item/started", params: {threadId, turnId: "turn-1", item: item("enteredReviewMode"), startedAtMs: 1}} as never);
+        expect(await listWith({type: "active", activeFlags: []})).toBe("reviewing");
+        expect(await listWith({type: "active", activeFlags: ["waitingOnApproval"]})).toBe("requires_action");
+
+        fixture.sendServerNotification({method: "item/completed", params: {threadId, turnId: "turn-1", item: item("exitedReviewMode"), completedAtMs: 2}} as never);
+        expect(await listWith({type: "active", activeFlags: []})).toBe("running");
+
+        // A review whose turn failed before its exit item ends with the turn.
+        fixture.sendServerNotification({method: "item/started", params: {threadId, turnId: "turn-1", item: item("enteredReviewMode"), startedAtMs: 3}} as never);
+        fixture.sendServerNotification({method: "turn/completed", params: {threadId, turn: turn("failed")}} as never);
+        expect(await listWith({type: "idle"})).toBe("error");
+    });
+
     it("keeps the rows of a client without sessionIndex", async () => {
         const {agent} = await createAgent("airWithoutSessionIndex", [
             createThread({status: {type: "active", activeFlags: []}, gitInfo: {sha: null, branch: "main", originUrl: null}}),
