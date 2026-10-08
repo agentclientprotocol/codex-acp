@@ -538,8 +538,8 @@ export class SessionListSubscriptions {
             if (found.has(threadId) || deleted.has(threadId)) continue;
             const offers: Array<{group: Group, row: acp.SessionInfo}> = [];
             let unknown = false;
-            const groups = this.groupsOf(cwd);
-            if (groups.length === 0 && !retriedUsage.has(threadId)) {
+            const {groups, deferred} = this.placeCwd(cwd);
+            if (deferred && !retriedUsage.has(threadId)) {
                 // Perhaps of a worktree that a group could not resolve yet: once more when it can.
                 this.usageRetries.delete(threadId);
                 this.usageRetries.set(threadId, {cwd, at: this.now() + SCOPE_RETRY_MS});
@@ -559,12 +559,13 @@ export class SessionListSubscriptions {
             const knowing = [...this.subscriptions.values()]
                 .filter(subscription => subscription.sent.has(threadId) || subscription.group.rows.has(threadId));
             const cwd = [...this.groups.values()].map(group => group.rows.get(threadId)?.row.cwd).find(known => known !== undefined);
+            const covering = cwd === undefined ? [] : this.groupsOf(cwd);
             // Every subscription whose scope has the cwd of the thread, which can be in a list that its client read
             // further down. A deleted thread that no group has seen has an unknown scope: every subscription hears
             // of it.
             const targets = cwd === undefined
                 ? (knowing.length > 0 ? knowing : [...this.subscriptions.values()])
-                : [...new Set([...knowing, ...[...this.subscriptions.values()].filter(subscription => subscription.group.scope.has(cwd))])];
+                : [...new Set([...knowing, ...[...this.subscriptions.values()].filter(subscription => covering.includes(subscription.group))])];
             for (const group of this.groups.values()) group.rows.delete(threadId);
             for (const subscription of targets) {
                 subscription.sent.delete(threadId);
@@ -738,15 +739,23 @@ export class SessionListSubscriptions {
      * one that has the cwd, and one without the cwd at most once a second, as it can miss a new worktree.
      */
     private groupsOf(cwd: string): Group[] {
+        return this.placeCwd(cwd).groups;
+    }
+
+    /** {@link groupsOf}, and whether a group without the cwd could not resolve its worktrees yet. */
+    private placeCwd(cwd: string): {groups: Group[], deferred: boolean} {
         const now = this.now();
+        let deferred = false;
         for (const group of this.groups.values()) {
             const age = now - group.scopeResolvedAt;
             if (age >= SCOPE_REFRESH_MS || (!group.scope.has(cwd) && age >= SCOPE_RETRY_MS)) {
                 group.scopeResolvedAt = now;
                 group.scope = new Set(this.deps.scopeCwds(group.cwd));
+            } else if (!group.scope.has(cwd)) {
+                deferred = true;
             }
         }
-        return [...this.groups.values()].filter(group => group.scope.has(cwd));
+        return {groups: [...this.groups.values()].filter(group => group.scope.has(cwd)), deferred};
     }
 }
 
