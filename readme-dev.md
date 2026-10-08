@@ -102,3 +102,12 @@ the adapter does not rely on notices being displayed.
 Command replies, review results, and terminal/retrying errors retain their existing response or
 failure channels. Clients advertising session compaction support continue to receive the dedicated
 compaction lifecycle instead of the legacy completion advisory.
+
+### Isolated native rewind tests
+
+Run `npm run test:native:rewind` with Node 24+, Python 3, and the platform
+optional Codex package installed. `NATIVE_E2E_PYTHON` overrides the Python
+executable (default: `python` on Windows, `python3` elsewhere). The harness
+uses an isolated child environment and local provider; it does not reuse your
+Codex home or credentials. See [rewind regression tests](docs/session-rewind-extension.md#native-regression-tests)
+for assertions, retained evidence and the intentional failure-path command.

@@ -65,3 +65,32 @@ An active prompt is cancelled only after the target validates; the adapter waits
 History rewind does not restore files.
 
 The interface and original implementation come from [Nikita Ashikhmin's PR #508](https://github.com/agentclientprotocol/codex-acp/pull/508), preserved as four commits in this branch. This local integration merges current main and adds validation/lifecycle safeguards; it is not a new incompatible rewind protocol.
+
+## Native regression tests
+
+With Node.js 24+, Python 3 and the platform optional Codex dependency installed,
+run `npm run test:native:rewind`. The runner builds this checkout, hashes source,
+bundle and the resolved native executable, then launches real ACP/native
+processes against a scripted loopback Responses provider. It requires no account
+or external model. Only rewind/history/lifecycle scenarios are present; file
+restore and other extension scenarios are excluded.
+
+The suite checks historical, latest and first-message rewind, same-ID cold
+restart before resend, invalid and stale targets, exact repeated-message
+identity, active-turn interruption, explicit cancellation, retained provider
+context, native process identity and clean shutdown. No native transcript is
+seeded or rewritten by the test client. The Windows/Linux native CI job runs
+this independently of the upstream unit/build job.
+
+Each run creates an isolated home, workspace, config and temporary directory
+under `tmp/native-e2e/run-*`. The child environment excludes inherited
+credentials, provider overrides and user profiles. Model traffic is loopback;
+an HTTP(S) deny proxy blocks incidental external requests, but is not an OS
+network firewall. Artifact directories are retained for diagnosis, including
+`build.json`, `report.json`, RPC/model traces and process-exit evidence.
+Nonzero exit, missing acknowledgement, changed source/build, failed assertion
+or unclean shutdown fails the run.
+
+Run `node scripts/native-e2e.mjs --rewind-only --wrong-reply` to verify the
+failure path: it must exit 1 and record `success:false`. The optional
+`--output <directory>` selects an artifact parent inside this checkout only.
