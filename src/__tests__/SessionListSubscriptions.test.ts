@@ -354,6 +354,27 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("scans from the top after a catch-up when a write came while the first scan still read", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        await subscriptions.subscribe("/repo");
+        for (let index = 0; index < 1_000; index++) codex.put(thread(`other-${index}`, {updatedAt: 2_000 + index, cwd: "/elsewhere"}));
+        const list = codex.threadList.getMockImplementation()!;
+        let calls = 0;
+        codex.threadList.mockImplementation(async (params) => {
+            // A write while the first scan reads its third page.
+            if (params.cwd === undefined && ++calls === 3) {
+                codex.put(thread("new", {updatedAt: 9_000}));
+                listener().stateChanged();
+            }
+            return await list(params);
+        });
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(5 * timings.maxWaitMs);
+
+        expect(sent.flatMap(changes => ids(changes.sessions))).toContain("new");
+        subscriptions.dispose();
+    });
+
     it("does not go on forever with pages of threads all of the second of its mark", async () => {
         const {codex, subscriptions, listener} = setup();
         for (let index = 0; index < 1_001; index++) codex.put(thread(`same-${index}`, {updatedAt: 5_000, cwd: "/elsewhere"}));

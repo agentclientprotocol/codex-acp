@@ -1186,7 +1186,8 @@ still re-reads the list now and then, and a lost change shows up there.
   in each linked Git worktree, as `includeWorktrees: true` resolves it; from the interactive sources, as the list;
   archived or not. The agent applies no archive filter: the client filters by the `archived` field of the row.
   The agent resolves the worktrees of a subscription again every 10 s, and at most once a second for a changed
-  thread whose cwd is not in its scope; a thread that came too soon for that is offered again a second later.
+  thread whose cwd is not in its scope. A thread of a worktree created less than a second before its change can
+  show only with its next change.
 - `_session/list/changes` carries, for each thread in scope that appeared or changed, its whole row exactly as
   `session/list` answers it. A row counts as changed when `title`, `lastPromptAt`, `state`, `lastTurnEndedAt`,
   `model`, `forkedFrom`, `archived` or `usage` differs from the row the subscription last got. A change of `updatedAt` alone

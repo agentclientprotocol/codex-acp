@@ -566,9 +566,11 @@ export class SessionIndexActivity {
     }
 
     /** The app-server went away: what its turns said of its loaded threads no longer holds. */
-    resetLoaded(): void {
+    resetLoaded(): string[] {
+        const threadIds = [...new Set([...this.failed, ...this.reviewing])];
         this.failed.clear();
         this.reviewing.clear();
+        return threadIds;
     }
 
     forget(threadId: string): void {

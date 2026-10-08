@@ -298,13 +298,13 @@ export class SessionUsageIndex {
         if (!scan.done) this.readLater(subject, SPAWN_SCAN_PAUSE_MS);
         // A read that waits for its turn after the connection closed does nothing.
         const usages = await Promise.all(scan.threadIds.map(childId => this.subagentReads(
-            async () => this.disposed ? null : await this.subagentUsage(childId),
+            async () => this.disposed ? null : await this.subagentUsage(childId, subject),
         )));
         return usages.filter((usage): usage is SubagentUsage => usage !== null);
     }
 
     /** The usage of one subagent, or `null` when Codex has no rollout of it, or one without a token count. */
-    private async subagentUsage(childId: string): Promise<SubagentUsage | null> {
+    private async subagentUsage(childId: string, parent?: UsageSubject): Promise<SubagentUsage | null> {
         let child = this.subagents.get(childId) ?? await this.readSubagent(childId);
         if (child === null) return null;
         let stamp: string;
@@ -339,9 +339,10 @@ export class SessionUsageIndex {
         try {
             tokens = await this.tokensOf(childId, child.path);
         } catch (error) {
-            // Moved or gone between the check and the read: read it with the next read of its parent.
+            // Moved or gone between the check and the read: the parent is read again a moment later.
             if (!isMissingFile(error)) throw error;
             this.subagents.delete(childId);
+            if (parent !== undefined) this.readLater(parent, SPAWN_SCAN_PAUSE_MS);
             return null;
         }
         return tokens === null ? null : {sessionId: childId, model: child.model, ...tokens};

@@ -136,7 +136,7 @@ export class SessionIndexService {
     observe(client: CodexAcpClient): void {
         if (!this.enabled || this.observedClients.has(client)) return;
         // Another app-server: one that crashed sent no end of its turns or reviews.
-        if (this.anyClientObserved) this.activity.resetLoaded();
+        if (this.anyClientObserved) this.subscriptions.refreshThreads(this.activity.resetLoaded());
         this.anyClientObserved = true;
         this.observedClients.add(client);
         client.appServerClient.onClientTransportEvent((event) => {
