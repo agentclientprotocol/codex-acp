@@ -3875,20 +3875,21 @@ export class CodexAcpServer {
         };
     }
 
+    /** `_meta.quota`: the usage of the whole prompt, the same counts as {@link buildPromptUsage}. */
     private buildQuotaMeta(sessionState: SessionState): { quota: QuotaMeta } {
-        const lastTokenUsage = sessionState.lastTokenUsage;
+        const promptTokenUsage = sessionState.promptTokenUsage?.usage() ?? null;
 
         // Remove the "[reasoning-level]" suffix from currentModelId if present
         const modelName = sessionState.currentModelId.replace(/\[.*?]$/, '');
 
         // FIXME: currently all tokens are reported for the current model
-        const modelUsage = (lastTokenUsage != null)
-            ? [{ model: modelName, token_count: lastTokenUsage }]
+        const modelUsage = (promptTokenUsage != null)
+            ? [{ model: modelName, token_count: promptTokenUsage }]
             : [];
 
         return {
             quota: {
-                token_count: sessionState.lastTokenUsage,
+                token_count: promptTokenUsage,
                 model_usage: modelUsage
             }
         };

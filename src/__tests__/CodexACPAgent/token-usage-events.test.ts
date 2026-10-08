@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ServerNotification } from '../../app-server';
 import { createCodexMockTestFixture, createTestEventHandler, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
-import { PromptTokenUsage } from '../../TokenCount';
+import { PromptTokenUsage, toPromptUsage, type TokenCount } from '../../TokenCount';
 import type { TokenUsageBreakdown } from '../../app-server/v2';
 import type { SessionState } from '../../CodexAcpServer';
 import { ACPSessionConnection } from '../../ACPSessionConnection';
@@ -445,6 +445,79 @@ describe('Token Usage Events', () => {
             });
 
             expect(response.usage).toBeNull();
+        });
+
+        describe('_meta.quota', () => {
+            const quotaOf = (response: { _meta?: Record<string, unknown> | null }) =>
+                (response._meta as { quota: { token_count: TokenCount | null, model_usage: Array<{ model: string, token_count: TokenCount }> } }).quota;
+
+            it('reports the whole turn after an earlier turn, as PromptResponse.usage does', async () => {
+                const prompt = setupPrompts([
+                    [createTokenUsageNotification(sessionId, {
+                        total: breakdown(1000, 800, 0, 200),
+                        last: breakdown(1000, 800, 0, 200),
+                        modelContextWindow: 128000,
+                    })],
+                    [
+                        createTokenUsageNotification(sessionId, {
+                            total: breakdown(2500, 2000, 600, 500),
+                            last: breakdown(1500, 1200, 600, 300),
+                            modelContextWindow: 128000,
+                        }),
+                        createTokenUsageNotification(sessionId, {
+                            total: breakdown(4500, 3700, 1800, 800),
+                            last: breakdown(2000, 1700, 1200, 300),
+                            modelContextWindow: 128000,
+                        }),
+                    ],
+                ]);
+
+                await prompt();
+                const response = await prompt();
+
+                const quota = quotaOf(response);
+                expect(quota.token_count).toMatchObject({totalTokens: 3500, inputTokens: 1100, cachedInputTokens: 1800, outputTokens: 600});
+                expect(toPromptUsage(quota.token_count!)).toEqual(response.usage);
+                expect(quota.model_usage).toEqual([{model: expect.any(String), token_count: quota.token_count}]);
+            });
+
+            it('leaves out the inherited history of a forked or resumed thread, as PromptResponse.usage does', async () => {
+                const prompt = setupPrompts([[
+                    createTokenUsageNotification(sessionId, {
+                        total: breakdown(102000, 100000, 80000, 2000),
+                        last: breakdown(2000, 1800, 1500, 200),
+                        modelContextWindow: 128000,
+                    }),
+                    createTokenUsageNotification(sessionId, {
+                        total: breakdown(105000, 102700, 82000, 2300),
+                        last: breakdown(3000, 2700, 2000, 300),
+                        modelContextWindow: 128000,
+                    }),
+                ]]);
+
+                const response = await prompt();
+
+                expect(quotaOf(response).token_count?.totalTokens).toBe(5000);
+                expect(toPromptUsage(quotaOf(response).token_count!)).toEqual(response.usage);
+            });
+
+            it('reports no usage for a prompt without a turn', async () => {
+                const prompt = setupPrompts([[
+                    createTokenUsageNotification(sessionId, {
+                        total: breakdown(1000, 800, 0, 200),
+                        last: breakdown(1000, 800, 0, 200),
+                        modelContextWindow: 128000,
+                    }),
+                ]]);
+                await prompt();
+
+                const response = await mockFixture.getCodexAcpAgent().prompt({
+                    sessionId,
+                    prompt: [{ type: 'text', text: '/status' }],
+                });
+
+                expect(quotaOf(response)).toEqual({token_count: null, model_usage: []});
+            });
         });
 
         it('never reports negative usage when the thread total goes back', async () => {
