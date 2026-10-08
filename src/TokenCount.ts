@@ -59,3 +59,93 @@ export function toPromptUsage(tokenCount: TokenCount): Usage {
         thoughtTokens: tokenCount.reasoningOutputTokens,
     };
 }
+
+export const ZERO_TOKEN_COUNT: Readonly<TokenCount> = Object.freeze({
+    totalTokens: 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    cacheWriteInputTokens: 0,
+    outputTokens: 0,
+    reasoningOutputTokens: 0,
+});
+
+const TOKEN_COUNT_FIELDS = [
+    "totalTokens",
+    "inputTokens",
+    "cachedInputTokens",
+    "cacheWriteInputTokens",
+    "outputTokens",
+    "reasoningOutputTokens",
+] as const satisfies ReadonlyArray<keyof TokenCount>;
+
+function combine(a: TokenCount, b: TokenCount, op: (x: number, y: number) => number): TokenCount {
+    const result = {} as TokenCount;
+    for (const field of TOKEN_COUNT_FIELDS) result[field] = op(a[field], b[field]);
+    return result;
+}
+
+function sameCount(a: TokenCount, b: TokenCount): boolean {
+    return TOKEN_COUNT_FIELDS.every(field => a[field] === b[field]);
+}
+
+/**
+ * Accumulates the token usage of one prompt from Codex's `thread/tokenUsage/updated` notifications.
+ *
+ * Codex reports the usage of the last model request (`last`) and the running total of the thread
+ * (`total`). A turn can make many requests, so the usage of the prompt is the thread total at its end
+ * minus the total when it started. When no start total is known, as in the first turn after a session is
+ * created, forked or resumed (whose first total already includes the inherited history), or when the
+ * total went back at any point of the prompt, the `last` values of the prompt's requests are summed instead.
+ * An update that repeats the previous total is not a new request and is not counted again: Codex sends
+ * its current usage again when a model request starts, with the rate limits of the response.
+ * When the start total is unknown, such a repeated update can be the first one of the prompt, carrying the
+ * history of a resumed or forked thread and its last request. A first update that arrives before the model
+ * produced any output in this prompt is therefore taken as the start total instead of a request of the
+ * prompt: the update of a request follows the output of that request.
+ */
+export class PromptTokenUsage {
+    private startTotal: TokenCount | null;
+    private previousTotal: TokenCount | null;
+    private latestTotal: TokenCount | null = null;
+    private summedLast: TokenCount | null = null;
+    private totalWentBack = false;
+    private modelOutputSeen = false;
+
+    /** @param startTotal the thread total when the prompt started, or null when it is unknown. */
+    constructor(startTotal: TokenCount | null) {
+        this.startTotal = startTotal;
+        this.previousTotal = startTotal;
+    }
+
+    /** Records that the model produced output in this prompt, so a later update is one of its requests. */
+    observeModelOutput(): void {
+        this.modelOutputSeen = true;
+    }
+
+    observe(total: TokenCount, last: TokenCount): void {
+        const previous = this.previousTotal;
+        if (previous !== null && sameCount(total, previous)) return;
+        if (previous === null && !this.modelOutputSeen) {
+            this.startTotal = total;
+            this.previousTotal = total;
+            return;
+        }
+        if (previous !== null && TOKEN_COUNT_FIELDS.some(field => total[field] < previous[field])) {
+            this.totalWentBack = true;
+        }
+        this.summedLast = this.summedLast === null ? {...last} : combine(this.summedLast, last, (x, y) => x + y);
+        this.previousTotal = total;
+        this.latestTotal = total;
+    }
+
+    /** The usage of the prompt so far, or null when Codex reported none. */
+    usage(): TokenCount | null {
+        const start = this.startTotal;
+        const latest = this.latestTotal;
+        if (latest === null) return null;
+        if (start !== null && !this.totalWentBack) {
+            return combine(latest, start, (x, y) => x - y);
+        }
+        return this.summedLast;
+    }
+}

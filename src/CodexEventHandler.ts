@@ -370,6 +370,11 @@ export class CodexEventHandler {
     }
 
     async handleNotification(notification: ServerNotification) {
+        if (notification.method === "item/started"
+            && notification.params.threadId === this.sessionState.sessionId
+            && isModelOutputItem(notification.params.item)) {
+            this.sessionState.promptTokenUsage?.observeModelOutput();
+        }
         await this.flushPendingErrors();
         await this.finishCompactionsForNotification(notification);
         const closingChildren = this.subagents.closingChildSessions(notification);
@@ -1159,6 +1164,7 @@ export class CodexEventHandler {
     private handleTokenUsageUpdated(params: ThreadTokenUsageUpdatedNotification): void {
         this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
         this.sessionState.totalTokenUsage = toTokenCount(params.tokenUsage.total);
+        this.sessionState.promptTokenUsage?.observe(this.sessionState.totalTokenUsage, this.sessionState.lastTokenUsage);
         this.sessionState.modelContextWindow = params.tokenUsage.modelContextWindow;
     }
 
@@ -1194,6 +1200,25 @@ export class CodexEventHandler {
         });
     }
 
+}
+
+/**
+ * Items that Codex reports for the input of a turn, for other agents, or before a model request, rather than
+ * as output of its model. Codex starts a context compaction before its request, which can send the
+ * current usage again. When a compaction is the first request of a prompt on a thread with an unknown
+ * start total and nothing was sent again before it, its own usage is taken as the start total; that
+ * undercount is the lesser error compared with counting the history's last request.
+ */
+const NON_MODEL_OUTPUT_ITEM_TYPES: ReadonlySet<ThreadItem["type"]> = new Set([
+    "userMessage",
+    "hookPrompt",
+    "enteredReviewMode",
+    "subAgentActivity",
+    "contextCompaction",
+]);
+
+function isModelOutputItem(item: ThreadItem): boolean {
+    return !NON_MODEL_OUTPUT_ITEM_TYPES.has(item.type);
 }
 
 function toolCallTitle(update: UpdateSessionEvent | null | undefined): string | undefined {

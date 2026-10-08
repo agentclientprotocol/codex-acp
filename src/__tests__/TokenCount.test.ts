@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {toPromptUsage, toTokenCount} from "../TokenCount";
+import {PromptTokenUsage, toPromptUsage, toTokenCount, type TokenCount} from "../TokenCount";
 
 describe("toTokenCount", () => {
     it("separates cache reads and cache writes from fresh input", () => {
@@ -57,5 +57,31 @@ describe("toPromptUsage", () => {
             outputTokens: 143,
             thoughtTokens: 57,
         });
+    });
+});
+
+function count(totalTokens: number): TokenCount {
+    return {
+        totalTokens,
+        inputTokens: totalTokens,
+        cachedInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        outputTokens: 0,
+        reasoningOutputTokens: 0,
+    };
+}
+
+describe("PromptTokenUsage", () => {
+    it("is null before Codex reports usage", () => {
+        expect(new PromptTokenUsage(count(1000)).usage()).toBeNull();
+    });
+
+    it("sums the requests once the total went back, even after it passes the start again", () => {
+        const usage = new PromptTokenUsage(count(1000));
+
+        usage.observe(count(500), count(500));
+        usage.observe(count(1500), count(1000));
+
+        expect(usage.usage()?.totalTokens).toBe(1500);
     });
 });

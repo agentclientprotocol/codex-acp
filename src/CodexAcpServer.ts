@@ -64,7 +64,7 @@ import {
     REASONING_EFFORT_CONFIG_ID,
 } from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
-import {toPromptUsage} from "./TokenCount";
+import {PromptTokenUsage, toPromptUsage, ZERO_TOKEN_COUNT} from "./TokenCount";
 import {CodexCommands, GOAL_CONTINUATION_PROMPT} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
@@ -197,6 +197,10 @@ export interface SessionState extends SessionIndexTitleState {
     currentTurnId: string | null;
     lastTokenUsage: TokenCount | null;
     totalTokenUsage: TokenCount | null;
+    /** The token usage of the current or last prompt, which its PromptResponse reports. */
+    promptTokenUsage: PromptTokenUsage | null;
+    /** Whether the thread may have token usage from before this session, as a loaded, resumed or forked thread. */
+    threadHasHistory: boolean;
     modelContextWindow: number | null;
     rateLimits: RateLimitsMap | null;
     account: Account | null;
@@ -870,6 +874,8 @@ export class CodexAcpServer {
             currentTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
+            promptTokenUsage: null,
+            threadHasHistory: operation !== "new",
             modelContextWindow: null,
             rateLimits: null,
             account: authState.account,
@@ -2445,6 +2451,8 @@ export class CodexAcpServer {
             currentTurnId: null,
             lastTokenUsage: null,
             totalTokenUsage: null,
+            promptTokenUsage: null,
+            threadHasHistory: true,
             modelContextWindow: null,
             rateLimits: null,
             account: authState.account,
@@ -3218,6 +3226,8 @@ export class CodexAcpServer {
         let promptWasCancelled = false;
         let recoverableSessionFailure = sessionState.sessionFailure;
         sessionState.currentTurnId = null;
+        // A prompt that starts no model work, such as /status or a cancellation before the turn, used no tokens.
+        sessionState.promptTokenUsage = null;
         const activePrompt = this.trackActivePrompt(params.sessionId);
         let pendingTurnStart: PendingTurnStart | null = null;
         const ensurePendingTurnStart = (): PendingTurnStart => {
@@ -3348,7 +3358,7 @@ export class CodexAcpServer {
             const commandPromise = promptCommands.tryHandleCommand(params.prompt, sessionState, {
                 signal: activePrompt.signal,
                 onTurnStartPending: () => {
-                    sessionState.lastTokenUsage = null;
+                    this.beginPromptTokenUsage(sessionState);
                     ensurePendingTurnStart();
                 },
                 onTurnStarted: (turnId, threadId) => {
@@ -3421,7 +3431,7 @@ export class CodexAcpServer {
                 await clearRecoveredSessionFailure(eventHandler);
                 return {
                     stopReason: "end_turn",
-                    usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                    usage: this.buildPromptUsage(sessionState),
                     _meta: this.buildQuotaMeta(sessionState),
                 };
             }
@@ -3454,7 +3464,7 @@ export class CodexAcpServer {
                 sessionState.fastModeEnabled,
                 sessionState.currentModelSupportsFast,
             );
-            sessionState.lastTokenUsage = null;
+            this.beginPromptTokenUsage(sessionState);
             ensurePendingTurnStart();
             const sendPromptPromise = this.runOnAppServer(promptGeneration, promptClient,
                 () => promptClient.sendPrompt(
@@ -3666,7 +3676,7 @@ export class CodexAcpServer {
 
             return {
                 stopReason: "end_turn",
-                usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+                usage: this.buildPromptUsage(sessionState),
                 _meta: this.buildQuotaMeta(sessionState),
             };
         } catch (caught) {
@@ -3840,7 +3850,7 @@ export class CodexAcpServer {
     private cancelledPromptResponse(sessionState: SessionState): acp.PromptResponse {
         return {
             stopReason: "cancelled",
-            usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+            usage: this.buildPromptUsage(sessionState),
             _meta: this.buildQuotaMeta(sessionState),
         };
     }
@@ -3857,7 +3867,7 @@ export class CodexAcpServer {
         }
         return {
             stopReason: "end_turn",
-            usage: this.buildPromptUsage(sessionState.lastTokenUsage),
+            usage: this.buildPromptUsage(sessionState),
             _meta: {
                 ...this.buildQuotaMeta(sessionState),
                 ...failureMeta,
@@ -3884,11 +3894,17 @@ export class CodexAcpServer {
         };
     }
 
-    private buildPromptUsage(lastTokenUsage: TokenCount | null): acp.Usage | null {
-        if (lastTokenUsage == null) {
-            return null;
-        }
-        return toPromptUsage(lastTokenUsage);
+    private beginPromptTokenUsage(sessionState: SessionState): void {
+        sessionState.lastTokenUsage = null;
+        // A new thread starts at zero; the usage of a thread with history is unknown until Codex reports it.
+        const startTotal = sessionState.totalTokenUsage
+            ?? (sessionState.threadHasHistory ? null : ZERO_TOKEN_COUNT);
+        sessionState.promptTokenUsage = new PromptTokenUsage(startTotal);
+    }
+
+    private buildPromptUsage(sessionState: SessionState): acp.Usage | null {
+        const usage = sessionState.promptTokenUsage?.usage() ?? null;
+        return usage === null ? null : toPromptUsage(usage);
     }
 
     /**
