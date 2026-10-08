@@ -725,6 +725,34 @@ export class CodexAcpServer {
         return generation;
     }
 
+    /**
+     * Whether a fork that failed before its session was installed may unsubscribe its thread. A client can find
+     * the new thread in the session list and load it meanwhile; that open owns the subscription then.
+     */
+    private canReleaseFailedFork(threadId: string): boolean {
+        return !this.sessionOpenGenerations.has(threadId) && !this.sessions.has(threadId);
+    }
+
+    /**
+     * Unsubscribes the thread of a fork that failed before its session was installed, see
+     * {@link canReleaseFailedFork}. The close fence keeps a new open of the thread out until the unsubscribe and
+     * the handler cleanup are done, as for {@link cleanupStaleSessionOpen}.
+     */
+    private async releaseFailedFork(threadId: string): Promise<void> {
+        if (!this.canReleaseFailedFork(threadId)) return;
+        this.beginSessionCloseFence(threadId);
+        try {
+            // A dead app-server holds nothing to close.
+            if (this.recovery === null || this.recovery.isReady()) {
+                await this.codexAcpClient.closeSession(threadId);
+            }
+        } catch (err) {
+            logger.error(`Failed to close the thread of a failed fork ${threadId}`, err);
+        } finally {
+            this.endSessionCloseFence(threadId);
+        }
+    }
+
     private sessionOpenCanInstall(sessionId: string, generation: number): boolean {
         return !this.sessionIsClosing(sessionId) && this.getSessionGeneration(sessionId) === generation;
     }
@@ -833,7 +861,7 @@ export class CodexAcpServer {
             sessionMetadata = await this.runWithProcessCheck(() => {
                 openGeneration = this.recovery?.generation ?? 0;
                 mcpServerStartupVersion = readMcpServerStartupVersion();
-                return this.codexAcpClient.forkSession(forkRequest);
+                return this.codexAcpClient.forkSession(forkRequest, threadId => this.releaseFailedFork(threadId));
             });
         } else {
             logger.log(`Create new session...`);
@@ -852,6 +880,9 @@ export class CodexAcpServer {
         } catch (err) {
             if (resumeSubscribed && requestedSessionGeneration !== null) {
                 await this.cleanupStaleSessionOpen(sessionId, requestedSessionGeneration);
+            } else if (operation === "fork") {
+                // The fork stays subscribed after `thread/fork`; without a session nothing would unsubscribe it.
+                await this.releaseFailedFork(sessionId);
             }
             throw err;
         }

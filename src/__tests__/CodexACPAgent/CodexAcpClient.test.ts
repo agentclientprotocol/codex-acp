@@ -698,7 +698,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 },
             }),
         }));
-        expect(threadUnsubscribeSpy).toHaveBeenCalledWith({threadId: "fork-id"});
+        expect(threadUnsubscribeSpy).not.toHaveBeenCalled();
     });
 
     it('maps an AIR fork message id to the containing Codex turn', async () => {
