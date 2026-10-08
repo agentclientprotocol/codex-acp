@@ -99,7 +99,8 @@ export class SessionForkOrigins {
 
     /** Reads the fork parent of a thread from its rollout; true when it is a fork. */
     private async read(thread: Thread): Promise<boolean> {
-        if (thread.path === null) return false;
+        // A thread listed again while it was read waits for that read, which may have answered meanwhile.
+        if (thread.path === null || isAnswer(this.origins.get(thread.id))) return false;
         let origin: string | null | undefined;
         try {
             origin = await readForkOrigin(thread.path);
@@ -108,6 +109,8 @@ export class SessionForkOrigins {
             logger.log("Cannot read the fork parent of a thread", {threadId: thread.id, error: String(error)});
             return false;
         }
+        // An answer is final: a later read of a moved or cut rollout does not take it back.
+        if (isAnswer(this.origins.get(thread.id))) return false;
         remember(this.origins, thread.id, origin === undefined ? {path: thread.path, updatedAt: thread.updatedAt} : origin);
         return typeof origin === "string";
     }
@@ -154,6 +157,11 @@ export async function readForkOrigin(file: string): Promise<string | null | unde
     }
     const forkedFrom = field(field(meta, "payload"), "forked_from_id");
     return field(meta, "type") === "session_meta" && typeof forkedFrom === "string" && forkedFrom !== "" ? forkedFrom : null;
+}
+
+/** A fork parent or `null` for no fork, as opposed to a rollout that could not tell yet. */
+function isAnswer(value: string | null | Unknown | undefined): value is string | null {
+    return typeof value === "string" || value === null;
 }
 
 function field(value: unknown, key: string): unknown {
