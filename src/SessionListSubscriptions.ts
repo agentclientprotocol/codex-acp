@@ -129,6 +129,7 @@ interface Subscription {
     /** The client has the id: `subscribe` answered. Changes before that wait in {@link held}. */
     ready: boolean;
     held: SessionListChanges | null;
+    readyTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export interface ThreadEntry {
@@ -209,20 +210,22 @@ export class SessionListSubscriptions {
             this.startWatching();
             created.ready = this.readBaseline(created);
         }
-        const subscription: Subscription = {id: randomUUID(), group, sent: new Map(), baselined: false, ready: false, held: null};
+        const subscription: Subscription = {id: randomUUID(), group, sent: new Map(), baselined: false, ready: false, held: null, readyTimer: null};
         this.subscriptions.set(subscription.id, subscription);
         group.subscriptions.add(subscription);
         // The client has what it listed: the rows the group knows now, or the baseline once it is read.
         if (group.baselined) this.takeBaseline(subscription);
         this.startWatching();
         await Promise.all([group.ready, this.marksReady]);
+        // Ready once the answer to `subscribe` is out, which happens before any timer; the next flush sends
+        // what was held meanwhile.
         if (this.subscriptions.get(subscription.id) === subscription) {
-            subscription.ready = true;
-            // After the answer to `subscribe`, which goes out before any timer.
-            if (subscription.held !== null) {
-                const delivery = setTimeout(() => void this.deliverHeld(subscription), 0);
-                delivery.unref?.();
-            }
+            subscription.readyTimer = setTimeout(() => {
+                subscription.readyTimer = null;
+                subscription.ready = true;
+                if (subscription.held !== null) this.requestThreads(0);
+            }, 0);
+            subscription.readyTimer.unref?.();
         }
         return subscription.id;
     }
@@ -232,19 +235,13 @@ export class SessionListSubscriptions {
         subscription.baselined = true;
     }
 
-    private async deliverHeld(subscription: Subscription): Promise<void> {
-        const held = subscription.held;
-        subscription.held = null;
-        if (held === null || this.disposed || this.subscriptions.get(subscription.id) !== subscription) return;
-        await this.send(held);
-        this.markSent([held]);
-    }
 
     /** Ends a subscription. Idempotent: an unknown id changes nothing. */
     unsubscribe(subscriptionId: string): void {
         const subscription = this.subscriptions.get(subscriptionId);
         if (subscription === undefined) return;
         this.subscriptions.delete(subscriptionId);
+        if (subscription.readyTimer !== null) clearTimeout(subscription.readyTimer);
         const group = subscription.group;
         group.subscriptions.delete(subscription);
         if (group.subscriptions.size === 0 && this.groups.get(group.cwd) === group) this.groups.delete(group.cwd);
@@ -254,6 +251,9 @@ export class SessionListSubscriptions {
     /** Ends every subscription: the connection is gone. */
     dispose(): void {
         this.disposed = true;
+        for (const subscription of this.subscriptions.values()) {
+            if (subscription.readyTimer !== null) clearTimeout(subscription.readyTimer);
+        }
         this.subscriptions.clear();
         this.groups.clear();
         this.stopWatching();
@@ -417,6 +417,8 @@ export class SessionListSubscriptions {
 
     /** The most recently updated rows of a new group, unarchived and archived: what its client has. */
     private async readBaseline(group: Group): Promise<void> {
+        // The marks come first: a change after them is scanned, a change before them is in the baseline.
+        await this.marksReady;
         // A read that starts after this one can be newer than the baseline; one that started before cannot.
         const epoch = ++this.epoch;
         await this.withReader(async (reader) => {
@@ -461,6 +463,8 @@ export class SessionListSubscriptions {
         }
         const readEpoch = ++this.epoch;
 
+        // A scan before the first marks would only set them: it waits for them instead.
+        if (scan) await this.marksReady;
         const found = new Map<string, ThreadEntry>();
         await this.withReader(async (reader) => {
             if (scan) {
@@ -516,17 +520,21 @@ export class SessionListSubscriptions {
             }
         }
 
+        // A batch joins the changes held for a subscription; a ready subscription gets them all in one
+        // notification. Sends happen only here, one flush at a time.
         for (const [subscription, batch] of batches) {
-            if (this.disposed || this.subscriptions.get(subscription.id) !== subscription) continue;
-            // Held changes go first: a batch joins them until they are sent.
-            if (subscription.ready && subscription.held === null) {
-                await this.send(batch);
-            } else {
-                subscription.held = subscription.held === null ? batch : mergeChanges(subscription.held, batch);
-            }
+            subscription.held = subscription.held === null ? batch : mergeChanges(subscription.held, batch);
+        }
+        const sent: SessionListChanges[] = [];
+        for (const subscription of this.subscriptions.values()) {
+            if (this.disposed || !subscription.ready || subscription.held === null) continue;
+            const changes = subscription.held;
+            subscription.held = null;
+            await this.send(changes);
+            sent.push(changes);
         }
         // The second between two changes of a thread counts from when the last notification with it went out.
-        this.markSent([...batches.values()]);
+        this.markSent(sent);
     }
 
     private markSent(batches: SessionListChanges[]): void {

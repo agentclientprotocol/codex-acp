@@ -461,9 +461,11 @@ describe("SessionListSubscriptions", () => {
         const held: Array<() => void> = [];
         const releaseMarks = () => held.forEach(release => release());
         const list = codex.threadList.getMockImplementation()!;
+        // The baseline reads the rows of its time, and answers late.
         codex.threadList.mockImplementation(async (params) => {
-            if (params.cwd === undefined) await new Promise<void>(resolve => held.push(resolve));
-            return await list(params);
+            const rows = await list(params);
+            if (params.cwd !== undefined) await new Promise<void>(resolve => held.push(resolve));
+            return rows;
         });
         let answered = false;
         const subscribing = subscriptions.subscribe("/repo").then((id) => {
@@ -482,7 +484,7 @@ describe("SessionListSubscriptions", () => {
         releaseMarks();
         const subscriptionId = await subscribing;
         expect(sent).toEqual([]);
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(10);
         expect(sent).toEqual([{subscriptionId, sessions: [expect.objectContaining({title: "during subscribe"})], removed: []}]);
         subscriptions.dispose();
     });
