@@ -263,13 +263,11 @@ export class SessionUsageIndex {
         if (thread.path !== null) {
             try {
                 if (origin === undefined) {
+                    // Kept with the usage below, so a read that fails leaves none behind.
                     origin = await readForkOrigin(thread.path);
-                    if (origin !== undefined) {
-                        this.origins.set(thread.id, origin);
-                        originRead = origin !== null;
-                    }
+                    originRead = origin !== undefined && origin !== null;
                 }
-                const own = await this.tokensOf(thread.id, thread.path);
+                const own = await this.tokensOf(thread.id, thread.path, origin);
                 if (own !== null) {
                     usage = {...own, model: thread.model, subagents: await this.subagentUsages(subject, thread.path)};
                 }
@@ -337,7 +335,15 @@ export class SessionUsageIndex {
             child = {...child, stamp};
             remember(this.subagents, childId, child);
         }
-        const tokens = await this.tokensOf(childId, child.path);
+        let tokens: SessionUsageTokens | null;
+        try {
+            tokens = await this.tokensOf(childId, child.path);
+        } catch (error) {
+            // Moved or gone between the check and the read: read it with the next read of its parent.
+            if (!isMissingFile(error)) throw error;
+            this.subagents.delete(childId);
+            return null;
+        }
         return tokens === null ? null : {sessionId: childId, model: child.model, ...tokens};
     }
 
@@ -357,25 +363,25 @@ export class SessionUsageIndex {
      * The own usage of a thread from its rollout, or `null` when it has no `token_count`. The rollout is read
      * again only when its path, size or modification time changed.
      */
-    private async tokensOf(threadId: string, file: string): Promise<SessionUsageTokens | null> {
+    private async tokensOf(threadId: string, file: string, knownOrigin?: string | null): Promise<SessionUsageTokens | null> {
         const stamp = await stampOf(file);
         const cached = this.fileTokens.get(threadId);
         if (cached !== undefined && cached.stamp === stamp) {
             remember(this.fileTokens, threadId, cached);
             return cached.tokens;
         }
-        const tokens = await this.readTokens(threadId, file);
+        const tokens = await this.readTokens(threadId, file, knownOrigin);
         remember(this.fileTokens, threadId, {stamp, tokens});
         return tokens;
     }
 
-    private async readTokens(threadId: string, file: string): Promise<SessionUsageTokens | null> {
+    private async readTokens(threadId: string, file: string, knownOrigin?: string | null): Promise<SessionUsageTokens | null> {
         const total = await readLastTokenTotal(file);
         if (total === null) return null;
         let inherited = this.inherited.get(threadId);
         if (inherited === undefined) {
             // A fork tells from its own session_meta: `thread/list` leaves out `Thread.forkedFromId`.
-            let origin = this.origins.get(threadId);
+            let origin = knownOrigin !== undefined ? knownOrigin : this.origins.get(threadId);
             if (origin === undefined) {
                 const read = await readForkOrigin(file);
                 if (read === undefined) return null;
