@@ -159,6 +159,8 @@ export class SessionListSubscriptions {
 
     /** Threads to read with `thread/read` in the next flush. */
     private readonly pendingThreads = new Set<string>();
+    /** Usage reads that went to no group: tried once more when the groups may resolve their worktrees again. */
+    private readonly usageRetries = new Map<string, {cwd: string, at: number}>();
     /** Threads whose usage was read, with their cwd, see {@link usageRead}. */
     private readonly pendingUsage = new Map<string, string>();
     /** Counts reads and baselines, so that a read that started before a baseline does not override it. */
@@ -425,6 +427,7 @@ export class SessionListSubscriptions {
         this.threadsDueAt = null;
         this.pendingThreads.clear();
         this.pendingUsage.clear();
+        this.usageRetries.clear();
         this.deletedThreads.clear();
         this.lastChangeAt.clear();
         this.ignoredThreads.clear();
@@ -484,6 +487,13 @@ export class SessionListSubscriptions {
         this.deletedThreads.clear();
         const usageRead = new Map(this.pendingUsage);
         this.pendingUsage.clear();
+        const retriedUsage = new Set<string>();
+        for (const [threadId, {cwd, at}] of this.usageRetries) {
+            if (at > startedAt || usageRead.has(threadId)) continue;
+            this.usageRetries.delete(threadId);
+            usageRead.set(threadId, cwd);
+            retriedUsage.add(threadId);
+        }
         for (const [threadId, at] of this.lastChangeAt) {
             if (startedAt - at >= this.timings.minChangeIntervalMs) this.lastChangeAt.delete(threadId);
         }
@@ -528,7 +538,14 @@ export class SessionListSubscriptions {
             if (found.has(threadId) || deleted.has(threadId)) continue;
             const offers: Array<{group: Group, row: acp.SessionInfo}> = [];
             let unknown = false;
-            for (const group of this.groupsOf(cwd)) {
+            const groups = this.groupsOf(cwd);
+            if (groups.length === 0 && !retriedUsage.has(threadId)) {
+                // Perhaps of a worktree that a group could not resolve yet: once more when it can.
+                this.usageRetries.delete(threadId);
+                this.usageRetries.set(threadId, {cwd, at: this.now() + SCOPE_RETRY_MS});
+                if (this.usageRetries.size > MAX_IGNORED_THREADS) this.usageRetries.delete(this.usageRetries.keys().next().value!);
+            }
+            for (const group of groups) {
                 const known = group.rows.get(threadId);
                 if (known === undefined) unknown = true;
                 else offers.push({group, row: this.deps.withLatestUsage(known.row)});
@@ -555,6 +572,9 @@ export class SessionListSubscriptions {
             }
         }
 
+        for (const {at} of this.usageRetries.values()) {
+            this.threadsDueAt = this.threadsDueAt === null ? at : Math.min(this.threadsDueAt, at);
+        }
         // A batch joins the changes held for a subscription; a ready subscription gets them all in one
         // notification. Sends happen only here, one flush at a time.
         for (const [subscription, batch] of batches) {
@@ -675,8 +695,7 @@ export class SessionListSubscriptions {
         const next = {unarchived: 0, archived: 0};
         let goOn = false;
         for (const side of sides) {
-            // Pages of threads all of the second of the mark are threads seen before: no reason to go on.
-            if (side.stoppedAt !== null && side.mark !== null && side.newest > side.mark) {
+            if (side.stoppedAt !== null && side.mark !== null) {
                 // The mark moves on only once the scan reached it: the rest goes on in the next scan.
                 this.resumes[side.key] = {cursor: side.stoppedAt, cutoff: side.mark, newest: side.newest, changesAtStart: side.resumed ?? changesAtStart};
                 next[side.key] = side.mark;

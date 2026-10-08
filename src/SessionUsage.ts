@@ -210,7 +210,8 @@ export class SessionUsageIndex {
             for (const [threadId, entry] of this.later) {
                 if (entry.at > now) continue;
                 this.later.delete(threadId);
-                this.schedule(entry.subject);
+                // A read already pending for the thread is newer than this one.
+                if (!this.pending.has(threadId)) this.schedule(entry.subject);
             }
             this.armLater();
         }, Math.max(0, next - Date.now()));

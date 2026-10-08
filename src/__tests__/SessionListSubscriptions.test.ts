@@ -375,6 +375,20 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("reads past its page limit a change within the second of its mark", async () => {
+        const {codex, subscriptions, sent, listener} = setup();
+        for (let index = 0; index < 1_000; index++) codex.put(thread(`same-${index}`, {updatedAt: 5_000, cwd: "/elsewhere"}));
+        // Listed after the 1,000 others of its second, beyond the 920 rows of a scan.
+        codex.put(thread("mine", {updatedAt: 4_999}));
+        await subscriptions.subscribe("/repo");
+        codex.update("mine", {updatedAt: 5_000, name: "changed"});
+        listener().stateChanged();
+        await vi.advanceTimersByTimeAsync(5 * timings.maxWaitMs);
+
+        expect(sent.flatMap(changes => changes.sessions.map(row => row.title))).toEqual(["changed"]);
+        subscriptions.dispose();
+    });
+
     it("does not go on forever with pages of threads all of the second of its mark", async () => {
         const {codex, subscriptions, listener} = setup();
         for (let index = 0; index < 1_001; index++) codex.put(thread(`same-${index}`, {updatedAt: 5_000, cwd: "/elsewhere"}));
