@@ -1,24 +1,32 @@
 #!/usr/bin/env node
+import {runInternalProcessHelper} from "./CodexProcessHelpers";
+import type * as AcpTypes from "@agentclientprotocol/sdk";
+import type {CodexProcessState, CodexAcpServer as CodexAcpServerType} from "./CodexAcpServer";
 
-import * as acp from "@agentclientprotocol/sdk";
-import {z} from "zod";
-import {startCodexConnection} from "./CodexJsonRpcConnection";
-import {CodexAcpServer, type CodexProcessState} from "./CodexAcpServer";
-import {createJsonStream} from "./StdUtils";
-import {isCodexAuthRequest} from "./CodexAuthMethod";
-import {CodexAcpClient} from "./CodexAcpClient";
-import {CodexAppServerClient} from "./CodexAppServerClient";
-import packageJson from "../package.json";
-import {logger} from "./Logger";
-import {runLoginCommand} from "./login";
-import {runCodexCli} from "./CodexCli";
-import {prepareCodexHookConfig} from "./CodexHookConfig";
-import {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD} from "./CodexHookTrust";
-import {
+await runInternalProcessHelper();
+
+const {SESSION_QUEUE_METHOD, parseSessionQueueRequest} = await import("./SessionQueue");
+
+const acp = await import("@agentclientprotocol/sdk");
+const {z} = await import("zod");
+const {startCodexConnection} = await import("./CodexJsonRpcConnection");
+const {CodexAcpServer} = await import("./CodexAcpServer");
+const {createJsonStream} = await import("./StdUtils");
+const {isCodexAuthRequest} = await import("./CodexAuthMethod");
+const {CodexAcpClient} = await import("./CodexAcpClient");
+const {CodexAppServerClient} = await import("./CodexAppServerClient");
+const {default: packageJson} = await import("../package.json");
+const {logger} = await import("./Logger");
+const {runLoginCommand} = await import("./login");
+const {runCodexCli} = await import("./CodexCli");
+const {prepareCodexHookConfig} = await import("./CodexHookConfig");
+const {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD} = await import("./CodexHookTrust");
+const {
     GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
     SESSION_STEERING_METHOD,
-} from "./AcpExtensions";
-import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+} = await import("./AcpExtensions");
+const {ASYNC_TASK_STOP_METHOD} = await import("./async-tasks/AsyncTaskExtension");
+
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -125,7 +133,7 @@ function startAcpServer() {
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
-    function createAgent(connection: acp.AgentContext): CodexAcpServer {
+    function createAgent(connection: AcpTypes.AgentContext): CodexAcpServerType {
         const appServerClient = new CodexAppServerClient(codexProcessState.connection.connection);
         const codexClient = new CodexAcpClient(appServerClient, hookConfig.sessionConfig, modelProvider);
         return new CodexAcpServer(
@@ -138,8 +146,8 @@ function startAcpServer() {
         );
     }
 
-    let codexAcpServer: CodexAcpServer | null = null;
-    const getAgent = (): CodexAcpServer => {
+    let codexAcpServer: CodexAcpServerType | null = null;
+    const getAgent = (): CodexAcpServerType => {
         if (!codexAcpServer) {
             throw acp.RequestError.internalError("ACP agent is not connected");
         }
@@ -178,6 +186,7 @@ function startAcpServer() {
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
+        .onRequest(SESSION_QUEUE_METHOD, z.unknown().transform(value => parseSessionQueueRequest(value)), (ctx) => getAgent().manageSessionQueue(ctx.params, ctx.signal))
         .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
         .onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))

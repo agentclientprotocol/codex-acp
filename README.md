@@ -8,6 +8,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 
 ## Features
 
+- Native persistent [message queue controls](docs/native-queue-controls.md), including edit, reorder, cancellation and explicit start.
 - ChatGPT, API key, and client-provided custom gateway authentication.
 - Model, reasoning effort, fast mode, approval, and sandbox mode configuration.
 - Concrete recommended model and reasoning-effort values through the opt-in [AIR recommended config values](docs/air-extensions.md#recommended-config-values) capability.
