@@ -68,6 +68,8 @@ import type {
     Turn,
     ThreadResumeParams,
     ThreadResumeResponse,
+    ThreadRevertParams,
+    ThreadRevertResponse,
     ThreadSettings,
     ThreadStartParams,
     ThreadStartResponse,
@@ -607,6 +609,14 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/fork", params: params });
     }
 
+    async threadRevert(params: ThreadRevertParams): Promise<ThreadRevertResponse> {
+        return await this.sendRequest({method: "thread/revert", params});
+    }
+
+    async threadRollback(params: ThreadRollbackParams): Promise<ThreadRollbackResponse> {
+        return await this.sendRequest({method: "thread/rollback", params});
+    }
+
     getThreadSettings(threadId: string): ThreadSettings | undefined {
         return this.threadSettings.get(threadId);
     }
@@ -1129,7 +1139,11 @@ export type CompactionCompletedNotification =
     | { method: "thread/compacted", params: Extract<ServerNotification, { method: "thread/compacted" }>["params"] }
     | { method: "item/completed", params: ItemCompletedNotification & { item: Extract<ItemCompletedNotification["item"], { type: "contextCompaction" }> } };
 
+// Compatibility for older CODEX_PATH binaries only. Current generated API removed rollback.
+type ThreadRollbackParams = {threadId: string; numTurns: number};
+type ThreadRollbackResponse = {thread: ThreadReadResponse["thread"]};
 type CodexRequest = DistributiveOmit<ClientRequest, "id"> | ThreadBackgroundTerminalsRequest
+    | {method: "thread/rollback"; params: ThreadRollbackParams};
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>

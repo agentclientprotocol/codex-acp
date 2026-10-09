@@ -29,6 +29,7 @@ export const AIR_CAPABILITY_NAMES = [
     "rawInputRendering",
     "planContentDelta",
     "codexHooks",
+    "sessionRewind",
 ];
 
 /** The client capabilities of each client profile. */

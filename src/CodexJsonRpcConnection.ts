@@ -25,11 +25,11 @@ export function startCodexConnection(
     if (codexPath) {
         // cross-spawn runs `.cmd` shims through cmd.exe with correct escaping for the TOML hook override.
         codex = process.platform === "win32"
-            ? crossSpawn(codexPath, appServerStartupArgs, {env: spawnEnv}) as ChildProcessWithoutNullStreams
-            : spawn(codexPath, appServerStartupArgs, {env: spawnEnv});
+            ? crossSpawn(codexPath, appServerStartupArgs, {env: spawnEnv, windowsHide: true}) as ChildProcessWithoutNullStreams
+            : spawn(codexPath, appServerStartupArgs, {env: spawnEnv, windowsHide: true});
     } else {
         const bundledCodexPath = require.resolve("@openai/codex/bin/codex.js");
-        codex = spawn(process.execPath, [bundledCodexPath, ...appServerStartupArgs], {env: spawnEnv});
+        codex = spawn(process.execPath, [bundledCodexPath, ...appServerStartupArgs], {env: spawnEnv, windowsHide: true});
     }
 
     attachLogs(codex);
