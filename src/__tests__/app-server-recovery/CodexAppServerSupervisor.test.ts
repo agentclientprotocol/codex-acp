@@ -44,7 +44,7 @@ describe("CodexAppServerSupervisor", () => {
 process.stdout.write(JSON.stringify({method: "turn/completed", params: {threadId: "t", turn: {id: "u"}}}) + "\\n", () => process.exit(1));
 `);
         fs.chmodSync(script, 0o755);
-        const state = {connection: startCodexConnection(script, undefined, {disposeOnExit: false}), codexPath: script, stderr: ""};
+        const state = {connection: startCodexConnection(script, undefined, undefined, {disposeOnExit: false}), codexPath: script, stderr: ""};
         const received: string[] = [];
         state.connection.connection.onUnhandledNotification((notification) => {
             received.push(notification.method);
@@ -73,7 +73,7 @@ out += JSON.stringify({method: "turn/completed", params: {threadId: "t", turn: {
 process.stdout.write(out, () => process.exit(1));
 `);
         fs.chmodSync(script, 0o755);
-        const state = {connection: startCodexConnection(script, undefined, {disposeOnExit: false}), codexPath: script, stderr: ""};
+        const state = {connection: startCodexConnection(script, undefined, undefined, {disposeOnExit: false}), codexPath: script, stderr: ""};
         let deltas = 0;
         let completedBeforeDispose = false;
         let disposed = false;
@@ -103,7 +103,7 @@ out += JSON.stringify({method: "turn/completed", params: {threadId: "t", turn: {
 process.stdout.write(out, () => process.exit(1));
 `);
         fs.chmodSync(script, 0o755);
-        const state = {connection: startCodexConnection(script, undefined, {disposeOnExit: false}), codexPath: script, stderr: ""};
+        const state = {connection: startCodexConnection(script, undefined, undefined, {disposeOnExit: false}), codexPath: script, stderr: ""};
         let completed = false;
         state.connection.connection.onUnhandledNotification((notification) => {
             // About 1 ms of work per message: the backlog takes about 2 s, more than the close grace time.
@@ -156,6 +156,18 @@ process.stdout.write(out, () => process.exit(1));
         expect(state.connection).toBe(spawner.spawned[0]!.connection);
         expect(supervisor.isAlive()).toBe(true);
         expect(supervisor.isAlive(1)).toBe(false);
+    });
+
+    it("starts a new child with the startup arguments of the first one", async () => {
+        const initial = fakeAppServer();
+        const startupArgs = ["app-server", "-c", "hooks={}"];
+        const state = {connection: initial.connection, codexPath: "/bin/codex", appServerStartupArgs: startupArgs, stderr: ""};
+        const spawner = fakeSpawner();
+        const supervisor = new CodexAppServerSupervisor(state, spawner.spawn, FAST);
+        initial.child.die(null, "SIGKILL");
+        await supervisor.current.exited;
+        supervisor.spawn();
+        expect(spawner.spawn).toHaveBeenCalledWith("/bin/codex", startupArgs);
     });
 
     it("does not spawn after shutdown, and does not spawn over a running child", async () => {

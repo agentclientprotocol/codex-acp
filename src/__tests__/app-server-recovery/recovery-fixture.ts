@@ -84,6 +84,7 @@ export function createRecoveryFixture(options: {air?: boolean, env?: Record<stri
         connection: initial.connection,
         codexPath: undefined,
         config: undefined,
+        appServerStartupArgs: ["app-server"],
         modelProvider: undefined,
         stderr: "",
     };

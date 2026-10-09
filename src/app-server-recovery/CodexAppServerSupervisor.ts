@@ -7,6 +7,8 @@ import {type AppServerExit, describeExit, likelyOutOfMemory} from "./AppServerEx
 export interface SupervisedProcessState {
     connection: CodexConnection;
     codexPath: string | undefined;
+    /** The arguments the app-server starts with, such as the hook trust override; `app-server` alone when unset. */
+    appServerStartupArgs?: string[];
     stderr: string;
 }
 
@@ -83,8 +85,9 @@ export class CodexAppServerSupervisor {
 
     constructor(
         private readonly state: SupervisedProcessState,
-        private readonly spawnConnection: (codexPath: string | undefined) => CodexConnection =
-            codexPath => startCodexConnection(codexPath, undefined, {disposeOnExit: false}),
+        private readonly spawnConnection: (codexPath: string | undefined, appServerStartupArgs?: string[]) => CodexConnection =
+            (codexPath, appServerStartupArgs) =>
+                startCodexConnection(codexPath, undefined, appServerStartupArgs, {disposeOnExit: false}),
         timings: Partial<SupervisorTimings> = {},
         private readonly now: () => number = Date.now,
     ) {
@@ -148,7 +151,7 @@ export class CodexAppServerSupervisor {
         if (this.isShuttingDown) throw new Error("The agent is shutting down");
         if (this.child.exit === null) throw new Error("The Codex app-server is still running or draining");
         this.state.stderr = "";
-        const connection = this.spawnConnection(this.state.codexPath);
+        const connection = this.spawnConnection(this.state.codexPath, this.state.appServerStartupArgs);
         this.state.connection = connection;
         this.child = this.watch(connection);
         logger.log("[APP-SERVER START]", {generation: this.child.generation, pid: connection.process.pid ?? null});
