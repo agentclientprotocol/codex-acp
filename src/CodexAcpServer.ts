@@ -204,6 +204,8 @@ export interface SessionState {
     clientCapabilities: ClientCapabilities;
     currentGoal?: ThreadGoalSnapshot | null;
     goalRevision: number;
+    /** Settles once app-server notifications for this thread reach an ACP event handler. */
+    eventSubscription?: Promise<void>;
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
@@ -540,6 +542,7 @@ export class CodexAcpServer {
                 if (!sessionState) {
                     throw RequestError.invalidParams(undefined, `Unknown session: ${methodRequest.params.sessionId}`);
                 }
+                await this.ensureSessionEventSubscription(sessionState);
                 const sessionGeneration = this.getSessionGeneration(sessionState.sessionId);
                 const goalControlGeneration = this.bumpGoalControlGeneration(sessionState.sessionId);
                 if (methodRequest.params.action === "set") {
@@ -1895,6 +1898,61 @@ export class CodexAcpServer {
         return {outcome: "startedNewTurn"};
     }
 
+    /**
+     * Subscribes a session that has not run a prompt yet to its app-server notifications.
+     *
+     * A prompt subscribes the thread and its handler keeps forwarding session-scoped
+     * notifications after the prompt ends. Before the first prompt nothing is subscribed, so
+     * goal control would drop the goal update and the goal turn app-server starts for it.
+     * The next prompt replaces this handler.
+     */
+    private ensureSessionEventSubscription(sessionState: SessionState): Promise<void> {
+        sessionState.eventSubscription ??= this.subscribeSessionEvents(sessionState).catch((error: unknown) => {
+            delete sessionState.eventSubscription;
+            throw error;
+        });
+        return sessionState.eventSubscription;
+    }
+
+    private async subscribeSessionEvents(sessionState: SessionState): Promise<void> {
+        const eventHandler = new CodexEventHandler(
+            this.connection,
+            sessionState,
+            clientSupportsTypedSessionFailures(this.clientCapabilities),
+            this.sessionFailureEpoch,
+            sessionState.subagents,
+            (accountUpdated) => this.handleAccountUpdated(accountUpdated),
+            false,
+            clientSupportsCompaction(this.clientCapabilities),
+            clientSupportsNotices(this.clientCapabilities),
+        );
+        const permissionContext = this.permissionLifecycleContext(sessionState).beginPrompt();
+        const toolCallRenderer = new AcpToolCallRenderer(this.capabilities);
+        const signal = new AbortController().signal;
+        const approvalHandler = new CodexApprovalHandler(this.connection, permissionContext, signal, toolCallRenderer);
+        const elicitationHandler = new CodexElicitationHandler(
+            this.connection,
+            permissionContext,
+            this.clientCapabilities,
+            signal,
+            toolCallRenderer,
+        );
+        const observeInteraction = async (event: ServerNotification): Promise<void> => {
+            permissionContext.handleNotification(event);
+            await elicitationHandler.handleNotification(event);
+        };
+        await this.codexAcpClient.subscribeToSessionEvents(sessionState.sessionId,
+            async (event) => {
+                await observeInteraction(event);
+                await eventHandler.handleSessionScopedNotification(event);
+            },
+            approvalHandler,
+            elicitationHandler,
+            clientSupportsSubagents(this.clientCapabilities),
+            observeInteraction,
+            childThreadId => eventHandler.waitForNativeSubagentSession(childThreadId));
+    }
+
     private async startGoalContinuationIfCurrent(
         sessionState: SessionState,
         sessionGeneration: number,
@@ -3071,6 +3129,7 @@ export class CodexAcpServer {
                 clientSupportsSubagents(this.clientCapabilities),
                 observeInteraction,
                 childThreadId => promptEventHandler.waitForNativeSubagentSession(childThreadId));
+            sessionState.eventSubscription = Promise.resolve();
 
             if (activePrompt.signal.aborted) {
                 return cancelledPromptResponse();
