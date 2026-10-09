@@ -47,6 +47,7 @@ describe("Fast mode session config", () => {
             currentServiceTier,
             additionalDirectories: [],
         });
+        vi.spyOn((codexAcpClient as any).codexClient, "threadSettingsUpdate").mockResolvedValue(undefined);
 
         await codexAcpAgent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,
