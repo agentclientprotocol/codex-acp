@@ -3,11 +3,13 @@
     "sessionFailure",
     "diffPatch",
     "agentFileChangeReport",
+    "customInstructions",
     "nativeSubagentSessions",
     "asyncTasks",
     "recommendedValue",
     "rawInputRendering",
     "planContentDelta",
+    "codexHooks",
     "sessionIndex",
     "sessionArchive",
     "sessionRename",
@@ -17,11 +19,13 @@
     "sessionFailure",
     "diffPatch",
     "agentFileChangeReport",
+    "customInstructions",
     "nativeSubagentSessions",
     "asyncTasks",
     "recommendedValue",
     "rawInputRendering",
-    "planContentDelta"
+    "planContentDelta",
+    "codexHooks"
   ],
   "plain": null
 }
