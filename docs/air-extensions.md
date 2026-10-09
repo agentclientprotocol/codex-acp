@@ -231,6 +231,18 @@ The adapter keeps them where they are.
 | `quota` | `PromptResponse._meta.quota` | Token usage and rate limits of the turn. |
 | `authStatus` | `initialize` response `agentCapabilities._meta.authStatus` | The agent pushes `_auth/status_update`. The object carries no payload. |
 
+## Auth source display
+
+The agent-owned provider ID comes from `getAgentConfiguredModelProvider()`: launch options take priority over the effective app-server `configRead`, and client-owned `providers/set` routing is ignored for identity reporting.
+
+An active `model_provider` ID equal to `wire` after trimming whitespace and ignoring case is displayed as:
+
+```json
+{ "authStatus": { "kind": "gateway", "label": "JetBrains Air Gateway" } }
+```
+
+The configured friendly `name`, URL, host and route are not checked. An unused provider or another ID whose friendly name is `wire` does not match. This is a weak display heuristic, not proof of configuration provenance or access rights. This payload omits `detail` and `account` and contains no keys, headers or private routes. Both the initial push and subsequent status publication use the same classification and existing duplicate suppression. Other providers and gateway authentication names retain their previous presentation.
+
 ## Zed conventions
 
 The adapter keeps these Zed conventions for every client:

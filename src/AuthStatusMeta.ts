@@ -126,6 +126,13 @@ export function gatewayStatus(providerName?: string | null): AuthStatus {
     };
 }
 
+export function agentConfiguredProviderStatus(providerId: string | null): AuthStatus {
+    if (providerId?.trim().toLowerCase() === "wire") {
+        return {kind: "gateway", label: "JetBrains Air Gateway"};
+    }
+    return gatewayStatus(providerId);
+}
+
 export function unauthenticatedStatus(): AuthStatus {
     return {
         kind: "none",
