@@ -12,7 +12,7 @@ import {clientSupportsAirCapability, withAirMeta} from "./AirExtension";
 import type {ServerNotification} from "./app-server";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {SessionState} from "./CodexAcpServer";
-import {sessionActiveRequestError, sessionNotFoundRequestError} from "./CodexThreadErrors";
+import {sessionNotFoundRequestError} from "./CodexThreadErrors";
 import {logger} from "./Logger";
 import {arePathBasenamesEqual, isAbsolutePathLike} from "./PathUtils";
 import type {Thread} from "./app-server/v2";
@@ -53,6 +53,8 @@ export interface SessionIndexHost {
     runWithProcessCheck<T>(operation: () => Promise<T>): Promise<T>;
     session(sessionId: string): SessionState | undefined;
     hasLocalSession(sessionId: string): boolean;
+    /** Closes a session open here as `session/close` does: ends its turn, its pending prompt and interactions. */
+    closeSession(sessionId: string): Promise<void>;
     beginSessionCloseFence(sessionId: string): void;
     endSessionCloseFence(sessionId: string): void;
 }
@@ -194,22 +196,22 @@ export class SessionIndexService {
 
     /**
      * `_session/archive` and `_session/unarchive`, as `session/archive` and `session/unarchive` of ACP RFD #2161.
-     * Both are idempotent and work for a session that is not loaded. Neither loads, resumes, closes or cancels
-     * a session: `thread/archive` would unload a thread that this process has loaded, so archiving a session
-     * that is open here fails with the `session_active` reason and changes nothing. The client closes it first.
-     * Unarchiving needs no such rule: Codex does not load an archived thread, so an open one is unarchived.
+     * Both are idempotent and work for a session that is not loaded. Archiving stops a session that is open here,
+     * as `thread/archive` unloads a loaded thread: it is closed as `session/close` closes it, then archived.
+     * Unarchiving loads nothing: the client loads the session again to work in it.
      */
     async setArchived({sessionId}: SessionArchiveRequest, archived: boolean): Promise<Record<string, never>> {
         this.require(archived ? SESSION_ARCHIVE_METHOD : SESSION_UNARCHIVE_METHOD);
         logger.log(archived ? "Archiving session..." : "Unarchiving session...", {sessionId});
         await this.host.ensureAppServer();
-        await this.writes.run(sessionId, async () => {
-            if (archived && this.host.hasLocalSession(sessionId)) {
-                throw sessionActiveRequestError(sessionId);
-            }
-            // An open of the session that starts meanwhile would load the thread that Codex archives.
-            if (archived) this.host.beginSessionCloseFence(sessionId);
-            try {
+        // Read before the fence, which counts as open.
+        const open = this.host.hasLocalSession(sessionId);
+        // An open of the session that starts meanwhile would load the thread that Codex archives.
+        if (archived) this.host.beginSessionCloseFence(sessionId);
+        try {
+            // Outside the write queue: the turn that the close ends may still write its title.
+            if (archived && open) await this.host.closeSession(sessionId);
+            await this.writes.run(sessionId, async () => {
                 let outcome;
                 try {
                     const client = this.host.client();
@@ -222,11 +224,12 @@ export class SessionIndexService {
                 if (outcome === "missing") {
                     throw sessionNotFoundRequestError(sessionId);
                 }
-            } finally {
-                if (archived) this.host.endSessionCloseFence(sessionId);
-            }
-        });
-        if (this.host.session(sessionId)) {
+            });
+        } finally {
+            if (archived) this.host.endSessionCloseFence(sessionId);
+        }
+        // An archived session was closed above: the update still goes to its client, to tell it why.
+        if (archived ? open : this.host.session(sessionId) !== undefined) {
             await new ACPSessionConnection(this.host.connection(), sessionId).update({
                 sessionUpdate: "session_info_update",
                 _meta: withAirMeta(undefined, AIR_ARCHIVED_KEY, archived),

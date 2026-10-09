@@ -1062,17 +1062,44 @@ describe("_session/archive and _session/unarchive", () => {
         await expect(agent.sessionIndex.setArchived({sessionId: threadId}, false)).rejects.toMatchObject({data: {reason: "thread_active_writer", threadId}});
     });
 
-    it("refuses to archive a session that is open here and leaves it open", async () => {
-        const {fixture, agent, appServer, threadArchive} = await createArchiveAgent();
+    it("stops a session that is open here: ends its turn, closes it, then archives the thread", async () => {
+        const {fixture, agent, appServer, threadArchive, threadUnarchive} = await createArchiveAgent();
         await openLocalSession(fixture, threadId);
-        const threadUnsubscribe = vi.spyOn(appServer, "threadUnsubscribe");
+        agent.getSessionState(threadId).currentTurnId = "turn-id";
+        const order: string[] = [];
+        vi.spyOn(appServer, "turnInterrupt").mockImplementation(async () => {
+            order.push("turn/interrupt");
+            return {};
+        });
+        vi.spyOn(appServer, "threadUnsubscribe").mockImplementation(async () => {
+            order.push("thread/unsubscribe");
+            return {status: "unsubscribed"} as never;
+        });
+        threadArchive.mockImplementation(async () => {
+            order.push("thread/archive");
+            return {};
+        });
 
-        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true))
-            .rejects.toMatchObject({code: -32600, data: {reason: "session_active", sessionId: threadId}});
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, true)).resolves.toEqual({});
 
-        expect(threadArchive).not.toHaveBeenCalled();
-        expect(threadUnsubscribe).not.toHaveBeenCalled();
-        expect(agent.getSessionState(threadId).sessionId).toBe(threadId);
+        expect(order).toEqual(["turn/interrupt", "thread/unsubscribe", "thread/archive"]);
+        expect(() => agent.getSessionState(threadId)).toThrow(`Session ${threadId} not found`);
+        const infoUpdates = () => fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "session_info_update");
+        expect(infoUpdates()).toEqual([{
+            method: "sessionUpdate",
+            args: [{sessionId: threadId, update: {sessionUpdate: "session_info_update", _meta: {jetbrains: {air: {version: 1, archived: true}}}}}],
+        }]);
+        // A prompt fails as for a closed session.
+        await expect(agent.prompt({sessionId: threadId, prompt: [{type: "text", text: "go on"}]}))
+            .rejects.toThrow(`Session ${threadId} not found`);
+
+        // Unarchive does not reopen it.
+        fixture.clearAcpConnectionDump();
+        await expect(agent.sessionIndex.setArchived({sessionId: threadId}, false)).resolves.toEqual({});
+        expect(threadUnarchive).toHaveBeenCalledWith({threadId});
+        expect(() => agent.getSessionState(threadId)).toThrow(`Session ${threadId} not found`);
+        expect(infoUpdates()).toEqual([]);
     });
 
     it("unarchives a session that is open here and reports its archive state to it", async () => {

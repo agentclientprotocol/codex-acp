@@ -1095,7 +1095,7 @@ A thread that is not loaded here has no `state`. A change of `state` is a row ch
 | Method | Params | Codex call |
 | --- | --- | --- |
 | `_session/rename` | `{sessionId, title}` | `thread/name/set`. |
-| `_session/archive` | `{sessionId}` | `thread/archive`. |
+| `_session/archive` | `{sessionId}` | `thread/archive`. A loaded session closes first. |
 | `_session/unarchive` | `{sessionId}` | `thread/unarchive`. |
 | `session/delete` | `{sessionId}` | `thread/delete`. A loaded session closes first. |
 
@@ -1110,14 +1110,18 @@ A thread that is not loaded here has no `state`. A change of `state` is a row ch
   while the rename ran.
 - Codex does not rename an archived thread. The rename then fails with `-32600` and `data.reason: "archived"`,
   and does not unarchive the thread.
-- Archive and unarchive never load, resume, close or cancel a session.
-  - `thread/archive` unloads a thread that this process has loaded, so archiving a session that is open here
-    fails with `-32600` and `data.reason: "session_active"` and changes nothing. The client closes it first.
+- Archiving a session stops it, as `thread/archive` unloads a loaded thread. Unarchive loads nothing.
+  - Archive of a session that is open here closes it first, as `session/close` does: it interrupts the running
+    turn, ends the pending prompt and its interactions, and unsubscribes the thread. Then it sends `thread/archive`. An open of the session that starts meanwhile fails.
+  - The session is then closed: a later `session/prompt` fails as for a closed session. To work in it again, the
+    client unarchives it and loads it.
+  - If `thread/archive` then fails, the session stays closed and unarchived.
   - Codex does not load an archived thread, so a session open here is not archived and unarchive just succeeds.
+    It keeps running.
   - Both are idempotent. Codex fails them for a thread already in the target state, so the adapter reads
     `Thread.path` with `thread/read`: an archived rollout is under `<CODEX_HOME>/archived_sessions/`.
-  - After a change of a session that is open on this connection, the adapter sends
-    `session_info_update` with `_meta.jetbrains.air.archived`.
+  - After a change of a session that was open on this connection, the adapter sends `session_info_update` with
+    `_meta.jetbrains.air.archived`. For an archive it comes after the close, as the last update of the session.
   - `session/load` and `session/resume` of an archived thread fail, and do not unarchive it.
 - Errors:
   - A thread that another Codex process holds fails with the `thread_active_writer` reason in `data.reason`.
@@ -1229,6 +1233,8 @@ Remaining differences:
   rows themselves through the [session list subscription](#session-list-subscription).
 - `updatedAt` moves on unarchive, because Codex touches the rollout file then; #2161 says it should not. The order
   is not affected.
+- Archive stops a session that is open here, as `session/close` does; #2161 leaves execution alone. The ACP session
+  list extensions RFD proposes this change to #2161.
 
 ## Context compaction
 

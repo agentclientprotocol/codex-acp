@@ -380,6 +380,9 @@ export class CodexAcpServer {
         runWithProcessCheck: (operation) => this.runWithProcessCheck(operation),
         session: (sessionId) => this.sessions.get(sessionId),
         hasLocalSession: (sessionId) => this.hasLocalSession(sessionId),
+        closeSession: async (sessionId) => {
+            await this.closeSession({sessionId});
+        },
         beginSessionCloseFence: (sessionId) => this.beginSessionCloseFence(sessionId),
         endSessionCloseFence: (sessionId) => this.endSessionCloseFence(sessionId),
     });
