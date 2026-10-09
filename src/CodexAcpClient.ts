@@ -70,6 +70,7 @@ import {
     isUnknownThreadError,
     threadActiveWriterRequestError,
 } from "./CodexThreadErrors";
+import {airCustomInstructions} from "./AirExtension";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 
 /**
@@ -749,6 +750,7 @@ export class CodexAcpClient {
 
     async newSession(request: acp.NewSessionRequest): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        const developerInstructions = airCustomInstructions(request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers);
@@ -756,6 +758,7 @@ export class CodexAcpClient {
             config: sessionConfig.config,
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
+            ...(developerInstructions !== undefined && {developerInstructions}),
         });
 
         const codexModels = await this.fetchAvailableModels();
