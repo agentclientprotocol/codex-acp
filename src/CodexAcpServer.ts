@@ -126,6 +126,8 @@ import {
     type ThreadGoalSnapshot,
     toThreadGoalSnapshot,
 } from "./ThreadGoalSnapshot";
+import {OpenAiPricingProvider, type PricingProvider} from "./PricingProvider";
+import {SessionCostTracker} from "./SessionCostTracker";
 import {
     clientSupportsSubagents,
     type SubagentAwareSessionCapabilities,
@@ -208,6 +210,7 @@ export interface SessionState {
     sessionTitle: string | null;
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
+    costTracker: SessionCostTracker;
     titleGen?: TitleGenerator;
     subagents: CodexSubagentEventRouter;
     asyncTasks: CodexBackgroundTerminalTasks;
@@ -321,6 +324,7 @@ export class CodexAcpServer {
     private readonly getExitCode: () => number | null;
     private readonly getRecentStderr: () => string;
     private readonly sessionFailureEpoch: string;
+    private readonly pricingProvider: PricingProvider;
     private availableCommands: CodexCommands;
     private clientInfo: acp.Implementation | null;
     private clientCapabilities: acp.ClientCapabilities | null;
@@ -362,6 +366,7 @@ export class CodexAcpServer {
         getExitCode?: () => number | null,
         getRecentStderr?: () => string,
         codexProcessState?: CodexProcessState,
+        pricingProvider: PricingProvider = new OpenAiPricingProvider(),
     ) {
         this.sessions = new Map();
         this.pendingTurnStarts = new Map();
@@ -394,6 +399,7 @@ export class CodexAcpServer {
         this.getExitCode = getExitCode ?? (() => this.codexProcessState?.connection.process.exitCode ?? null);
         this.getRecentStderr = getRecentStderr ?? (() => this.codexProcessState?.stderr ?? "");
         this.sessionFailureEpoch = randomUUID();
+        this.pricingProvider = pricingProvider;
         this.clientInfo = null;
         this.clientCapabilities = null;
         this.capabilities = ClientCapabilities.DEFAULT;
@@ -801,6 +807,11 @@ export class CodexAcpServer {
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, operation === "resume");
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
+        const costTracker = await this.createSessionCostTracker(
+            models,
+            authProvider,
+            "sessionId" in request,
+        );
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
@@ -827,6 +838,7 @@ export class CodexAcpServer {
             goalRevision: 0,
             sessionTitle: null,
             sessionTitleSource: operation === "resume" ? "unknown" : "unset",
+            costTracker,
             subagents: new CodexSubagentEventRouter(
                 sessionId,
                 clientSupportsSubagents(this.clientCapabilities),
@@ -1002,6 +1014,18 @@ export class CodexAcpServer {
 
     private authProviderUsesOpenAiAccount(authProvider: string | null): boolean {
         return authProvider === null || authProvider === "openai";
+    }
+
+    private async createSessionCostTracker(
+        models: readonly Model[],
+        authProvider: string | null,
+        baselineInitialUsage: boolean,
+    ): Promise<SessionCostTracker> {
+        if (!this.authProviderUsesOpenAiAccount(authProvider)) {
+            return SessionCostTracker.disabled();
+        }
+        const pricing = await this.pricingProvider.getPricing(models);
+        return new SessionCostTracker(pricing, baselineInitialUsage);
     }
 
     private authProvidersMatch(a: string | null, b: string | null): boolean {
@@ -2228,6 +2252,7 @@ export class CodexAcpServer {
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
+        const costTracker = await this.createSessionCostTracker(models, authProvider, true);
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
@@ -2254,6 +2279,7 @@ export class CodexAcpServer {
             goalRevision: 0,
             sessionTitle: null,
             sessionTitleSource: "unset",
+            costTracker,
             subagents: new CodexSubagentEventRouter(
                 sessionId,
                 clientSupportsSubagents(this.clientCapabilities),
