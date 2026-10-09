@@ -1,24 +1,37 @@
 #!/usr/bin/env node
+import {runInternalProcessHelper} from "./CodexProcessHelpers";
+import type * as AcpTypes from "@agentclientprotocol/sdk";
+import type {CodexProcessState, CodexAcpServer as CodexAcpServerType} from "./CodexAcpServer";
 
-import * as acp from "@agentclientprotocol/sdk";
-import {z} from "zod";
-import {startCodexConnection} from "./CodexJsonRpcConnection";
-import {CodexAcpServer, type CodexProcessState} from "./CodexAcpServer";
-import {createJsonStream} from "./StdUtils";
-import {isCodexAuthRequest} from "./CodexAuthMethod";
-import {CodexAcpClient} from "./CodexAcpClient";
-import {CodexAppServerClient} from "./CodexAppServerClient";
-import packageJson from "../package.json";
-import {logger} from "./Logger";
-import {runLoginCommand} from "./login";
-import {runCodexCli} from "./CodexCli";
-import {prepareCodexHookConfig} from "./CodexHookConfig";
-import {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD} from "./CodexHookTrust";
-import {
+await runInternalProcessHelper();
+
+const {SESSION_FILE_REVERT_METHOD, sessionFileRevertParser} = await import("./SessionFileRevert");
+const {SESSION_QUEUE_METHOD, parseSessionQueueRequest} = await import("./SessionQueue");
+const {SESSION_SEARCH_METHOD, SESSION_ATTACHMENTS_METHOD, sessionSearchParser, sessionAttachmentsParser} = await import("./SessionDiscovery");
+const {SESSION_ARCHIVE_METHOD, SESSION_UNARCHIVE_METHOD, sessionArchiveParser} = await import("./SessionArchive");
+
+const acp = await import("@agentclientprotocol/sdk");
+const {z} = await import("zod");
+const {startCodexConnection} = await import("./CodexJsonRpcConnection");
+const {CodexAcpServer} = await import("./CodexAcpServer");
+const {createJsonStream} = await import("./StdUtils");
+const {isCodexAuthRequest} = await import("./CodexAuthMethod");
+const {CodexAcpClient} = await import("./CodexAcpClient");
+const {CodexAppServerClient} = await import("./CodexAppServerClient");
+const {default: packageJson} = await import("../package.json");
+const {logger} = await import("./Logger");
+const {runLoginCommand} = await import("./login");
+const {runCodexCli} = await import("./CodexCli");
+const {prepareCodexHookConfig} = await import("./CodexHookConfig");
+const {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD} = await import("./CodexHookTrust");
+const {
     GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
     SESSION_STEERING_METHOD,
-} from "./AcpExtensions";
-import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+} = await import("./AcpExtensions");
+const {ASYNC_TASK_STOP_METHOD} = await import("./async-tasks/AsyncTaskExtension");
+
+const {RUNTIME_READ_METHOD, RUNTIME_CONTROL_METHOD, runtimeReadParser, runtimeControlParser} = await import("./SessionRuntime");
+const {SESSION_REWIND_METHOD} = await import("./SessionRewind");
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -50,6 +63,17 @@ const goalControlParamsParser = z.discriminatedUnion("action", [
 const asyncTaskStopParamsParser = z.object({
     sessionId: z.string().trim().min(1),
     asyncTaskId: z.string().trim().min(1),
+}).passthrough();
+
+const sessionHistoryPointParser = z.object({
+    messageId: z.string().trim().min(1),
+    messageFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    messageOccurrence: z.number().int().positive(),
+});
+const sessionRewindParamsParser = z.object({
+    sessionId: z.string().trim().min(1),
+    beforeMessage: sessionHistoryPointParser,
+    resumeAtMessage: sessionHistoryPointParser.optional(),
 }).passthrough();
 
 const hooksListParamsParser = z.object({cwd: z.string().trim().min(1)});
@@ -125,7 +149,7 @@ function startAcpServer() {
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
-    function createAgent(connection: acp.AgentContext): CodexAcpServer {
+    function createAgent(connection: AcpTypes.AgentContext): CodexAcpServerType {
         const appServerClient = new CodexAppServerClient(codexProcessState.connection.connection);
         const codexClient = new CodexAcpClient(appServerClient, hookConfig.sessionConfig, modelProvider);
         return new CodexAcpServer(
@@ -138,8 +162,8 @@ function startAcpServer() {
         );
     }
 
-    let codexAcpServer: CodexAcpServer | null = null;
-    const getAgent = (): CodexAcpServer => {
+    let codexAcpServer: CodexAcpServerType | null = null;
+    const getAgent = (): CodexAcpServerType => {
         if (!codexAcpServer) {
             throw acp.RequestError.internalError("ACP agent is not connected");
         }
@@ -178,6 +202,15 @@ function startAcpServer() {
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
+        .onRequest(SESSION_FILE_REVERT_METHOD, sessionFileRevertParser, (ctx) => getAgent().revertFiles(ctx.params))
+        .onRequest(SESSION_QUEUE_METHOD, z.unknown().transform(value => parseSessionQueueRequest(value)), (ctx) => getAgent().manageSessionQueue(ctx.params, ctx.signal))
+        .onRequest(SESSION_SEARCH_METHOD, sessionSearchParser, (ctx) => getAgent().searchSessionHistory(ctx.params))
+        .onRequest(SESSION_ATTACHMENTS_METHOD, sessionAttachmentsParser, (ctx) => getAgent().manageSessionAttachments(ctx.params))
+        .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParser, (ctx) => getAgent().archiveSession(ctx.params.sessionId, true))
+        .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParser, (ctx) => getAgent().archiveSession(ctx.params.sessionId, false))
+        .onRequest(RUNTIME_READ_METHOD, runtimeReadParser, (ctx) => getAgent().readSessionRuntime(ctx.params, ctx.signal))
+        .onRequest(RUNTIME_CONTROL_METHOD, runtimeControlParser, (ctx) => getAgent().controlSessionRuntime(ctx.params))
+        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent().extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
         .onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))

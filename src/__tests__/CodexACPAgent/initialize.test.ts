@@ -1,3 +1,7 @@
+import {fileRevertCapability} from "../../SessionFileRevert";
+import {sessionDiscoveryCapability} from "../../SessionDiscovery";
+import {archiveCapability} from "../../SessionArchive";
+import {runtimeCapability} from "../../SessionRuntime";
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CodexAcpServer } from '../../CodexAcpServer';
 import * as acp from '@agentclientprotocol/sdk';
@@ -67,8 +71,13 @@ describe('CodexACPAgent - initialize', () => {
             },
             authMethods: getCodexAuthMethods(),
             _meta: {
+                runtime: runtimeCapability(),
+                archive: archiveCapability(),
+                fileRevert: fileRevertCapability(),
+                discovery: sessionDiscoveryCapability(),
                 steering: {
                     supported: true,
+                    idleBehavior: ["promptRequired"],
                 },
             },
         });
@@ -80,8 +89,13 @@ describe('CodexACPAgent - initialize', () => {
             clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: []}}}},
         });
         expect(result._meta).toEqual({
+            runtime: runtimeCapability(),
+                archive: archiveCapability(),
+                fileRevert: fileRevertCapability(),
+                discovery: sessionDiscoveryCapability(),
             steering: {
                 supported: true,
+                idleBehavior: ["promptRequired"],
             },
             jetbrains: {
                 air: {
@@ -91,7 +105,7 @@ describe('CodexACPAgent - initialize', () => {
                         controlMethod: "_session/goal",
                         actions: ["set", "pause", "resume", "clear"],
                     },
-                    capabilities: ["sessionFailure", "diffPatch", "agentFileChangeReport", "nativeSubagentSessions", "asyncTasks", "recommendedValue", "rawInputRendering", "planContentDelta", "codexHooks"],
+                    capabilities: ["sessionFailure", "diffPatch", "agentFileChangeReport", "nativeSubagentSessions", "asyncTasks", "recommendedValue", "rawInputRendering", "planContentDelta", "codexHooks", "sessionRewind"],
                 },
             },
         });
