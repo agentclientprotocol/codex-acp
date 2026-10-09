@@ -536,12 +536,16 @@ export class CodexAcpServer {
     }
 
     async listHooks(cwd: string): Promise<HooksListEntry> {
-        if (this.providerUpdate !== null) await this.providerUpdate;
+        if (this.providerUpdate !== null) await this.waitForProviderUpdate();
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         return await this.runWithProcessCheck(() => listCodexHooks(this.codexAcpClient.appServerClient, cwd));
     }
 
     async trustHooks(cwd: string, hooks: CodexHookIdentity[]): Promise<{trusted: boolean}> {
-        if (this.providerUpdate !== null) await this.providerUpdate;
+        if (this.providerUpdate !== null) await this.waitForProviderUpdate();
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
         return {trusted: await this.runWithProcessCheck(() => trustCodexHooks(this.codexAcpClient.appServerClient, cwd, hooks))};
     }
 

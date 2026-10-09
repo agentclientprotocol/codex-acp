@@ -168,6 +168,22 @@ describe("app-server recovery", () => {
         expect(requestsOf(fixture.current(), "thread/archive")).toHaveLength(1);
     });
 
+    it("starts the app-server again to list or trust the startup hooks", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture);
+        fixture.answers.set("hooks/list", () => ({data: [{cwd: "/work", hooks: [], warnings: [], errors: []}]}));
+
+        await fixture.kill();
+        await fixture.agent.listHooks("/work");
+        expect(fixture.servers).toHaveLength(2);
+        expect(requestsOf(fixture.current(), "hooks/list")).toHaveLength(1);
+
+        await fixture.kill();
+        await fixture.agent.trustHooks("/work", []);
+        expect(fixture.servers).toHaveLength(3);
+        expect(requestsOf(fixture.current(), "hooks/list")).toHaveLength(2);
+    });
+
     it("starts one app-server for concurrent requests", async () => {
         const fixture = createRecoveryFixture();
         await openSession(fixture);
