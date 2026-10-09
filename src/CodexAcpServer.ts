@@ -842,6 +842,7 @@ export class CodexAcpServer {
             sessionId,
             sessionState.cwd,
             () => sessionState.sessionTitleSource,
+            () => this.authProviderUsesOpenAiAccount(sessionState.authProvider),
         );
         this.installSessionState(sessionState);
         resumeSubscribed = false;
@@ -2269,6 +2270,7 @@ export class CodexAcpServer {
             sessionId,
             sessionState.cwd,
             () => sessionState.sessionTitleSource,
+            () => this.authProviderUsesOpenAiAccount(sessionState.authProvider),
         );
         this.installSessionState(sessionState);
         if (knownAccount === "pending") {
