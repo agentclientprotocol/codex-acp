@@ -1,3 +1,4 @@
+import type {SessionQueueAction, SessionQueueNative} from "./SessionQueue";
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
 import {McpStartupTracker} from "./mcp/McpStartupTracker";
@@ -723,6 +724,26 @@ export class CodexAppServerClient {
 
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
         return await this.sendRequest({ method: "thread/archive", params: params });
+    }
+
+    /** Invalid parameters only: proves method registration without a valid mutation target. */
+    async probeQueueAction(action: SessionQueueAction): Promise<boolean> {
+        try { await this.connection.sendRequest(`thread/queue/${action}`, {}); return false; }
+        catch (error) {
+            return typeof error === "object" && error !== null && "code" in error && error.code === -32600
+                && "message" in error && error.message === "Invalid request: missing field `threadId`";
+        }
+    }
+
+    queueNative(): SessionQueueNative {
+        return {
+            list: params => this.connection.sendRequest("thread/queue/list", params),
+            add: params => this.connection.sendRequest("thread/queue/add", params),
+            update: params => this.connection.sendRequest("thread/queue/update", params),
+            delete: params => this.connection.sendRequest("thread/queue/delete", params),
+            reorder: params => this.connection.sendRequest("thread/queue/reorder", params),
+            start: params => this.connection.sendRequest("thread/queue/start", params),
+        };
     }
 
     async threadUnsubscribe(params: ThreadUnsubscribeParams): Promise<ThreadUnsubscribeResponse> {

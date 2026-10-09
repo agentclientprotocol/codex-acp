@@ -1,0 +1,43 @@
+name: Native queue E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  native-queue:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install locked dependencies (including native optional package)
+        run: npm ci
+      - name: Fresh build and real native queue tests with loopback replies
+        timeout-minutes: 5
+        run: npm run test:native-queue
+      - name: Preserve build hashes, RPC, model, spawn and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-queue-${{ matrix.os }}
+          path: tmp/native-queue/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
