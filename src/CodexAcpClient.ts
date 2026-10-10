@@ -975,7 +975,7 @@ export class CodexAcpClient {
         if (configured != null && typeof configured !== "string") {
             throw RequestError.invalidParams(undefined, "Configured developer_instructions must be a string");
         }
-        return {developerInstructions: configured ? `${configured}\n\n${append}` : append};
+        return {developerInstructions: configured ? (append ? `${configured}\n\n${append}` : configured) : append};
     }
 
     private async createSessionConfig(

@@ -38,3 +38,5 @@ session creation or skill changes. Config lookup failures are propagated; the
 adapter never substitutes an empty configuration and loses user instructions.
 
 AIR `customInstructions` remains supported on its upstream new-session path. Combining a nonblank `systemPrompt.append` with AIR `customInstructions` is rejected before thread creation rather than silently choosing an override.
+
+The `clear: true` capability advertises explicit empty append support: `{append:""}` reloads only effective configured developer instructions, clearing a prior session addition. Omitted metadata remains unchanged. This requires an unloaded thread just like a nonempty append.

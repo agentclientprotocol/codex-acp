@@ -89,6 +89,16 @@ it("native Codex retains appended roles across turns, compaction, fork and proce
         ({app,client} = await open());
         await client.loadSession({sessionId:session.sessionId,cwd,mcpServers:[],...metadata});
         await turn("after native restart");
+        await close();
+        ({app,client} = await open());
+        await client.loadSession({sessionId:session.sessionId,cwd,mcpServers:[],_meta:{systemPrompt:{append:""}}});
+        const resetBefore=requests.length;
+        expect((await app.runTurn({threadId:session.sessionId,input:[{type:"text",text:"after clearing role",text_elements:[]}]})).turn.status).toBe("completed");
+        const reset=requests.slice(resetBefore).find(x=>x.url?.endsWith("/responses"));
+        expect(JSON.stringify(reset.body.input.filter((x:any)=>x.role==="developer"))).toContain("native-user-rules");
+        // Codex may retain old instruction messages in history; its new override
+        // must explicitly restore only the configured developer rules.
+        expect(JSON.stringify(reset.body.input.filter((x:any)=>x.role==="user"))).not.toContain("native-office-role");
         const plain = await client.newSession({cwd,mcpServers:[]});
         const before = requests.length;
         expect((await app.runTurn({threadId:plain.sessionId,input:[{type:"text",text:"ordinary session",text_elements:[]}]})).turn.status).toBe("completed");

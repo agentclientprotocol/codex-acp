@@ -1,6 +1,6 @@
 import {RequestError} from "@agentclientprotocol/sdk";
 
-export const SYSTEM_PROMPT_CAPABILITY = {version: 1, append: true, maxBytes: 256 * 1024};
+export const SYSTEM_PROMPT_CAPABILITY = {version: 1, append: true, clear: true, maxBytes: 256 * 1024};
 
 /** Session metadata is an opt-in append, never a replacement of Codex's base prompt. */
 export function readSessionInstructionAppend(meta?: Record<string, unknown> | null): string | undefined {
@@ -14,5 +14,7 @@ export function readSessionInstructionAppend(meta?: Record<string, unknown> | nu
     if (Buffer.byteLength(prompt.append, "utf8") > SYSTEM_PROMPT_CAPABILITY.maxBytes) {
         throw RequestError.invalidParams(undefined, `systemPrompt.append exceeds ${SYSTEM_PROMPT_CAPABILITY.maxBytes} UTF-8 bytes`);
     }
-    return prompt.append.trim() ? prompt.append : undefined;
+    // Explicit empty append resets the per-session addition to configured rules.
+    // Omitted metadata still preserves native history without an override.
+    return prompt.append;
 }

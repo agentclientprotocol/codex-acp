@@ -145,7 +145,7 @@ export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage
         if (message.direction === "response" && message.method === "initialize") {
             const params = message.params as Json;
             return {...message, params: {...params, _meta: {...(params["_meta"] as Json),
-                systemPrompt: {version: 1, append: true, maxBytes: 262144}}}};
+                systemPrompt: {version: 1, append: true, clear: true, maxBytes: 262144}}}};
         }
         const update = sessionUpdate(message);
         if (update === undefined || update["sessionUpdate"] !== "available_commands_update") return message;

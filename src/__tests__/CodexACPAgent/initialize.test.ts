@@ -67,7 +67,7 @@ describe('CodexACPAgent - initialize', () => {
             },
             authMethods: getCodexAuthMethods(),
             _meta: {
-                systemPrompt: {version: 1, append: true, maxBytes: 262144},
+                systemPrompt: {version: 1, append: true, clear: true, maxBytes: 262144},
                 steering: {
                     supported: true,
                 },
@@ -81,7 +81,7 @@ describe('CodexACPAgent - initialize', () => {
             clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: []}}}},
         });
         expect(result._meta).toEqual({
-            systemPrompt: {version: 1, append: true, maxBytes: 262144},
+            systemPrompt: {version: 1, append: true, clear: true, maxBytes: 262144},
             steering: {
                 supported: true,
             },
