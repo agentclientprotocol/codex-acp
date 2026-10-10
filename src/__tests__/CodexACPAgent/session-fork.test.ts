@@ -42,7 +42,7 @@ describe("ACP session fork", () => {
             sessionId: "source-id",
             cwd: "/workspace",
             mcpServers: [],
-        });
+        }, expect.any(Function));
     });
 
     it("waits for MCP startup before completing session fork", async () => {

@@ -71,3 +71,14 @@ describe("session instruction append", () => {
         });
     }
 });
+
+it("rejects simultaneous append and AIR replacement before side effects",async()=>{
+ const {client,app}=fixture();
+ await expect(client.newSession({...request,_meta:{systemPrompt:{append:"role"},jetbrains:{air:{customInstructions:"replacement"}}}})).rejects.toThrow(/cannot be combined/);
+ expect(app.configRead).not.toHaveBeenCalled();expect(app.listSkills).not.toHaveBeenCalled();expect(app.threadStart).not.toHaveBeenCalled();
+});
+it("preserves upstream AIR-only custom instructions",async()=>{
+ const {client,app}=fixture();
+ await client.newSession({...request,_meta:{jetbrains:{air:{customInstructions:"AIR rules"}}}});
+ expect(vi.mocked(app.threadStart).mock.calls[0]![0].developerInstructions).toBe("AIR rules");
+});

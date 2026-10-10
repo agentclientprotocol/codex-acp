@@ -36,3 +36,5 @@ Only the `{ "append": "..." }` form is supported. Replacement strings, unknown
 fields, non-string values, and values over 256 KiB in UTF-8 are rejected before
 session creation or skill changes. Config lookup failures are propagated; the
 adapter never substitutes an empty configuration and loses user instructions.
+
+AIR `customInstructions` remains supported on its upstream new-session path. Combining a nonblank `systemPrompt.append` with AIR `customInstructions` is rejected before thread creation rather than silently choosing an override.

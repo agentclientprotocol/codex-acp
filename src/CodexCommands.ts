@@ -303,6 +303,8 @@ export class CodexCommands {
                     await this.sendCommandUsageMessage(commandName, "new name", sessionId);
                     return { handled: true };
                 }
+                // The new name replaces a `_session/rename` title, so its echo must be shown.
+                delete sessionState.sessionIndexExplicitTitle;
                 await this.runWithProcessCheck(() => this.codexAcpClient.renameSession(sessionId, command.rest));
                 return { handled: true };
             }
@@ -500,7 +502,10 @@ export class CodexCommands {
         const input = this.formatTokenCount(usage.inputTokens);
         const cachedInput = this.formatTokenCount(usage.cachedInputTokens);
         const output = this.formatTokenCount(usage.outputTokens);
-        return `${total} total  (${input} input + ${cachedInput} cached input, ${output} output)`;
+        const cacheWrite = usage.cacheWriteInputTokens > 0
+            ? ` + ${this.formatTokenCount(usage.cacheWriteInputTokens)} cache write`
+            : "";
+        return `${total} total  (${input} input + ${cachedInput} cached input${cacheWrite}, ${output} output)`;
     }
 
     private formatContextWindow(usage: TokenCount | null, contextWindow: number | null): string {

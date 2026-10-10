@@ -29,6 +29,14 @@ export function isMissingRolloutError(err: unknown): boolean {
 }
 
 /**
+ * `thread/unarchive` answers this for a thread that has no archived rollout:
+ * a thread that is not archived, or one Codex has never seen.
+ */
+export function isMissingArchivedRolloutError(err: unknown): boolean {
+    return errorText(err).includes("no archived rollout found for thread id");
+}
+
+/**
  * `thread/read` answers this for a thread id that is well-formed but not
  * currently loaded in the app-server process.
  */
@@ -93,6 +101,25 @@ export function threadActiveWriterRequestError(threadId: string, err: unknown): 
     return RequestError.invalidRequest(
         {reason: "thread_active_writer", threadId, details: errorText(err)},
         "This Codex session is in use by another Codex client (the Codex app, the CLI or an IDE extension). Close the session there or quit that client, then try again.",
+    );
+}
+
+/** The JSON-RPC code of ACP `ResourceNotFound`. */
+export const RESOURCE_NOT_FOUND_CODE = -32002;
+
+/** The ACP error for a session id that Codex has no thread for. */
+export function sessionNotFoundRequestError(sessionId: string): RequestError {
+    return new RequestError(RESOURCE_NOT_FOUND_CODE, `Session not found: ${sessionId}`, {sessionId});
+}
+
+/** The `data.reason` of the error for a request that an archived session does not take. */
+export const SESSION_ARCHIVED_REASON = "archived";
+
+/** The ACP error for a request that Codex refuses because the thread is archived. */
+export function sessionArchivedRequestError(sessionId: string): RequestError {
+    return RequestError.invalidRequest(
+        {reason: SESSION_ARCHIVED_REASON, sessionId},
+        `Session is archived: ${sessionId}`,
     );
 }
 

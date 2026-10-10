@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {MAX_SESSION_TITLE_LENGTH, normalizeSessionTitle} from "../SessionTitle";
+import {listedSessionTitle, MAX_SESSION_TITLE_LENGTH, normalizeSessionTitle} from "../SessionTitle";
 
 describe("normalizeSessionTitle", () => {
     it("collapses whitespace and returns null for a blank title", () => {
@@ -26,5 +26,29 @@ describe("normalizeSessionTitle", () => {
         const title = normalizeSessionTitle(`${"a".repeat(MAX_SESSION_TITLE_LENGTH - 2)}😀😀`);
 
         expect(title).toBe(`${"a".repeat(MAX_SESSION_TITLE_LENGTH - 2)}…`);
+    });
+});
+
+describe("listedSessionTitle", () => {
+    it("takes the first non-blank of name, title, summary and preview", () => {
+        const all = {name: "Name", title: "Title", summary: "Summary", preview: "Preview"};
+
+        expect(listedSessionTitle(all)).toBe("Name");
+        expect(listedSessionTitle({...all, name: " \n "})).toBe("Title");
+        expect(listedSessionTitle({...all, name: null, title: ""})).toBe("Summary");
+        expect(listedSessionTitle({...all, name: null, title: null, summary: "\t"})).toBe("Preview");
+        expect(listedSessionTitle({name: null, preview: "Preview"})).toBe("Preview");
+    });
+
+    it("collapses whitespace and returns null when every field is blank", () => {
+        expect(listedSessionTitle({name: "  Fix the flaky\n test  ", preview: ""})).toBe("Fix the flaky test");
+        expect(listedSessionTitle({name: null, title: " ", summary: null, preview: " \n "})).toBeNull();
+    });
+
+    it("does not cut a long title", () => {
+        const preview = "a".repeat(25_023);
+
+        expect(listedSessionTitle({name: null, preview})).toBe(preview);
+        expect(listedSessionTitle({name: `${"b".repeat(MAX_SESSION_TITLE_LENGTH)} tail`, preview})).toHaveLength(MAX_SESSION_TITLE_LENGTH + 5);
     });
 });

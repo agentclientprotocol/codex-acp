@@ -2,10 +2,11 @@ import {readSessionInstructionAppend} from "./SessionInstructions";
 import {createHash} from "node:crypto";
 import type * as acp from "@agentclientprotocol/sdk";
 import {RequestError} from "@agentclientprotocol/sdk";
+import type {SessionConfig} from "./CodexAcpClient";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import type {ModeKind} from "./app-server/ModeKind";
 import type {ServiceTier} from "./app-server/ServiceTier";
-import type {Model, ThreadForkParams} from "./app-server/v2";
+import type {Model} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
 
 export type SessionForkDependencies = {
@@ -16,11 +17,13 @@ export type SessionForkDependencies = {
         cwd: string,
         additionalDirectories: string[],
         mcpServers: acp.McpServer[],
-    ): Promise<NonNullable<ThreadForkParams["config"]>>;
+    ): Promise<SessionConfig>;
     getResumeModelProvider(): Promise<string>;
     fetchAvailableModels(): Promise<Model[]>;
     createCurrentModelId(models: Model[], model: string, reasoningEffort: string | null): string;
     getCollaborationMode(sessionId: string): ModeKind;
+    /** Gives back the subscription of a fork that failed after `thread/fork`, unless another open of it began. */
+    releaseFailedFork(threadId: string): Promise<void>;
 };
 
 export async function forkSession(
@@ -32,22 +35,31 @@ export async function forkSession(
     const instructionOverride = await dependencies.sessionInstructionOverride(append, request.cwd);
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
     const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
+    const sessionConfig = await dependencies.createSessionConfig(
+        request.cwd,
+        additionalDirectories,
+        request.mcpServers ?? [],
+    );
     const response = await dependencies.codexClient.threadFork({
         ...instructionOverride,
         excludeTurns: true,
-        config: await dependencies.createSessionConfig(
-            request.cwd,
-            additionalDirectories,
-            request.mcpServers ?? [],
-        ),
+        config: sessionConfig.config,
         cwd: request.cwd,
         ...(lastTurnId !== undefined && {lastTurnId}),
         modelProvider: await dependencies.getResumeModelProvider(),
         threadId: request.sessionId,
     });
-    await dependencies.codexClient.threadUnsubscribe({threadId: response.thread.id});
-
-    const models = await dependencies.fetchAvailableModels();
+    // `thread/fork` subscribes this connection to the new thread, and only to it: the source thread keeps the
+    // subscription it had. The fork stays subscribed, as ACP lets the client prompt it at once. Codex keeps an
+    // unsubscribed thread loaded and runs its turns, but sends their notifications to subscribers only.
+    // A fork that fails from here on has no session, so it gives the subscription back.
+    let models: Model[];
+    try {
+        models = await dependencies.fetchAvailableModels();
+    } catch (err) {
+        await dependencies.releaseFailedFork(response.thread.id);
+        throw err;
+    }
     return {
         sessionId: response.thread.id,
         currentModelId: dependencies.createCurrentModelId(models, response.model, response.reasoningEffort),
@@ -56,6 +68,7 @@ export async function forkSession(
         modelProvider: response.modelProvider,
         currentServiceTier: response.serviceTier as ServiceTier ?? null,
         additionalDirectories,
+        skippedMcpServers: sessionConfig.skippedMcpServers,
     };
 }
 

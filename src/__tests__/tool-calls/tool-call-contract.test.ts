@@ -87,6 +87,8 @@ function reportsOfEachKind(): Record<string, ToolFacts[]> {
         elicitation: [ElicitationReporter.answered("ask", "accept")],
         mcpStartup: McpStartupReporter.failures({ready: [], failed: [{server: "db", error: "boom", failureReason: null}], cancelled: []} as never)
             .map(facts => ({...facts, toolCallId: "mcp_startup.db"})),
+        mcpSkipped: McpStartupReporter.skipped(["docs"])
+            .map(facts => ({...facts, toolCallId: "mcp_startup.docs"})),
     };
 }
 

@@ -1,0 +1,61 @@
+[
+  {
+    "cursor": null,
+    "limit": 50,
+    "sortKey": "recency_at",
+    "archived": false,
+    "sourceKinds": [],
+    "modelProviders": [],
+    "cwd": "/repo/project",
+    "useStateDbOnly": true
+  },
+  {
+    "cursor": null,
+    "limit": 100,
+    "sortKey": "recency_at",
+    "archived": false,
+    "sourceKinds": [],
+    "modelProviders": [],
+    "cwd": "/repo/project",
+    "useStateDbOnly": true
+  },
+  {
+    "cursor": null,
+    "limit": 100,
+    "sortKey": "recency_at",
+    "archived": true,
+    "sourceKinds": [],
+    "modelProviders": [],
+    "cwd": "/repo/project",
+    "useStateDbOnly": true
+  },
+  {
+    "cursor": null,
+    "limit": 1,
+    "sortKey": "recency_at",
+    "archived": false,
+    "sourceKinds": [],
+    "modelProviders": [],
+    "useStateDbOnly": true
+  },
+  {
+    "cursor": null,
+    "limit": 5,
+    "sortKey": "recency_at",
+    "archived": false,
+    "sourceKinds": [],
+    "modelProviders": [],
+    "cwd": "/repo/project",
+    "useStateDbOnly": true
+  },
+  {
+    "cursor": null,
+    "limit": 5,
+    "sortKey": "recency_at",
+    "archived": true,
+    "sourceKinds": [],
+    "modelProviders": [],
+    "cwd": "/repo/project",
+    "useStateDbOnly": true
+  }
+]
