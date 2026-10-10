@@ -1,3 +1,4 @@
+import {readSessionInstructionAppend} from "./SessionInstructions";
 import {createHash} from "node:crypto";
 import type * as acp from "@agentclientprotocol/sdk";
 import {RequestError} from "@agentclientprotocol/sdk";
@@ -10,6 +11,7 @@ import type {SessionMetadata} from "./SessionMetadata";
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
+    sessionInstructionOverride(append: string | undefined, cwd: string): Promise<{developerInstructions?: string}>;
     refreshSkills(cwd: string, additionalDirectories: string[]): Promise<void>;
     createSessionConfig(
         cwd: string,
@@ -29,6 +31,8 @@ export async function forkSession(
     additionalDirectories: string[],
     dependencies: SessionForkDependencies,
 ): Promise<SessionMetadata> {
+    const append = readSessionInstructionAppend(request._meta);
+    const instructionOverride = await dependencies.sessionInstructionOverride(append, request.cwd);
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
     const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
     const sessionConfig = await dependencies.createSessionConfig(
@@ -37,6 +41,7 @@ export async function forkSession(
         request.mcpServers ?? [],
     );
     const response = await dependencies.codexClient.threadFork({
+        ...instructionOverride,
         excludeTurns: true,
         config: sessionConfig.config,
         cwd: request.cwd,

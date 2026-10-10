@@ -135,12 +135,18 @@ const MCP_COMMAND = {
 
 /**
  * The feature changes of the compatibility rule that change the messages of the scenarios:
- * the `/mcp` command has a new description and an input hint.
+ * the `/mcp` command has a new description and an input hint; initialization
+ * advertises the provider-neutral, opt-in system prompt append capability.
  * Only a command that equals the baseline `/mcp` command changes.
  */
 export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage[] {
     const baselineMcp = JSON.stringify(canonical(BASELINE_MCP_COMMAND));
     return messages.map(message => {
+        if (message.direction === "response" && message.method === "initialize") {
+            const params = message.params as Json;
+            return {...message, params: {...params, _meta: {...(params["_meta"] as Json),
+                systemPrompt: {version: 1, append: true, clear: true, maxBytes: 262144}}}};
+        }
         const update = sessionUpdate(message);
         if (update === undefined || update["sessionUpdate"] !== "available_commands_update") return message;
         const commands = (update["availableCommands"] as unknown[]).map(command =>

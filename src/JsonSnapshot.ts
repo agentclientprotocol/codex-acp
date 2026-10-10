@@ -28,7 +28,9 @@ export class JsonText {
 }
 
 /** Deeper values go to `JSON.stringify`, so that the walk does not use more stack than the serializer. */
-const MAX_DEPTH = 256;
+// Leave stack headroom for native JSON.stringify on Node/ARM64; a deep
+// subtree falls back before the recursive snapshot walk consumes its budget.
+const MAX_DEPTH = 64;
 const apply = Reflect.apply;
 const getPrototypeOf = Object.getPrototypeOf;
 /** `JSON.rawJSON` values serialize as their raw text. */

@@ -1,3 +1,4 @@
+import {realpathSync} from "node:fs";
 import {beforeEach, describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk";
 import {
@@ -10,6 +11,9 @@ import {CodexCommands} from "../../CodexCommands";
 import {logger} from "../../Logger";
 import type {Turn, TurnCompletedNotification} from "../../app-server/v2";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "../../AgentFileChangeReport";
+
+// Use a real fixture root: /workspace may be a symlink on the test host.
+const reportWorkspace = realpathSync(process.cwd());
 
 function createTurn(id: string, status: Turn["status"]): Turn {
     return {
@@ -73,7 +77,7 @@ async function setupMainPrompt(negotiateCapability = true): Promise<{
         ...(negotiateCapability ? {clientCapabilities: FILE_CHANGE_REPORT_CLIENT_CAPABILITIES} : {}),
     });
     const sessionState = createTestSessionState({
-        cwd: "/workspace",
+        cwd: reportWorkspace,
         additionalDirectories: ["/generated"],
     });
     vi.spyOn(fixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
@@ -134,7 +138,7 @@ describe("agent file-change report lifecycle", () => {
                     version: 1,
                     requestId: "request-42",
                     status: "reported",
-                    paths: ["/workspace/src/Main.kt"],
+                    paths: [`${reportWorkspace}/src/Main.kt`],
                     declaredComplete: false,
                     truncated: false,
                     uncertainty: "Codex turn diffs may omit same-content renames and changes made outside apply_patch, including shell commands, version-control commands, generators, and child processes.",
@@ -164,7 +168,7 @@ describe("agent file-change report lifecycle", () => {
         );
 
         expect(reportedUpdates(fixture)[0]).toMatchObject({
-            _meta: {jetbrains: {air: {agentFileChangeReport: {paths: ["/workspace/final.txt"]}}}},
+            _meta: {jetbrains: {air: {agentFileChangeReport: {paths: [`${reportWorkspace}/final.txt`]}}}},
         });
     });
 

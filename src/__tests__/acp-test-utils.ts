@@ -13,7 +13,8 @@ import fs from "node:fs";
 import os from "node:os";
 import {AgentMode} from "../AgentMode";
 import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
-import {expect, vi} from "vitest";
+import {afterEach, expect, vi} from "vitest";
+import {once} from "node:events";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
 import {CodexEventHandler} from "../CodexEventHandler";
@@ -22,6 +23,17 @@ import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTermin
 import {CodexSessionCompactions} from "../CodexSessionCompactions";
 import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
 import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
+
+const nativeTestProcesses = new Set<CodexConnection>();
+afterEach(async () => {
+    await Promise.all([...nativeTestProcesses].map(async native => {
+        if (native.process.exitCode !== null || native.process.signalCode !== null) return;
+        const exited = once(native.process, "exit");
+        native.process.kill();
+        await exited;
+    }));
+    nativeTestProcesses.clear();
+});
 
 export type MethodCallEvent = { method: string; args: any[] };
 
@@ -200,6 +212,9 @@ export function createTestFixture(): TestFixture {
         ...process.env,
         CODEX_HOME: codexHome,
     });
+    // Every test owns its app-server, including tests that mock client methods.
+    // Reap it before deleting the home or starting the next fixture.
+    nativeTestProcesses.add(codexConnection);
     codexConnection.process.on("exit", () => {
         removeDirectoryWithRetry(codexHome);
     });
