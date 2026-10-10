@@ -10,7 +10,7 @@ import {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD, listCodexHooks, trust
 import {startCodexConnection} from "../../../CodexJsonRpcConnection";
 import type {HookMetadata} from "../../../app-server/v2/HookMetadata";
 import {requireLiveApiKey} from "./acp-e2e-test-utils";
-import {createSpawnedAgentFixture} from "./spawned-agent-fixture";
+import {createSpawnedAgentFixture, type SpawnedAgentFixture} from "./spawned-agent-fixture";
 
 const hasLiveApiKey = Boolean(process.env["CODEX_API_KEY"] || process.env["OPENAI_API_KEY"]);
 
@@ -92,8 +92,12 @@ describe.skipIf(process.env["RUN_E2E_TESTS"] !== "true")("ACP hook review", () =
             expect(hooks).toHaveLength(1);
             expect(hooks[0]).toMatchObject({source: "sessionFlags", trustStatus: "untrusted"});
 
-            await fixture.createSession();
+            // Codex runs SessionStart hooks with the first turn of a thread, not on thread/start.
+            const untrusted = await fixture.createSession();
+            expect((await prompt(fixture, untrusted.sessionId)).stopReason).toBe("end_turn");
             expect(existsSync(marker)).toBe(false);
+            // A session without messages is never persisted by Codex, so the provider restart below cannot resume it.
+            const empty = await fixture.createSession();
 
             const trust = await fixture.connection.extMethod(CODEX_HOOKS_TRUST_METHOD, {
                 cwd: fixture.workspaceDir,
@@ -106,12 +110,20 @@ describe.skipIf(process.env["RUN_E2E_TESTS"] !== "true")("ACP hook review", () =
             const hooksAfterRestart = restartedList["hooks"] as HookMetadata[];
             expect(hooksAfterRestart).toHaveLength(1);
             expect(hooksAfterRestart[0]).toMatchObject({key: hooks[0]!.key, trustStatus: "trusted"});
+            await expect(prompt(fixture, empty.sessionId)).rejects.toMatchObject({
+                message: expect.stringContaining("had no messages yet and was lost"),
+            });
 
-            await fixture.createSession();
+            const trusted = await fixture.createSession();
+            expect((await prompt(fixture, trusted.sessionId)).stopReason).toBe("end_turn");
             await vi.waitFor(() => expect(existsSync(marker)).toBe(true), {timeout: 10_000});
             expect(readFileSync(marker, "utf8")).toBe("started");
         } finally {
             await fixture.dispose();
         }
-    }, 60_000);
+    }, 120_000);
 });
+
+function prompt(fixture: SpawnedAgentFixture, sessionId: string): Promise<acp.PromptResponse> {
+    return fixture.connection.prompt({sessionId, prompt: [{type: "text", text: "Reply with the single word OK."}]});
+}

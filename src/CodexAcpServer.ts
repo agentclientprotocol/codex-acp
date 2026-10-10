@@ -26,7 +26,12 @@ import {
 } from "./CodexThreadErrors";
 import {type CodexConnection} from "./CodexJsonRpcConnection";
 import {AppServerRecovery, recoveryLimitsFromEnv} from "./app-server-recovery/AppServerRecovery";
-import {CODEX_PROCESS_EXITED_ERROR_CODE, SessionReplacedError, ThreadRefusedError} from "./app-server-recovery/AppServerExit";
+import {
+    CODEX_PROCESS_EXITED_ERROR_CODE,
+    SessionReplacedError,
+    ThreadRefusedError,
+    UnpersistedSessionLostError,
+} from "./app-server-recovery/AppServerExit";
 import {CodexAppServerSupervisor} from "./app-server-recovery/CodexAppServerSupervisor";
 import {lossAwareConnection} from "./app-server-recovery/LossAwareConnection";
 import {AppServerConnectionLostError} from "./app-server-recovery/ConnectionLoss";
@@ -1498,9 +1503,12 @@ export class CodexAcpServer {
                     session.asyncTasks.refresh();
                     logger.log("Resumed session after provider restart", {sessionId: session.sessionId});
                 } catch (error) {
-                    if (error instanceof ThreadRefusedError || error instanceof SessionReplacedError) {
+                    if (error instanceof ThreadRefusedError || error instanceof SessionReplacedError
+                        || error instanceof UnpersistedSessionLostError) {
                         // A refused session stays not live and its next use reports the refusal; a session that closed
-                        // or opened again meanwhile needs no resume. Neither fails the provider update.
+                        // or opened again meanwhile needs no resume; a session without messages was never persisted,
+                        // so no app-server can resume it, and its next use reports the loss. None of them fails the
+                        // provider update, which applied to the agent and to every session that can go on.
                         logger.log("Session not resumed after provider restart", {sessionId: session.sessionId, reason: String(error)});
                         continue;
                     }

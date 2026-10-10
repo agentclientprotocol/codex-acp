@@ -118,6 +118,9 @@ The adapter restarts the Codex app-server when it dies (for example, killed for 
   fails the request with "Codex process has exited with code N:" and its stderr, and no promise of a restart.
 - The next request starts a new app-server with the same `initialize` handshake and provider routing. A session that
   was open is resumed on its next use, with the model, mode and settings that the adapter kept.
+- Codex writes a thread to disk only with its first message, so a session without messages cannot be resumed in a new
+  app-server, after a crash or a provider restart. Its next use fails with "had no messages yet and was lost"; the
+  client starts a new session. A provider restart still completes for the agent and the other sessions.
 - After `CODEX_ACP_APP_SERVER_CRASH_LIMIT` crashes in the crash window the adapter stops restarting it and says so,
   with the stderr of the last crash.
   A session that the app-server died opening twice in 30 minutes is not opened again for the rest of that time, so

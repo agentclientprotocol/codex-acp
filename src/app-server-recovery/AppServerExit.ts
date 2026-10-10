@@ -68,6 +68,21 @@ export class SessionReplacedError extends AppServerUnavailableError {
     }
 }
 
+/**
+ * A session whose thread had no messages when its app-server stopped. Codex writes a thread's rollout on the first
+ * message, so the thread was never persisted and is gone with that app-server, and Codex cannot start a thread with
+ * the same id again. The session reports this on its next use; the client starts a new session.
+ */
+export class UnpersistedSessionLostError extends AppServerUnavailableError {
+    constructor(sessionId: string) {
+        super(
+            `Session ${sessionId} had no messages yet and was lost when the Codex app-server restarted. Start a new session.`,
+            {exitCode: null, signal: null, restartable: false},
+        );
+        this.name = "UnpersistedSessionLostError";
+    }
+}
+
 export function isAppServerUnavailableError(error: unknown): error is AppServerUnavailableError {
     return error instanceof RequestError && error.code === CODEX_PROCESS_EXITED_ERROR_CODE;
 }
