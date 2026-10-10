@@ -1166,17 +1166,43 @@ export class CodexAcpClient {
         if (shouldCancel?.()) {
             return null;
         }
+        const sandboxPolicy = await this.createTurnSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories, cwd);
+        if (shouldCancel?.()) {
+            return null;
+        }
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             approvalsReviewer: agentMode.approvalsReviewer,
-            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            sandboxPolicy,
             summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,
         }, onTurnStarted);
+    }
+
+    private async createTurnSandboxPolicy(
+        sandboxPolicy: SandboxPolicy,
+        additionalDirectories: string[],
+        cwd: string,
+    ): Promise<SandboxPolicy> {
+        const policy = addAdditionalDirectoriesToSandboxPolicy(sandboxPolicy, additionalDirectories);
+        if (policy.type !== "workspaceWrite") {
+            return policy;
+        }
+
+        const workspaceConfig = this.config["sandbox_workspace_write"];
+        let networkAccess = isJsonObject(workspaceConfig) ? workspaceConfig["network_access"] : undefined;
+        if (typeof networkAccess !== "boolean") {
+            const response = await this.codexClient.configRead({includeLayers: false, cwd});
+            networkAccess = response?.config?.sandbox_workspace_write?.network_access;
+        }
+        return {
+            ...policy,
+            networkAccess: typeof networkAccess === "boolean" ? networkAccess : policy.networkAccess,
+        };
     }
 
     async setCollaborationMode(sessionId: string, mode: ModeKind, currentModelId: string): Promise<void> {
