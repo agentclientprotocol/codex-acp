@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.0...v2.2.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* resume a session without messages after an app-server restart ([#604](https://github.com/agentclientprotocol/codex-acp/issues/604)) ([9ac3254](https://github.com/agentclientprotocol/codex-acp/commit/9ac32543b2990574b43bb29b41e3b2b3f6fbc6a7))
+
 ## [2.2.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.1.1...v2.2.0) (2026-10-10)
 
 
