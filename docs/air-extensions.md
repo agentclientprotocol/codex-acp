@@ -1042,6 +1042,12 @@ The request can carry `_meta.jetbrains.air.list`:
   No `cwd` lists every thread.
 - Rows are ordered by last user activity, `lastPromptAt ?? updatedAt`, newest first, ties in the Codex order:
   Codex sorts by `recency_at`, which it moves when a turn starts.
+- `title` is the first non-blank of `Thread.name`, `title`, `summary` and `preview`, collapsed to one line, as AIR's
+  native Codex list resolves it. Current Codex threads carry only `name` and `preview`; the other two are read when
+  Codex sends them. The title is not cut, as the native list does not cut it, and no transport limit asks for a
+  cut: Codex already sends the whole `preview` to the adapter. Only `_session/rename` cuts to 256 characters. When
+  all four are blank, `title` is `null`, which ACP allows, and the client shows its own fallback: AIR shows the
+  session id. A `session/list` without `sessionIndex` and a `_session/list/changes` row use the same title.
 - `updatedAt` is `Thread.updatedAt`, the last activity of any kind: Codex moves it for every rollout write of the
   user or the agent, so it can be later than `lastPromptAt` while the agent works. Every row has it. A rename and
   an archive do not move it, but `thread/unarchive` does: Codex sets the rollout file time to now and copies it

@@ -30,7 +30,7 @@ import path from "node:path";
 import {logger} from "./Logger";
 import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
 import {sanitizeMcpServerName} from "./McpServerName";
-import {normalizeSessionTitle} from "./SessionTitle";
+import {listedSessionTitle} from "./SessionTitle";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
@@ -1300,7 +1300,7 @@ export class CodexAcpClient {
         const mapThreadToSession = (thread: Thread) => ({
             sessionId: thread.id,
             cwd: thread.cwd,
-            title: normalizeSessionTitle(thread.name ?? thread.preview),
+            title: listedSessionTitle(thread),
             updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
         });
 
