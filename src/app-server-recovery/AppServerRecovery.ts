@@ -13,6 +13,7 @@ import {
     isAppServerUnavailableError,
     likelyOutOfMemory,
     SessionReplacedError,
+    UnpersistedSessionLostError,
     ThreadRefusedError,
 } from "./AppServerExit";
 import {AppServerConnectionLostError} from "./ConnectionLoss";
@@ -675,11 +676,7 @@ export class AppServerRecovery<S extends RecoverableSession> {
         const mapped = this.mapError(error, client);
         if (mapped !== error) return mapped;
         if (isMissingRolloutError(error)) {
-            return new AppServerUnavailableError(
-                `Session ${sessionId} had no messages yet and was lost when the Codex app-server restarted. `
-                + "Start a new session.",
-                {exitCode: null, signal: null, restartable: false},
-            );
+            return new UnpersistedSessionLostError(sessionId);
         }
         const message = error instanceof Error ? error.message : String(error);
         return new AppServerUnavailableError(

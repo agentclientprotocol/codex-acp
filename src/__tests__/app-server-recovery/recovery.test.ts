@@ -1,7 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {describe, expect, it, vi} from "vitest";
 import {ConnectionError, ConnectionErrors, ResponseError} from "vscode-jsonrpc/node";
-import {createRecoveryFixture, initialize, MODEL, type RecoveryFixture, requestsOf} from "./recovery-fixture";
+import {createRecoveryFixture, defaultAnswer, initialize, MODEL, type RecoveryFixture, requestsOf} from "./recovery-fixture";
 import {AppServerRecovery} from "../../app-server-recovery/AppServerRecovery";
 import type {CodexAcpClient} from "../../CodexAcpClient";
 
@@ -487,6 +487,31 @@ describe("app-server recovery", () => {
         completeTurn(fixture, sessionId);
         await prompt;
         expect(requestsOf(fixture.current(), "thread/resume")).toHaveLength(1);
+    });
+
+    it("completes a provider update when a session without messages cannot be resumed, and reports the loss on that session", async () => {
+        const fixture = createRecoveryFixture();
+        const empty = await openSession(fixture);
+        await fixture.agent.resumeSession({sessionId: "persisted", cwd: "/work", mcpServers: []});
+        fixture.answers.set("thread/resume", (params) => (params as {threadId: string}).threadId === empty
+            ? new Error(`no rollout found for thread id ${empty}`)
+            : defaultAnswer("thread/resume", params));
+        fixture.answers.set("thread/read", () => new Error("thread not loaded"));
+
+        await fixture.agent.setProvider({providerId: "openai", apiType: "openai", baseUrl: "https://gateway.example/v1"});
+
+        expect(fixture.servers).toHaveLength(2);
+        expect(requestsOf(fixture.current(), "thread/resume")).toEqual(expect.arrayContaining([
+            expect.objectContaining({threadId: empty}),
+            expect.objectContaining({threadId: "persisted"}),
+        ]));
+        await expect(fixture.agent.prompt({sessionId: empty, prompt: [{type: "text", text: "hi"}]})).rejects.toMatchObject({
+            code: 1001,
+            message: `Session ${empty} had no messages yet and was lost when the Codex app-server restarted. Start a new session.`,
+        });
+        const {prompt} = await startTurn(fixture, "persisted");
+        completeTurn(fixture, "persisted");
+        await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
     });
 
     it("keeps the provider routing of the agent across a crash restart", async () => {
