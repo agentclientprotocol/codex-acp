@@ -6,6 +6,7 @@ import {logger} from "../Logger";
 import {
     type AppServerExit,
     appServerExitedError,
+    appServerStartupExitError,
     AppServerUnavailableError,
     describeExit,
     formatDuration,
@@ -109,6 +110,10 @@ export class AppServerRecovery<S extends RecoverableSession> {
     private state: RecoveryState = "ready";
     private readyGeneration: number;
     private readonly clientGenerations = new WeakMap<CodexAcpClient, number>();
+    /** The client of each running generation, to tell at its exit whether its `initialize` handshake succeeded. */
+    private readonly generationClients = new Map<number, CodexAcpClient>();
+    /** The generations that exited before their `initialize` handshake succeeded. */
+    private readonly startupExits = new Set<number>();
     private readonly loadedGenerations = new WeakMap<S, number>();
     /** The resume of each session in flight: a lazy resume or the resume of a provider restart. */
     private readonly resumes = new WeakMap<S, Promise<void>>();
@@ -147,6 +152,7 @@ export class AppServerRecovery<S extends RecoverableSession> {
         this.readyGeneration = host.supervisor.generation;
         this.liveClient = host.currentClient();
         this.clientGenerations.set(this.liveClient, this.readyGeneration);
+        this.generationClients.set(this.readyGeneration, this.liveClient);
         this.gateThreadLoads(this.liveClient);
         host.supervisor.onExit((exit, child) => this.handleExit(exit, child.generation));
         host.supervisor.onDeath(child => this.snapshotLoads(child.generation));
@@ -443,6 +449,7 @@ export class AppServerRecovery<S extends RecoverableSession> {
         }
         this.liveClient = client;
         this.clientGenerations.set(client, child.generation);
+        this.generationClients.set(child.generation, client);
         this.gateThreadLoads(client);
         return {child, client};
     }
@@ -685,6 +692,9 @@ export class AppServerRecovery<S extends RecoverableSession> {
         const loadsAtDeath = this.loadsAtDeath.get(generation) ?? [];
         this.loadsAtDeath.delete(generation);
         const isInstalled = generation === this.readyGeneration;
+        const client = this.generationClients.get(generation);
+        this.generationClients.delete(generation);
+        if (!exit.intentional && client?.initialized !== true) this.startupExits.add(generation);
         if (isInstalled && this.state === "ready") {
             this.state = this.host.supervisor.shuttingDown ? "shutdown" : "dead";
         }
@@ -754,16 +764,20 @@ export class AppServerRecovery<S extends RecoverableSession> {
         if (this.crashGuard.tripped()) {
             return this.crashLoopError(exit);
         }
+        if (this.startupExits.has(exit.generation)) {
+            return appServerStartupExitError(exit);
+        }
         return appServerExitedError(exit, "The agent starts it again on the next request.");
     }
 
     private crashLoopError(exit = this.host.supervisor.lastExit): AppServerUnavailableError {
         const retryAfterMs = this.crashGuard.retryAfterMs();
         const last = exit !== undefined ? ` (last: it ${describeExit(exit)})` : "";
+        const stderr = exit?.stderrTail.trim() ?? "";
         return new AppServerUnavailableError(
             `The Codex app-server crashed ${this.crashGuard.count()} times in the last `
             + `${formatDuration(this.limits.crashWindowMs)}${last}, so the agent stopped restarting it. `
-            + `Restart the agent, or try again in ${formatDuration(retryAfterMs)}.`,
+            + `Restart the agent, or try again in ${formatDuration(retryAfterMs)}.${stderr ? `\n${stderr}` : ""}`,
             {exitCode: exit?.code ?? null, signal: exit?.signal ?? null, restartable: false, retryAfterMs},
         );
     }

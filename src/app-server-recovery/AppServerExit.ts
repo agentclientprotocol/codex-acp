@@ -83,6 +83,21 @@ export function appServerExitedError(exit: AppServerExit, restartHint: string): 
     });
 }
 
+/**
+ * The error of a request that ran on a child that ended before its `initialize` handshake succeeded, such as one that
+ * rejected its startup config. It promises no restart, since a new app-server would read the same config, and it
+ * keeps the wording of the adapter before the recovery: "Codex process has exited with code 1:" and the stderr tail.
+ */
+export function appServerStartupExitError(exit: AppServerExit): AppServerUnavailableError {
+    const stderr = exit.stderrTail.trim();
+    const described = exit.error === undefined && exit.signal === null ? `has ${describeExit(exit)}` : describeExit(exit);
+    return new AppServerUnavailableError(`Codex process ${described}${stderr ? `:\n${stderr}` : ""}`, {
+        exitCode: exit.code,
+        signal: exit.signal,
+        restartable: true,
+    });
+}
+
 export function formatDuration(ms: number): string {
     const seconds = Math.ceil(ms / 1000);
     if (seconds < 120) return `${seconds} s`;

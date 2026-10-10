@@ -114,8 +114,11 @@ The adapter restarts the Codex app-server when it dies (for example, killed for 
 - A request that was waiting on the dead app-server fails with error `1001` and the cause, such as "was killed by
   SIGKILL, which usually means it ran out of memory". A running prompt ends at once: open tool calls become `failed`,
   open permission dialogs are cancelled, and an AIR client gets the `transport_lost` session failure.
+- An app-server that exits before its `initialize` handshake succeeded, such as one that rejects its startup config,
+  fails the request with "Codex process has exited with code N:" and its stderr, and no promise of a restart.
 - The next request starts a new app-server with the same `initialize` handshake and provider routing. A session that
   was open is resumed on its next use, with the model, mode and settings that the adapter kept.
-- After `CODEX_ACP_APP_SERVER_CRASH_LIMIT` crashes in the crash window the adapter stops restarting it and says so.
+- After `CODEX_ACP_APP_SERVER_CRASH_LIMIT` crashes in the crash window the adapter stops restarting it and says so,
+  with the stderr of the last crash.
   A session that the app-server died opening twice in 30 minutes is not opened again for the rest of that time, so
   one session that is too large for the memory cannot take the other sessions down with it.

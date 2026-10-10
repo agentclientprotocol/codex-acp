@@ -313,19 +313,40 @@ describe("app-server recovery", () => {
         expect(fixture.servers).toHaveLength(3);
     });
 
-    it("stops restarting after the crash limit and says what to do", async () => {
+    it("stops restarting after the crash limit and says what to do, with the stderr of the last crash", async () => {
         const fixture = createRecoveryFixture({env: {CODEX_ACP_APP_SERVER_CRASH_LIMIT: "2"}});
         await openSession(fixture);
         await fixture.kill();
         await fixture.agent.listSessions({});
+        fixture.current().child.stderr.write("memory allocation of 4096 bytes failed\n");
+        await vi.waitFor(() => expect(fixture.supervisor.current.connection.process.stderr.readableLength).toBe(0));
         // The second crash restarts after the backoff of 1 s.
         await fixture.kill();
 
         await expect(fixture.agent.listSessions({})).rejects.toMatchObject({
             code: 1001,
-            message: expect.stringMatching(/crashed 2 times in the last 5 min \(last: it was killed by SIGKILL.*\), so the agent stopped restarting it\. Restart the agent/),
+            message: expect.stringMatching(
+                /crashed 2 times in the last 5 min \(last: it was killed by SIGKILL.*\), so the agent stopped restarting it\. Restart the agent.*\nmemory allocation of 4096 bytes failed$/,
+            ),
         });
         expect(fixture.servers).toHaveLength(2);
+    });
+
+    it("does not promise a restart when the app-server exits before its initialize handshake", async () => {
+        const fixture = createRecoveryFixture();
+        fixture.answers.set("initialize", () => undefined);
+        const initializing = initialize(fixture);
+        initializing.catch(() => undefined);
+        const server = fixture.current();
+        await vi.waitFor(() => expect(requestsOf(server, "initialize")).toHaveLength(1));
+        server.child.stderr.write("Error: invalid hooks config\n");
+        await vi.waitFor(() => expect(server.child.stderr.readableLength).toBe(0));
+
+        server.child.die(1);
+
+        const error = await initializing.then(() => null, (failure: unknown) => failure as acp.RequestError);
+        expect(error).toMatchObject({code: 1001, message: "Codex process has exited with code 1:\nError: invalid hooks config"});
+        expect(error?.message).not.toContain("starts it again");
     });
 
     it("refuses a session that crashed the app-server twice while opening, and keeps others working", async () => {
