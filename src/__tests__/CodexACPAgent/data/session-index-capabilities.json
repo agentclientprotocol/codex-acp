@@ -1,0 +1,31 @@
+{
+  "sessionIndex": [
+    "sessionFailure",
+    "diffPatch",
+    "agentFileChangeReport",
+    "customInstructions",
+    "nativeSubagentSessions",
+    "asyncTasks",
+    "recommendedValue",
+    "rawInputRendering",
+    "planContentDelta",
+    "codexHooks",
+    "sessionIndex",
+    "sessionArchive",
+    "sessionRename",
+    "sessionListSubscribe"
+  ],
+  "airWithoutSessionIndex": [
+    "sessionFailure",
+    "diffPatch",
+    "agentFileChangeReport",
+    "customInstructions",
+    "nativeSubagentSessions",
+    "asyncTasks",
+    "recommendedValue",
+    "rawInputRendering",
+    "planContentDelta",
+    "codexHooks"
+  ],
+  "plain": null
+}

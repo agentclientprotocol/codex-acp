@@ -65,6 +65,7 @@ import type {SubagentState} from "./subagents/AcpSubagents";
 import {mergeRateLimitSnapshot} from "./RateLimitsMap";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "./AgentFileChangeReport";
 import {createSessionNotice} from "./SessionNotice";
+import {isStaleAutomaticTitleEcho} from "./SessionIndexTitles";
 import {readableServiceErrorMessage} from "./ServiceErrorMessage";
 
 export { stripShellPrefix };
@@ -369,6 +370,11 @@ export class CodexEventHandler {
     }
 
     async handleNotification(notification: ServerNotification) {
+        if (notification.method === "item/started"
+            && notification.params.threadId === this.sessionState.sessionId
+            && isModelOutputItem(notification.params.item)) {
+            this.sessionState.promptTokenUsage?.observeModelOutput();
+        }
         await this.flushPendingErrors();
         await this.finishCompactionsForNotification(notification);
         const closingChildren = this.subagents.closingChildSessions(notification);
@@ -529,6 +535,10 @@ export class CodexEventHandler {
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
             case "thread/name/updated":
+                if (isStaleAutomaticTitleEcho(this.sessionState, normalizeSessionTitle(notification.params.threadName))) {
+                    this.sessionState.titleGen?.observeRename();
+                    return null;
+                }
                 this.sessionState.sessionTitle = normalizeSessionTitle(notification.params.threadName);
                 this.sessionState.sessionTitleSource = notification.params.threadName == null
                     ? "unset"
@@ -1154,14 +1164,25 @@ export class CodexEventHandler {
     private handleTokenUsageUpdated(params: ThreadTokenUsageUpdatedNotification): void {
         this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
         this.sessionState.totalTokenUsage = toTokenCount(params.tokenUsage.total);
+        this.sessionState.promptTokenUsage?.observe(this.sessionState.totalTokenUsage, this.sessionState.lastTokenUsage);
         this.sessionState.modelContextWindow = params.tokenUsage.modelContextWindow;
     }
 
     private createUsageUpdate(params: ThreadTokenUsageUpdatedNotification): UpdateSessionEvent | null {
-        this.handleTokenUsageUpdated(params);
-
-        const used = this.sessionState.lastTokenUsage?.totalTokens;
-        const size = this.sessionState.modelContextWindow;
+        let used: number | undefined;
+        let size: number | null;
+        if (params.threadId === this.sessionState.sessionId) {
+            this.handleTokenUsageUpdated(params);
+            used = this.sessionState.lastTokenUsage?.totalTokens;
+            size = this.sessionState.modelContextWindow;
+        } else if (this.subagents.isNativeSubagentThread(params.threadId)) {
+            // The usage of a native subagent belongs to its own session, where handleNotification routes the
+            // update. It must not change the usage of this session or its turn.
+            used = params.tokenUsage.last.totalTokens;
+            size = params.tokenUsage.modelContextWindow;
+        } else {
+            return null;
+        }
         if (used == null || size == null || size <= 0) {
             return null;
         }
@@ -1189,6 +1210,25 @@ export class CodexEventHandler {
         });
     }
 
+}
+
+/**
+ * Items that Codex reports for the input of a turn, for other agents, or before a model request, rather than
+ * as output of its model. Codex starts a context compaction before its request, which can send the
+ * current usage again. When a compaction is the first request of a prompt on a thread with an unknown
+ * start total and nothing was sent again before it, its own usage is taken as the start total; that
+ * undercount is the lesser error compared with counting the history's last request.
+ */
+const NON_MODEL_OUTPUT_ITEM_TYPES: ReadonlySet<ThreadItem["type"]> = new Set([
+    "userMessage",
+    "hookPrompt",
+    "enteredReviewMode",
+    "subAgentActivity",
+    "contextCompaction",
+]);
+
+function isModelOutputItem(item: ThreadItem): boolean {
+    return !NON_MODEL_OUTPUT_ITEM_TYPES.has(item.type);
 }
 
 function toolCallTitle(update: UpdateSessionEvent | null | undefined): string | undefined {

@@ -414,6 +414,8 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         currentTurnId: null,
         lastTokenUsage: null,
         totalTokenUsage: null,
+        promptTokenUsage: null,
+        threadHasHistory: true,
         modelContextWindow: null,
         rateLimits: null,
         account: null,

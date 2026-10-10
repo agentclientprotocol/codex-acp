@@ -10,6 +10,7 @@ import {CodexAcpClient} from "./CodexAcpClient";
 import {CodexAppServerClient} from "./CodexAppServerClient";
 import packageJson from "../package.json";
 import {logger} from "./Logger";
+import {CodexAppServerSupervisor} from "./app-server-recovery/CodexAppServerSupervisor";
 import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
 import {prepareCodexHookConfig} from "./CodexHookConfig";
@@ -19,6 +20,16 @@ import {
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+import {
+    SESSION_ARCHIVE_METHOD,
+    SESSION_LIST_SUBSCRIBE_METHOD,
+    SESSION_LIST_UNSUBSCRIBE_METHOD,
+    SESSION_RENAME_METHOD,
+    SESSION_UNARCHIVE_METHOD,
+    sessionArchiveParamsParser,
+    sessionListSubscriptionParamsParser,
+    sessionRenameParamsParser,
+} from "./SessionIndex";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -104,23 +115,20 @@ function startAcpServer() {
     });
 
     const codexProcessState: CodexProcessState = {
-        connection: startCodexConnection(codexPath, undefined, hookConfig.appServerStartupArgs),
+        // The supervisor disposes the connection itself, after the last output of the process was read.
+        connection: startCodexConnection(codexPath, undefined, hookConfig.appServerStartupArgs, {disposeOnExit: false}),
         codexPath,
         config: hookConfig.sessionConfig,
         appServerStartupArgs: hookConfig.appServerStartupArgs,
         modelProvider,
         stderr: "",
     };
+    const supervisor = new CodexAppServerSupervisor(codexProcessState);
+    codexProcessState.supervisor = supervisor;
 
     process.stdin.on("close", () => {
-        codexProcessState.connection.process.stdin.end();
-        // Kill the codex process if it doesn't exit naturally
-        setTimeout(() => {
-            if (!codexProcessState.connection.process.killed) {
-                logger.log("Codex still running 2s after stdin closed; terminating process");
-                codexProcessState.connection.process.kill();
-            }
-        }, 2000);
+        // Ends the stdin of the app-server, sends SIGTERM if it is still running 2 s later, and never restarts it.
+        supervisor.shutdown();
     });
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
@@ -151,6 +159,7 @@ function startAcpServer() {
             const agent = createAgent(connection.client);
             codexAcpServer = agent;
             connection.signal.addEventListener("abort", () => {
+                agent.sessionIndex.dispose();
                 if (codexAcpServer === agent) {
                     codexAcpServer = null;
                 }
@@ -181,5 +190,10 @@ function startAcpServer() {
         .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
         .onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
+        .onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent().sessionIndex.rename(ctx.params))
+        .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, true))
+        .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, false))
+        .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
+        .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params))
         .connect(acpJsonStream);
 }

@@ -20,6 +20,8 @@ export type SessionForkDependencies = {
     fetchAvailableModels(): Promise<Model[]>;
     createCurrentModelId(models: Model[], model: string, reasoningEffort: string | null): string;
     getCollaborationMode(sessionId: string): ModeKind;
+    /** Gives back the subscription of a fork that failed after `thread/fork`, unless another open of it began. */
+    releaseFailedFork(threadId: string): Promise<void>;
 };
 
 export async function forkSession(
@@ -42,9 +44,17 @@ export async function forkSession(
         modelProvider: await dependencies.getResumeModelProvider(),
         threadId: request.sessionId,
     });
-    await dependencies.codexClient.threadUnsubscribe({threadId: response.thread.id});
-
-    const models = await dependencies.fetchAvailableModels();
+    // `thread/fork` subscribes this connection to the new thread, and only to it: the source thread keeps the
+    // subscription it had. The fork stays subscribed, as ACP lets the client prompt it at once. Codex keeps an
+    // unsubscribed thread loaded and runs its turns, but sends their notifications to subscribers only.
+    // A fork that fails from here on has no session, so it gives the subscription back.
+    let models: Model[];
+    try {
+        models = await dependencies.fetchAvailableModels();
+    } catch (err) {
+        await dependencies.releaseFailedFork(response.thread.id);
+        throw err;
+    }
     return {
         sessionId: response.thread.id,
         currentModelId: dependencies.createCurrentModelId(models, response.model, response.reasoningEffort),

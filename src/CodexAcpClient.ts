@@ -166,6 +166,22 @@ export class CodexAcpClient {
         return this.codexClient;
     }
 
+    /**
+     * A client of the same configuration for another app-server: the same config and model provider. The routing
+     * that the agent set at runtime (gateway auth, `providers/set`) is copied by {@link adoptRoutingFrom}.
+     */
+    withAppServer(codexClient: CodexAppServerClient): CodexAcpClient {
+        const client = new CodexAcpClient(codexClient, this.config, this.modelProvider ?? undefined);
+        client.adoptRoutingFrom(this);
+        return client;
+    }
+
+    /** Takes the runtime routing of `previous`, the client that this client replaces. */
+    adoptRoutingFrom(previous: CodexAcpClient): void {
+        this.gatewayConfig = previous.gatewayConfig;
+        this.gatewayConfigSource = previous.gatewayConfigSource;
+    }
+
     private readonly defaultClientInfo: ClientInfo = {
         name: `${packageJson.name}`, title: "Codex ACP", version: `${packageJson.version}`
     };
@@ -183,6 +199,14 @@ export class CodexAcpClient {
             }
         });
         this.configPath = response?.codexHome ?? null;
+        this.isInitialized = true;
+    }
+
+    private isInitialized = false;
+
+    /** The app-server `initialize` handshake of this client succeeded. */
+    get initialized(): boolean {
+        return this.isInitialized;
     }
 
     getHomePath(): string | null {
@@ -213,6 +237,7 @@ export class CodexAcpClient {
     private async authenticateWithApiKey(authRequest: ApiKeyAuthRequest): Promise<Boolean> {
         const apiKey = authRequest._meta?.["api-key"]?.apiKey ?? this.readApiKeyFromEnv();
         const loginCompletedPromise = this.awaitNextLoginCompleted();
+        loginCompletedPromise.catch(() => {});
         await this.codexClient.accountLogin({
             type: "apiKey",
             apiKey,
@@ -226,6 +251,7 @@ export class CodexAcpClient {
             return true;
         }
         const loginCompletedPromise = this.awaitNextLoginCompleted();
+        loginCompletedPromise.catch(() => {});
         const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
         if (loginResponse.type == "chatgpt") {
             await open(loginResponse.authUrl);
@@ -267,6 +293,7 @@ export class CodexAcpClient {
             throw RequestError.invalidRequest(undefined, "Device code authentication requires URL elicitation support");
         }
         const loginCompletedPromise = this.awaitNextLoginCompleted();
+        loginCompletedPromise.catch(() => {});
         const loginResponse = await this.codexClient.accountLogin({type: "chatgptDeviceCode"});
         if (loginResponse.type !== "chatgptDeviceCode") {
             return false;
@@ -276,33 +303,41 @@ export class CodexAcpClient {
             message: `Sign in to ChatGPT and enter this code: ${loginResponse.userCode}`,
             elicitationId: loginResponse.loginId,
         }));
-        const first = await Promise.race([
-            loginCompletedPromise.then(result => ({
-                type: "loginCompleted" as const,
-                result,
-            })),
-            elicitationResponsePromise.then(response => ({
-                type: "elicitationResponse" as const,
-                response,
-            })),
-        ]);
+        try {
+            const first = await Promise.race([
+                loginCompletedPromise.then(result => ({
+                    type: "loginCompleted" as const,
+                    result,
+                })),
+                elicitationResponsePromise.then(response => ({
+                    type: "elicitationResponse" as const,
+                    response,
+                })),
+            ]);
 
-        if (first.type === "loginCompleted") {
+            if (first.type === "loginCompleted") {
+                await urlElicitationRequester.completeElicitation();
+                return first.result.success;
+            }
+
+            if (!acp.CreateElicitationResponse.isAccept(first.response)) {
+                await this.codexClient.accountLoginCancel({loginId: loginResponse.loginId});
+                throw RequestError.requestCancelled(
+                    {methodId: "chat-gpt-device-code", action: first.response.action},
+                    "ChatGPT device code sign-in was cancelled",
+                );
+            }
+
+            const result = await loginCompletedPromise;
             await urlElicitationRequester.completeElicitation();
-            return first.result.success;
+            return result.success;
+        } catch (error) {
+            // A lost app-server ends the login: the open URL elicitation must not stay open in the client.
+            if (this.codexClient.connectionLoss.lost) {
+                await Promise.resolve(urlElicitationRequester.completeElicitation()).catch(() => {});
+            }
+            throw error;
         }
-
-        if (!acp.CreateElicitationResponse.isAccept(first.response)) {
-            await this.codexClient.accountLoginCancel({loginId: loginResponse.loginId});
-            throw RequestError.requestCancelled(
-                {methodId: "chat-gpt-device-code", action: first.response.action},
-                "ChatGPT device code sign-in was cancelled",
-            );
-        }
-
-        const result = await loginCompletedPromise;
-        await urlElicitationRequester.completeElicitation();
-        return result.success;
     }
 
     private authenticateWithGateway(authRequest: GatewayAuthRequest): boolean {
@@ -383,6 +418,7 @@ export class CodexAcpClient {
 
     async logout(): Promise<void> {
         const accountUpdatedPromise = this.awaitNextAccountUpdated();
+        accountUpdatedPromise.catch(() => {});
         await this.codexClient.accountLogout();
         await accountUpdatedPromise;
     }
@@ -663,7 +699,10 @@ export class CodexAcpClient {
         }
     }
 
-    async forkSession(request: acp.ForkSessionRequest): Promise<SessionMetadata> {
+    async forkSession(
+        request: acp.ForkSessionRequest,
+        releaseFailedFork: (threadId: string) => Promise<void> = threadId => this.closeSession(threadId),
+    ): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         return await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
@@ -675,6 +714,7 @@ export class CodexAcpClient {
             createCurrentModelId: (models, model, reasoningEffort) =>
                 this.createModelId(models, model, reasoningEffort).toString(),
             getCollaborationMode: sessionId => this.getCollaborationMode(sessionId),
+            releaseFailedFork,
         });
     }
 
@@ -1196,13 +1236,14 @@ export class CodexAcpClient {
         method: "account/login/completed" | "account/updated",
         mapEvent: (event: T) => T,
     ): Promise<T> {
-        return await new Promise((resolve) => {
-            let disposable: Disposable | undefined;
+        let disposable: Disposable | undefined;
+        const notified = new Promise<T>((resolve) => {
             disposable = this.codexClient.connection.onNotification(method, (event: T) => {
                 disposable?.dispose();
                 resolve(mapEvent(event));
             });
         });
+        return await this.codexClient.waitWhileConnected(method, notified, () => disposable?.dispose());
     }
 
     async listMcpServers(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
