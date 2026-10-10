@@ -14,7 +14,7 @@ import {z} from "zod";
 import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadStatus, Turn} from "./app-server/v2";
 import {AIR_META_KEY, JETBRAINS_META_KEY, withAirMeta} from "./AirExtension";
-import {normalizeSessionTitle} from "./SessionTitle";
+import {listedSessionTitle} from "./SessionTitle";
 import {logger} from "./Logger";
 
 export const AIR_SESSION_INDEX_KEY = "sessionIndex";
@@ -445,7 +445,7 @@ export function sessionIndexSessionInfo(
     return {
         sessionId: thread.id,
         cwd: thread.cwd,
-        title: normalizeSessionTitle(thread.name ?? thread.preview),
+        title: listedSessionTitle(thread),
         // Codex moves `Thread.updatedAt` for every rollout write of the user or the agent: the last activity of any
         // kind. The list is ordered by `lastPromptAt ?? updatedAt` instead. Known deviation from #2161: Codex also
         // moves it on `thread/unarchive`, which sets the rollout mtime to now (thread-store unarchive_thread.rs).

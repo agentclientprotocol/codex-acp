@@ -6,6 +6,7 @@ import path from "node:path";
 import {createCodexMockTestFixture, createTestModel, deferred, type CodexMockTestFixture} from "../acp-test-utils";
 import type {Thread, ThreadListParams, ThreadListResponse} from "../../app-server/v2";
 import {SESSION_LIST_CHANGES_METHOD} from "../../SessionIndex";
+import {MAX_SESSION_TITLE_LENGTH} from "../../SessionTitle";
 
 const threadId = "01a0637c-5b99-7242-9064-04545d605fdb";
 const otherThreadId = "01a0637c-5b99-7242-9064-04545d605fdc";
@@ -297,6 +298,25 @@ describe("session/list", () => {
             }],
             nextCursor: null,
         });
+    });
+
+    it("titles a row by name, title, summary, then preview, without a cut", async () => {
+        const longPreview = `Investigate ${"x".repeat(MAX_SESSION_TITLE_LENGTH)}\n end`;
+        const {agent} = await createAgent("sessionIndex", [
+            createThread({id: "named", name: " Named\n thread ", recencyAt: 50}),
+            createThread({id: "blank-name", name: " ", preview: longPreview, recencyAt: 40}),
+            {...createThread({id: "summarized", name: null, recencyAt: 30}), title: null, summary: "Summary"} as Thread,
+            createThread({id: "untitled", name: null, preview: "", recencyAt: 20}),
+        ]);
+
+        const response = await agent.listSessions({cwd: "/repo/project"});
+
+        expect(response.sessions.map(({sessionId, title}) => [sessionId, title])).toEqual([
+            ["named", "Named thread"],
+            ["blank-name", `Investigate ${"x".repeat(MAX_SESSION_TITLE_LENGTH)} end`],
+            ["summarized", "Summary"],
+            ["untitled", null],
+        ]);
     });
 
     it("merges the unarchived and the archived threads by recency when the client asks for archived ones", async () => {
@@ -728,6 +748,26 @@ describe("_session/list/subscribe", () => {
         await vi.advanceTimersByTimeAsync(2_000);
         expect(listChanges(fixture)).toEqual([]);
         expect(agent.sessionIndex.subscriptionResources()).toEqual({subscriptions: 0, groups: 0, watching: false, timer: false});
+    });
+
+    it("sends the uncut title of a changed row, by the same chain as the list", async () => {
+        vi.useFakeTimers();
+        const {fixture, agent, appServer} = await createAgent("sessionIndex");
+        const {subscriptionId} = await agent.sessionIndex.subscribeList({cwd: "/repo/project"});
+        fixture.clearAcpConnectionDump();
+        const name = `Renamed ${"y".repeat(MAX_SESSION_TITLE_LENGTH)}`;
+        const renamed = createThread({name, path: "/codex-home/sessions/rollout.jsonl"});
+        vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: renamed});
+
+        fixture.sendServerNotification({method: "thread/name/updated", params: {threadId, threadName: name}});
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(listChanges(fixture)).toEqual([{
+            subscriptionId,
+            sessions: [expect.objectContaining({sessionId: threadId, title: name})],
+            removed: [],
+        }]);
+        agent.sessionIndex.dispose();
     });
 
     it("sends removed for a thread that the client deletes", async () => {
