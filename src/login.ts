@@ -11,6 +11,10 @@ interface LoginOptions {
     clientVersion?: string;
 }
 
+export function resolveLoginCodexPath(env: NodeJS.ProcessEnv = process.env): string | undefined {
+    return env["CODEX_PATH"];
+}
+
 function parseArgs(args: string[]): LoginOptions | null {
     const options: LoginOptions = {};
 
@@ -63,7 +67,7 @@ Example:
 }
 
 async function login(options: LoginOptions): Promise<boolean> {
-    const codexPath = process.env["CODEX_PATH"] ?? "codex";
+    const codexPath = resolveLoginCodexPath();
 
     logger.log("Starting Codex connection...");
     const codexConnection = startCodexConnection(codexPath);
