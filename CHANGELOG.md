@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.2](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.1...v2.2.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* title listed sessions by name, title, summary, then preview ([#606](https://github.com/agentclientprotocol/codex-acp/issues/606)) ([90fea43](https://github.com/agentclientprotocol/codex-acp/commit/90fea43dc15a6e8e3538ecea5c96ffe55dfcc42f))
+
 ## [2.2.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.0...v2.2.1) (2026-10-10)
 
 
