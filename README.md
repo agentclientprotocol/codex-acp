@@ -63,6 +63,34 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - API key via `CODEX_API_KEY` or `OPENAI_API_KEY`.
 - A custom OpenAI-compatible gateway, when the client opts in to the gateway auth capability.
 
+## Host-owned steering fallback
+
+Clients can opt in to host-owned fallback when calling `_session/steering`:
+
+```json
+{
+  "sessionId": "session-id",
+  "prompt": [{ "type": "text", "text": "Adjust the plan" }],
+  "_meta": { "steering": { "idleBehavior": "promptRequired" } }
+}
+```
+
+When a Codex turn is running, the input is injected into that turn and the
+response is `{ "outcome": "injected" }`. If no turn can accept it, the adapter
+returns `{ "outcome": "promptRequired", "reason": "noRunningTurn" }` without
+consuming the input or starting a new prompt. This also returns while the
+original prompt is waiting for plan approval.
+
+The client keeps the input queued, answers any pending permission request, and
+waits for the original `session/prompt` response before sending the queued input
+through its normal `session/prompt` lifecycle. That request owns completion,
+usage, and failure reporting. `promptRequired` does not cancel an active prompt
+or answer its permission requests.
+
+Calls without this opt-in retain the existing `startedNewTurn` fallback.
+The initialization capability `_meta.steering.supported` advertises steering
+in general; it does not distinguish support for this newer opt-in contract.
+
 ## Runtime options
 
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
