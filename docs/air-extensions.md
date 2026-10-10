@@ -678,7 +678,8 @@ The final update of that tool call puts the decision text in `rawOutput`.
 The goal extension exposes a long-running, session-scoped objective.
 It is shaped like a possible future first-class ACP API.
 The adapter sends no other goal key.
-Only AIR gets the goal capability and the goal snapshots.
+AIR gets the goal capability and snapshots as before.
+A client that is not AIR can opt in by declaring `clientCapabilities._meta.goal: {}`.
 Another client gets no goal key and no `session_info_update` for a goal.
 
 ### Capability
@@ -691,6 +692,8 @@ The `initialize` response advertises the goal support:
 
 `actions` is the subset of `set`, `pause`, `resume`, and `clear` that the adapter supports.
 A client must not assume support for an action that is not advertised.
+AIR receives the capability in `_meta.jetbrains.air.goal`.
+An opted-in client that is not AIR receives it in `_meta.goal`.
 
 ### Control request
 
@@ -701,7 +704,8 @@ The adapter still accepts `_codex/session/goal_control` as a legacy alias. It do
 
 ### Session state
 
-The adapter publishes the current snapshot in `session_info_update._meta.jetbrains.air.goal`.
+The adapter publishes the current snapshot in `session_info_update._meta.jetbrains.air.goal` for AIR
+and `session_info_update._meta.goal` for an opted-in client that is not AIR.
 Clearing a goal publishes `goal: null`.
 
 ```json
@@ -1296,7 +1300,6 @@ AIR gets only the new key. A client that is not AIR gets neither the old key nor
 | Old key | New key |
 | --- | --- |
 | `agent_message_chunk._meta.codex.phase` | `_meta.jetbrains.air.phase`, same values |
-| `initialize._meta.goal`, `session_info_update._meta.goal` | `_meta.jetbrains.air.goal`, same shape |
 | mode `_meta.kind`, config option value `_meta.kind` | `_meta.jetbrains.air.kind` |
 | available command `_meta.commandAction` | `_meta.jetbrains.air.commandAction` |
 | tool call `_meta.contextCompaction` | `_meta.jetbrains.air.contextCompaction` |
