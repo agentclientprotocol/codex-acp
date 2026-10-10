@@ -15,7 +15,7 @@ import {
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
-import type {Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
+import type {ConfigReadResponse, Model, ReviewStartResponse, ThreadGoal, TurnCompletedNotification, TurnStartParams} from "../../app-server/v2";
 import type {RateLimitsMap} from "../../RateLimitsMap";
 import {ModelId} from "../../ModelId";
 import {GOAL_CONTROL_METHOD} from "../../AcpExtensions";
@@ -1500,6 +1500,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const codexAcpAgent = fixture.getCodexAcpAgent();
 
         fixture.getCodexAppServerClient().listSkills = vi.fn().mockResolvedValue({ data: [] });
+        fixture.getCodexAppServerClient().configRead = vi.fn().mockResolvedValue({config: {}, origins: {}, layers: null});
         fixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
             turn: { id: "turn-id", items: [], status: "inProgress", error: null }
         });
@@ -1839,6 +1840,27 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
 
         skillsRefresh.resolve();
+        await flushAsyncWork();
+        expect(turnStartSpy).not.toHaveBeenCalled();
+    });
+
+    it('returns cancelled while workspace network configuration is still pending', async () => {
+        const {mockFixture, turnStartSpy} = setupPromptFixture();
+        const configRead = deferred<ConfigReadResponse>();
+        const configReadSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "configRead")
+            .mockReturnValue(configRead.promise);
+        const controller = new AbortController();
+        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
+            sessionId: "session-id",
+            prompt: [{type: "text", text: "Hello"}],
+        }, controller.signal);
+
+        await vi.waitFor(() => expect(configReadSpy).toHaveBeenCalled());
+        controller.abort();
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+        expect(turnStartSpy).not.toHaveBeenCalled();
+
+        configRead.resolve({config: {} as ConfigReadResponse["config"], origins: {}, layers: null});
         await flushAsyncWork();
         expect(turnStartSpy).not.toHaveBeenCalled();
     });

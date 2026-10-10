@@ -15,6 +15,17 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `CODEX_ACP_APP_SERVER_CRASH_LIMIT` - how many crashes of the Codex app-server in the crash window stop its automatic restart (default `5`).
 - `CODEX_ACP_APP_SERVER_CRASH_WINDOW_MS` - the crash window in milliseconds (default `300000`, 5 minutes).
 
+### Workspace-write networking
+
+For `agent` and `workspace-write` modes, enable networking with the existing Codex setting:
+
+```toml
+[sandbox_workspace_write]
+network_access = true
+```
+
+The adapter reads Codex's effective configuration for the session working directory on each workspace-write turn. An explicit boolean `sandbox_workspace_write.network_access` in `CODEX_CONFIG` takes precedence over the file configuration. If neither source sets it, the mode keeps its existing default. Other sandbox types, writable roots, temporary-directory flags, and approval policies are unchanged.
+
 ### Quick start
 
 #### Develop on Windows?

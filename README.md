@@ -68,12 +68,14 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
 - `OPENAI_API_KEY` - fallback API key used when the API-key auth method is selected.
 - `CODEX_PATH` - run a specific Codex executable instead of the bundled package dependency.
-- `CODEX_CONFIG` - JSON object merged into the Codex session config.
+- `CODEX_CONFIG` - JSON object merged into the Codex session config. An explicit boolean `sandbox_workspace_write.network_access` also applies to workspace-write turns and takes precedence over `config.toml`.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
+
+Workspace-write modes (`agent` and `workspace-write`) honor `[sandbox_workspace_write] network_access = true` from Codex's effective configuration for the working directory. An explicit boolean in `CODEX_CONFIG` overrides that value. With neither setting, the mode keeps its existing network default. This changes only networking; writable roots, approvals, and the `read-only` and `agent-full-access` presets retain their policies.
 
 ## Development
 
