@@ -21,6 +21,73 @@ import {
 type CommandExecutionItem = Extract<ThreadItem, {type: "commandExecution"}>;
 
 describe("Codex background terminal tasks", () => {
+    it("reconciles idle background tasks serially and stops observing after disposal", async () => {
+        vi.useFakeTimers();
+        const fixture = createFixture();
+        try {
+            fixture.list.mockResolvedValue(page([terminal()]));
+            await fixture.tasks.handleNotification(started(command()), "thread-1");
+            await fixture.tasks.sync();
+            fixture.list.mockClear();
+            const pending = deferred<ThreadBackgroundTerminalsListResponse>();
+            fixture.list.mockReturnValue(pending.promise);
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(fixture.list).toHaveBeenCalledTimes(1);
+            expect(fixture.list).toHaveBeenCalledWith({threadId: "thread-1", cursor: null});
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(fixture.list).toHaveBeenCalledTimes(1);
+            pending.resolve(page([terminal()]));
+            await vi.advanceTimersByTimeAsync(0);
+            fixture.tasks.clear();
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(fixture.list).toHaveBeenCalledTimes(1);
+        } finally {
+            fixture.tasks.clear();
+            vi.useRealTimers();
+        }
+    });
+
+    it("removes an idle task absent from the native list and stops polling", async () => {
+        vi.useFakeTimers();
+        const fixture = createFixture();
+        try {
+            fixture.list.mockResolvedValue(page([terminal()]));
+            await fixture.tasks.handleNotification(started(command()), "thread-1");
+            await fixture.tasks.sync();
+            fixture.list.mockClear();
+            fixture.list.mockResolvedValue(page([]));
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(fixture.list).toHaveBeenCalledTimes(1);
+            expect(fixture.updates.filter(update => update.sessionUpdate === "async_task_state_update"))
+                .toEqual([expect.objectContaining({state: "stopped"})]);
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(fixture.list).toHaveBeenCalledTimes(1);
+        } finally {
+            fixture.tasks.clear();
+            vi.useRealTimers();
+        }
+    });
+
+    it("retries a rejected idle reconciliation without an unhandled timer rejection", async () => {
+        vi.useFakeTimers();
+        const fixture = createFixture();
+        try {
+            fixture.list.mockResolvedValue(page([terminal()]));
+            await fixture.tasks.handleNotification(started(command()), "thread-1");
+            await fixture.tasks.sync();
+            const reconcile = vi.spyOn(fixture.tasks, "reconcile")
+                .mockRejectedValueOnce(new Error("publication unavailable"))
+                .mockResolvedValue(undefined);
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(reconcile).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(reconcile).toHaveBeenCalledTimes(2);
+        } finally {
+            fixture.tasks.clear();
+            vi.useRealTimers();
+        }
+    });
+
     it("discovers background work from the root session event stream", async () => {
         const fixture = createCodexMockTestFixture();
         await fixture.getCodexAcpAgent().initialize({

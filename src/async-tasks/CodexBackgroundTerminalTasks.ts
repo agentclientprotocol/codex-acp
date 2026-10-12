@@ -52,6 +52,7 @@ export class CodexBackgroundTerminalTasks {
     private appServerGeneration = 0;
     private appServerQueriesEnabled = true;
     private disposed = false;
+    private observation: ReturnType<typeof setTimeout> | null = null;
 
     constructor(
         readonly enabled: boolean,
@@ -212,6 +213,8 @@ export class CodexBackgroundTerminalTasks {
 
     clear(): void {
         this.disposed = true;
+        if (this.observation) clearTimeout(this.observation);
+        this.observation = null;
         this.appServerGeneration += 1;
         this.appServerQueriesEnabled = false;
         this.tasks.clear();
@@ -299,10 +302,37 @@ export class CodexBackgroundTerminalTasks {
         try {
             await this.publishSpawn(task);
             task.publication = "published";
+            this.observeBetweenTurns();
         } catch (error) {
             task.publication = "unpublished";
             throw error;
         }
+    }
+
+    private observeBetweenTurns(): void {
+        if (!this.isActive() || this.observation || this.tasks.size === 0) return;
+        // Idle sessions have no turn events to trigger reconciliation. Keep one
+        // serialized observer for owned threads, without starting model turns.
+        this.observation = setTimeout(async () => {
+            try {
+                const threads = new Map([...this.tasks.values()]
+                    .map(task => [task.threadId, task.sessionId]));
+                for (const [threadId, sessionId] of threads) {
+                    if (!this.canQueryAppServer()) break;
+                    try {
+                        await this.reconcile(threadId, sessionId);
+                    } catch (error) {
+                        // A failed publication must not reject the detached timer or
+                        // prevent other owned threads from being observed.
+                        if (this.isActive()) logger.error(`Failed to observe background terminals for ${threadId}`, error);
+                    }
+                }
+            } finally {
+                this.observation = null;
+                this.observeBetweenTurns();
+            }
+        }, 1000);
+        this.observation.unref();
     }
 
     private async publishSpawn(task: Task): Promise<void> {
