@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {createObjectDump} from "./acp-test-utils";
+import {createTestFixture, createObjectDump} from "./acp-test-utils";
 
 describe("createObjectDump anonymizer", () => {
     it("anonymizes both direct keys and dotted paths", () => {
@@ -31,5 +31,18 @@ describe("createObjectDump anonymizer", () => {
         expect(parsed.items[0].secret).toBe("secret");
         expect(parsed.items[0].visible).toBe("keep");
         expect(parsed.items[1].secret).toBe("second-item");
+    });
+});
+
+
+describe("native fixture cleanup", () => {
+    let previous: ReturnType<typeof createTestFixture>;
+    it("owns a running app-server for the current test", async () => {
+        previous = createTestFixture();
+        await previous.getCodexAcpAgent().initialize({protocolVersion: 1});
+        expect(previous.getCodexAcpAgent()["getExitCode"]()).toBeNull();
+    });
+    it("does not leave the preceding test app-server alive", () => {
+        expect(previous.getCodexAcpAgent()["getExitCode"]()).not.toBeNull();
     });
 });
