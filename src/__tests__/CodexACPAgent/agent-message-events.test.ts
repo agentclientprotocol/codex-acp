@@ -86,4 +86,23 @@ describe("CodexEventHandler - agent message events", () => {
             "data/agent-message-phases.json"
         );
     });
+    it("delivers textless async questions with a visible fallback and structured metadata", async () => {
+        const notifications: ServerNotification[] = [{
+            method: "item/completed",
+            params: {
+                threadId: sessionId, turnId: "turn-1", completedAtMs: 1,
+                item: {
+                    type: "agentMessage", id: "async-question", text: "", phase: "commentary",
+                    memoryCitation: null, delivery: null,
+                    questions: [{ title: "Proceed with the bounded test?", options: ["Approve", "Keep paused"] }],
+                },
+            },
+        }];
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+        const events = mockFixture.getAcpConnectionEvents([]);
+        expect(JSON.stringify(events)).toContain("Proceed with the bounded test?");
+        expect(JSON.stringify(events)).toContain("codex/asyncUserInput");
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot("data/async-user-input.json");
+    });
+
 });

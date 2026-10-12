@@ -4,6 +4,40 @@ import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 import type { Model, Thread, ThreadGoal, UserInput } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
+    it("replays structured async questions from a textless history item", async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const client = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        client.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        client.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        const thread = {
+            id: "async-history", historyMode: "legacy", turns: [{
+                id: "turn-1", itemsView: "full", status: "completed", items: [{
+                    type: "agentMessage", id: "question-1", text: "", phase: "commentary",
+                    memoryCitation: null, delivery: null,
+                    questions: [{title: "Which color?", options: ["Blue", "Green"]}, {title: "Why?", options: null}],
+                }],
+            }],
+        } as unknown as Thread;
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread, model: model.id, modelProvider: "openai", cwd: "/workspace",
+            approvalPolicy: "never", sandbox: {type: "dangerFullAccess"}, reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread});
+        await agent.initialize({protocolVersion: 1, clientCapabilities: {}});
+        await agent.loadSession({sessionId: thread.id, cwd: "/workspace", mcpServers: []});
+        const updates = fixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update)
+            .filter(update => update._meta?.["codex/asyncUserInput"]);
+        expect(updates).toHaveLength(1);
+        await expect(JSON.stringify(updates, null, 2)).toMatchFileSnapshot("data/async-user-input-history.json");
+    });
+
     it("preserves every native user input kind during history replay", async () => {
         const cases: Array<{input: UserInput, content: acp.ContentBlock}> = [
             {input: {type: "text", text: "Request", text_elements: []}, content: {type: "text", text: "Request"}},

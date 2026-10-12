@@ -1,0 +1,30 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "async-question",
+        "content": {
+          "type": "text",
+          "text": "Proceed with the bounded test?\n- Approve\n- Keep paused"
+        },
+        "_meta": {
+          "codex/asyncUserInput": {
+            "id": "async-question",
+            "questions": [
+              {
+                "title": "Proceed with the bounded test?",
+                "options": [
+                  "Approve",
+                  "Keep paused"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

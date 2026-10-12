@@ -1,3 +1,4 @@
+import {createAsyncUserInputUpdate} from "./AsyncUserInput";
 import type {
     ServerNotification
 } from "./app-server";
@@ -854,7 +855,7 @@ export class CodexEventHandler {
                 return this.renderer.render(this.subagents.legacyCollaborationCompleted(event.item));
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item);
-                return null;
+                return createAsyncUserInputUpdate(event.item);
             case "plan":
                 return await this.createCompletedPlanEvent(event.item);
             case "exitedReviewMode":

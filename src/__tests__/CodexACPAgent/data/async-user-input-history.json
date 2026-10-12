@@ -1,0 +1,28 @@
+[
+  {
+    "sessionUpdate": "agent_message_chunk",
+    "messageId": "question-1",
+    "content": {
+      "type": "text",
+      "text": "Which color?\n- Blue\n- Green\n\nWhy?"
+    },
+    "_meta": {
+      "codex/asyncUserInput": {
+        "id": "question-1",
+        "questions": [
+          {
+            "title": "Which color?",
+            "options": [
+              "Blue",
+              "Green"
+            ]
+          },
+          {
+            "title": "Why?",
+            "options": null
+          }
+        ]
+      }
+    }
+  }
+]

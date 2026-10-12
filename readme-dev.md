@@ -125,3 +125,14 @@ The adapter restarts the Codex app-server when it dies (for example, killed for 
   with the stderr of the last crash.
   A session that the app-server died opening twice in 30 minutes is not opened again for the rest of that time, so
   one session that is too large for the memory cannot take the other sessions down with it.
+
+### Asynchronous user questions
+
+Codex `agentMessage.questions` items are emitted as `agent_message_chunk` updates,
+including when their text is empty and during history replay. The text content
+contains the question titles and choices for clients without form support.
+`_meta["codex/asyncUserInput"]` carries `{id, questions}`, where `id` is the native
+item ID and each question has a `title` and nullable `options` array of strings.
+Clients can render a persistent form and send the user's answers as a subsequent
+user prompt. These questions do not hold an ACP request open and must not be
+withdrawn merely because the current prompt completes.

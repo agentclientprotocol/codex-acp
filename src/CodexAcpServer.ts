@@ -1,3 +1,4 @@
+import {createAsyncUserInputUpdate} from "./AsyncUserInput";
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan} from "./CodexEventHandler";
@@ -2825,12 +2826,15 @@ export class CodexAcpServer {
                 return [renderer.render(SubagentActivityReporter.activity(item, "completed", "start"))];
             case "agentMessage": {
                 const meta = createMessagePhaseMeta(item.phase, sessionState.clientCapabilities.airClient);
-                return [{
+                const updates: UpdateSessionEvent[] = [{
                     sessionUpdate: "agent_message_chunk",
                     messageId: item.id,
                     content: { type: "text", text: item.text },
                     ...(meta ? { _meta: meta } : {}),
                 }];
+                const questions = createAsyncUserInputUpdate(item);
+                if (questions !== null) updates.push(questions);
+                return updates;
             }
             case "reasoning":
                 return this.createReasoningUpdates(item);
