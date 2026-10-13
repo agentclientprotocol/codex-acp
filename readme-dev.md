@@ -135,7 +135,9 @@ The v2 chain registers: `initialize`, `session/new|list|close|delete|resume` (v2
 into `session/resume` with `replayFrom`), `session/set_config_option`, `session/cancel`,
 `auth/login|logout`, `session/prompt` (plus `$/cancel_request`), `session/fork`, and
 `providers/list|set|disable`. Unstable extension methods on top of that: `_session/steering`,
-`_session/goal` (set/pause/resume/clear), and `_session/async_task/stop`. `session/fork` drops the
+`_session/goal` (set/pause/resume/clear), `_session/async_task/stop`, and the AIR session index
+requests (`_session/rename`, `_session/archive|unarchive`, `_session/list/subscribe|unsubscribe`).
+`session/fork` drops the
 v1 `modes` field (v2 removed the modes API in favor of config options), and forked sessions do not
 get an `available_commands_update`, matching v1. There are no new environment/config knobs specific
 to v2; it reuses the runtime environment variables above.
@@ -169,6 +171,9 @@ schema alone:
   offered there. A read, search or list command has no terminal; its output arrives as `content`
   text when it completes. A file change sends one diff per file whose Git patch is built from the
   Codex diff.
+- The AIR `sessionIndex` extension (`docs/air-extensions.md`, "Session index") works as on v1: a
+  client that declares `sessionIndex` gets it, `session/list` reads `_meta.jetbrains.air.list`, and
+  rows, `session_info_update`s and `_session/list/changes` carry the same `_meta`.
 - Other AIR `_meta` keys (goal, message phase, mode kind, permission presentation) go only to AIR
   clients, as on v1. Every v2 permission request still gets its prompt `title` and `description`.
 

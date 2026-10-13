@@ -692,7 +692,9 @@ export class CodexAcpServer {
         this.reportingConnection.reports.compareMeta = this.capabilities.airToolCallContract;
         // Boolean config options are baseline on v2, so there is nothing to probe.
         this.booleanConfigOptionsSupported = true;
+        this.sessionIndex.configure(clientCapabilities);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize({clientInfo: params.info}));
+        this.sessionIndex.observe(this.codexAcpClient);
         this.publishFirstAuthStatusAfterResponse();
         return {
             protocolVersion: 2,
@@ -755,6 +757,7 @@ export class CodexAcpServer {
                 AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                 AIR_ASYNC_TASKS_KEY,
                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+                ...this.sessionIndex.agentCapabilities(),
             ];
         return {
             steering: {

@@ -181,7 +181,12 @@ export function createAcpAgentRouter(
         .onRequest(acpV2.methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
-        .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params));
+        .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
+        .onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent().sessionIndex.rename(ctx.params))
+        .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, true))
+        .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, false))
+        .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
+        .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
 
     return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(withOmittedParamsWorkaround(v2Agent));
 }

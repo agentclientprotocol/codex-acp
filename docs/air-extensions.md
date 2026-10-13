@@ -1008,6 +1008,7 @@ AIR uses `session/list` as its index of Codex threads when it declares `sessionI
 Everything in this section applies only to such a client. The `initialize` answer to it lists `sessionIndex`,
 `sessionArchive`, `sessionRename` and `sessionListSubscribe` in `_meta.jetbrains.air.capabilities`.
 Another client, AIR included, keeps the old `session/list`, `session/delete` and `initialize` answers.
+ACP v1 and v2 connections get the same session index.
 
 The extension follows two ACP RFDs field for field: the session list extensions RFD (`limit`, order, row fields)
 and [RFD #2161](https://github.com/agentclientprotocol/agent-client-protocol/pull/2161)
