@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Model, ReasoningEffortOption } from "../../app-server/v2";
-import { createCodexMockTestFixture } from "../acp-test-utils";
+import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 
 describe("Model filtering", () => {
     it("filters available models by id allowlist", async () => {
@@ -13,6 +13,16 @@ describe("Model filtering", () => {
         const efforts: ReasoningEffortOption[] = [defaultEffort, fastEffort];
 
         const models: Model[] = [
+            createTestModel({
+                id: "gpt-6-astra",
+                model: "gpt-6-astra",
+                displayName: "gpt-6-astra",
+                description: "Astra from the app-server model catalog.",
+                supportedReasoningEfforts: (["low", "medium", "high", "xhigh", "max", "ultra"] as const).map(
+                    reasoningEffort => ({reasoningEffort, description: `${reasoningEffort} effort.`}),
+                ),
+                defaultReasoningEffort: "low",
+            }),
             {
                 id: "gpt-5.2",
                 model: "gpt-5.2-model-field",
