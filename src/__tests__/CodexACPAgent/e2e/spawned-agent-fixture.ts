@@ -8,6 +8,7 @@ import {ModelId} from "../../../ModelId";
 import {removeDirectoryWithRetry, writeCodexHomeConfig} from "../../acp-test-utils";
 import type {PermissionResponder} from "./permission-responders";
 import type {LegacyNewSessionResponse} from "../../../AcpExtensions";
+import type {AsyncTaskSpawnedUpdate} from "../../../async-tasks/AcpAsyncTasks";
 
 export const DEFAULT_TEST_MODEL_ID = ModelId.create("gpt-6-luna", "low");
 export const OTHER_TEST_MODEL_ID = ModelId.create("gpt-5.5", "low");
@@ -39,6 +40,7 @@ export interface SpawnedAgentFixture {
         toolCallKind: acp.ToolKind,
     ): acp.RequestPermissionRequest[];
     readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[];
+    readAsyncTasks(sessionId: string): AsyncTaskSpawnedUpdate[];
     dispose(): Promise<void>;
 }
 
@@ -109,6 +111,7 @@ class RecordingClient implements acp.Client {
     private readonly availableCommandsBySessionId = new Map<string, acp.AvailableCommand[]>();
     private readonly permissionRequestsBySessionId = new Map<string, acp.RequestPermissionRequest[]>();
     private readonly toolCallsBySessionId = new Map<string, acp.ToolCall[]>();
+    private readonly asyncTasksBySessionId = new Map<string, AsyncTaskSpawnedUpdate[]>();
     private permissionResponder: PermissionResponder = () => ({
         outcome: {outcome: "cancelled"},
     });
@@ -128,6 +131,15 @@ class RecordingClient implements acp.Client {
     }
 
     async sessionUpdate(params: acp.SessionNotification): Promise<void> {
+        // The SDK schema does not know the AIR async task updates.
+        const update: {sessionUpdate: string} = params.update;
+        if (update.sessionUpdate === "async_task_spawned") {
+            const asyncTasks = this.asyncTasksBySessionId.get(params.sessionId) ?? [];
+            asyncTasks.push(update as AsyncTaskSpawnedUpdate);
+            this.asyncTasksBySessionId.set(params.sessionId, asyncTasks);
+            return;
+        }
+
         if (params.update.sessionUpdate === "available_commands_update") {
             this.availableCommandsBySessionId.set(params.sessionId, params.update.availableCommands);
             return;
@@ -167,6 +179,10 @@ class RecordingClient implements acp.Client {
     readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[] {
         const toolCalls = this.toolCallsBySessionId.get(sessionId) ?? [];
         return toolCalls.filter((toolCall) => toolCall.kind === toolCallKind);
+    }
+
+    readAsyncTasks(sessionId: string): AsyncTaskSpawnedUpdate[] {
+        return this.asyncTasksBySessionId.get(sessionId) ?? [];
     }
 }
 
@@ -277,6 +293,10 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
 
     readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[] {
         return this.client.readToolCalls(sessionId, toolCallKind);
+    }
+
+    readAsyncTasks(sessionId: string): AsyncTaskSpawnedUpdate[] {
+        return this.client.readAsyncTasks(sessionId);
     }
 
     async dispose(): Promise<void> {

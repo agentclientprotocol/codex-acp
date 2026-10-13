@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it, onTestFinished, vi} from "vitest";
 import {AgentMode} from "../../../AgentMode";
+import {ASYNC_TASK_STOP_METHOD} from "../../../async-tasks/AsyncTaskExtension";
 import {ApprovalOptionId} from "../../../permissions/option-ids";
 import {
     createAuthenticatedFixture,
@@ -201,8 +202,10 @@ describeE2E("E2E shell cancellation tests", () => {
         }
     }
 
-    it("cancels a running shell command", async () => {
-        fixture = await createAuthenticatedFixture(AgentMode.AgentFullAccess);
+    // Codex keeps a running command as a background terminal when the turn is interrupted,
+    // so cancel ends the turn and the async task stop request ends the process.
+    it("cancels the turn of a running shell command and stops it as an async task", async () => {
+        fixture = await createAuthenticatedFixture(AgentMode.AgentFullAccess, undefined, ["asyncTasks"]);
         const sessionId = (await fixture.createSession()).sessionId;
         const pidFilePath = path.join(fixture.workspaceDir, "cancel-command.pid");
         const command = `/bin/sh -c 'echo $$ > "${pidFilePath}"; exec sleep 100'`;
@@ -218,15 +221,28 @@ describeE2E("E2E shell cancellation tests", () => {
             expect(parsed).toBeGreaterThan(0);
             return parsed;
         }, {timeout: 10_000});
+        onTestFinished(() => {
+            if (isProcessRunning(pid)) process.kill(pid, "SIGKILL");
+        });
         expect(isProcessRunning(pid)).toBe(true);
-        // The process can start before Codex tracks it in the turn; an interrupt in that
-        // window leaves it running. A client only cancels what it has seen, so wait for it.
-        await vi.waitFor(() => {
-            expect(fixture?.readToolCalls(sessionId, "execute")).not.toHaveLength(0);
+        // The process can start before Codex tracks it in the turn, so wait until the client sees it.
+        const toolCallId = await vi.waitFor(() => {
+            const [toolCall] = fixture?.readToolCalls(sessionId, "execute") ?? [];
+            expect(toolCall).toBeDefined();
+            return toolCall!.toolCallId;
         }, {timeout: 10_000});
         await fixture.connection.cancel({sessionId});
 
         expect((await promptResponse).stopReason).toBe("cancelled");
+        const asyncTaskId = await vi.waitFor(() => {
+            const task = fixture?.readAsyncTasks(sessionId).find(task => task.toolCallId === toolCallId);
+            expect(task).toBeDefined();
+            return task!.asyncTaskId;
+        }, {timeout: 10_000});
+        expect(isProcessRunning(pid)).toBe(true);
+
+        await expect(fixture.connection.extMethod(ASYNC_TASK_STOP_METHOD, {sessionId, asyncTaskId}))
+            .resolves.toEqual({stopped: true});
         await vi.waitFor(() => {
             expect(isProcessRunning(pid)).toBe(false);
         }, {timeout: 5_000});
