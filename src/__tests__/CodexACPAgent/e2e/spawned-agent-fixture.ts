@@ -38,6 +38,7 @@ export interface SpawnedAgentFixture {
         sessionId: string,
         toolCallKind: acp.ToolKind,
     ): acp.RequestPermissionRequest[];
+    readSessionUpdates(sessionId: string): acp.SessionUpdate[];
     readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[];
     dispose(): Promise<void>;
 }
@@ -108,6 +109,7 @@ class RecordingClient implements acp.Client {
     private readonly textBySessionId = new Map<string, string>();
     private readonly availableCommandsBySessionId = new Map<string, acp.AvailableCommand[]>();
     private readonly permissionRequestsBySessionId = new Map<string, acp.RequestPermissionRequest[]>();
+    private readonly updatesBySessionId = new Map<string, acp.SessionUpdate[]>();
     private readonly toolCallsBySessionId = new Map<string, acp.ToolCall[]>();
     private permissionResponder: PermissionResponder = () => ({
         outcome: {outcome: "cancelled"},
@@ -128,6 +130,13 @@ class RecordingClient implements acp.Client {
     }
 
     async sessionUpdate(params: acp.SessionNotification): Promise<void> {
+        let updates = this.updatesBySessionId.get(params.sessionId);
+        if (!updates) {
+            updates = [];
+            this.updatesBySessionId.set(params.sessionId, updates);
+        }
+        updates.push(params.update);
+
         if (params.update.sessionUpdate === "available_commands_update") {
             this.availableCommandsBySessionId.set(params.sessionId, params.update.availableCommands);
             return;
@@ -154,6 +163,10 @@ class RecordingClient implements acp.Client {
 
     readAvailableCommands(sessionId: string): acp.AvailableCommand[] {
         return this.availableCommandsBySessionId.get(sessionId) ?? [];
+    }
+
+    readSessionUpdates(sessionId: string): acp.SessionUpdate[] {
+        return this.updatesBySessionId.get(sessionId) ?? [];
     }
 
     readPermissionRequests(
@@ -273,6 +286,10 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         toolCallKind: acp.ToolKind,
     ): acp.RequestPermissionRequest[] {
         return this.client.readPermissionRequests(sessionId, toolCallKind);
+    }
+
+    readSessionUpdates(sessionId: string): acp.SessionUpdate[] {
+        return this.client.readSessionUpdates(sessionId);
     }
 
     readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[] {

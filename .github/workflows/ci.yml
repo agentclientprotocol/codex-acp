@@ -27,5 +27,7 @@ jobs:
         run: npm run typecheck
       - name: Run unit tests
         run: npm test
+      - name: Run integration tests
+        run: npm run test:integration
       - name: Bundle binaries
         run: npm run bundle:all

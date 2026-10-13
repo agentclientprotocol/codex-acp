@@ -87,6 +87,16 @@ npm run package:all
 2. Regenerate Codex types in `src/app-server/`: `npm run generate-types`
 3. Ensure there are no type errors or failed tests: `npm run typecheck` and `npm run test`
 
+### Test suites
+
+- `npm test`: unit tests with the Codex app-server mocked.
+- `npm run test:integration`: real codex-acp plus a real `codex app-server`. The model is a local mock of the
+  OpenAI Responses API (`src/__tests__/integration/mock-responses-server.ts`) reached through the `gateway`
+  auth method, so no API key or network is needed. Tests script model replies with `textResponse`,
+  `execCommandResponse` and `applyPatchResponse`.
+- `npm run test:e2e`: real OpenAI model. Builds first and requires `RUN_E2E_TESTS=true` (set by the script)
+  plus `OPENAI_API_KEY` or `CODEX_API_KEY` in the environment.
+
 ### Session notices
 
 The adapter implements [Session Notices](https://agentclientprotocol.com/rfds/session-notices)
