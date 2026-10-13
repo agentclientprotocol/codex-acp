@@ -234,15 +234,17 @@ describeE2E("E2E shell cancellation tests", () => {
         await fixture.connection.cancel({sessionId});
 
         expect((await promptResponse).stopReason).toBe("cancelled");
-        const asyncTaskId = await vi.waitFor(() => {
-            const task = fixture?.readAsyncTasks(sessionId).find(task => task.toolCallId === toolCallId);
-            expect(task).toBeDefined();
-            return task!.asyncTaskId;
-        }, {timeout: 10_000});
         expect(isProcessRunning(pid)).toBe(true);
 
-        await expect(fixture.connection.extMethod(ASYNC_TASK_STOP_METHOD, {sessionId, asyncTaskId}))
-            .resolves.toEqual({stopped: true});
+        // The SDK client rejects the `async_task_spawned` update it has no schema for, but a root
+        // command's async task id is its tool call id. Stop fails until the adapter publishes the task.
+        await vi.waitFor(async () => {
+            const response = await fixture?.connection.extMethod(ASYNC_TASK_STOP_METHOD, {
+                sessionId,
+                asyncTaskId: toolCallId,
+            });
+            expect(response).toEqual({stopped: true});
+        }, {timeout: 10_000});
         await vi.waitFor(() => {
             expect(isProcessRunning(pid)).toBe(false);
         }, {timeout: 5_000});
