@@ -22,6 +22,7 @@ export type AirCapabilities = {
 
 type ClientCapabilityValues = {
     readonly airClient: boolean;
+    readonly goal: boolean;
     readonly terminalOutput: boolean;
     readonly terminalOutputDelta: boolean;
     readonly planUpdates: boolean;
@@ -38,6 +39,7 @@ type ClientCapabilityValues = {
 export class ClientCapabilities {
     static readonly DEFAULT = new ClientCapabilities({
         airClient: false,
+        goal: false,
         terminalOutput: false,
         terminalOutputDelta: false,
         planUpdates: false,
@@ -46,6 +48,8 @@ export class ClientCapabilities {
 
     /** The client declares `_meta.jetbrains.air`. */
     readonly airClient: boolean;
+    /** The client is AIR or declares `_meta.goal`. */
+    readonly goal: boolean;
     /** The client declares `_meta.terminal_output`, the Zed convention for command output chunks. */
     readonly terminalOutput: boolean;
     /** The client declares `_meta.terminal_output_delta` and appends the output chunks. */
@@ -56,6 +60,7 @@ export class ClientCapabilities {
 
     private constructor(values: ClientCapabilityValues) {
         this.airClient = values.airClient;
+        this.goal = values.goal;
         this.terminalOutput = values.terminalOutput;
         this.terminalOutputDelta = values.terminalOutputDelta;
         this.planUpdates = values.planUpdates;
@@ -63,8 +68,11 @@ export class ClientCapabilities {
     }
 
     static from(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
+        const airClient = isAirClient(capabilities);
+        const goal = capabilities?._meta?.["goal"];
         return new ClientCapabilities({
-            airClient: isAirClient(capabilities),
+            airClient,
+            goal: airClient || (goal !== null && typeof goal === "object" && !Array.isArray(goal)),
             terminalOutput: capabilities?._meta?.["terminal_output"] === true,
             terminalOutputDelta: capabilities?._meta?.["terminal_output_delta"] === true,
             planUpdates: capabilities?.plan != null,
@@ -91,4 +99,3 @@ export class ClientCapabilities {
         return this.airClient ? null : "terminal_output_delta";
     }
 }
-

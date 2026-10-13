@@ -2,6 +2,7 @@ import type {UpdateSessionEvent} from "./ACPSessionConnection";
 import {AIR_GOAL_KEY, withAirMeta} from "./AirExtension";
 import {GOAL_CONTROL_METHOD, type GoalSnapshot, type GoalStatus} from "./GoalExtension";
 import type {ThreadGoal} from "./app-server/v2";
+import type {ClientCapabilities} from "./tool-calls/ClientCapabilities";
 
 export type ThreadGoalSnapshot = GoalSnapshot;
 
@@ -47,11 +48,15 @@ export function sameThreadGoalSnapshot(
         && left.createdAt === right.createdAt;
 }
 
-/** Only AIR gets the goal. The update carries nothing else, so another client gets no update. */
-export function goalSessionInfoUpdate(goal: ThreadGoalSnapshot | null, airClient: boolean): UpdateSessionEvent | null {
-    if (!airClient) return null;
+export function goalSessionInfoUpdate(
+    goal: ThreadGoalSnapshot | null,
+    capabilities: ClientCapabilities,
+): UpdateSessionEvent | null {
+    if (!capabilities.goal) return null;
     return {
         sessionUpdate: "session_info_update",
-        _meta: withAirMeta(undefined, AIR_GOAL_KEY, goal),
+        _meta: capabilities.airClient
+            ? withAirMeta(undefined, AIR_GOAL_KEY, goal)
+            : {[AIR_GOAL_KEY]: goal},
     };
 }
