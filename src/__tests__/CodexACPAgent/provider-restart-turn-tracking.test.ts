@@ -22,6 +22,7 @@ import {
     type TranscriptEntry,
 } from './v2-prompt-harness';
 import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
+import {stubGatewayModelListing} from '../acp-test-utils';
 
 function toolCallUpdates(transcript: TranscriptEntry[]) {
     return transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
@@ -60,6 +61,8 @@ async function runPromptToCompletion(client: PromptSession) {
  * running on the old client with a v2-only `idle`/`cancelled` (fix 2), since the old app-server process's EOF drops the notification and
  * no `turn/completed` for it ever arrives.
  */
+stubGatewayModelListing(["gpt-5"]);
+
 describe('provider restart reinstalls the baseline turn tracker', () => {
     let closeClient: (() => void) | null = null;
 

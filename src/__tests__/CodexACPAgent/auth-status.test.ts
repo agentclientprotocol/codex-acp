@@ -4,6 +4,7 @@ import {
     createTestEventHandler,
     createTestModel,
     createTestSessionState,
+    stubGatewayModelListing,
     mockPromptTurn,
     type CodexMockTestFixture,
     type MethodCallEvent,
@@ -93,6 +94,8 @@ function gatewayAuthRequest(providerName: string) {
         },
     };
 }
+
+stubGatewayModelListing(["model-id"]);
 
 describe("authStatus extension", () => {
     describe("Central provider display", () => {

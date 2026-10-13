@@ -1,6 +1,6 @@
 import {describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk";
-import {createCodexMockTestFixture, createTestSessionState} from "../acp-test-utils";
+import {createCodexMockTestFixture, createTestSessionState, stubGatewayModelListing} from "../acp-test-utils";
 import {CodexAcpClient, CUSTOM_GATEWAY_PROVIDER_ID, OPENAI_PROVIDER_ID} from "../../CodexAcpClient";
 
 async function expectInvalidParams(fn: () => unknown): Promise<void> {
@@ -8,6 +8,8 @@ async function expectInvalidParams(fn: () => unknown): Promise<void> {
     expect(caught).toBeInstanceOf(acp.RequestError);
     expect((caught as acp.RequestError).code).toBe(-32602);
 }
+
+stubGatewayModelListing(["model-id"]);
 
 describe("Configurable LLM providers (providers/*)", () => {
     it("advertises the providers capability in initialize", async () => {
@@ -36,7 +38,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         });
     });
 
-    it("restores the startup-configured proxy after the last override is disabled", () => {
+    it("restores the startup-configured proxy after the last override is disabled", async () => {
         const fixture = createCodexMockTestFixture();
         const client = new CodexAcpClient(fixture.getCodexAppServerClient(), {
             model_provider: "company-proxy",
@@ -44,11 +46,11 @@ describe("Configurable LLM providers (providers/*)", () => {
                 "company-proxy": {base_url: "https://proxy.example/openai/v1"},
             },
         });
-        client.setProvider({
+        client.setProvider(await client.prepareProvider({
             providerId: OPENAI_PROVIDER_ID,
             apiType: "openai",
             baseUrl: "https://temporary.example/openai/v1",
-        });
+        }));
 
         client.disableProvider({providerId: OPENAI_PROVIDER_ID});
 
@@ -58,10 +60,10 @@ describe("Configurable LLM providers (providers/*)", () => {
         });
     });
 
-    it("reflects set routing in list without echoing headers", () => {
+    it("reflects set routing in list without echoing headers", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
-        agent.setProvider({
+        await agent.setProvider({
             providerId: OPENAI_PROVIDER_ID,
             apiType: "openai",
             baseUrl: "https://llm-gateway.corp.example.com/openai/v1",
@@ -107,10 +109,10 @@ describe("Configurable LLM providers (providers/*)", () => {
         }));
     });
 
-    it("restores native OpenAI routing after disable", () => {
+    it("restores native OpenAI routing after disable", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
-        agent.setProvider({
+        await agent.setProvider({
             providerId: OPENAI_PROVIDER_ID,
             apiType: "openai",
             baseUrl: "https://example.com",
@@ -142,7 +144,7 @@ describe("Configurable LLM providers (providers/*)", () => {
         const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart")
             .mockRejectedValue(new Error("stop after capturing config"));
 
-        agent.setProvider({
+        await agent.setProvider({
             providerId: OPENAI_PROVIDER_ID,
             apiType: "openai",
             baseUrl: "https://llm-gateway.corp.example.com/openai/v1",
@@ -198,11 +200,11 @@ describe("Configurable LLM providers (providers/*)", () => {
         const secondGatewayReplacement = createCodexMockTestFixture().getCodexAcpClient();
         const nativeReplacement = createCodexMockTestFixture().getCodexAcpClient();
         vi.spyOn(firstGatewayReplacement, "initialize").mockResolvedValue();
-        const firstGatewayResume = vi.spyOn(firstGatewayReplacement, "resumeSession").mockResolvedValue({} as never);
+        const firstGatewayResume = vi.spyOn(firstGatewayReplacement, "resumeSession").mockResolvedValue({models: []} as never);
         vi.spyOn(secondGatewayReplacement, "initialize").mockResolvedValue();
-        const secondGatewayResume = vi.spyOn(secondGatewayReplacement, "resumeSession").mockResolvedValue({} as never);
+        const secondGatewayResume = vi.spyOn(secondGatewayReplacement, "resumeSession").mockResolvedValue({models: []} as never);
         vi.spyOn(nativeReplacement, "initialize").mockResolvedValue();
-        const nativeResume = vi.spyOn(nativeReplacement, "resumeSession").mockResolvedValue({} as never);
+        const nativeResume = vi.spyOn(nativeReplacement, "resumeSession").mockResolvedValue({models: []} as never);
         const restart = vi.fn()
             .mockResolvedValueOnce(firstGatewayReplacement)
             .mockResolvedValueOnce(secondGatewayReplacement)
@@ -269,9 +271,9 @@ describe("Configurable LLM providers (providers/*)", () => {
         vi.spyOn(failedReplacement, "initialize").mockResolvedValue();
         const failedResume = vi.spyOn(failedReplacement, "resumeSession")
             .mockRejectedValueOnce(new Error("thread-1 failed"))
-            .mockResolvedValue({} as never);
+            .mockResolvedValue({models: []} as never);
         vi.spyOn(recoveredReplacement, "initialize").mockResolvedValue();
-        const recoveredResume = vi.spyOn(recoveredReplacement, "resumeSession").mockResolvedValue({} as never);
+        const recoveredResume = vi.spyOn(recoveredReplacement, "resumeSession").mockResolvedValue({models: []} as never);
         const restart = vi.fn()
             .mockResolvedValueOnce(failedReplacement)
             .mockResolvedValueOnce(recoveredReplacement);

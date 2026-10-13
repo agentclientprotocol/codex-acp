@@ -177,6 +177,21 @@ schema alone:
 - Other AIR `_meta` keys (goal, message phase, mode kind, permission presentation) go only to AIR
   clients, as on v1. Every v2 permission request still gets its prompt `title` and `description`.
 
+#### Models of a `providers/set` gateway
+
+`providers/set` lists the models of the gateway (`GET {baseUrl}/models`, with the headers Codex sends to it)
+before it responds. The models reported to the client are then only the Codex models whose `model` or `id` the
+gateway lists, matched without case and date suffix. A session whose thread model the gateway does not list uses
+the default of these models; a thread model that the gateway lists but Codex does not know is kept. A gateway that
+lists none of the Codex models leaves no model option at all, and the session keeps the thread's model as current.
+Sessions already open get the models of the new routing when the provider restart resumes them, after
+`providers/disable` too. A 4xx answer means the gateway has no listing: `providers/set` succeeds and nothing is
+narrowed. A failed listing (network error, a status other than 2xx or 4xx, malformed body, or the timeout) fails
+`providers/set` with `internal_error` and keeps the current routing; a base URL that is not http(s) fails with
+`invalid_params`. A listing that finishes after a newer `providers/set` or `providers/disable` was applied is
+dropped. The `gateway` auth method and providers from
+the Codex config are not listed.
+
 #### Known gaps
 
 - After `providers/disable("openai")`, `providers/list` still reports native OpenAI routing as the

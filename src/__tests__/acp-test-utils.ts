@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import {AgentMode} from "../AgentMode";
 import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
-import {expect, vi} from "vitest";
+import {afterEach, beforeEach, expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
 import {CodexEventHandler} from "../CodexEventHandler";
@@ -608,6 +608,19 @@ export function createTestEventHandler(
         false,
         false,
     );
+}
+
+/**
+ * Answers the gateway model listing of every `providers/set` in the file with `modelIds`, so its tests never reach
+ * the network. A failed listing would fail `providers/set`, and an empty one would leave the sessions no model.
+ */
+export function stubGatewayModelListing(modelIds: string[]): void {
+    beforeEach(() => {
+        vi.stubGlobal("fetch", vi.fn(async () => Response.json({object: "list", data: modelIds.map(id => ({id}))})));
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
 }
 
 /** A promise that the test resolves or rejects from outside. */

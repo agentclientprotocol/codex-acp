@@ -6,6 +6,7 @@ import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient, OPENAI_PROVIDER_ID} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
 import {createMockConnections} from './test-utils';
+import {stubGatewayModelListing} from '../acp-test-utils';
 
 type ProtocolVersion = "v1" | "v2";
 
@@ -64,6 +65,8 @@ function toError(err: {code: number, message: string, data?: unknown}) {
 }
 
 const VERSIONS: ProtocolVersion[] = ["v1", "v2"];
+
+stubGatewayModelListing(["model-id"]);
 
 describe('providers/* over ACP v1 and v2', () => {
     let closeClient: (() => void) | null = null;
@@ -172,8 +175,7 @@ describe('providers/* over ACP v1 and v2', () => {
     });
 
     // The v2 SDK validates `baseUrl` as `format: uri` before codex-acp's own handler runs.
-    // v1's schema has no such format constraint, so v1's handler-level check (non-empty string
-    // only) is all that applies there.
+    // v1's schema has no such format constraint, so v1's handler-level check is all that applies there.
     it('v2 only: rejects a non-URL baseUrl with invalid_params from the SDK', async () => {
         const client = connectClient("v2");
         closeClient = () => client.connection.close();
@@ -188,22 +190,21 @@ describe('providers/* over ACP v1 and v2', () => {
         expect(error?.code).toBe(-32602);
     });
 
-    it('v1 pin: accepts a non-URL baseUrl (no format validation on v1)', async () => {
+    it('v1 pin: rejects a non-URL baseUrl with invalid_params before listing the models', async () => {
         const client = connectClient("v1");
         closeClient = () => client.connection.close();
         await client.initialize();
 
-        const setResponse = await client.providers.set({
+        const error = await client.providers.set({
             providerId: OPENAI_PROVIDER_ID,
             apiType: "openai",
             baseUrl: "not-a-url",
-        });
+        }).then(() => undefined, (e: {code?: number, message?: string}) => e);
         const listResponse = await client.providers.list({});
 
-        expect(setResponse).toEqual({});
-        expect(listResponse.providers[0]!.current).toEqual({
-            apiType: "openai",
-            baseUrl: "not-a-url",
-        });
+        expect(error?.code).toBe(-32602);
+        expect(error?.message).toContain("baseUrl must be an http(s) URL");
+        expect(fetch).not.toHaveBeenCalled();
+        expect(listResponse.providers[0]!.current?.baseUrl).not.toBe("not-a-url");
     });
 });

@@ -4,6 +4,7 @@ import {ConnectionError, ConnectionErrors, ResponseError} from "vscode-jsonrpc/n
 import {createRecoveryFixture, defaultAnswer, initialize, MODEL, type RecoveryFixture, requestsOf} from "./recovery-fixture";
 import {AppServerRecovery} from "../../app-server-recovery/AppServerRecovery";
 import type {CodexAcpClient} from "../../CodexAcpClient";
+import {stubGatewayModelListing} from "../acp-test-utils";
 
 const resumed = (id: string) => ({
     thread: {id, turns: [], historyMode: "paginated", status: {type: "idle"}, preview: "", ephemeral: false, modelProvider: "openai",
@@ -45,6 +46,8 @@ function completeTurn(fixture: RecoveryFixture, sessionId: string, turnId = "tur
         params: {threadId: sessionId, turn: {id: turnId, items: [], status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null}},
     });
 }
+
+stubGatewayModelListing(["gpt-test"]);
 
 describe("app-server recovery", () => {
     it("starts the app-server again on the next request after an idle crash, with the same handshake", async () => {

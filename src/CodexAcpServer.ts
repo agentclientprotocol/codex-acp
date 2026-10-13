@@ -527,6 +527,12 @@ export class CodexAcpServer {
     private readonly recovery: AppServerRecovery<SessionState> | null;
     private initializeRequest: Pick<acp.InitializeRequest, "clientInfo"> | null = null;
     private providerUpdate: Promise<void> | null = null;
+    /**
+     * Numbers `providers/set` and `providers/disable` requests in arrival order. A listing finishing after a newer
+     * request was applied is dropped; a newer request that failed drops nothing.
+     */
+    private providerRequests = 0;
+    private appliedProviderRequest = 0;
     /** The AIR `sessionIndex` extension, see `SessionIndexService.ts`. */
     readonly sessionIndex = new SessionIndexService({
         connection: () => this.connection,
@@ -1920,8 +1926,17 @@ export class CodexAcpServer {
     }
 
     async setProvider(params: acp.SetProviderRequest): Promise<acp.SetProviderResponse> {
-        this.codexAcpClient.setProvider(params);
-        await this.enqueueProviderUpdate((client) => client.setProvider(params));
+        const request = ++this.providerRequests;
+        // A provider restart can replace the client while the models are listed, so the routing goes to the current one.
+        const gatewayConfig = await this.codexAcpClient.prepareProvider(params);
+        if (this.appliedProviderRequest > request) {
+            logger.log("providers/set dropped: a newer provider request was applied while the models were listed");
+            return { };
+        }
+        this.appliedProviderRequest = request;
+        this.codexAcpClient.setProvider(gatewayConfig);
+        // The restarted app-server takes the listing too and does not list the models again.
+        await this.enqueueProviderUpdate((client) => client.setProvider(gatewayConfig));
         return { };
     }
 
@@ -1930,6 +1945,7 @@ export class CodexAcpServer {
         if (params.providerId !== OPENAI_PROVIDER_ID) {
             return { };
         }
+        this.appliedProviderRequest = ++this.providerRequests;
         await this.enqueueProviderUpdate((client) => client.disableProvider(params));
         return { };
     }
@@ -2011,14 +2027,19 @@ export class CodexAcpServer {
                         additionalDirectories: session.additionalDirectories,
                         mcpServers: session.mcpServers ?? [],
                     };
-                    const resume = (onSubscribed?: () => void) => onSubscribed === undefined
-                        ? replacement.resumeSession(request)
-                        : replacement.resumeSession(request, onSubscribed);
+                    let resumed: SessionMetadata | null = null;
+                    const resume = async (onSubscribed?: () => void) => {
+                        resumed = onSubscribed === undefined
+                            ? await replacement.resumeSession(request)
+                            : await replacement.resumeSession(request, onSubscribed);
+                        return resumed;
+                    };
                     await (this.recovery?.resumeForReplacement(session, replacementGeneration, replacement, resume) ?? resume());
                     session.authProvider = replacement.getModelProvider();
                     session.asyncTasks.refresh();
                     settleTrackerReady(session);
                     logger.log("Resumed session after provider restart", {sessionId: session.sessionId});
+                    if (resumed) await this.applyResumedModels(session, replacement, resumed);
                 } catch (error) {
                     settleTrackerReady(null);
                     if (error instanceof ThreadRefusedError || error instanceof SessionReplacedError
@@ -2146,6 +2167,8 @@ export class CodexAcpServer {
                     additionalDirectories: session.additionalDirectories,
                     mcpServers: session.mcpServers ?? [],
                 }, onSubscribed);
+                // A session the provider restart failed to resume gets the models of the routing here.
+                await this.applyResumedModels(session, client, metadata);
                 return {collaborationMode: metadata.collaborationMode};
             },
             applyCollaborationMode: (session, client) =>
@@ -2482,6 +2505,27 @@ export class CodexAcpServer {
         sessionState.currentModelId = ModelId.create(model, effort).toString();
     }
 
+    /**
+     * Takes the models of a session that a provider restart resumed: the provider decides which models there are.
+     * The session keeps its model when it can, the way a resumed thread keeps its own; see `createModelId`.
+     */
+    private async applyResumedModels(sessionState: SessionState, client: CodexAcpClient, resumed: SessionMetadata): Promise<void> {
+        const configOptions = JSON.stringify(this.createSessionConfigOptions(sessionState));
+        const {model, effort} = ModelId.fromString(sessionState.currentModelId);
+        sessionState.availableModels = resumed.models;
+        sessionState.currentModelId = client.createModelId(resumed.models, model, effort as ReasoningEffort).toString();
+        const currentModel = this.findCurrentModel(resumed.models, sessionState.currentModelId);
+        sessionState.supportedReasoningEfforts = currentModel?.supportedReasoningEfforts ?? [];
+        sessionState.supportedInputModalities = currentModel?.inputModalities ?? ["text", "image"];
+        sessionState.currentModelSupportsFast = modelSupportsFast(currentModel);
+        if (JSON.stringify(this.createSessionConfigOptions(sessionState)) !== configOptions) {
+            await new ACPSessionConnection(this.connection, sessionState.sessionId).update({
+                sessionUpdate: "config_option_update",
+                configOptions: this.createSessionConfigOptions(sessionState),
+            });
+        }
+    }
+
     private applyModelAndEffort(sessionState: SessionState, model: Model, effort: ReasoningEffort): void {
         sessionState.currentModelId = ModelId.fromComponents(model, effort).toString();
         sessionState.supportedReasoningEfforts = model.supportedReasoningEfforts;
@@ -2814,8 +2858,11 @@ export class CodexAcpServer {
         const configOptions = [
             sessionState.agentMode.toConfigOption(sessionState.clientCapabilities.airClient),
             createCollaborationModeConfigOption(sessionState.collaborationMode),
-            createModelConfigOption(sessionState.availableModels, currentModelId.model, recommendedModelId),
         ];
+        // A gateway that lists none of the Codex models leaves no model to offer, so there is no model option at all.
+        if (sessionState.availableModels.length > 0) {
+            configOptions.push(createModelConfigOption(sessionState.availableModels, currentModelId.model, recommendedModelId));
+        }
         if (sessionState.supportedReasoningEfforts.length > 0) {
             configOptions.push(
                 createReasoningEffortConfigOption(

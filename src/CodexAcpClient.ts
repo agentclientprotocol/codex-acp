@@ -73,6 +73,14 @@ import {
     threadActiveWriterRequestError,
 } from "./CodexThreadErrors";
 import {airCustomInstructions} from "./AirExtension";
+import {
+    GatewayListingError,
+    type GatewayModelIds,
+    isListedModelId,
+    listGatewayModels,
+    narrowToListedModels,
+} from "./GatewayModelDiscovery";
+import {findSupportedEffort} from "./ModelConfigOption";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 
 /**
@@ -444,41 +452,64 @@ export class CodexAcpClient {
      * method and the ACP `providers/set` method. Throws `invalid_params` for an
      * unsupported protocol or a malformed base URL.
      */
-    private applyGatewayConfig(params: {
-        baseUrl: string;
-        headers?: Record<string, string> | undefined;
-        providerName?: string | undefined;
-        apiType: acp.LlmProtocol;
-    }, source: GatewayConfigSource): void {
-        const apiType = params.apiType;
-        const wireApi = SUPPORTED_GATEWAY_PROTOCOLS[apiType];
-        if (!wireApi) {
+    private applyGatewayConfig(params: GatewayRoutingParams, source: GatewayConfigSource): void {
+        const gatewayConfig = buildGatewayConfig(params);
+        this.gatewayConfigSource = source;
+        this.gatewayConfig = gatewayConfig;
+    }
+
+    /**
+     * `providers/set`: the full configuration for the custom gateway provider, which {@link setProvider}
+     * applies. Rejects unknown provider ids and malformed base URLs with `invalid_params`.
+     *
+     * Lists the models of the gateway, which narrow the models reported to the client;
+     * see {@link fetchAvailableModels}. A failed listing fails the call with `internal_error`.
+     * The same configuration again reuses the previous listing.
+     */
+    async prepareProvider(request: acp.SetProviderRequest): Promise<GatewayConfig> {
+        if (request.providerId !== OPENAI_PROVIDER_ID) {
             throw RequestError.invalidParams(
-                {apiType},
-                `Unsupported provider apiType "${apiType}"; supported: ${Object.keys(SUPPORTED_GATEWAY_PROTOCOLS).join(", ")}`,
+                {providerId: request.providerId},
+                `Unknown providerId "${request.providerId}"; only "${OPENAI_PROVIDER_ID}" is configurable`,
             );
         }
-        if (typeof params.baseUrl !== "string" || params.baseUrl.trim().length === 0) {
-            throw RequestError.invalidParams(undefined, "baseUrl must be a non-empty string");
+        const gatewayConfig = buildGatewayConfig({
+            apiType: request.apiType,
+            baseUrl: request.baseUrl,
+            headers: request.headers,
+        });
+        if (!URL.canParse(request.baseUrl) || !["http:", "https:"].includes(new URL(request.baseUrl).protocol)) {
+            throw RequestError.invalidParams({baseUrl: request.baseUrl}, "baseUrl must be an http(s) URL");
         }
-        const providerName = typeof params.providerName === "string" && params.providerName.trim().length > 0
-            ? params.providerName
-            : "User-provided gateway";
-        const headers: Record<string, string> = {
-            "X-Client-Feature-ID": "codex",
-            ...params.headers,
-        };
+        // Reuse needs the very same headers, so a rotated token lists again, and a failed listing then fails that
+        // `providers/set`. Deliberate: AIR keeps its proxy key for the IDE's lifetime and does not rotate it.
+        const previous = this.gatewayConfigSource === "acpProviders" ? this.gatewayConfig : null;
+        try {
+            gatewayConfig.listedModels = previous?.listedModels && sameGatewayRouting(previous, gatewayConfig)
+                ? previous.listedModels
+                : await listGatewayModels(gatewayConfig.config.base_url, gatewayConfig.config.http_headers);
+        } catch (error) {
+            if (error instanceof GatewayListingError) {
+                throw RequestError.internalError(
+                    {providerId: request.providerId, apiType: request.apiType, baseUrl: request.baseUrl},
+                    `Model discovery for provider "${OPENAI_PROVIDER_ID}" failed: ${error.message}`,
+                );
+            }
+            throw error;
+        }
+        return gatewayConfig;
+    }
 
-        this.gatewayConfigSource = source;
-        this.gatewayConfig = {
-            modelProvider: CUSTOM_GATEWAY_PROVIDER_ID,
-            config: {
-                name: providerName,
-                base_url: params.baseUrl,
-                http_headers: headers,
-                wire_api: wireApi,
-            },
-        };
+    /** `providers/set`: replaces the routing with a configuration from {@link prepareProvider}. */
+    setProvider(gatewayConfig: GatewayConfig): void {
+        this.gatewayConfigSource = "acpProviders";
+        this.gatewayConfig = gatewayConfig;
+        logger.log("providers/set applied", {
+            providerId: OPENAI_PROVIDER_ID,
+            apiType: gatewayApiTypeFromConfig(gatewayConfig),
+            baseUrl: gatewayConfig.config.base_url,
+            headerNames: Object.keys(gatewayConfig.config.http_headers),
+        });
     }
 
     /**
@@ -523,30 +554,6 @@ export class CodexAcpClient {
             }
         }
         return {apiType: "openai", baseUrl: DEFAULT_OPENAI_BASE_URL};
-    }
-
-    /**
-     * `providers/set`: replaces the full configuration for the custom gateway
-     * provider. Rejects unknown provider ids with `invalid_params`.
-     */
-    setProvider(request: acp.SetProviderRequest): void {
-        if (request.providerId !== OPENAI_PROVIDER_ID) {
-            throw RequestError.invalidParams(
-                {providerId: request.providerId},
-                `Unknown providerId "${request.providerId}"; only "${OPENAI_PROVIDER_ID}" is configurable`,
-            );
-        }
-        this.applyGatewayConfig({
-            apiType: request.apiType,
-            baseUrl: request.baseUrl,
-            headers: request.headers,
-        }, "acpProviders");
-        logger.log("providers/set applied", {
-            providerId: request.providerId,
-            apiType: request.apiType,
-            baseUrl: request.baseUrl,
-            headerNames: Object.keys(request.headers ?? {}),
-        });
     }
 
     /**
@@ -812,7 +819,7 @@ export class CodexAcpClient {
         });
 
         const codexModels = await this.fetchAvailableModels();
-        if (codexModels.length === 0) {
+        if (codexModels.length === 0 && !this.isNarrowedByGateway()) {
             throw new Error("Codex did not return any models");
         }
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
@@ -1072,6 +1079,22 @@ export class CodexAcpClient {
         const selectedModel = availableModels.find(m => m.id === modelId);
         if (selectedModel) {
             return ModelId.create(selectedModel.id, reasoningEffort ?? selectedModel.defaultReasoningEffort);
+        }
+
+        // The gateway narrowed the models, so a model it does not list must not be used. A model it lists but Codex
+        // does not know is kept, as below. When it lists none, no model is available and the thread keeps its own;
+        // the gateway then refuses the requests.
+        const narrowedDefault = availableModels.find(m => m.isDefault) ?? availableModels[0];
+        const listed = this.getGatewayListedModels();
+        if (modelId && narrowedDefault && listed !== null && !isListedModelId(modelId, listed)) {
+            const defaultModel = narrowedDefault;
+            logger.log("The gateway does not list the model of the thread; using the default model", {
+                model: modelId,
+                defaultModel: defaultModel.id,
+            });
+            const effort = findSupportedEffort(defaultModel.supportedReasoningEfforts, reasoningEffort ?? undefined)
+                ?? defaultModel.defaultReasoningEffort;
+            return ModelId.create(defaultModel.id, effort);
         }
 
         // The configured model is not in Codex's advertised catalog. This is
@@ -1342,6 +1365,7 @@ export class CodexAcpClient {
         });
     }
 
+    /** The Codex models, narrowed to the ones that the `providers/set` gateway lists. */
     async fetchAvailableModels(): Promise<Model[]> {
         const models: Model[] = [];
         let cursor: string | null = null;
@@ -1352,7 +1376,17 @@ export class CodexAcpClient {
             cursor = response.nextCursor;
         } while (cursor);
 
-        return models;
+        const listed = this.getGatewayListedModels();
+        return listed === null ? models : narrowToListedModels(models, listed);
+    }
+
+    private getGatewayListedModels(): GatewayModelIds | null {
+        return this.gatewayConfigSource === "acpProviders" ? this.gatewayConfig?.listedModels ?? null : null;
+    }
+
+    /** Whether {@link fetchAvailableModels} narrows the models to a `providers/set` gateway's listing. */
+    private isNarrowedByGateway(): boolean {
+        return this.getGatewayListedModels() !== null;
     }
 
 }
@@ -1437,14 +1471,64 @@ type WireApi = "responses";
 
 type GatewayConfigSource = "authentication" | "acpProviders";
 
-interface GatewayConfig {
+export interface GatewayConfig {
     modelProvider: string;
     config: {
         name: string,
         base_url: string,
         http_headers: Record<string, string>,
         wire_api: WireApi
+    };
+    /** The models a `providers/set` gateway lists; `null` when it was not listed or the listing failed. */
+    listedModels: GatewayModelIds | null;
+}
+
+type GatewayRoutingParams = {
+    baseUrl: string;
+    headers?: Record<string, string> | undefined;
+    providerName?: string | undefined;
+    apiType: acp.LlmProtocol;
+};
+
+/** The custom gateway routing for `params`, not yet listed. Throws `invalid_params` like {@link CodexAcpClient.setProvider}. */
+function buildGatewayConfig(params: GatewayRoutingParams): GatewayConfig {
+    const apiType = params.apiType;
+    const wireApi = SUPPORTED_GATEWAY_PROTOCOLS[apiType];
+    if (!wireApi) {
+        throw RequestError.invalidParams(
+            {apiType},
+            `Unsupported provider apiType "${apiType}"; supported: ${Object.keys(SUPPORTED_GATEWAY_PROTOCOLS).join(", ")}`,
+        );
     }
+    if (typeof params.baseUrl !== "string" || params.baseUrl.trim().length === 0) {
+        throw RequestError.invalidParams(undefined, "baseUrl must be a non-empty string");
+    }
+    const providerName = typeof params.providerName === "string" && params.providerName.trim().length > 0
+        ? params.providerName
+        : "User-provided gateway";
+    const headers: Record<string, string> = {
+        "X-Client-Feature-ID": "codex",
+        ...params.headers,
+    };
+    return {
+        modelProvider: CUSTOM_GATEWAY_PROVIDER_ID,
+        config: {
+            name: providerName,
+            base_url: params.baseUrl,
+            http_headers: headers,
+            wire_api: wireApi,
+        },
+        listedModels: null,
+    };
+}
+
+function sameGatewayRouting(left: GatewayConfig, right: GatewayConfig): boolean {
+    const leftHeaders = Object.entries(left.config.http_headers);
+    const rightHeaders = right.config.http_headers;
+    return left.config.base_url === right.config.base_url
+        && left.config.wire_api === right.config.wire_api
+        && leftHeaders.length === Object.keys(rightHeaders).length
+        && leftHeaders.every(([name, value]) => rightHeaders[name] === value);
 }
 
 function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[] | undefined {
