@@ -10,6 +10,7 @@
     "rawInputRendering",
     "planContentDelta",
     "codexHooks",
+    "sessionRewind",
     "sessionIndex",
     "sessionArchive",
     "sessionRename",
@@ -25,7 +26,8 @@
     "recommendedValue",
     "rawInputRendering",
     "planContentDelta",
-    "codexHooks"
+    "codexHooks",
+    "sessionRewind"
   ],
   "plain": null
 }

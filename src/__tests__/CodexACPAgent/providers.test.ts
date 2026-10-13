@@ -2,6 +2,15 @@ import {describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk";
 import {createCodexMockTestFixture, createTestSessionState} from "../acp-test-utils";
 import {CodexAcpClient, CUSTOM_GATEWAY_PROVIDER_ID, OPENAI_PROVIDER_ID} from "../../CodexAcpClient";
+import {SESSION_REWIND_METHOD} from "../../SessionRewind";
+
+function deferred<T>(): {promise: Promise<T>, resolve: (value: T) => void} {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>(resolvePromise => {
+        resolve = resolvePromise;
+    });
+    return {promise, resolve};
+}
 
 async function expectInvalidParams(fn: () => unknown): Promise<void> {
     const caught = await Promise.resolve().then(fn).catch((err: unknown) => err);
@@ -302,6 +311,61 @@ describe("Configurable LLM providers (providers/*)", () => {
             apiType: "openai",
             baseUrl: "https://recovered-gateway.example/v1",
         });
+    });
+
+    it("waits for an in-flight provider update before rewinding", async () => {
+        const replacement = createCodexMockTestFixture().getCodexAcpClient();
+        const resumeStarted = deferred<void>();
+        const resume = deferred<never>();
+        vi.spyOn(replacement, "initialize").mockResolvedValue();
+        vi.spyOn(replacement, "resumeSession").mockImplementation(async () => {
+            resumeStarted.resolve();
+            return await resume.promise;
+        });
+        const replacementRewind = vi.spyOn(replacement, "rewindSession").mockResolvedValue({rewound: true});
+        const fixture = createCodexMockTestFixture(vi.fn().mockResolvedValue(replacement));
+        const agent = fixture.getCodexAcpAgent();
+        await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION});
+        const sessions = (agent as unknown as {sessions: Map<string, ReturnType<typeof createTestSessionState>>}).sessions;
+        sessions.set("thread-1", createTestSessionState({sessionId: "thread-1", cwd: "/workspace"}));
+
+        const providerUpdate = agent.setProvider({
+            providerId: OPENAI_PROVIDER_ID,
+            apiType: "openai",
+            baseUrl: "https://gateway.example/v1",
+        });
+        await resumeStarted.promise;
+        const rewind = agent.extMethod(SESSION_REWIND_METHOD, {
+            sessionId: "thread-1",
+            beforeMessage: {
+                messageId: "user-1",
+                messageFingerprint: `sha256:${"0".repeat(64)}`,
+                messageOccurrence: 1,
+            },
+        });
+
+        await Promise.resolve();
+        expect(replacementRewind).not.toHaveBeenCalled();
+
+        resume.resolve({} as never);
+        await providerUpdate;
+        await expect(rewind).resolves.toEqual({rewound: true});
+        expect(replacementRewind).toHaveBeenCalledOnce();
+    });
+
+    it("rejects rewind for a thread that is not a loaded ACP session", async () => {
+        const fixture = createCodexMockTestFixture();
+        const rewind = vi.spyOn(fixture.getCodexAcpClient(), "rewindSession");
+
+        await expect(fixture.getCodexAcpAgent().extMethod(SESSION_REWIND_METHOD, {
+            sessionId: "persisted-but-not-loaded",
+            beforeMessage: {
+                messageId: "user-1",
+                messageFingerprint: `sha256:${"0".repeat(64)}`,
+                messageOccurrence: 1,
+            },
+        })).rejects.toThrow("Unknown session: persisted-but-not-loaded");
+        expect(rewind).not.toHaveBeenCalled();
     });
 
     it("shares state with the legacy gateway auth method", async () => {

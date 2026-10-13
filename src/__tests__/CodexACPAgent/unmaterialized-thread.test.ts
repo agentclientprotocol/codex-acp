@@ -163,6 +163,7 @@ describe("session/load and a title generation left over from an earlier turn", (
         });
         agent.getSessionState(threadId).titleGen = {
             waitForIdle: () => titleGeneration,
+            retire: () => titleGeneration,
             markExistingTitle: () => {},
         } as unknown as NonNullable<ReturnType<typeof agent.getSessionState>["titleGen"]>;
 

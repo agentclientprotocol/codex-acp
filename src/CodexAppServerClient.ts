@@ -1,3 +1,7 @@
+import type {SessionQueueAction, SessionQueueNative} from "./SessionQueue";
+import type {NativeThreadSearchParams, NativeThreadSearchResponse} from "./SessionDiscovery";
+import type {ThreadAttachmentListParams, ThreadAttachmentListResponse, ThreadAttachmentAddParams, ThreadAttachmentAddResponse, ThreadAttachmentRemoveParams, ThreadAttachmentRemoveResponse} from "./app-server/v2";
+import type {PluginInstalledParams, PluginInstalledResponse, PluginReconcileParams, PluginReconcileResponse} from "./app-server/v2";
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import {AppServerConnectionLostError, ConnectionLoss} from "./app-server-recovery/ConnectionLoss";
 import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
@@ -73,6 +77,8 @@ import type {
     Turn,
     ThreadResumeParams,
     ThreadResumeResponse,
+    ThreadRevertParams,
+    ThreadRevertResponse,
     ThreadSettings,
     ThreadStartParams,
     ThreadStartResponse,
@@ -616,6 +622,14 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/fork", params: params });
     }
 
+    async threadRevert(params: ThreadRevertParams): Promise<ThreadRevertResponse> {
+        return await this.sendRequest({method: "thread/revert", params});
+    }
+
+    async threadRollback(params: ThreadRollbackParams): Promise<ThreadRollbackResponse> {
+        return await this.sendRequest({method: "thread/rollback", params});
+    }
+
     getThreadSettings(threadId: string): ThreadSettings | undefined {
         return this.threadSettings.get(threadId);
     }
@@ -730,6 +744,26 @@ export class CodexAppServerClient {
         }
     }
 
+    async threadSearch(params: NativeThreadSearchParams): Promise<NativeThreadSearchResponse> {
+        return this.connection.sendRequest<NativeThreadSearchResponse>("thread/search", {...params, sourceKinds: ["appServer", "cli", "vscode"]});
+    }
+    async threadAttachmentList(params: ThreadAttachmentListParams): Promise<ThreadAttachmentListResponse> {
+        return this.sendRequest({method: "thread/attachment/list", params});
+    }
+    async threadAttachmentAdd(params: ThreadAttachmentAddParams): Promise<ThreadAttachmentAddResponse> {
+        return this.sendRequest({method: "thread/attachment/add", params});
+    }
+    async threadAttachmentRemove(params: ThreadAttachmentRemoveParams): Promise<ThreadAttachmentRemoveResponse> {
+        return this.sendRequest({method: "thread/attachment/remove", params});
+    }
+
+    async pluginInstalled(params: PluginInstalledParams): Promise<PluginInstalledResponse> {
+        return this.sendRequest({method: "plugin/installed", params});
+    }
+    async pluginReconcile(params: PluginReconcileParams): Promise<PluginReconcileResponse> {
+        return this.sendRequest({method: "plugin/reconcile", params});
+    }
+
     async threadArchive(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
         return await this.sendRequest({ method: "thread/archive", params: params });
     }
@@ -740,6 +774,26 @@ export class CodexAppServerClient {
 
     async threadDelete(params: ThreadDeleteParams): Promise<ThreadDeleteResponse> {
         return await this.sendRequest({ method: "thread/delete", params: params });
+    }
+
+    /** Invalid parameters only: proves method registration without a valid mutation target. */
+    async probeQueueAction(action: SessionQueueAction): Promise<boolean> {
+        try { await this.connection.sendRequest(`thread/queue/${action}`, {}); return false; }
+        catch (error) {
+            return typeof error === "object" && error !== null && "code" in error && error.code === -32600
+                && "message" in error && error.message === "Invalid request: missing field `threadId`";
+        }
+    }
+
+    queueNative(): SessionQueueNative {
+        return {
+            list: params => this.connection.sendRequest("thread/queue/list", params),
+            add: params => this.connection.sendRequest("thread/queue/add", params),
+            update: params => this.connection.sendRequest("thread/queue/update", params),
+            delete: params => this.connection.sendRequest("thread/queue/delete", params),
+            reorder: params => this.connection.sendRequest("thread/queue/reorder", params),
+            start: params => this.connection.sendRequest("thread/queue/start", params),
+        };
     }
 
     async threadUnsubscribe(params: ThreadUnsubscribeParams): Promise<ThreadUnsubscribeResponse> {
@@ -1233,7 +1287,11 @@ export type CompactionCompletedNotification =
     | { method: "thread/compacted", params: Extract<ServerNotification, { method: "thread/compacted" }>["params"] }
     | { method: "item/completed", params: ItemCompletedNotification & { item: Extract<ItemCompletedNotification["item"], { type: "contextCompaction" }> } };
 
+// Compatibility for older CODEX_PATH binaries only. Current generated API removed rollback.
+type ThreadRollbackParams = {threadId: string; numTurns: number};
+type ThreadRollbackResponse = {thread: ThreadReadResponse["thread"]};
 type CodexRequest = DistributiveOmit<ClientRequest, "id"> | ThreadBackgroundTerminalsRequest
+    | {method: "thread/rollback"; params: ThreadRollbackParams};
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>

@@ -19,7 +19,7 @@ export class FuzzySearchReporter {
             report: started ? "start" : "update",
             title: searchTitle(event.query, null),
             status: "in_progress",
-            locations: event.files.map(file => path.isAbsolute(file.path) ? file.path : path.join(file.root, file.path)),
+            locations: event.files.map(file => path.isAbsolute(file.path) ? file.path : (file.root.startsWith("/") ? path.posix : path).join(file.root, file.path)),
         };
         return started ? {...facts, kind: "search", input: {query: event.query}} : facts;
     }
