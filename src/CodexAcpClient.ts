@@ -34,6 +34,8 @@ import {listedSessionTitle} from "./SessionTitle";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
+    ApprovalsReviewer,
+    AskForApproval,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
     ListMcpServerStatusParams,
@@ -87,6 +89,9 @@ type ResumedThread = {
     materialized: boolean;
     /** The mode that the resume response reports. Null when the thread has no rollout yet. */
     collaborationMode: ModeKind | null;
+    approvalPolicy?: AskForApproval;
+    approvalsReviewer?: ApprovalsReviewer;
+    sandbox?: SandboxPolicy;
 };
 
 /**
@@ -642,6 +647,9 @@ export class CodexAcpClient {
                 itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
                 materialized: true,
                 collaborationMode: response.collaborationMode?.mode ?? null,
+                ...(response.approvalPolicy !== undefined ? {approvalPolicy: response.approvalPolicy} : {}),
+                ...(response.approvalsReviewer !== undefined ? {approvalsReviewer: response.approvalsReviewer} : {}),
+                ...(response.sandbox !== undefined ? {sandbox: response.sandbox} : {}),
             };
         } catch (err) {
             if (isThreadActiveWriterError(err)) throw threadActiveWriterRequestError(params.threadId, err);
@@ -696,6 +704,9 @@ export class CodexAcpClient {
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
             skippedMcpServers: sessionConfig.skippedMcpServers,
+            ...(response.approvalPolicy !== undefined ? {approvalPolicy: response.approvalPolicy} : {}),
+            ...(response.approvalsReviewer !== undefined ? {approvalsReviewer: response.approvalsReviewer} : {}),
+            ...(response.sandbox !== undefined ? {sandboxPolicy: response.sandbox} : {}),
         }
     }
 
@@ -759,6 +770,9 @@ export class CodexAcpClient {
             history,
             additionalDirectories,
             skippedMcpServers: sessionConfig.skippedMcpServers,
+            ...(response.approvalPolicy !== undefined ? {approvalPolicy: response.approvalPolicy} : {}),
+            ...(response.approvalsReviewer !== undefined ? {approvalsReviewer: response.approvalsReviewer} : {}),
+            ...(response.sandbox !== undefined ? {sandboxPolicy: response.sandbox} : {}),
         };
     }
 
@@ -815,6 +829,9 @@ export class CodexAcpClient {
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
             skippedMcpServers: sessionConfig.skippedMcpServers,
+            ...(response.approvalPolicy !== undefined ? {approvalPolicy: response.approvalPolicy} : {}),
+            ...(response.approvalsReviewer !== undefined ? {approvalsReviewer: response.approvalsReviewer} : {}),
+            ...(response.sandbox !== undefined ? {sandboxPolicy: response.sandbox} : {}),
         };
     }
 
@@ -1151,7 +1168,7 @@ export class CodexAcpClient {
 
     async sendPrompt(
         request: acp.PromptRequest,
-        agentMode: AgentMode,
+        turnPermissionSettings: {approvalPolicy: AskForApproval, approvalsReviewer: ApprovalsReviewer, sandboxPolicy: SandboxPolicy},
         modelId: ModelId,
         serviceTier: ServiceTier | null,
         disableSummary: boolean,
@@ -1169,9 +1186,9 @@ export class CodexAcpClient {
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
-            approvalPolicy: agentMode.approvalPolicy,
-            approvalsReviewer: agentMode.approvalsReviewer,
-            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            approvalPolicy: turnPermissionSettings.approvalPolicy,
+            approvalsReviewer: turnPermissionSettings.approvalsReviewer,
+            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(turnPermissionSettings.sandboxPolicy, additionalDirectories),
             summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
