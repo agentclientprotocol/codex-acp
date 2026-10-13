@@ -29,6 +29,7 @@ import {
     isNoActiveTurnError,
     parseExpectedActiveTurnMismatch,
 } from "./CodexThreadErrors";
+import {requiresLogout} from "./CodexErrorExplanations";
 import {type CodexConnection} from "./CodexJsonRpcConnection";
 import {AppServerRecovery, recoveryLimitsFromEnv} from "./app-server-recovery/AppServerRecovery";
 import {
@@ -933,14 +934,10 @@ export class CodexAcpServer {
     }
 
     async handleError(e: Error){
-        if (e.message.includes("log out") || e.message.includes("cloud requirements")) {
+        if (requiresLogout(e)) {
             await this.runWithProcessCheck(() => this.codexAcpClient.logout());
             await this.refreshAuthState(null);
             throw RequestError.internalError(`${(e.message)}\n\nYou have been logged out. Please try again.`);
-        }
-        const configPath = this.codexAcpClient.getHomePath() ?? "global";
-        if (e.message.includes("load config")) {
-            throw RequestError.internalError(`${e.message}\n\nCheck ${configPath} and project .codex directories, especially their config.toml files, or any CODEX_CONFIG override.`);
         }
     }
 

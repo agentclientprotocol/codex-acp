@@ -1,5 +1,6 @@
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import {AppServerConnectionLostError, ConnectionLoss} from "./app-server-recovery/ConnectionLoss";
+import {explainCodexError} from "./CodexErrorExplanations";
 import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
 import {McpStartupTracker} from "./mcp/McpStartupTracker";
 import type {
@@ -185,6 +186,8 @@ export class CodexAppServerClient {
     private readonly leakedReviewErrors = new Map<string, {error: TurnError, failedTurnIds: Set<string>}>();
     /** Ends the notification waits below when the connection is gone, see {@link waitWhileConnected}. */
     readonly connectionLoss: ConnectionLoss;
+    /** The `$CODEX_HOME` of the app-server, for the error explanations. */
+    private codexHome: string | null = null;
 
     constructor(connection: MessageConnection) {
         this.connection = connection;
@@ -304,7 +307,9 @@ export class CodexAppServerClient {
     }
 
     async initialize(params: InitializeParams): Promise<InitializeResponse> {
-        return await this.sendRequest({ method: "initialize", params: params });
+        const response: InitializeResponse = await this.sendRequest({ method: "initialize", params: params });
+        this.codexHome = response?.codexHome ?? null;
+        return response;
     }
 
     async turnStart(params: TurnStartParams): Promise<TurnStartResponse> {
@@ -1281,15 +1286,19 @@ export class CodexAppServerClient {
         }
         const loadedThreadId = threadLoadOf(request);
         let result: any;
-        if (loadedThreadId === null) {
-            if (request.params) {
-                result = await this.connection.sendRequest<R>(request.method, request.params)
+        try {
+            if (loadedThreadId === null) {
+                if (request.params) {
+                    result = await this.connection.sendRequest<R>(request.method, request.params)
+                }
+                else {
+                    result = await this.connection.sendRequest<R>(request.method);
+                }
+            } else {
+                result = await this.threadLoadGate(loadedThreadId, () => this.sendThreadLoad<R>(loadedThreadId, request));
             }
-            else {
-                result = await this.connection.sendRequest<R>(request.method);
-            }
-        } else {
-            result = await this.threadLoadGate(loadedThreadId, () => this.sendThreadLoad<R>(loadedThreadId, request));
+        } catch (err) {
+            throw err instanceof Error ? explainCodexError(err, {codexHome: this.codexHome}) : err;
         }
         for (const callback of this.codexEventHandlers) {
             callback({ eventType: "response", ...result});
