@@ -15,6 +15,7 @@ import {
     SESSION_RENAME_METHOD,
     SESSION_UNARCHIVE_METHOD,
 } from '../../SessionIndex';
+import {MAX_SESSION_TITLE_LENGTH} from '../../SessionTitle';
 import {createTestModel} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
 import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
@@ -56,7 +57,10 @@ function createThread(overrides?: Partial<Thread>): Thread {
     };
 }
 
-function codexResponse(method: string): unknown {
+/** Replaces the canned `thread/list` rows or `thread/read` thread. */
+type CodexOverrides = {threads?: Thread[], threadRead?: Thread};
+
+function codexResponse(method: string, overrides: CodexOverrides): unknown {
     switch (method) {
         case "thread/start":
             return {
@@ -67,13 +71,13 @@ function codexResponse(method: string): unknown {
                 serviceTier: null,
             };
         case "thread/read":
-            return {thread: createThread({
+            return {thread: overrides.threadRead ?? createThread({
                 status: {type: "active", activeFlags: []},
                 name: "Renamed",
                 path: "/codex-home/sessions/rollout.jsonl",
             })};
         case "thread/list":
-            return {data: [createThread()], nextCursor: null, backwardsCursor: null};
+            return {data: overrides.threads ?? [createThread()], nextCursor: null, backwardsCursor: null};
         case "model/list":
             return {data: [createTestModel({id: "gpt-5"})], nextCursor: null};
         case "skills/list":
@@ -95,14 +99,14 @@ const recordedCodexMethods = new Set([
     "thread/unarchive",
 ]);
 
-async function connectV2Client(airCapabilities: string[]) {
+async function connectV2Client(airCapabilities: string[], overrides: CodexOverrides = {}) {
     const mocks = createMockConnections();
     const codexRequests: Array<{method: string, params: unknown}> = [];
     mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params?: unknown) => {
         if (recordedCodexMethods.has(method)) {
             codexRequests.push({method, params});
         }
-        return codexResponse(method);
+        return codexResponse(method, overrides);
     });
     const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
@@ -205,5 +209,42 @@ describe('AIR sessionIndex over ACP v2', () => {
             listChanges: listChanges.map((change: any) => ({...change, subscriptionId: "<subscriptionId>"})),
             unsubscribe,
         })).toMatchFileSnapshot('data/session-index-v2-subscription.json');
+    });
+    // #606: rows are titled by the first non-blank of name, title, summary and preview, without a cut.
+    it.each([[["sessionIndex"]], [[]]])('titles session/list rows by name, title, summary, then preview (AIR capabilities: %j)', async (airCapabilities) => {
+        const longPreview = `Investigate ${"x".repeat(MAX_SESSION_TITLE_LENGTH)}\n end`;
+        const {connection} = await connectV2Client(airCapabilities, {threads: [
+            createThread({id: "named", name: " Named\n thread ", recencyAt: 50}),
+            createThread({id: "blank-name", name: " ", preview: longPreview, recencyAt: 40}),
+            {...createThread({id: "summarized", name: null, recencyAt: 30}), title: null, summary: "Summary"} as Thread,
+            createThread({id: "untitled", name: null, preview: "", recencyAt: 20}),
+        ]});
+        closeClient = () => connection.close();
+
+        const response = await connection.agent.request(acpV2.methods.agent.session.list, {cwd});
+
+        expect(response.sessions.map(({sessionId, title}) => [sessionId, title])).toEqual([
+            ["named", "Named thread"],
+            ["blank-name", `Investigate ${"x".repeat(MAX_SESSION_TITLE_LENGTH)} end`],
+            ["summarized", "Summary"],
+            ["untitled", null],
+        ]);
+    });
+
+    it('sends the uncut title of a changed row to a subscription', async () => {
+        const name = `Renamed ${"y".repeat(MAX_SESSION_TITLE_LENGTH)}`;
+        const {connection, listChanges, sendServerNotification} = await connectV2Client(["sessionIndex"], {
+            threadRead: createThread({name, path: "/codex-home/sessions/rollout.jsonl"}),
+        });
+        closeClient = () => connection.close();
+
+        const {subscriptionId} = await connection.agent.request(SESSION_LIST_SUBSCRIBE_METHOD, {cwd}) as {subscriptionId: string};
+        sendServerNotification({method: "thread/name/updated", params: {threadId: sessionId, threadName: name}});
+
+        await vi.waitFor(() => expect(listChanges).toEqual([{
+            subscriptionId,
+            sessions: [expect.objectContaining({sessionId, title: name})],
+            removed: [],
+        }]));
     });
 });
