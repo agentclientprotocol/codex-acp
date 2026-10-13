@@ -18,6 +18,9 @@ import {
 
 const FIRST_FILE_NAME = "approval-first.txt";
 const SECOND_FILE_NAME = "approval-second.txt";
+// Without this hint the model may run the command sandboxed, hit the read-only
+// filesystem and end the turn without ever requesting approval.
+const ESCALATE = "It writes outside the sandbox, so request escalated permissions on the first attempt.";
 
 describeE2E("E2E shell approval tests", () => {
     let fixture: SpawnedAgentFixture;
@@ -42,12 +45,9 @@ describeE2E("E2E shell approval tests", () => {
     async function promptShellCommandTwice(
         expectedStopReasons: ["end_turn" | "cancelled", "end_turn" | "cancelled"],
     ): Promise<void> {
-        // Without the escalation hint the model may run the command sandboxed, hit the
-        // read-only filesystem and end the turn without ever requesting approval.
-        const escalate = "It writes outside the sandbox, so request escalated permissions on the first attempt.";
         const prompts = [
-            `Use your shell tool to run exactly \`${command}\`. ${escalate}`,
-            `Use your shell tool to run exactly the same command again: \`${command}\`. ${escalate}`,
+            `Use your shell tool to run exactly \`${command}\`. ${ESCALATE}`,
+            `Use your shell tool to run exactly the same command again: \`${command}\`. ${ESCALATE}`,
         ];
         for (const [index, text] of prompts.entries()) {
             const response = await fixture.connection.prompt({
@@ -108,7 +108,7 @@ describeE2E("E2E read-only mode shell permission tests", () => {
 
     it("requests permission for a command that writes inside the workspace", async () => {
         fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowOnce));
-        const sessionId = await writeToFile(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()));
+        const sessionId = await writeToFile(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()), ESCALATE);
 
         expect(fixture.readPermissionRequests(sessionId, "execute").length).toBeGreaterThanOrEqual(1);
         expect(fixture.readPermissionRequests(sessionId, "edit")).toHaveLength(0);
@@ -144,7 +144,7 @@ describeE2E("E2E read-only mode shell permission tests", () => {
     it("requests permission for a command that writes outside the workspace", async () => {
         const dir = createDirOutsideWorkspace(fixture);
         fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowOnce));
-        const sessionId = await writeToFile(fixture, path.join(dir, generateFileNameForTest()));
+        const sessionId = await writeToFile(fixture, path.join(dir, generateFileNameForTest()), ESCALATE);
         expectPermissionRequests(fixture, sessionId, {execute: 1, edit: 0});
     });
 });
@@ -219,6 +219,11 @@ describeE2E("E2E shell cancellation tests", () => {
             return parsed;
         }, {timeout: 10_000});
         expect(isProcessRunning(pid)).toBe(true);
+        // The process can start before Codex tracks it in the turn; an interrupt in that
+        // window leaves it running. A client only cancels what it has seen, so wait for it.
+        await vi.waitFor(() => {
+            expect(fixture?.readToolCalls(sessionId, "execute")).not.toHaveLength(0);
+        }, {timeout: 10_000});
         await fixture.connection.cancel({sessionId});
 
         expect((await promptResponse).stopReason).toBe("cancelled");
@@ -228,7 +233,7 @@ describeE2E("E2E shell cancellation tests", () => {
     });
 });
 
-async function writeToFile(fixture: SpawnedAgentFixture, filePath: string): Promise<string> {
+async function writeToFile(fixture: SpawnedAgentFixture, filePath: string, hint?: string): Promise<string> {
     const content = "hello from e2e";
     const command = `printf '${content}' > '${filePath}'`;
     const sessionId = (await fixture.createSession()).sessionId;
@@ -236,7 +241,7 @@ async function writeToFile(fixture: SpawnedAgentFixture, filePath: string): Prom
         sessionId,
         prompt: [{
             type: "text",
-            text: `Use your shell tool to run exactly \`${command}\`. Do not modify files any other way.`,
+            text: `Use your shell tool to run exactly \`${command}\`. Do not modify files any other way.${hint ? ` ${hint}` : ""}`,
         }],
     });
     expectEndTurn(response);
