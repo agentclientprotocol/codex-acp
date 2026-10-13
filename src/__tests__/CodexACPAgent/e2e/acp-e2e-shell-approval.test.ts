@@ -42,9 +42,12 @@ describeE2E("E2E shell approval tests", () => {
     async function promptShellCommandTwice(
         expectedStopReasons: ["end_turn" | "cancelled", "end_turn" | "cancelled"],
     ): Promise<void> {
+        // Without the escalation hint the model may run the command sandboxed, hit the
+        // read-only filesystem and end the turn without ever requesting approval.
+        const escalate = "It writes outside the sandbox, so request escalated permissions on the first attempt.";
         const prompts = [
-            `Use your shell tool to run exactly \`${command}\`.`,
-            `Use your shell tool to run exactly the same command again: \`${command}\`.`,
+            `Use your shell tool to run exactly \`${command}\`. ${escalate}`,
+            `Use your shell tool to run exactly the same command again: \`${command}\`. ${escalate}`,
         ];
         for (const [index, text] of prompts.entries()) {
             const response = await fixture.connection.prompt({
