@@ -94,6 +94,24 @@ function listChanges(fixture: CodexMockTestFixture): any[] {
         .map(event => event.args[1]);
 }
 
+/** The Git administrative files of a repository at `<root>/repo` and its linked worktrees at `<root>/<name>`. */
+function createGitLayout(root: string, worktreeNames: string[]): {repo: string, worktrees: string[]} {
+    const repo = path.join(root, "repo");
+    fs.mkdirSync(path.join(repo, ".git", "worktrees"), {recursive: true});
+    fs.writeFileSync(path.join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+    const worktrees = worktreeNames.map(name => {
+        const worktree = path.join(root, name);
+        const adminDir = path.join(repo, ".git", "worktrees", name);
+        fs.mkdirSync(adminDir);
+        fs.mkdirSync(worktree);
+        fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${adminDir}\n`);
+        fs.writeFileSync(path.join(adminDir, "commondir"), "../..\n");
+        fs.writeFileSync(path.join(adminDir, "gitdir"), `${path.join(worktree, ".git")}\n`);
+        return worktree;
+    });
+    return {repo, worktrees};
+}
+
 afterEach(() => {
     vi.useRealTimers();
 });
@@ -188,6 +206,39 @@ describe("session/list", () => {
 
             expect(threadList.mock.calls.map(call => call[0].cwd)).toEqual([[repo, worktree], repo, repo]);
             expect(response.sessions[0]?.cwd).toBe(worktree);
+        } finally {
+            fs.rmSync(root, {recursive: true, force: true});
+        }
+    });
+
+    it("marks the rows of threads in a worktree that Codex made", async () => {
+        const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-session-index-")));
+        try {
+            const {repo, worktrees} = createGitLayout(root, ["codex", "user"]);
+            fs.writeFileSync(
+                path.join(repo, ".git", "worktrees", "codex", "codex-thread.json"),
+                `${JSON.stringify({version: 1, ownerThreadId: "codex-root"})}\n`,
+            );
+            const [codexWorktree, userWorktree] = worktrees as [string, string];
+            fs.mkdirSync(path.join(codexWorktree, "pkg"));
+            const threads = [
+                createThread({id: "codex-root", cwd: codexWorktree}),
+                // Another thread in the same worktree: the file names only its first owner.
+                createThread({id: "codex-subdirectory", cwd: path.join(codexWorktree, "pkg")}),
+                createThread({id: "user-worktree", cwd: userWorktree}),
+                createThread({id: "main-checkout", cwd: repo}),
+            ];
+            const {agent} = await createAgent("sessionIndex", threads);
+
+            const response = await agent.listSessions({cwd: repo, _meta: {jetbrains: {air: {list: {includeWorktrees: true}}}}});
+
+            const rows = response.sessions.map(session => ({
+                sessionId: session.sessionId,
+                cwd: path.relative(root, session.cwd).split(path.sep).join("/"),
+                agentWorktree: (session._meta as any)?.jetbrains?.air?.agentWorktree ?? null,
+            }));
+            await expect(`${JSON.stringify(rows, null, 2)}\n`).toMatchFileSnapshot("data/session-index-agent-worktree-rows.json");
+            expect(response.sessions[0]!._meta).toMatchObject({jetbrains: {air: {version: 1, agentWorktree: true}}});
         } finally {
             fs.rmSync(root, {recursive: true, force: true});
         }
@@ -834,6 +885,31 @@ describe("_session/list/subscribe", () => {
             fs.rmSync(link);
         } finally {
             fs.rmSync(dir, {recursive: true, force: true});
+        }
+    });
+
+    it("marks a changed row of a thread in a worktree that Codex made", async () => {
+        const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-scope-")));
+        try {
+            const {repo, worktrees} = createGitLayout(root, ["codex"]);
+            fs.writeFileSync(path.join(repo, ".git", "worktrees", "codex", "codex-thread.json"), `${JSON.stringify({version: 1, ownerThreadId: threadId})}\n`);
+            vi.useFakeTimers();
+            const {fixture, agent, appServer} = await createAgent("sessionIndex");
+            const {subscriptionId} = await agent.sessionIndex.subscribeList({cwd: repo});
+            fixture.clearAcpConnectionDump();
+            vi.spyOn(appServer, "threadRead").mockResolvedValue({thread: createThread({cwd: worktrees[0]!, path: path.join(root, "rollout.jsonl")})});
+
+            fixture.sendServerNotification({method: "thread/name/updated", params: {threadId}} as never);
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(listChanges(fixture)).toEqual([{
+                subscriptionId,
+                sessions: [expect.objectContaining({cwd: worktrees[0], _meta: {jetbrains: {air: expect.objectContaining({agentWorktree: true})}}})],
+                removed: [],
+            }]);
+            agent.sessionIndex.dispose();
+        } finally {
+            fs.rmSync(root, {recursive: true, force: true});
         }
     });
 

@@ -145,9 +145,9 @@ The `initialize` response carries the agent side of the extension only when the 
 
 The agent list does not depend on the client capability list, except for `sessionIndex`.
 The agent lists `sessionIndex` only when the client declared it, because AIR builds without it use
-`session/list` and `session/delete` the old way. Exactly then it also lists `sessionArchive`, `sessionRename` and
-`sessionListSubscribe`, which name requests of the session index; the client does not declare those three, and
-declaring them without `sessionIndex` enables nothing.
+`session/list` and `session/delete` the old way. Exactly then it also lists `sessionArchive`, `sessionRename`,
+`sessionListSubscribe` and `sessionWorktrees`, which name requests and row fields of the session index; the client
+does not declare those four, and declaring them without `sessionIndex` enables nothing.
 An extension is active only when the client declared its capability.
 A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initialize` response.
 
@@ -166,13 +166,14 @@ A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initi
 | `codexHooks` | Lets AIR review and trust startup hooks before it opens a session. | [Hook trust](#hook-trust) |
 | `sessionIndex` | Serves `session/list` as the session index of AIR, as the ACP session list extensions RFD and RFD #2161 describe, adds rename and archive requests, and pushes the changed rows of a cwd to a subscription. | [Session index](#session-index) |
 
-Three agent capabilities come with `sessionIndex` and are listed exactly when it is. The client does not declare them:
+Four agent capabilities come with `sessionIndex` and are listed exactly when it is. The client does not declare them:
 
 | Agent capability | What it tells the client | Section |
 | --- | --- | --- |
 | `sessionArchive` | The agent serves `_session/archive` and `_session/unarchive`. | [Requests](#requests) |
 | `sessionRename` | The agent serves `_session/rename`. | [Requests](#requests) |
 | `sessionListSubscribe` | The agent serves `_session/list/subscribe` and `_session/list/unsubscribe` and sends `_session/list/changes`. | [Session list subscription](#session-list-subscription) |
+| `sessionWorktrees` | A list row of a thread in a linked Git worktree that Codex made carries `agentWorktree: true`. | [Agent worktrees](#agent-worktrees) |
 
 The goal extension has no client capability.
 The agent advertises the `goal` object, and the client uses the control method when it wants to.
@@ -1006,7 +1007,7 @@ This section covers only the AIR bridge.
 
 AIR uses `session/list` as its index of Codex threads when it declares `sessionIndex`.
 Everything in this section applies only to such a client. The `initialize` answer to it lists `sessionIndex`,
-`sessionArchive`, `sessionRename` and `sessionListSubscribe` in `_meta.jetbrains.air.capabilities`.
+`sessionArchive`, `sessionRename`, `sessionListSubscribe` and `sessionWorktrees` in `_meta.jetbrains.air.capabilities`.
 Another client, AIR included, keeps the old `session/list`, `session/delete` and `initialize` answers.
 ACP v1 and v2 connections get the same session index.
 
@@ -1091,8 +1092,30 @@ Every row carries these fields in `_meta.jetbrains.air`; all but `archived` only
 | `forkedFrom` | The thread it was forked from: `Thread.forkedFromId` when Codex gives it, which `thread/read` does and `thread/list` does not. Otherwise `payload.forked_from_id` of the first line of the rollout at `Thread.path`, `session_meta`, which the adapter reads in the background, once per thread, so a list never waits for it: the first row of a fork can come without `forkedFrom`. A subscription that runs when the read ends gets the row again; otherwise the next `session/list` has it. |
 | `state` | Only for a thread that this adapter has loaded, see [Row state](#row-state): `requires_action`, `reviewing`, `running`, `error` or `idle`. Omitted otherwise, never `unknown`. |
 | `lastTurnEndedAt` | ISO time of the last `turn/completed` that this adapter saw for a session of this connection. Forgotten when the thread is deleted. |
+| `agentWorktree` | `true` when the cwd of the thread lies in a linked Git worktree that Codex made, see [Agent worktrees](#agent-worktrees). Omitted otherwise, never `false`. |
 
 The adapter sends no `cost`: Codex reports none.
+
+#### Agent worktrees
+
+A row whose `Thread.cwd` is the root of a linked Git worktree, or a directory in it, carries
+`agentWorktree: true` when Codex made that worktree:
+
+```json
+{ "sessionId": "…", "cwd": "/repo-worktrees/fix-login/src", "title": "…", "updatedAt": "…", "_meta": { "jetbrains": { "air": { "version": 1, "archived": false, "agentWorktree": true } } } }
+```
+
+- Codex made a worktree when its own Git directory, `<git-common-dir>/worktrees/<name>/`, holds the file
+  `codex-thread.json`, which Codex writes there as `{"version":1,"ownerThreadId":"<thread id>"}`. AIR's native
+  Codex provider reads the same file.
+- Only the existence of the file counts, not `ownerThreadId`: several threads can work in one Codex worktree, and
+  each of their rows is marked.
+- The primary checkout is never marked, and neither is a worktree whose administrative link does not point back
+  to it, the same check as for `includeWorktrees`.
+- The adapter finds the worktree of each distinct cwd of a page from the Git administrative files and checks the
+  file with one `lstat`; it never runs Git. A missing cwd is not marked.
+- `cwd` stays `Thread.cwd`. The mark does not depend on `includeWorktrees`: a list of the worktree's own cwd marks
+  its rows too. `_session/list/changes` rows carry it, as they are the rows of the list.
 
 #### Row state
 
@@ -1174,8 +1197,8 @@ still re-reads the list now and then, and a lost change shows up there.
   show only with its next change.
 - `_session/list/changes` carries, for each thread in scope that appeared or changed, its whole row exactly as
   `session/list` answers it. A row counts as changed when `title`, `lastPromptAt`, `state`, `lastTurnEndedAt`,
-  `model`, `forkedFrom` or `archived` differs from the row the subscription last got. A change of `updatedAt` alone
-  sends nothing; the new `updatedAt` comes with the next change. Archive and unarchive are row changes.
+  `model`, `forkedFrom`, `archived` or `agentWorktree` differs from the row the subscription last got. A change of
+  `updatedAt` alone sends nothing; the new `updatedAt` comes with the next change. Archive and unarchive are row changes.
   `removed` lists the ids of deleted threads, to every subscription whose scope has the cwd of the thread. A
   deleted thread whose cwd the agent does not know is listed to every subscription; a client ignores an id it does
   not have. Both arrays are always present, and one
@@ -1234,6 +1257,7 @@ The names and the semantics are the RFDs'. The transport differs:
 | `SessionInfo._meta.jetbrains.air.lastPromptAt` = `Thread.recencyAt`, the order key | `SessionInfo.lastPromptAt`; the list order `lastPromptAt ?? updatedAt` |
 | `SessionInfo._meta.jetbrains.air.{model, forkedFrom, state, lastTurnEndedAt}` | the `SessionInfo` fields of the same names |
 | `SessionInfo._meta.jetbrains.air.archived` | `SessionInfo.archived` (#2161) |
+| agent capability `sessionWorktrees`; `SessionInfo._meta.jetbrains.air.agentWorktree` | none yet: a proposal for the session list extensions RFD ([#2323](https://github.com/agentclientprotocol/agent-client-protocol/pull/2323)) |
 | `session_info_update._meta.jetbrains.air.archived` | `SessionInfoUpdate.archived` (#2161) |
 | `_session/archive`, `_session/unarchive` | `session/archive`, `session/unarchive` (#2161) |
 | `_session/rename` | `session/set_title`, client-set titles (#1987) |

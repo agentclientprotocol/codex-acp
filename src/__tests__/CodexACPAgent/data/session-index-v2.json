@@ -9,7 +9,8 @@
     "sessionIndex",
     "sessionArchive",
     "sessionRename",
-    "sessionListSubscribe"
+    "sessionListSubscribe",
+    "sessionWorktrees"
   ],
   "list": {
     "sessions": [

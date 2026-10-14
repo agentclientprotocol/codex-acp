@@ -30,6 +30,8 @@ export const AIR_SESSION_LIST_SUBSCRIBE_KEY = "sessionListSubscribe";
 export const SESSION_LIST_SUBSCRIBE_METHOD = "_session/list/subscribe";
 export const SESSION_LIST_UNSUBSCRIBE_METHOD = "_session/list/unsubscribe";
 export const SESSION_LIST_CHANGES_METHOD = "_session/list/changes";
+/** Agent capability: list rows carry {@link AIR_AGENT_WORKTREE_KEY}. Advertised exactly with `sessionIndex`. */
+export const AIR_SESSION_WORKTREES_KEY = "sessionWorktrees";
 
 /** The `_meta.jetbrains.air` key of the list options in a `session/list` request. */
 export const AIR_SESSION_LIST_KEY = "list";
@@ -38,6 +40,8 @@ export const AIR_LAST_TURN_ENDED_AT_KEY = "lastTurnEndedAt";
 export const AIR_LAST_PROMPT_AT_KEY = "lastPromptAt";
 export const AIR_MODEL_KEY = "model";
 export const AIR_FORKED_FROM_KEY = "forkedFrom";
+/** The `_meta.jetbrains.air` key of a row whose cwd lies in a linked worktree that Codex made; omitted otherwise. */
+export const AIR_AGENT_WORKTREE_KEY = "agentWorktree";
 
 export const DEFAULT_SESSION_INDEX_LIMIT = 50;
 /** The largest page that the adapter asks Codex for. */
@@ -429,6 +433,7 @@ export function sessionIndexSessionInfo(
     thread: Thread,
     archived: boolean,
     activity: SessionActivity | null,
+    agentWorktree = false,
 ): acp.SessionInfo {
     const airFields: Record<string, unknown> = {[AIR_ARCHIVED_KEY]: archived};
     // Codex moves `recencyAt` when a turn starts and orders threads by it: the time of the last prompt.
@@ -438,6 +443,7 @@ export function sessionIndexSessionInfo(
     // `state` is omitted when unknown, never "unknown".
     if (activity?.state !== undefined) airFields[AIR_STATE_KEY] = activity.state;
     if (activity?.lastTurnEndedAt !== undefined) airFields[AIR_LAST_TURN_ENDED_AT_KEY] = activity.lastTurnEndedAt;
+    if (agentWorktree) airFields[AIR_AGENT_WORKTREE_KEY] = true;
     let meta: Record<string, unknown> | undefined;
     for (const [key, value] of Object.entries(airFields)) {
         meta = withAirMeta(meta, key, value);
@@ -567,6 +573,7 @@ export function sessionIndexRowSignature(row: acp.SessionInfo): string {
         air[AIR_MODEL_KEY] ?? null,
         air[AIR_FORKED_FROM_KEY] ?? null,
         air[AIR_ARCHIVED_KEY] ?? null,
+        air[AIR_AGENT_WORKTREE_KEY] ?? null,
     ]);
 }
 

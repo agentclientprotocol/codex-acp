@@ -2,7 +2,7 @@ import {afterEach, beforeEach, describe, expect, it} from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {linkedWorktreeCwds} from "../SessionIndexWorktrees";
+import {isCodexWorktreeCwd, linkedWorktreeCwds} from "../SessionIndexWorktrees";
 
 /**
  * Builds the Git administrative files of a repository with linked worktrees, the way
@@ -111,5 +111,67 @@ describe("linkedWorktreeCwds", () => {
         fs.symlinkSync(repo, link);
 
         expect(linkedWorktreeCwds(link)).toEqual([link, repo, worktrees[0]]);
+    });
+});
+
+describe("isCodexWorktreeCwd", () => {
+    let root: string;
+
+    beforeEach(() => {
+        root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-worktrees-")));
+    });
+
+    afterEach(() => {
+        fs.rmSync(root, {recursive: true, force: true});
+    });
+
+    function markAsCodexWorktree(name: string): void {
+        fs.writeFileSync(
+            path.join(root, "repo", ".git", "worktrees", name, "codex-thread.json"),
+            `${JSON.stringify({version: 1, ownerThreadId: "01a0637c-5b99-7242-9064-04545d605fdb"})}\n`,
+        );
+    }
+
+    it("tells the root and the directories of a linked worktree whose Git directory has codex-thread.json", () => {
+        const {repo, worktrees} = createRepository(root, ["codex", "user"]);
+        markAsCodexWorktree("codex");
+        // In the common Git directory the file marks nothing.
+        fs.writeFileSync(path.join(repo, ".git", "codex-thread.json"), "{}\n");
+        const plain = path.join(root, "plain");
+        fs.mkdirSync(plain);
+
+        expect({
+            codexRoot: isCodexWorktreeCwd(worktrees[0]!),
+            codexSubdirectory: isCodexWorktreeCwd(path.join(worktrees[0]!, "src", "pkg")),
+            userWorktree: isCodexWorktreeCwd(worktrees[1]!),
+            primaryCheckout: isCodexWorktreeCwd(repo),
+            outsideGit: isCodexWorktreeCwd(plain),
+            missing: isCodexWorktreeCwd(path.join(root, "missing")),
+            relative: isCodexWorktreeCwd("repo"),
+        }).toEqual({
+            codexRoot: true,
+            codexSubdirectory: true,
+            userWorktree: false,
+            primaryCheckout: false,
+            outsideGit: false,
+            missing: false,
+            relative: false,
+        });
+    });
+
+    it("keys on the file, whatever its owner, but not on a directory of that name", () => {
+        const {worktrees} = createRepository(root, ["shared", "directory"]);
+        fs.writeFileSync(path.join(root, "repo", ".git", "worktrees", "shared", "codex-thread.json"), "{}\n");
+        fs.mkdirSync(path.join(root, "repo", ".git", "worktrees", "directory", "codex-thread.json"));
+
+        expect([isCodexWorktreeCwd(worktrees[0]!), isCodexWorktreeCwd(worktrees[1]!)]).toEqual([true, false]);
+    });
+
+    it("ignores the file of a worktree whose administrative link does not point back", () => {
+        const {worktrees} = createRepository(root, ["foreign"]);
+        markAsCodexWorktree("foreign");
+        fs.writeFileSync(path.join(root, "repo", ".git", "worktrees", "foreign", "gitdir"), `${path.join(root, "elsewhere", ".git")}\n`);
+
+        expect(isCodexWorktreeCwd(worktrees[0]!)).toBe(false);
     });
 });

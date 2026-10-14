@@ -22,6 +22,7 @@ import {
     AIR_SESSION_INDEX_KEY,
     AIR_SESSION_LIST_SUBSCRIBE_KEY,
     AIR_SESSION_RENAME_KEY,
+    AIR_SESSION_WORKTREES_KEY,
     readSessionIndexListOptions,
     readSessionIndexPage,
     SESSION_ARCHIVE_METHOD,
@@ -38,7 +39,7 @@ import {
 } from "./SessionIndex";
 import {deleteThread, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
 import {SessionIndexTitles} from "./SessionIndexTitles";
-import {canonicalCwds, linkedWorktreeCwds} from "./SessionIndexWorktrees";
+import {canonicalCwds, isCodexWorktreeCwd, linkedWorktreeCwds} from "./SessionIndexWorktrees";
 import {SessionForkOrigins} from "./SessionForkOrigins";
 import {SessionListSubscriptions, type SessionListSubscriptionTimings, type ThreadEntry} from "./SessionListSubscriptions";
 import {SessionWriteQueue} from "./SessionWriteQueue";
@@ -103,11 +104,12 @@ export class SessionIndexService {
 
     /**
      * The AIR capabilities to answer: only a client that declares `sessionIndex` gets them. `sessionArchive` and
-     * `sessionRename` name the requests that come with it; the client need not declare them.
+     * `sessionRename` name the requests that come with it, `sessionWorktrees` the `agentWorktree` row field; the
+     * client need not declare them.
      */
     agentCapabilities(): string[] {
         return this.enabled
-            ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY]
+            ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY, AIR_SESSION_WORKTREES_KEY]
             : [];
     }
 
@@ -294,9 +296,19 @@ export class SessionIndexService {
 
     /**
      * The list rows of threads, for `session/list` and `_session/list/changes` alike. A row has the fork parent
-     * known for its thread; one that is not read yet is read in the background, see `SessionForkOrigins`.
+     * known for its thread; one that is not read yet is read in the background, see `SessionForkOrigins`. A row
+     * whose cwd lies in a worktree that Codex made says so, checked once per cwd of the rows.
      */
     private async rows(entries: ThreadEntry[]): Promise<acp.SessionInfo[]> {
+        const agentWorktrees = new Map<string, boolean>();
+        const inAgentWorktree = (cwd: string): boolean => {
+            let result = agentWorktrees.get(cwd);
+            if (result === undefined) {
+                result = isCodexWorktreeCwd(cwd);
+                agentWorktrees.set(cwd, result);
+            }
+            return result;
+        };
         return entries.map(entry => {
             const forkedFromId = this.forkOrigins.originOf(entry.thread);
             const thread = forkedFromId === entry.thread.forkedFromId ? entry.thread : {...entry.thread, forkedFromId};
@@ -305,7 +317,7 @@ export class SessionIndexService {
             if (activity?.state !== undefined) this.rowsWithState.add(thread.id);
             else this.rowsWithState.delete(thread.id);
             return this.withActiveAdditionalDirectories(
-                sessionIndexSessionInfo(thread, entry.archived, activity),
+                sessionIndexSessionInfo(thread, entry.archived, activity, inAgentWorktree(thread.cwd)),
             );
         });
     }

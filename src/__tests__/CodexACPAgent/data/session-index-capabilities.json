@@ -13,7 +13,8 @@
     "sessionIndex",
     "sessionArchive",
     "sessionRename",
-    "sessionListSubscribe"
+    "sessionListSubscribe",
+    "sessionWorktrees"
   ],
   "airWithoutSessionIndex": [
     "sessionFailure",

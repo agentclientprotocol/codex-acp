@@ -22,7 +22,15 @@ interface RepositoryIdentity {
      * a bare repository, or a common dir that is not the `.git` directory of a checkout.
      */
     primaryRoot: string | null;
+    /** The canonical own Git directory of a linked worktree, `<commonDir>/worktrees/<name>`; `null` for the primary checkout. */
+    worktreeGitDir: string | null;
 }
+
+/**
+ * The file that Codex writes into the own Git directory of a worktree that it made, as
+ * `{"version":1,"ownerThreadId":"<id>"}`. JetBrains Air reads the same file to tell such a worktree.
+ */
+export const CODEX_WORKTREE_MARKER_FILE = "codex-thread.json";
 
 /**
  * The cwds whose sessions belong to the list of `cwd`: `cwd` itself, its
@@ -42,6 +50,22 @@ export function linkedWorktreeCwds(cwd: string): string[] {
 export function canonicalCwds(cwd: string): string[] {
     const canonical = canonicalize(cwd);
     return canonical === null || canonical === cwd ? [cwd] : [cwd, canonical];
+}
+
+/**
+ * Tells whether `cwd`, its root or a directory below, lies in a linked worktree that Codex made: one whose own Git
+ * directory, `<common Git dir>/worktrees/<name>`, holds {@link CODEX_WORKTREE_MARKER_FILE}. Only the file's existence
+ * counts, not its owner thread, since several threads can share the worktree. The primary checkout never counts.
+ * Reads the Git administrative files and never runs Git.
+ */
+export function isCodexWorktreeCwd(cwd: string): boolean {
+    try {
+        const gitDir = repositoryIdentity(cwd)?.worktreeGitDir ?? null;
+        if (gitDir === null) return false;
+        return lstat(path.join(gitDir, CODEX_WORKTREE_MARKER_FILE))?.isFile() ?? false;
+    } catch {
+        return false;
+    }
 }
 
 function linkedWorktreeCwdsOrNull(cwd: string): string[] | null {
@@ -109,6 +133,7 @@ function repositoryIdentity(cwd: string): RepositoryIdentity | null {
     if (entry === null || entry.isSymbolicLink()) return null;
 
     let commonDir: string | null;
+    let worktreeGitDir: string | null = null;
     if (entry.isDirectory()) {
         commonDir = canonicalize(gitEntry);
     } else if (entry.isFile()) {
@@ -120,12 +145,13 @@ function repositoryIdentity(cwd: string): RepositoryIdentity | null {
         if (registeredRoot === null || path.dirname(gitDir) !== registeredRoot) return null;
         const backlink = readGitPath(path.join(gitDir, "gitdir"), gitDir, "");
         if (backlink === null || backlink !== canonicalize(gitEntry)) return null;
+        worktreeGitDir = gitDir;
     } else {
         return null;
     }
     if (commonDir === null) return null;
 
-    return {commonDir, relativeCwd, primaryRoot: primaryCheckoutRoot(commonDir)};
+    return {commonDir, relativeCwd, primaryRoot: primaryCheckoutRoot(commonDir), worktreeGitDir};
 }
 
 /**
