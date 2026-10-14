@@ -7,6 +7,7 @@ import type {ModeKind} from "./app-server/ModeKind";
 import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
+import type {AcpMcpServer, WithAcpMcpServers} from "./McpServerConfig";
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
@@ -14,16 +15,18 @@ export type SessionForkDependencies = {
     createSessionConfig(
         cwd: string,
         additionalDirectories: string[],
-        mcpServers: acp.McpServer[],
+        mcpServers: AcpMcpServer[],
     ): Promise<SessionConfig>;
     getResumeModelProvider(): Promise<string>;
     fetchAvailableModels(): Promise<Model[]>;
     createCurrentModelId(models: Model[], model: string, reasoningEffort: string | null): string;
     getCollaborationMode(sessionId: string): ModeKind;
+    /** Gives back the subscription of a fork that failed after `thread/fork`, unless another open of it began. */
+    releaseFailedFork(threadId: string): Promise<void>;
 };
 
 export async function forkSession(
-    request: acp.ForkSessionRequest,
+    request: WithAcpMcpServers<acp.ForkSessionRequest>,
     additionalDirectories: string[],
     dependencies: SessionForkDependencies,
 ): Promise<SessionMetadata> {
@@ -42,9 +45,17 @@ export async function forkSession(
         modelProvider: await dependencies.getResumeModelProvider(),
         threadId: request.sessionId,
     });
-    await dependencies.codexClient.threadUnsubscribe({threadId: response.thread.id});
-
-    const models = await dependencies.fetchAvailableModels();
+    // `thread/fork` subscribes this connection to the new thread, and only to it: the source thread keeps the
+    // subscription it had. The fork stays subscribed, as ACP lets the client prompt it at once. Codex keeps an
+    // unsubscribed thread loaded and runs its turns, but sends their notifications to subscribers only.
+    // A fork that fails from here on has no session, so it gives the subscription back.
+    let models: Model[];
+    try {
+        models = await dependencies.fetchAvailableModels();
+    } catch (err) {
+        await dependencies.releaseFailedFork(response.thread.id);
+        throw err;
+    }
     return {
         sessionId: response.thread.id,
         currentModelId: dependencies.createCurrentModelId(models, response.model, response.reasoningEffort),
@@ -58,7 +69,7 @@ export async function forkSession(
 }
 
 async function resolveForkTurnId(
-    request: acp.ForkSessionRequest,
+    request: Pick<acp.ForkSessionRequest, "sessionId" | "_meta">,
     codexClient: CodexAppServerClient,
 ): Promise<string | undefined> {
     const forkPoint = readAirForkPoint(request._meta);

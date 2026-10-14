@@ -150,7 +150,7 @@ url = "https://example.com/mcp"
             cwd: "",
             mcpServers: [conflictingMcp],
         })).rejects.toMatchObject({
-            data: expect.stringContaining("url is not supported for stdio"),
+            message: expect.stringMatching(/url is not supported for stdio[\s\S]*config\.toml/),
         });
     });
 });

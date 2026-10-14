@@ -6,12 +6,14 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
 - `OPENAI_API_KEY` - fallback API key used when the API-key auth method is selected.
 - `CODEX_PATH` - run a specific Codex executable instead of the bundled package dependency.
-- `CODEX_CONFIG` - JSON object merged into the Codex session config.
+- `CODEX_CONFIG` - JSON object merged into the Codex session config. `hooks` move to App Server startup (`-c hooks=...`) for AIR review; Codex rejects malformed hooks at startup and `initialize` reports its error.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
+- `CODEX_ACP_APP_SERVER_CRASH_LIMIT` - how many crashes of the Codex app-server in the crash window stop its automatic restart (default `5`).
+- `CODEX_ACP_APP_SERVER_CRASH_WINDOW_MS` - the crash window in milliseconds (default `300000`, 5 minutes).
 
 ### Quick start
 
@@ -103,3 +105,83 @@ Command replies, review results, and terminal/retrying errors retain their exist
 failure channels. Clients advertising session compaction support continue to receive the dedicated
 compaction lifecycle instead of the legacy completion advisory.
 
+
+### App-server recovery
+
+The adapter restarts the Codex app-server when it dies (for example, killed for lack of memory). Its code is in
+`src/app-server-recovery/`.
+
+- A request that was waiting on the dead app-server fails with error `1001` and the cause, such as "was killed by
+  SIGKILL, which usually means it ran out of memory". A running prompt ends at once: open tool calls become `failed`,
+  open permission dialogs are cancelled, and an AIR client gets the `transport_lost` session failure.
+- An app-server that exits before its `initialize` handshake succeeded, such as one that rejects its startup config,
+  fails the request with "Codex process has exited with code N:" and its stderr, and no promise of a restart.
+- The next request starts a new app-server with the same `initialize` handshake and provider routing. A session that
+  was open is resumed on its next use, with the model, mode and settings that the adapter kept.
+- Codex writes a thread to disk only with its first message, so a session without messages cannot be resumed in a new
+  app-server, after a crash or a provider restart. Its next use fails with "had no messages yet and was lost"; the
+  client starts a new session. A provider restart still completes for the agent and the other sessions.
+- After `CODEX_ACP_APP_SERVER_CRASH_LIMIT` crashes in the crash window the adapter stops restarting it and says so,
+  with the stderr of the last crash.
+  A session that the app-server died opening twice in 30 minutes is not opened again for the rest of that time, so
+  one session that is too large for the memory cannot take the other sessions down with it.
+
+### ACP v2 support
+
+The agent speaks both ACP v1 and the unstable ACP v2 (Draft) protocol from the same process; the
+version is negotiated on the first `initialize` request and fixed for the connection's lifetime.
+
+The v2 chain registers: `initialize`, `session/new|list|close|delete|resume` (v2 folds `session/load`
+into `session/resume` with `replayFrom`), `session/set_config_option`, `session/cancel`,
+`auth/login|logout`, `session/prompt` (plus `$/cancel_request`), `session/fork`, and
+`providers/list|set|disable`. Unstable extension methods on top of that: `_session/steering`,
+`_session/goal` (set/pause/resume/clear), `_session/async_task/stop`, and the AIR session index
+requests (`_session/rename`, `_session/archive|unarchive`, `_session/list/subscribe|unsubscribe`).
+`session/fork` drops the
+v1 `modes` field (v2 removed the modes API in favor of config options), and forked sessions do not
+get an `available_commands_update`, matching v1. There are no new environment/config knobs specific
+to v2; it reuses the runtime environment variables above.
+
+#### AIR v2 client contract
+
+These are behaviors the AIR (JetBrains) ACP client relies on that aren't obvious from the wire
+schema alone:
+
+- On a failed prompt, read `sessionFailure` (`_meta.jetbrains.air.sessionFailure`) and `quota`
+  (`_meta.quota`) from the idle `state_update` that ends the turn, not from a separate error
+  channel. The same `_meta` v1 attaches to `PromptResponse` is copied onto the v2 idle update.
+- Custom session updates are renamed on v2: `subagent_spawned`/`subagent_state_update` become a
+  single `_subagent_update` (gated on the AIR `nativeSubagentSessions` capability; it will rename to
+  `subagent_update` once the subagent RFD, spec PR #1992, lands), and
+  `async_task_spawned`/`async_task_state_update` become `_async_task_spawned`/`_async_task_state_update`
+  (gated on the AIR `asyncTasks` capability). Payload shapes are unchanged.
+- The SDK client treats any `idle` state update as the stop of whichever prompt is pending, not just
+  one paired 1:1 with a `session/prompt` call.
+- A steer (`_session/steering`) shows up as a `user_message` once it actually lands in the turn.
+- On cancel, any permission or elicitation request still waiting on a client response is withdrawn
+  with `$/cancel_request`, not just the underlying Codex turn.
+- Turns Codex starts on its own (goal auto-turns, e.g. after `session/resume` or `session/new`) are
+  rendered the same as prompted turns (`running` then one `idle`) but with no corresponding
+  `session/prompt` call — clients should not assume every `running`/`idle` pair has a matching
+  outbound prompt.
+- After a tool call streams terminal output as `terminal_output_chunk`s, completion does not resend a
+  full `output` snapshot; the streamed chunks are the only copy of the output.
+- The AIR tool call contract (`docs/air-extensions.md`) does not apply on v2: every v2 client gets
+  the standard tool call reports, so `rawInputRendering`, `planContentDelta` and `diffPatch` are not
+  offered there. A read, search or list command has no terminal; its output arrives as `content`
+  text when it completes. A file change sends one diff per file whose Git patch is built from the
+  Codex diff.
+- The AIR `sessionIndex` extension (`docs/air-extensions.md`, "Session index") works as on v1: a
+  client that declares `sessionIndex` gets it, `session/list` reads `_meta.jetbrains.air.list`, and
+  rows, `session_info_update`s and `_session/list/changes` carry the same `_meta`.
+- Other AIR `_meta` keys (goal, message phase, mode kind, permission presentation) go only to AIR
+  clients, as on v1. Every v2 permission request still gets its prompt `title` and `description`.
+
+#### Known gaps
+
+- After `providers/disable("openai")`, `providers/list` still reports native OpenAI routing as the
+  current provider. The providers RFD says a disabled provider's `current` should be `null`; this is
+  left as-is and documented here rather than fixed.
+- Open question for AIR: AIR's fork points match Codex item ids, but on v2 a user message's
+  rendered id is the client-minted `clientId` (when the client supplied one), not the Codex item id.
+  A fork at a user message would not resolve. This is flagged for AIR, not fixed here.

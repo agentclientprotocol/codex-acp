@@ -5,6 +5,7 @@ import {
     isAccountReadAuthFailureError,
     isAccountReadUnavailableError,
     isInvalidThreadIdError,
+    isMissingArchivedRolloutError,
     isMissingRolloutError,
     isThreadActiveWriterError,
     isThreadNotLoadedError,
@@ -30,6 +31,13 @@ describe("CodexThreadErrors", () => {
         expect(isMissingRolloutError(missingRollout)).toBe(true);
         expect(isMissingRolloutError(notLoaded)).toBe(false);
         expect(isMissingRolloutError(unrelated)).toBe(false);
+    });
+
+    it("recognises a thread that has no archived rollout", () => {
+        const missingArchivedRollout = new Error("no archived rollout found for thread id 01a0c48a-fc81-7b33-8d61-f4e2fd7c9b99");
+        expect(isMissingArchivedRolloutError(missingArchivedRollout)).toBe(true);
+        expect(isMissingRolloutError(missingArchivedRollout)).toBe(false);
+        expect(isMissingArchivedRolloutError(missingRollout)).toBe(false);
     });
 
     it("recognises a thread that is not loaded in the app-server", () => {

@@ -1,0 +1,27 @@
+{
+  "stdio-full": {
+    "command": "/usr/local/bin/mcp-fs",
+    "args": [
+      "--root",
+      "/workspace"
+    ],
+    "env": {
+      "EXAMPLE": "1"
+    }
+  },
+  "stdio-minimal": {
+    "command": "/usr/local/bin/mcp-minimal",
+    "args": [],
+    "env": {}
+  },
+  "http-full": {
+    "url": "https://example.com/mcp",
+    "http_headers": {
+      "Authorization": "Bearer token"
+    }
+  },
+  "http-minimal": {
+    "url": "https://example.com/minimal",
+    "http_headers": {}
+  }
+}

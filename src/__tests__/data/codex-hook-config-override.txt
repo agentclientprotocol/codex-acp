@@ -1,0 +1,1 @@
+hooks={ "PostToolUse" = [{ "matcher" = "Bash", "hooks" = [{ "type" = "command", "command" = "echo ready" }] }] }

@@ -68,10 +68,13 @@ describe('_session/steering', () => {
             _meta,
         })).resolves.toEqual({outcome: "injected"});
 
+        // Every steer mints a fresh `clientUserMessageId` (Codex-side param only; no ACP wire
+        // change on v1).
         expect(turnSteerSpy).toHaveBeenCalledWith({
             threadId: "session-id",
             expectedTurnId: "turn-id",
             input: [{type: "text", text: "also keep backward compatibility", text_elements: []}],
+            clientUserMessageId: expect.any(String),
         });
 
         turnCompleted.resolve({
@@ -231,6 +234,7 @@ describe('_session/steering', () => {
             threadId: "session-id",
             expectedTurnId: "new-turn-id",
             input: [{type: "text", text: "second late follow-up", text_elements: []}],
+            clientUserMessageId: expect.any(String),
         });
 
         turnCompleted.resolve({

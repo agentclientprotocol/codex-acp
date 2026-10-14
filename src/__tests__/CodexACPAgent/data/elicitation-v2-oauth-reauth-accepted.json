@@ -1,0 +1,24 @@
+[
+  {
+    "sessionUpdate": {
+      "state": "requires_action",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "elicitationRequest": {
+      "sessionId": "thread-1",
+      "elicitationId": "elicit-123",
+      "url": "https://example.com/authorize",
+      "mode": "url",
+      "message": "Please authorize access",
+      "_meta": null
+    }
+  },
+  {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  }
+]

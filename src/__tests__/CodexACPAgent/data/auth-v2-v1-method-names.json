@@ -1,0 +1,30 @@
+{
+  "authenticate": {
+    "code": -32601,
+    "message": "\"Method not found\": authenticate",
+    "data": {
+      "method": "authenticate"
+    }
+  },
+  "logout": {
+    "code": -32601,
+    "message": "\"Method not found\": logout",
+    "data": {
+      "method": "logout"
+    }
+  },
+  "authentication/status": {
+    "code": -32601,
+    "message": "\"Method not found\": authentication/status",
+    "data": {
+      "method": "authentication/status"
+    }
+  },
+  "authentication/logout": {
+    "code": -32601,
+    "message": "\"Method not found\": authentication/logout",
+    "data": {
+      "method": "authentication/logout"
+    }
+  }
+}

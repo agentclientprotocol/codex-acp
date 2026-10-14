@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.2.2](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.1...v2.2.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* title listed sessions by name, title, summary, then preview ([#606](https://github.com/agentclientprotocol/codex-acp/issues/606)) ([90fea43](https://github.com/agentclientprotocol/codex-acp/commit/90fea43dc15a6e8e3538ecea5c96ffe55dfcc42f))
+
+## [2.2.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.0...v2.2.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* resume a session without messages after an app-server restart ([#604](https://github.com/agentclientprotocol/codex-acp/issues/604)) ([9ac3254](https://github.com/agentclientprotocol/codex-acp/commit/9ac32543b2990574b43bb29b41e3b2b3f6fbc6a7))
+
+## [2.2.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.1.1...v2.2.0) (2026-10-10)
+
+
+### Features
+
+* add pre-session Codex hook trust ([#588](https://github.com/agentclientprotocol/codex-acp/issues/588)) ([51aa211](https://github.com/agentclientprotocol/codex-acp/commit/51aa21123c1724db96ef3b7b2de982437e9ab4e4))
+* add the AIR sessionIndex extension for fast session lists ([#590](https://github.com/agentclientprotocol/codex-acp/issues/590)) ([95bc33f](https://github.com/agentclientprotocol/codex-acp/commit/95bc33f354a2260cd65990450525b1f65bbe1e41))
+* report the MCP servers that the Codex config replaces ([#587](https://github.com/agentclientprotocol/codex-acp/issues/587)) ([fbb15ad](https://github.com/agentclientprotocol/codex-acp/commit/fbb15adc6ff5a821543818e48170ee0b006a8fc7))
+* show live MCP server status and reconnect from /mcp ([#579](https://github.com/agentclientprotocol/codex-acp/issues/579)) ([ca1d971](https://github.com/agentclientprotocol/codex-acp/commit/ca1d97173ad37b471d5a4e5847725a4657d34e29))
+* Support custom instructions for agent sessions via meta ([#546](https://github.com/agentclientprotocol/codex-acp/issues/546)) ([51f78d6](https://github.com/agentclientprotocol/codex-acp/commit/51f78d67e46c3a96ee8d8bf4e43fc917ab21c73e))
+
+
+### Bug Fixes
+
+* report cancelled device-code sign-in as auth error instead of invalid params ([#594](https://github.com/agentclientprotocol/codex-acp/issues/594)) ([951844f](https://github.com/agentclientprotocol/codex-acp/commit/951844f87e276cc4cb1640defe7afce7068a50c0))
+* update codex to 0.160.1 ([#586](https://github.com/agentclientprotocol/codex-acp/issues/586)) ([cf83291](https://github.com/agentclientprotocol/codex-acp/commit/cf83291d3f35821c89308985f8b123f0d283ae48))
+
 ## [2.1.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.1.0...v2.1.1) (2026-10-01)
 
 

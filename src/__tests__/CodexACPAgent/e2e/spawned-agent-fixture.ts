@@ -9,7 +9,7 @@ import {removeDirectoryWithRetry, writeCodexHomeConfig} from "../../acp-test-uti
 import type {PermissionResponder} from "./permission-responders";
 import type {LegacyNewSessionResponse} from "../../../AcpExtensions";
 
-export const DEFAULT_TEST_MODEL_ID = ModelId.create("gpt-5.2", "none");
+export const DEFAULT_TEST_MODEL_ID = ModelId.create("gpt-6-luna", "low");
 export const OTHER_TEST_MODEL_ID = ModelId.create("gpt-5.5", "low");
 
 export interface TestSkill {
@@ -38,6 +38,7 @@ export interface SpawnedAgentFixture {
         sessionId: string,
         toolCallKind: acp.ToolKind,
     ): acp.RequestPermissionRequest[];
+    readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[];
     dispose(): Promise<void>;
 }
 
@@ -107,6 +108,7 @@ class RecordingClient implements acp.Client {
     private readonly textBySessionId = new Map<string, string>();
     private readonly availableCommandsBySessionId = new Map<string, acp.AvailableCommand[]>();
     private readonly permissionRequestsBySessionId = new Map<string, acp.RequestPermissionRequest[]>();
+    private readonly toolCallsBySessionId = new Map<string, acp.ToolCall[]>();
     private permissionResponder: PermissionResponder = () => ({
         outcome: {outcome: "cancelled"},
     });
@@ -128,6 +130,13 @@ class RecordingClient implements acp.Client {
     async sessionUpdate(params: acp.SessionNotification): Promise<void> {
         if (params.update.sessionUpdate === "available_commands_update") {
             this.availableCommandsBySessionId.set(params.sessionId, params.update.availableCommands);
+            return;
+        }
+
+        if (params.update.sessionUpdate === "tool_call") {
+            const toolCalls = this.toolCallsBySessionId.get(params.sessionId) ?? [];
+            toolCalls.push(params.update);
+            this.toolCallsBySessionId.set(params.sessionId, toolCalls);
             return;
         }
 
@@ -153,6 +162,11 @@ class RecordingClient implements acp.Client {
     ): acp.RequestPermissionRequest[] {
         const requests = this.permissionRequestsBySessionId.get(sessionId) ?? [];
         return requests.filter((request) => request.toolCall.kind === toolCallKind);
+    }
+
+    readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[] {
+        const toolCalls = this.toolCallsBySessionId.get(sessionId) ?? [];
+        return toolCalls.filter((toolCall) => toolCall.kind === toolCallKind);
     }
 }
 
@@ -259,6 +273,10 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         toolCallKind: acp.ToolKind,
     ): acp.RequestPermissionRequest[] {
         return this.client.readPermissionRequests(sessionId, toolCallKind);
+    }
+
+    readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[] {
+        return this.client.readToolCalls(sessionId, toolCallKind);
     }
 
     async dispose(): Promise<void> {

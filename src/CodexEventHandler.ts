@@ -35,7 +35,7 @@ import type {
 import {toTokenCount} from "./TokenCount";
 import { stripShellPrefix } from "./CommandUtils";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
-import {CommandReporter} from "./tool-calls/reporters/CommandReporter";
+import {CommandReporter, commandUsesTerminal} from "./tool-calls/reporters/CommandReporter";
 import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
 import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
 import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
@@ -65,6 +65,7 @@ import type {SubagentState} from "./subagents/AcpSubagents";
 import {mergeRateLimitSnapshot} from "./RateLimitsMap";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "./AgentFileChangeReport";
 import {createSessionNotice} from "./SessionNotice";
+import {isStaleAutomaticTitleEcho} from "./SessionIndexTitles";
 import {readableServiceErrorMessage} from "./ServiceErrorMessage";
 
 export { stripShellPrefix };
@@ -179,6 +180,30 @@ const STRUCTURED_CODEX_ERROR_CATEGORIES = {
     responseTooManyFailedAttempts: "transport_lost",
     activeTurnNotSteerable: "provider_error",
 } satisfies Record<StructuredCodexErrorKind, CodexFailureKind>;
+
+/**
+ * Item types that render as a plain `tool_call`/`tool_call_update` and have no outstanding-item
+ * tracker of their own (`contextCompaction` has `CodexSessionCompactions`; `collabAgentToolCall`/
+ * `subAgentActivity` have `CodexSubagentEventRouter`). Used to track which open items a provider
+ * restart's close-out needs to fail.
+ */
+const PLAIN_TOOL_CALL_ITEM_TYPES = new Set<ThreadItem["type"]>([
+    "fileChange",
+    "commandExecution",
+    "mcpToolCall",
+    "dynamicToolCall",
+    "webSearch",
+    "imageView",
+    "imageGeneration",
+]);
+
+/** Prompt failures whose text the client has already received as an agent message. */
+const failuresShownAsMessages = new WeakSet<RequestError>();
+
+/** Whether a prompt failure's text has already been sent to the client as an agent message. */
+export function failureWasShownAsMessage(error: unknown): boolean {
+    return error instanceof RequestError && failuresShownAsMessages.has(error);
+}
 
 export class CodexEventHandler {
 
@@ -369,6 +394,11 @@ export class CodexEventHandler {
     }
 
     async handleNotification(notification: ServerNotification) {
+        if (notification.method === "item/started"
+            && notification.params.threadId === this.sessionState.sessionId
+            && isModelOutputItem(notification.params.item)) {
+            this.sessionState.promptTokenUsage?.observeModelOutput();
+        }
         await this.flushPendingErrors();
         await this.finishCompactionsForNotification(notification);
         const closingChildren = this.subagents.closingChildSessions(notification);
@@ -489,11 +519,15 @@ export class CodexEventHandler {
             case "item/plan/delta":
                 this.completeRetryIncidentOnTurnProgress();
                 return this.plans.delta(notification.params.itemId, notification.params.delta);
-            case "item/started":
+            case "item/started": {
                 this.completeRetryIncidentOnTurnProgress();
-                return await this.createItemEvent(notification.params);
+                const update = await this.createItemEvent(notification.params);
+                this.trackOpenToolCall(notification.params.item);
+                return update;
+            }
             case "item/completed":
                 this.completeRetryIncidentOnTurnProgress();
+                this.sessionState.openToolCalls.complete(notification.params.item.id);
                 return await this.completeItemEvent(notification.params);
             case "turn/plan/updated":
                 this.completeRetryIncidentOnTurnProgress();
@@ -517,18 +551,29 @@ export class CodexEventHandler {
             case "error":
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
-                this.sessionState.currentTurnId = notification.params.turn.id;
+                this.sessionState.interruptTurnId = notification.params.turn.id;
+                // A review's child turn starts under its own id, while the review's items, errors and
+                // completion keep the parent id already set from the `review/start` response.
+                this.sessionState.currentTurnId ??= notification.params.turn.id;
                 await this.flushPendingErrors();
                 return null;
             case "turn/completed":
                 await this.plans.flush();
                 this.plans.clearTurn();
                 this.sessionState.currentTurnId = null;
+                this.sessionState.interruptTurnId = null;
                 this.sessionState.toolCallReports.releaseOpen(this.subagents.notificationSessionId(notification));
+                // An item that missed its item/completed (e.g. dropped by a provider restart
+                // mid-turn) must not linger past its own turn and get failed by a later restart.
+                this.sessionState.openToolCalls.clear();
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
             case "thread/name/updated":
+                if (isStaleAutomaticTitleEcho(this.sessionState, normalizeSessionTitle(notification.params.threadName))) {
+                    this.sessionState.titleGen?.observeRename();
+                    return null;
+                }
                 this.sessionState.sessionTitle = normalizeSessionTitle(notification.params.threadName);
                 this.sessionState.sessionTitleSource = notification.params.threadName == null
                     ? "unset"
@@ -560,7 +605,7 @@ export class CodexEventHandler {
             case "item/mcpToolCall/progress":
                 this.completeRetryIncidentOnTurnProgress();
                 // AIR does not show MCP progress.
-                if (this.renderer.capabilities.airClient) return null;
+                if (this.renderer.capabilities.airToolCallContract) return null;
                 return this.renderer.render(McpToolReporter.progress(
                     notification.params.itemId,
                     notification.params.message,
@@ -772,7 +817,7 @@ export class CodexEventHandler {
             case "fileChange":
                 return this.renderer.render(FileChangeReporter.started(
                     event.item,
-                    this.sessionState.clientCapabilities.air.diffPatch,
+                    this.sessionState.clientCapabilities.diffPatchFormat,
                 ));
             case "commandExecution":
                 return this.renderer.render(this.commands.started(event.item));
@@ -907,6 +952,12 @@ export class CodexEventHandler {
         );
     }
 
+    private trackOpenToolCall(item: ThreadItem): void {
+        if (!PLAIN_TOOL_CALL_ITEM_TYPES.has(item.type)) return;
+        const hasTerminal = item.type === "commandExecution" && commandUsesTerminal(item);
+        this.sessionState.openToolCalls.start(item.id, hasTerminal);
+    }
+
     private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {
         const plan: PlanEntry[] = event.plan.map(value => ({
                 status: value.status == "inProgress" ? "in_progress" : value.status,
@@ -977,6 +1028,9 @@ export class CodexEventHandler {
             this.failure = RequestError.internalError(
                 this.createTurnErrorData(params.error),
             );
+        }
+        if (this.failure !== null) {
+            failuresShownAsMessages.add(this.failure);
         }
         return createAgentTextMessageChunk(`${readableServiceErrorMessage(params.error.message)}\n\n`);
     }
@@ -1154,14 +1208,25 @@ export class CodexEventHandler {
     private handleTokenUsageUpdated(params: ThreadTokenUsageUpdatedNotification): void {
         this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
         this.sessionState.totalTokenUsage = toTokenCount(params.tokenUsage.total);
+        this.sessionState.promptTokenUsage?.observe(this.sessionState.totalTokenUsage, this.sessionState.lastTokenUsage);
         this.sessionState.modelContextWindow = params.tokenUsage.modelContextWindow;
     }
 
     private createUsageUpdate(params: ThreadTokenUsageUpdatedNotification): UpdateSessionEvent | null {
-        this.handleTokenUsageUpdated(params);
-
-        const used = this.sessionState.lastTokenUsage?.totalTokens;
-        const size = this.sessionState.modelContextWindow;
+        let used: number | undefined;
+        let size: number | null;
+        if (params.threadId === this.sessionState.sessionId) {
+            this.handleTokenUsageUpdated(params);
+            used = this.sessionState.lastTokenUsage?.totalTokens;
+            size = this.sessionState.modelContextWindow;
+        } else if (this.subagents.isNativeSubagentThread(params.threadId)) {
+            // The usage of a native subagent belongs to its own session, where handleNotification routes the
+            // update. It must not change the usage of this session or its turn.
+            used = params.tokenUsage.last.totalTokens;
+            size = params.tokenUsage.modelContextWindow;
+        } else {
+            return null;
+        }
         if (used == null || size == null || size <= 0) {
             return null;
         }
@@ -1189,6 +1254,25 @@ export class CodexEventHandler {
         });
     }
 
+}
+
+/**
+ * Items that Codex reports for the input of a turn, for other agents, or before a model request, rather than
+ * as output of its model. Codex starts a context compaction before its request, which can send the
+ * current usage again. When a compaction is the first request of a prompt on a thread with an unknown
+ * start total and nothing was sent again before it, its own usage is taken as the start total; that
+ * undercount is the lesser error compared with counting the history's last request.
+ */
+const NON_MODEL_OUTPUT_ITEM_TYPES: ReadonlySet<ThreadItem["type"]> = new Set([
+    "userMessage",
+    "hookPrompt",
+    "enteredReviewMode",
+    "subAgentActivity",
+    "contextCompaction",
+]);
+
+function isModelOutputItem(item: ThreadItem): boolean {
+    return !NON_MODEL_OUTPUT_ITEM_TYPES.has(item.type);
 }
 
 function toolCallTitle(update: UpdateSessionEvent | null | undefined): string | undefined {

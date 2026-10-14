@@ -1,0 +1,32 @@
+[
+  {
+    "toolCallId": "item-add",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "changes": [
+          {
+            "path": "/workspace/added.ts",
+            "operation": "add"
+          }
+        ],
+        "patch": {
+          "format": "git_patch",
+          "text": "diff --git a/workspace/added.ts b/workspace/added.ts\nnew file mode 100644\n--- /dev/null\n+++ b/workspace/added.ts\n@@ -0,0 +1,2 @@\n+export const a = 1;\n+export const b = 2;\n"
+        },
+        "_meta": {
+          "kind": "add"
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "item-add",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]
