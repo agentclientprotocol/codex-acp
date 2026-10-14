@@ -60,7 +60,12 @@ export function canonicalCwds(cwd: string): string[] {
  */
 export function isCodexWorktreeCwd(cwd: string): boolean {
     try {
-        const gitDir = repositoryIdentity(cwd)?.worktreeGitDir ?? null;
+        // Most rows lie in a primary checkout, whose `.git` is a directory: no Git file is read for it.
+        const canonicalCwd = canonicalize(cwd);
+        if (canonicalCwd === null) return false;
+        const repo = findGitRepo(canonicalCwd);
+        if (repo === null || repo.dotGitIsDirectory || !isDirectory(canonicalCwd)) return false;
+        const gitDir = repositoryIdentityAt(canonicalCwd, repo.root, false)?.worktreeGitDir ?? null;
         if (gitDir === null) return false;
         return lstat(path.join(gitDir, CODEX_WORKTREE_MARKER_FILE))?.isFile() ?? false;
     } catch {
@@ -122,8 +127,16 @@ function repositoryIdentity(cwd: string): RepositoryIdentity | null {
     const canonicalCwd = canonicalize(cwd);
     if (canonicalCwd === null || !isDirectory(canonicalCwd)) return null;
 
-    const repoRoot = findGitRepoRoot(canonicalCwd);
+    const repoRoot = findGitRepo(canonicalCwd)?.root ?? null;
     if (repoRoot === null) return null;
+    return repositoryIdentityAt(canonicalCwd, repoRoot, true);
+}
+
+/**
+ * The {@link repositoryIdentity} of the directory `canonicalCwd` in the checkout at `repoRoot`. Without
+ * `withPrimaryRoot`, `primaryRoot` is `null` and not looked up.
+ */
+function repositoryIdentityAt(canonicalCwd: string, repoRoot: string, withPrimaryRoot: boolean): RepositoryIdentity | null {
     const checkoutRoot = canonicalize(repoRoot);
     if (checkoutRoot === null || !isWithin(canonicalCwd, checkoutRoot)) return null;
     const relativeCwd = path.relative(checkoutRoot, canonicalCwd);
@@ -151,7 +164,8 @@ function repositoryIdentity(cwd: string): RepositoryIdentity | null {
     }
     if (commonDir === null) return null;
 
-    return {commonDir, relativeCwd, primaryRoot: primaryCheckoutRoot(commonDir), worktreeGitDir};
+    const primaryRoot = withPrimaryRoot ? primaryCheckoutRoot(commonDir) : null;
+    return {commonDir, relativeCwd, primaryRoot, worktreeGitDir};
 }
 
 /**
@@ -171,13 +185,19 @@ function primaryCheckoutRoot(commonDir: string): string | null {
     return primaryRoot;
 }
 
-/** The nearest ancestor of `dir` with a `.git` file, or a `.git` directory that has a `HEAD`. */
-function findGitRepoRoot(dir: string): string | null {
+/**
+ * The nearest ancestor of `dir` with a `.git` file, or a `.git` directory that has a `HEAD`, and whether that
+ * `.git` is a directory.
+ */
+function findGitRepo(dir: string): {root: string; dotGitIsDirectory: boolean} | null {
     let current = dir;
     for (;;) {
         const dotGit = path.join(current, ".git");
-        if (fs.existsSync(dotGit) && (!isDirectory(dotGit) || fs.existsSync(path.join(dotGit, "HEAD")))) {
-            return current;
+        if (fs.existsSync(dotGit)) {
+            const dotGitIsDirectory = isDirectory(dotGit);
+            if (!dotGitIsDirectory || fs.existsSync(path.join(dotGit, "HEAD"))) {
+                return {root: current, dotGitIsDirectory};
+            }
         }
         const parent = path.dirname(current);
         if (parent === current) return null;
