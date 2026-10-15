@@ -29,6 +29,7 @@ import type {
     ThreadGoalUpdatedNotification,
     ThreadTokenUsageUpdatedNotification,
     Turn,
+    TurnDiffUpdatedNotification,
     TurnPlanUpdatedNotification,
     WarningNotification
 } from "./app-server/v2";
@@ -232,6 +233,10 @@ export class CodexEventHandler {
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly turnDiffs = new Map<string, string>();
     private readonly oversizedTurnDiffs = new Set<string>();
+    /** Latest diff of each subagent turn, keyed by child thread and turn; `null` marks an oversized diff. */
+    private readonly childTurnDiffs = new Map<string, {rootTurnId: string; diff: string | null}>();
+    /** The last root turn that ended, for subagent turns that outlive it. */
+    private latestRootTurnId: string | null = null;
     private readonly collectTurnDiffs: boolean;
     private readonly subagents: CodexSubagentEventRouter;
     /** Connection-level `authStatus` sink; the app-server account push feeds it. */
@@ -266,12 +271,20 @@ export class CodexEventHandler {
         return this.failure;
     }
 
+    /** The root turn's diff followed by the diffs of the subagent turns that ran during it. */
     getTurnDiff(turnId: string): string {
-        return this.turnDiffs.get(turnId) ?? "";
+        const diffs = [this.turnDiffs.get(turnId) ?? ""];
+        for (const child of this.childTurnDiffs.values()) {
+            if (child.rootTurnId === turnId && child.diff !== null) diffs.push(child.diff);
+        }
+        return diffs
+            .filter(diff => diff.trim() !== "")
+            .reduce((all, diff) => all === "" || all.endsWith("\n") ? all + diff : `${all}\n${diff}`, "");
     }
 
     isTurnDiffOversized(turnId: string): boolean {
-        return this.oversizedTurnDiffs.has(turnId);
+        return this.oversizedTurnDiffs.has(turnId)
+            || [...this.childTurnDiffs.values()].some(child => child.rootTurnId === turnId && child.diff === null);
     }
 
     getTerminalSessionFailureMeta(
@@ -399,6 +412,10 @@ export class CodexEventHandler {
             && isModelOutputItem(notification.params.item)) {
             this.sessionState.promptTokenUsage?.observeModelOutput();
         }
+        // Before subagent routing, which drops updates of ended children and of spawns that never materialized.
+        if (notification.method === "turn/diff/updated" && notification.params.threadId !== this.sessionState.sessionId) {
+            this.recordChildTurnDiff(notification.params);
+        }
         await this.flushPendingErrors();
         await this.finishCompactionsForNotification(notification);
         const closingChildren = this.subagents.closingChildSessions(notification);
@@ -502,6 +519,20 @@ export class CodexEventHandler {
         this.disposed = true;
         this.turnDiffs.clear();
         this.oversizedTurnDiffs.clear();
+        this.childTurnDiffs.clear();
+    }
+
+    /** Subagent threads report their own turn diffs; the root turn's file-change report must include them. */
+    private recordChildTurnDiff(params: TurnDiffUpdatedNotification): void {
+        if (this.disposed || !this.collectTurnDiffs) return;
+        const key = `${params.threadId}\n${params.turnId}`;
+        // A child turn stays with the root turn it started under, even if its diff updates arrive later.
+        const rootTurnId = this.childTurnDiffs.get(key)?.rootTurnId
+            ?? this.sessionState.currentTurnId
+            ?? this.latestRootTurnId;
+        if (rootTurnId === null) return;
+        const oversized = Buffer.byteLength(params.diff, "utf8") > AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES;
+        this.childTurnDiffs.set(key, {rootTurnId, diff: oversized ? null : params.diff});
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
@@ -560,6 +591,8 @@ export class CodexEventHandler {
             case "turn/completed":
                 await this.plans.flush();
                 this.plans.clearTurn();
+                // Subagents can keep running after the root turn ends; their turns still belong to it.
+                this.latestRootTurnId = this.sessionState.currentTurnId ?? this.latestRootTurnId;
                 this.sessionState.currentTurnId = null;
                 this.sessionState.interruptTurnId = null;
                 this.sessionState.toolCallReports.releaseOpen(this.subagents.notificationSessionId(notification));

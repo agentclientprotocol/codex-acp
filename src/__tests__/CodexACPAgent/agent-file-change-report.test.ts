@@ -6,10 +6,15 @@ import {
     type CodexMockTestFixture,
 } from "../acp-test-utils";
 import type {SessionState} from "../../CodexAcpServer";
+import {ACPSessionConnection} from "../../ACPSessionConnection";
+import {CodexSubagentEventRouter} from "../../subagents/CodexSubagentEventRouter";
+import type {ServerNotification} from "../../app-server";
 import {CodexCommands} from "../../CodexCommands";
 import {logger} from "../../Logger";
 import type {Turn, TurnCompletedNotification} from "../../app-server/v2";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "../../AgentFileChangeReport";
+
+const CHILD_THREAD_ID = "child-thread";
 
 function createTurn(id: string, status: Turn["status"]): Turn {
     return {
@@ -61,6 +66,60 @@ const FILE_CHANGE_REPORT_CLIENT_CAPABILITIES: acp.ClientCapabilities = {
     },
 };
 
+function modifiedFileDiff(pathname: string): string {
+    return `diff --git a/${pathname} b/${pathname}\n--- a/${pathname}\n+++ b/${pathname}\n@@ -1 +1 @@\n-old\n+new\n`;
+}
+
+function turnDiffUpdated(threadId: string, turnId: string, diff: string): ServerNotification {
+    return {method: "turn/diff/updated", params: {threadId, turnId, diff}};
+}
+
+/** Notifications of a root turn that spawns a native subagent, as Codex reports them. */
+function spawnChild(rootSessionId: string): ServerNotification[] {
+    return [
+        {
+            method: "item/started",
+            params: {
+                threadId: rootSessionId,
+                turnId: "main-turn",
+                startedAtMs: 0,
+                item: {
+                    type: "collabAgentToolCall",
+                    id: "spawn-child",
+                    tool: "spawnAgent",
+                    status: "inProgress",
+                    senderThreadId: rootSessionId,
+                    receiverThreadIds: [CHILD_THREAD_ID],
+                    prompt: "Edit the docs.",
+                    model: null,
+                    reasoningEffort: null,
+                    agentsStates: {[CHILD_THREAD_ID]: {status: "running", message: null}},
+                },
+            },
+        },
+        {
+            method: "item/started",
+            params: {
+                threadId: rootSessionId,
+                turnId: "main-turn",
+                startedAtMs: 0,
+                item: {
+                    type: "subAgentActivity",
+                    id: "activity-child",
+                    kind: "started",
+                    agentThreadId: CHILD_THREAD_ID,
+                    agentPath: "/root/docs_writer",
+                },
+            },
+        },
+        {method: "turn/started", params: {threadId: CHILD_THREAD_ID, turn: createTurn("child-turn", "inProgress")}},
+    ];
+}
+
+function childTurnCompleted(): ServerNotification {
+    return {method: "turn/completed", params: {threadId: CHILD_THREAD_ID, turn: createTurn("child-turn", "completed")}};
+}
+
 async function setupMainPrompt(negotiateCapability = true): Promise<{
     fixture: CodexMockTestFixture;
     sessionState: SessionState;
@@ -85,6 +144,32 @@ async function setupMainPrompt(negotiateCapability = true): Promise<{
             turn: createTurn("main-turn", "completed"),
         });
     return {fixture, sessionState, turnStart, awaitTurnCompleted};
+}
+
+async function setupNativeSubagentPrompt(): Promise<{
+    fixture: CodexMockTestFixture;
+    sessionState: SessionState;
+    awaitTurnCompleted: ReturnType<typeof vi.spyOn>;
+}> {
+    const fixture = createCodexMockTestFixture();
+    await fixture.getCodexAcpAgent().initialize({
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: {
+            _meta: {jetbrains: {air: {version: 1, capabilities: ["agentFileChangeReport", "nativeSubagentSessions"]}}},
+        },
+    });
+    const sessionState = createTestSessionState({cwd: "/workspace"});
+    sessionState.subagents = new CodexSubagentEventRouter(
+        sessionState.sessionId,
+        true,
+        new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId),
+        () => {},
+    );
+    vi.spyOn(fixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
+    vi.spyOn(fixture.getCodexAppServerClient(), "turnStart")
+        .mockResolvedValue({turn: createTurn("main-turn", "inProgress")});
+    const awaitTurnCompleted = vi.spyOn(fixture.getCodexAppServerClient(), "awaitTurnCompleted");
+    return {fixture, sessionState, awaitTurnCompleted};
 }
 
 describe("agent file-change report lifecycle", () => {
@@ -319,6 +404,87 @@ describe("agent file-change report lifecycle", () => {
                 status: "unavailable",
                 reason: "providerError",
             }}}},
+        });
+    });
+
+    describe("with native subagents", () => {
+        it("includes the files a subagent changed during the root turn", async () => {
+            const {fixture, sessionState, awaitTurnCompleted} = await setupNativeSubagentPrompt();
+            awaitTurnCompleted.mockImplementationOnce(async (): Promise<TurnCompletedNotification> => {
+                for (const notification of [
+                    turnDiffUpdated(sessionState.sessionId, "main-turn", modifiedFileDiff("README.md")),
+                    ...spawnChild(sessionState.sessionId),
+                    turnDiffUpdated(CHILD_THREAD_ID, "child-turn", modifiedFileDiff("README.md")
+                        + modifiedFileDiff("community/README.md")),
+                    childTurnCompleted(),
+                ]) {
+                    fixture.sendServerNotification(notification);
+                }
+                return {threadId: sessionState.sessionId, turn: createTurn("main-turn", "completed")};
+            });
+
+            await expect(fixture.getCodexAcpAgent().prompt(
+                promptWithFileChangeReport(sessionState.sessionId, "request-subagent"),
+            )).resolves.toMatchObject({stopReason: "end_turn"});
+
+            expect(reportedUpdates(fixture)[0]).toMatchObject({
+                _meta: {jetbrains: {air: {agentFileChangeReport: {
+                    status: "reported",
+                    paths: ["/workspace/README.md", "/workspace/community/README.md"],
+                }}}},
+            });
+        });
+
+        it("includes the files of a subagent that finishes after the root turn ends", async () => {
+            const {fixture, sessionState, awaitTurnCompleted} = await setupNativeSubagentPrompt();
+            awaitTurnCompleted.mockImplementationOnce(async (): Promise<TurnCompletedNotification> => {
+                const completed = {threadId: sessionState.sessionId, turn: createTurn("main-turn", "completed")};
+                for (const notification of [
+                    ...spawnChild(sessionState.sessionId),
+                    {method: "turn/completed", params: completed} satisfies ServerNotification,
+                    turnDiffUpdated(CHILD_THREAD_ID, "child-turn", modifiedFileDiff("docs/guide.md")),
+                    childTurnCompleted(),
+                ]) {
+                    fixture.sendServerNotification(notification);
+                }
+                return completed;
+            });
+
+            await fixture.getCodexAcpAgent().prompt(
+                promptWithFileChangeReport(sessionState.sessionId, "request-late-subagent"),
+            );
+
+            expect(reportedUpdates(fixture)[0]).toMatchObject({
+                _meta: {jetbrains: {air: {agentFileChangeReport: {
+                    status: "reported",
+                    paths: ["/workspace/docs/guide.md"],
+                }}}},
+            });
+        });
+
+        it("publishes invalidOutput when a subagent turn diff is oversized", async () => {
+            const {fixture, sessionState, awaitTurnCompleted} = await setupNativeSubagentPrompt();
+            awaitTurnCompleted.mockImplementationOnce(async (): Promise<TurnCompletedNotification> => {
+                for (const notification of [
+                    ...spawnChild(sessionState.sessionId),
+                    turnDiffUpdated(CHILD_THREAD_ID, "child-turn", "x".repeat(AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES + 1)),
+                    childTurnCompleted(),
+                ]) {
+                    fixture.sendServerNotification(notification);
+                }
+                return {threadId: sessionState.sessionId, turn: createTurn("main-turn", "completed")};
+            });
+
+            await fixture.getCodexAcpAgent().prompt(
+                promptWithFileChangeReport(sessionState.sessionId, "request-oversized-subagent"),
+            );
+
+            expect(reportedUpdates(fixture)[0]).toMatchObject({
+                _meta: {jetbrains: {air: {agentFileChangeReport: {
+                    status: "unavailable",
+                    reason: "invalidOutput",
+                }}}},
+            });
         });
     });
 });

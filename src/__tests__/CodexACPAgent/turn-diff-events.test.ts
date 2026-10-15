@@ -34,11 +34,20 @@ describe("CodexEventHandler - turn diff events", () => {
         expect(disabled.getTurnDiff("turn-1")).toBe("");
 
         const enabled = createHandler(true).handler;
-        await enabled.handleNotification(turnDiff("child-thread", "child diff"));
-        expect(enabled.getTurnDiff("turn-1")).toBe("");
-
         await enabled.handleNotification(turnDiff(sessionId, "root diff"));
         expect(enabled.getTurnDiff("turn-1")).toBe("root diff");
+    });
+
+    it("appends subagent turn diffs to the root turn that was running", async () => {
+        const {handler} = createHandler(true);
+        await handler.handleNotification(turnDiff(sessionId, "root diff"));
+        await handler.handleNotification({
+            method: "turn/diff/updated",
+            params: {threadId: "child-thread", turnId: "child-turn", diff: "child diff\n"},
+        });
+
+        expect(handler.getTurnDiff("turn-1")).toBe("root diff\nchild diff\n");
+        expect(handler.getTurnDiff("child-turn")).toBe("");
     });
 
     it("clears a prior snapshot when Codex emits the final empty aggregate", async () => {
@@ -119,6 +128,5 @@ describe("CodexEventHandler - turn diff events", () => {
         await handler.handleNotification(turnDiff("child-thread", "child diff"));
 
         expect(sessionState.sessionFailure).toMatchObject({severity: "warning"});
-        expect(handler.getTurnDiff("turn-1")).toBe("");
     });
 });
