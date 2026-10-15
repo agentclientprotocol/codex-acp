@@ -367,13 +367,18 @@ function isUnderAny(directory: string, worktrees: string[]): boolean {
 
 /** The trimmed first line of a Git file of at most 4 KiB, or `null` when it is empty or not UTF-8, as Air reads it. */
 function readFirstLine(file: string): string | null {
+    let fd: number | undefined;
     try {
-        if (fs.statSync(file).size > MAX_GIT_FILE_BYTES) return null;
-        const contents = new TextDecoder("utf-8", {fatal: true, ignoreBOM: true}).decode(fs.readFileSync(file));
+        // One descriptor for the size check and the read, so the file cannot change between them.
+        fd = fs.openSync(file, "r");
+        if (fs.fstatSync(fd).size > MAX_GIT_FILE_BYTES) return null;
+        const contents = new TextDecoder("utf-8", {fatal: true, ignoreBOM: true}).decode(fs.readFileSync(fd));
         const line = kotlinTrim(contents.split(/\r\n|\n|\r/, 1)[0] ?? "");
         return line.length === 0 ? null : line;
     } catch {
         return null;
+    } finally {
+        if (fd !== undefined) fs.closeSync(fd);
     }
 }
 
