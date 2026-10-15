@@ -110,8 +110,10 @@ const childTurns: Thread["turns"] = [
     },
 ];
 
+type HistoryTurns = {root: Thread["turns"]; child: Thread["turns"]};
+
 /** Canned Codex app-server responses for a two-thread (root + subagent) fixture, keyed by method and threadId. */
-function codexResponse(method: string, params: unknown): unknown {
+function codexResponse(method: string, params: unknown, turns: HistoryTurns): unknown {
     const threadId = (params as {threadId?: string} | undefined)?.threadId;
     switch (method) {
         case "thread/resume":
@@ -124,8 +126,8 @@ function codexResponse(method: string, params: unknown): unknown {
                 turnsBackwardsCursor: null,
             };
         case "thread/read":
-            if (threadId === childId) return {thread: createThread(childId, {turns: childTurns})};
-            return {thread: createThread(rootId, {turns: rootTurns})};
+            if (threadId === childId) return {thread: createThread(childId, {turns: turns.child})};
+            return {thread: createThread(rootId, {turns: turns.root})};
         case "thread/backgroundTerminals/list":
             if (threadId === childId) {
                 return {data: [{itemId: "child-command-1", processId: "42", command: "npm test"}], nextCursor: null};
@@ -147,10 +149,13 @@ function codexResponse(method: string, params: unknown): unknown {
 }
 
 /** Connects a v2 client to the agent through the router, over a mocked (threadId-aware) Codex app-server. */
-async function connectV2Client(capabilities: acpV2.ClientCapabilities) {
+async function connectV2Client(
+    capabilities: acpV2.ClientCapabilities,
+    turns: HistoryTurns = {root: rootTurns, child: childTurns},
+) {
     const mocks = createMockConnections();
     mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params: unknown) => (
-        codexResponse(method, params)
+        codexResponse(method, params, turns)
     ));
     const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
@@ -229,6 +234,67 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
             .map((update) => (update as {content: {type: string; text?: string}}).content)
             .map((content) => (content.type === "text" ? content.text : null));
         expect(agentMessages).toContain("Investigating the flaky test.");
+    });
+
+    it('replays a follow-up turn of a finished child as a new generation', async () => {
+        const turn = (id: string, items: Thread["turns"][number]["items"]): Thread["turns"][number] => ({
+            id,
+            itemsView: "full",
+            status: "completed",
+            error: null,
+            startedAt: null,
+            completedAt: null,
+            durationMs: null,
+            items,
+        });
+        const activity = (id: string, kind: "started" | "interacted" | "completed") => ({
+            type: "subAgentActivity" as const,
+            id,
+            kind,
+            agentThreadId: childId,
+            agentPath: `/${rootId}/researcher`,
+        });
+        const reply = (id: string, text: string) => ({
+            type: "agentMessage" as const,
+            id,
+            text,
+            phase: null,
+            memoryCitation: null,
+            delivery: null,
+            questions: null,
+        });
+        const {connection, updates} = await connectV2Client({
+            _meta: {jetbrains: {air: {version: 1, capabilities: [AIR_NATIVE_SUBAGENT_SESSIONS_KEY]}}},
+        }, {
+            // Codex records a follow-up to a finished child as an `interacted` activity of the parent.
+            root: [
+                turn("root-turn-1", [activity("spawn", "started"), activity("first-done", "completed")]),
+                turn("root-turn-2", [activity("followup", "interacted"), activity("followup-done", "completed")]),
+            ],
+            child: [
+                turn("child-turn-1", [reply("first-reply", "First answer.")]),
+                turn("child-turn-2", [reply("followup-reply", "Follow-up answer.")]),
+            ],
+        });
+        closeClient = () => connection.close();
+
+        await connection.agent.request(acpV2.methods.agent.session.resume, {
+            sessionId: rootId,
+            cwd,
+            replayFrom: {type: "start"},
+        });
+
+        const followupSessionId = `${childId}:generation:2`;
+        expect(updates.map(({update}) => update).filter((update) => update.sessionUpdate === "_subagent_update")).toEqual([
+            {sessionUpdate: "_subagent_update", subagentSessionId: childId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
+            {sessionUpdate: "_subagent_update", subagentSessionId: childId, state: "completed"},
+            {sessionUpdate: "_subagent_update", subagentSessionId: followupSessionId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
+            {sessionUpdate: "_subagent_update", subagentSessionId: followupSessionId, state: "completed"},
+        ]);
+        const followupReplies = updates
+            .filter(({sessionId, update}) => sessionId === followupSessionId && update.sessionUpdate === "agent_message_chunk")
+            .map(({update}) => (update as {content: {type: string; text?: string}}).content.text);
+        expect(followupReplies).toEqual(["Follow-up answer."]);
     });
 
     it('also emits the child subagent async task when the client also supports asyncTasks (report: not silently lost)', async () => {
