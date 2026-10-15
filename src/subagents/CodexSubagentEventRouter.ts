@@ -64,7 +64,10 @@ export class CodexSubagentEventRouter {
 
     async handle(notification: ServerNotification): Promise<boolean> {
         if (notification.method === "turn/started") {
-            return this.isKnownChild(notification.params.threadId);
+            const childTurn = this.isKnownChild(notification.params.threadId);
+            // A follow-up can start a new turn of an ended child with no collaboration item that reports it.
+            if (childTurn) await this.reopen(notification.params.threadId);
+            return childTurn;
         }
         if (notification.method === "turn/completed") {
             const childTurn = this.isKnownChild(notification.params.threadId);

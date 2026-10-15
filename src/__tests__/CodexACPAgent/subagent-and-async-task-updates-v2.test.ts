@@ -78,6 +78,65 @@ describe('subagent and async task updates on ACP v2', () => {
         ]);
     });
 
+    it('renders a follow-up turn of a finished subagent as a new `_subagent_update` generation', async () => {
+        const {session, updates} = v2Session("root");
+        const router = new CodexSubagentEventRouter("root", true, session, () => {});
+        const childTurn = (id: string, status: "completed" | "inProgress") => router.handle({
+            method: status === "completed" ? "turn/completed" : "turn/started",
+            params: {
+                threadId: "child-1",
+                turn: {
+                    id,
+                    items: [],
+                    itemsView: "notLoaded",
+                    status,
+                    error: null,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
+                },
+            },
+        });
+
+        await router.handle({
+            method: "item/started",
+            params: {
+                threadId: "root",
+                turnId: "turn-1",
+                startedAtMs: 0,
+                item: {
+                    type: "subAgentActivity",
+                    id: "activity-started",
+                    kind: "started",
+                    agentThreadId: "child-1",
+                    agentPath: "/root/researcher",
+                },
+            },
+        });
+        await childTurn("first-turn", "completed");
+        await childTurn("followup-turn", "inProgress");
+        await childTurn("followup-turn", "completed");
+
+        expect(updates).toEqual([
+            {
+                sessionUpdate: "_subagent_update",
+                subagentSessionId: "child-1",
+                name: "Researcher",
+                task: "Delegated task for Researcher",
+                capabilities: {},
+            },
+            {sessionUpdate: "_subagent_update", subagentSessionId: "child-1", state: "completed"},
+            {
+                sessionUpdate: "_subagent_update",
+                subagentSessionId: "child-1:generation:2",
+                name: "Researcher",
+                task: "Delegated task for Researcher",
+                capabilities: {},
+            },
+            {sessionUpdate: "_subagent_update", subagentSessionId: "child-1:generation:2", state: "completed"},
+        ]);
+    });
+
     it('never emits `_subagent_update` (or `subagent_spawned`) when native subagents are disabled', async () => {
         const {session, updates} = v2Session("root");
         const router = new CodexSubagentEventRouter("root", false, session, () => {});

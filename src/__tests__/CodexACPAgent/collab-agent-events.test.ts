@@ -1469,6 +1469,94 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         }));
     });
 
+    it("uses a new ACP child generation when a finished child starts a follow-up turn", async () => {
+        await initializeNativeSubagents();
+        const childTurn = (id: string, status: "completed" | "inProgress"): ServerNotification => ({
+            method: status === "completed" ? "turn/completed" : "turn/started",
+            params: {
+                threadId: "followup-child",
+                turn: {
+                    id,
+                    items: [],
+                    itemsView: "notLoaded",
+                    status,
+                    error: null,
+                    startedAt: null,
+                    completedAt: null,
+                    durationMs: null,
+                },
+            },
+        });
+        const activity = (id: string, kind: "started" | "interacted"): ServerNotification => ({
+            method: "item/completed",
+            params: {
+                threadId: sessionId,
+                turnId: "root-turn",
+                completedAtMs: 0,
+                item: {
+                    type: "subAgentActivity",
+                    id,
+                    kind,
+                    agentThreadId: "followup-child",
+                    agentPath: "/root/reviewer",
+                },
+            },
+        });
+        // Codex reports a follow-up only as an `interacted` activity, then starts a new child turn.
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            activity("spawn-activity", "started"),
+            childTurn("first-turn", "inProgress"),
+            childTurn("first-turn", "completed"),
+            activity("followup-activity", "interacted"),
+            childTurn("followup-turn", "inProgress"),
+            {
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: "followup-child",
+                    turnId: "followup-turn",
+                    itemId: "followup-message",
+                    delta: "Follow-up answer",
+                },
+            },
+            childTurn("followup-turn", "completed"),
+        ]);
+        const subagentUpdates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0])
+            .filter(params => params.update.sessionUpdate.startsWith("subagent_")
+                || params.update.messageId === "followup-message");
+        expect(subagentUpdates).toEqual([
+            expect.objectContaining({
+                sessionId,
+                update: expect.objectContaining({sessionUpdate: "subagent_spawned", subagentSessionId: "followup-child"}),
+            }),
+            expect.objectContaining({
+                sessionId,
+                update: {sessionUpdate: "subagent_state_update", subagentSessionId: "followup-child", state: "completed"},
+            }),
+            expect.objectContaining({
+                sessionId,
+                update: expect.objectContaining({
+                    sessionUpdate: "subagent_spawned",
+                    subagentSessionId: "followup-child:generation:2",
+                    name: "Reviewer",
+                }),
+            }),
+            expect.objectContaining({
+                sessionId: "followup-child:generation:2",
+                update: expect.objectContaining({messageId: "followup-message"}),
+            }),
+            expect.objectContaining({
+                sessionId,
+                update: {
+                    sessionUpdate: "subagent_state_update",
+                    subagentSessionId: "followup-child:generation:2",
+                    state: "completed",
+                },
+            }),
+        ]);
+    });
+
     it("attaches a resumed nested child to the current parent generation", async () => {
         const router = new CodexSubagentEventRouter(
             sessionId,
