@@ -434,6 +434,9 @@ describe("CodexEventHandler - auth error events", () => {
         ["service", "sandboxError"],
         ["service", "tooManyDenials"],
         ["service", "other"],
+        ["service", "futureProviderError"],
+        ["service", "constructor"],
+        ["service", {futureProviderError: {message: "unknown code"}}],
         ["connection", {httpConnectionFailed: {httpStatusCode: null}}],
         ["connection", {responseStreamConnectionFailed: {httpStatusCode: 503}}],
         ["connection", {responseTooManyFailedAttempts: {httpStatusCode: 503}}],
@@ -1061,6 +1064,7 @@ function createTurn(
     return {
         id,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded" as const,
         status,
         error,

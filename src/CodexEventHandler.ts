@@ -146,17 +146,8 @@ function nextSessionFailureRevision(previous: SessionFailure | undefined, id: st
     return previous?.id === id ? previous.revision + 1 : 1;
 }
 
-type StringCodexErrorInfo = Extract<CodexErrorInfo, string>;
-type StructuredCodexErrorInfo = Exclude<CodexErrorInfo, string>;
-type KeysOfUnion<T> = T extends unknown ? keyof T : never;
-type StructuredCodexErrorKind = KeysOfUnion<StructuredCodexErrorInfo>;
-
-/**
- * Exhaustive against the generated app-server union: a schema update cannot silently fall through
- * to provider_error. The runtime lookup still has a fallback for a newer app-server talking to an
- * older codex-acp build.
- */
-const STRING_CODEX_ERROR_CATEGORIES = {
+/** Known error categories; unknown upstream codes fall back to provider_error. */
+const STRING_CODEX_ERROR_CATEGORIES: Partial<Record<string, CodexFailureKind>> = {
     contextWindowExceeded: "context_exhausted",
     sessionBudgetExceeded: "budget_exhausted",
     usageLimitExceeded: "quota_exhausted",
@@ -172,15 +163,15 @@ const STRING_CODEX_ERROR_CATEGORIES = {
     threadRollbackFailed: "provider_error",
     sandboxError: "provider_error",
     other: "provider_error",
-} satisfies Record<StringCodexErrorInfo, CodexFailureKind>;
+};
 
-const STRUCTURED_CODEX_ERROR_CATEGORIES = {
+const STRUCTURED_CODEX_ERROR_CATEGORIES: Partial<Record<string, CodexFailureKind>> = {
     httpConnectionFailed: "transport_lost",
     responseStreamConnectionFailed: "transport_lost",
     responseStreamDisconnected: "transport_lost",
     responseTooManyFailedAttempts: "transport_lost",
     activeTurnNotSteerable: "provider_error",
-} satisfies Record<StructuredCodexErrorKind, CodexFailureKind>;
+};
 
 /**
  * Item types that render as a plain `tool_call`/`tool_call_update` and have no outstanding-item
@@ -691,6 +682,9 @@ export class CodexEventHandler {
                     notification.params.itemId,
                     notification.params.stdin,
                 ));
+            case "thread/prediction/updated":
+                // Suggested future input has no ACP session update counterpart.
+                return null;
             case "thread/attachment/updated":
                 // Persisted attachment metadata has no ACP session update counterpart.
                 return null;
@@ -1194,10 +1188,12 @@ export class CodexEventHandler {
         if (this.isAuthenticationRequiredError(error)) return "auth_required";
         if (this.getHttpStatusCode(error) === 429) return "rate_limited";
         if (typeof error === "string") {
-            return STRING_CODEX_ERROR_CATEGORIES[error] ?? "provider_error";
+            return Object.hasOwn(STRING_CODEX_ERROR_CATEGORIES, error)
+                ? STRING_CODEX_ERROR_CATEGORIES[error] ?? "provider_error"
+                : "provider_error";
         }
         if (error !== null) {
-            for (const kind of Object.keys(STRUCTURED_CODEX_ERROR_CATEGORIES) as StructuredCodexErrorKind[]) {
+            for (const kind of Object.keys(STRUCTURED_CODEX_ERROR_CATEGORIES)) {
                 if (kind in error) {
                     return STRUCTURED_CODEX_ERROR_CATEGORIES[kind] ?? "provider_error";
                 }

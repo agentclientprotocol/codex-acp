@@ -475,7 +475,7 @@ describe("subagents", () => {
         it(`air: gets a replayed ${tool} as the tool call that the live session reports`, async () => {
             const endState = tool === "closeAgent" ? "completed" : "running";
             const spawn = collab("spawn-1", "spawnAgent", "completed", "running");
-            const activity = {type: "subAgentActivity", id: "act-1", kind: "started", agentThreadId: CHILD_THREAD_ID, agentPath: "/root/weather"};
+            const activity = {type: "subAgentActivity", model: null, reasoningEffort: null, id: "act-1", kind: "started", agentThreadId: CHILD_THREAD_ID, agentPath: "/root/weather"};
             const control = (status: "inProgress" | "completed", state: "running" | "completed") =>
                 collab("control-1", tool, status, state, SESSION_ID, CHILD_THREAD_ID, "Use Celsius.");
             const reported = async (each: Scenario) => normalize(await runScenario(each, "air"))

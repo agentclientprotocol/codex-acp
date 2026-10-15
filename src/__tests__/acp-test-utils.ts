@@ -523,6 +523,7 @@ export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string)
         turn: {
             id: "turn-id",
             items: [],
+            rootTurnId: null,
             itemsView: "notLoaded",
             status: "inProgress",
             error: null,
@@ -536,6 +537,7 @@ export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string)
         turn: {
             id: "turn-id",
             items: [],
+            rootTurnId: null,
             itemsView: "notLoaded",
             status: "completed",
             error: null,
