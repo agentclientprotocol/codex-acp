@@ -3258,13 +3258,29 @@ export class CodexAcpServer {
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
                 if (item.type === "subAgentActivity") {
                     const activityKind = item.kind as string;
-                    if (activityKind === "started") {
+                    if (activityKind === "started" || activityKind === "interacted") {
                         const previous = announced.get(item.agentThreadId);
                         if (previous && !previous.terminal) continue;
+                        // A follow-up to a finished child is an `interacted` activity.
+                        if (activityKind === "interacted" && !previous) continue;
                         const generation = (previous?.generation ?? 0) + 1;
                         const childSessionId = generation === 1
                             ? item.agentThreadId
                             : `${item.agentThreadId}:generation:${generation}`;
+                        // Each generation of a child is one turn of the child thread. The
+                        // adapter reads only the items of that turn, one page at a time.
+                        let childItems: AsyncIterable<ThreadItem[]> | null = null;
+                        if (!ancestry.has(item.agentThreadId) && !unreadableChildren.has(item.agentThreadId)) {
+                            try {
+                                childItems = await this.codexAcpClient.readSessionTurnItems(item.agentThreadId, generation - 1);
+                            }
+                            catch (error) {
+                                unreadableChildren.add(item.agentThreadId);
+                                logger.error(`Failed to read subagent history ${item.agentThreadId}`, error);
+                            }
+                        }
+                        // An interaction that started no child turn is not a new generation.
+                        if (activityKind === "interacted" && !childItems) continue;
                         const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
                         await session.update({
                             sessionUpdate: "subagent_spawned",
@@ -3274,44 +3290,32 @@ export class CodexAcpServer {
                             capabilities: {},
                         });
                         announced.set(item.agentThreadId, {generation, sessionId: childSessionId, terminal: false});
-                        if (!ancestry.has(item.agentThreadId) && !unreadableChildren.has(item.agentThreadId)) {
-                            // Each generation of a child is one turn of the child thread. The
-                            // adapter reads only the items of that turn, one page at a time.
-                            let childItems: AsyncIterable<ThreadItem[]> | null = null;
+                        if (childItems) {
+                            const commandIds = new Set<string>();
                             try {
-                                childItems = await this.codexAcpClient.readSessionTurnItems(item.agentThreadId, generation - 1);
+                                await this.streamNativeThreadHistory(
+                                    childSessionId,
+                                    withCommandIds(untilSessionClose(childItems, isOpen), commandIds),
+                                    sessionState,
+                                    new Set([...ancestry, item.agentThreadId]),
+                                    unreadableChildren,
+                                    isOpen,
+                                );
                             }
                             catch (error) {
+                                if (error instanceof SessionClosedDuringLoadError) throw error;
+                                // The child pages are read lazily. A child that fails midway keeps what it sent.
                                 unreadableChildren.add(item.agentThreadId);
                                 logger.error(`Failed to read subagent history ${item.agentThreadId}`, error);
                             }
-                            if (childItems) {
-                                const commandIds = new Set<string>();
-                                try {
-                                    await this.streamNativeThreadHistory(
-                                        childSessionId,
-                                        withCommandIds(untilSessionClose(childItems, isOpen), commandIds),
-                                        sessionState,
-                                        new Set([...ancestry, item.agentThreadId]),
-                                        unreadableChildren,
-                                        isOpen,
-                                    );
-                                }
-                                catch (error) {
-                                    if (error instanceof SessionClosedDuringLoadError) throw error;
-                                    // The child pages are read lazily. A child that fails midway keeps what it sent.
-                                    unreadableChildren.add(item.agentThreadId);
-                                    logger.error(`Failed to read subagent history ${item.agentThreadId}`, error);
-                                }
-                                try {
-                                    await sessionState.asyncTasks.recover(
-                                        item.agentThreadId,
-                                        childSessionId,
-                                        commandIds,
-                                    );
-                                } catch (error) {
-                                    logger.error(`Failed to restore background terminals for ${item.agentThreadId}`, error);
-                                }
+                            try {
+                                await sessionState.asyncTasks.recover(
+                                    item.agentThreadId,
+                                    childSessionId,
+                                    commandIds,
+                                );
+                            } catch (error) {
+                                logger.error(`Failed to restore background terminals for ${item.agentThreadId}`, error);
                             }
                         }
                     }
