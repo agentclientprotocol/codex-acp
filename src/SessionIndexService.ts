@@ -39,7 +39,7 @@ import {
 } from "./SessionIndex";
 import {deleteThread, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
 import {SessionIndexTitles} from "./SessionIndexTitles";
-import {canonicalCwds, isCodexWorktreeCwd, linkedWorktreeCwds} from "./SessionIndexWorktrees";
+import {canonicalCwds, CodexWorktreeMarks, isUncPath, linkedWorktreeCwds} from "./SessionIndexWorktrees";
 import {SessionForkOrigins} from "./SessionForkOrigins";
 import {SessionListSubscriptions, type SessionListSubscriptionTimings, type ThreadEntry} from "./SessionListSubscriptions";
 import {SessionWriteQueue} from "./SessionWriteQueue";
@@ -75,6 +75,8 @@ export class SessionIndexService {
     private anyClientObserved = false;
     /** The threads whose last row had a state, as listed or sent: loaded here. */
     private readonly rowsWithState = new Set<string>();
+    /** Whether a cwd lies in a worktree that Codex made, read from the disk at most once a minute per cwd. */
+    private readonly codexWorktrees = new CodexWorktreeMarks();
 
     constructor(private readonly host: SessionIndexHost, subscriptionTimings?: SessionListSubscriptionTimings) {
         this.activity = new SessionIndexActivity(threadId => host.session(threadId) !== undefined);
@@ -291,24 +293,19 @@ export class SessionIndexService {
             relativeCwd === null ? undefined : (thread) => arePathBasenamesEqual(thread.cwd, relativeCwd),
             cwd === null || relativeCwd !== null ? cwd : path.resolve(cwd),
         ));
-        return {sessions: await this.rows(page.threads), nextCursor: page.nextCursor};
+        // A list of every cwd does not read the Git files of each network share that a thread ran in.
+        return {sessions: await this.rows(page.threads, cwds === null), nextCursor: page.nextCursor};
     }
 
     /**
      * The list rows of threads, for `session/list` and `_session/list/changes` alike. A row has the fork parent
      * known for its thread; one that is not read yet is read in the background, see `SessionForkOrigins`. A row
-     * whose cwd lies in a worktree that Codex made says so, checked once per cwd of the rows.
+     * whose cwd lies in a worktree that Codex made says so, see `CodexWorktreeMarks`. With `skipUncCwds`, a row whose
+     * cwd is a UNC path, such as `\\wsl.localhost\…`, is not checked and not marked.
      */
-    private async rows(entries: ThreadEntry[]): Promise<acp.SessionInfo[]> {
-        const agentWorktrees = new Map<string, boolean>();
-        const inAgentWorktree = (cwd: string): boolean => {
-            let result = agentWorktrees.get(cwd);
-            if (result === undefined) {
-                result = isCodexWorktreeCwd(cwd);
-                agentWorktrees.set(cwd, result);
-            }
-            return result;
-        };
+    private async rows(entries: ThreadEntry[], skipUncCwds = false): Promise<acp.SessionInfo[]> {
+        const inAgentWorktree = (cwd: string): boolean =>
+            !(skipUncCwds && isUncPath(cwd)) && this.codexWorktrees.isCodexWorktreeCwd(cwd);
         return entries.map(entry => {
             const forkedFromId = this.forkOrigins.originOf(entry.thread);
             const thread = forkedFromId === entry.thread.forkedFromId ? entry.thread : {...entry.thread, forkedFromId};

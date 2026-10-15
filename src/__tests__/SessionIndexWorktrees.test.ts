@@ -1,8 +1,8 @@
-import {afterEach, beforeEach, describe, expect, it} from "vitest";
+import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {isCodexWorktreeCwd, linkedWorktreeCwds} from "../SessionIndexWorktrees";
+import {CodexWorktreeMarks, isCodexWorktreeCwd, isUncPath, linkedWorktreeCwds} from "../SessionIndexWorktrees";
 
 /**
  * Builds the Git administrative files of a repository with linked worktrees, the way
@@ -173,5 +173,159 @@ describe("isCodexWorktreeCwd", () => {
         fs.writeFileSync(path.join(root, "repo", ".git", "worktrees", "foreign", "gitdir"), `${path.join(root, "elsewhere", ".git")}\n`);
 
         expect(isCodexWorktreeCwd(worktrees[0]!)).toBe(false);
+    });
+
+    // The cases below follow Air's native rule, `LinkedGitWorktrees.mainWorktreeRoot` and `linkedWorktreesMarkedBy`.
+
+    it("marks no worktree of a bare repository, whose common Git directory is not a .git directory", () => {
+        const bare = path.join(root, "repo.git");
+        const adminDir = path.join(bare, "worktrees", "codex");
+        const worktree = path.join(root, "codex");
+        fs.mkdirSync(adminDir, {recursive: true});
+        fs.mkdirSync(worktree);
+        fs.writeFileSync(path.join(bare, "HEAD"), "ref: refs/heads/main\n");
+        fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${adminDir}\n`);
+        fs.writeFileSync(path.join(adminDir, "commondir"), "../..\n");
+        fs.writeFileSync(path.join(adminDir, "gitdir"), `${path.join(worktree, ".git")}\n`);
+        fs.writeFileSync(path.join(adminDir, "codex-thread.json"), "{}\n");
+
+        expect(isCodexWorktreeCwd(worktree)).toBe(false);
+    });
+
+    it("marks no worktree whose common Git directory named .git is a file", () => {
+        const {repo, worktrees} = createRepository(root, ["codex"]);
+        markAsCodexWorktree("codex");
+        const adminDir = path.join(repo, ".git", "worktrees", "codex");
+        fs.writeFileSync(path.join(root, ".git"), "gitdir: elsewhere\n");
+        fs.writeFileSync(path.join(adminDir, "commondir"), `${path.join(root, ".git")}\n`);
+
+        expect(isCodexWorktreeCwd(worktrees[0]!)).toBe(false);
+    });
+
+    it("follows a marker that links to a file, but not one that links to a directory", () => {
+        const {worktrees} = createRepository(root, ["file", "directory"]);
+        const admin = path.join(root, "repo", ".git", "worktrees");
+        fs.writeFileSync(path.join(root, "marker.json"), "{}\n");
+        fs.mkdirSync(path.join(root, "marker-directory"));
+        fs.symlinkSync(path.join(root, "marker.json"), path.join(admin, "file", "codex-thread.json"), "file");
+        fs.symlinkSync(path.join(root, "marker-directory"), path.join(admin, "directory", "codex-thread.json"), "dir");
+
+        expect([isCodexWorktreeCwd(worktrees[0]!), isCodexWorktreeCwd(worktrees[1]!)]).toEqual([true, false]);
+    });
+
+    it("reads a .git that links to a file as the .git file of the worktree", () => {
+        const {worktrees} = createRepository(root, ["codex"]);
+        markAsCodexWorktree("codex");
+        const dotGit = path.join(worktrees[0]!, ".git");
+        fs.renameSync(dotGit, path.join(root, "dot-git-file"));
+        fs.symlinkSync(path.join(root, "dot-git-file"), dotGit, "file");
+
+        expect(isCodexWorktreeCwd(path.join(worktrees[0]!, "src"))).toBe(true);
+    });
+
+    it("stops at the first .git entry above the cwd: a directory without HEAD or a broken link", () => {
+        const {worktrees} = createRepository(root, ["codex"]);
+        markAsCodexWorktree("codex");
+        const worktree = worktrees[0]!;
+        fs.mkdirSync(path.join(worktree, "src", ".git"));
+        fs.symlinkSync(path.join(root, "missing"), path.join(worktree, "src", "pkg", ".git"), "file");
+        fs.mkdirSync(path.join(worktree, "docs"));
+
+        expect({
+            root: isCodexWorktreeCwd(worktree),
+            sibling: isCodexWorktreeCwd(path.join(worktree, "docs")),
+            gitDirectoryWithoutHead: isCodexWorktreeCwd(path.join(worktree, "src")),
+            brokenGitLink: isCodexWorktreeCwd(path.join(worktree, "src", "pkg")),
+        }).toEqual({root: true, sibling: true, gitDirectoryWithoutHead: false, brokenGitLink: false});
+    });
+
+    it("takes the common Git directory two levels above the worktree's Git directory without a commondir file", () => {
+        const {worktrees} = createRepository(root, ["codex"]);
+        markAsCodexWorktree("codex");
+        fs.rmSync(path.join(root, "repo", ".git", "worktrees", "codex", "commondir"));
+
+        expect(isCodexWorktreeCwd(worktrees[0]!)).toBe(true);
+    });
+
+    it("matches the cwd as given, not its real path: a link to a Codex worktree is not marked", () => {
+        const {worktrees} = createRepository(root, ["codex"]);
+        markAsCodexWorktree("codex");
+        const link = path.join(root, "link");
+        fs.symlinkSync(worktrees[0]!, link, "dir");
+
+        expect([isCodexWorktreeCwd(link), isCodexWorktreeCwd(path.join(worktrees[0]!, "src", "..", "src"))]).toEqual([false, true]);
+    });
+
+    it("marks a path in the worktree that the gitdir file names, which need not exist itself", () => {
+        const {worktrees} = createRepository(root, ["relative", "outside"]);
+        markAsCodexWorktree("relative");
+        markAsCodexWorktree("outside");
+        const admin = path.join(root, "repo", ".git", "worktrees");
+        // A relative gitdir file resolves against the worktree's Git directory.
+        fs.writeFileSync(path.join(admin, "relative", "gitdir"), `${path.relative(path.join(admin, "relative"), path.join(worktrees[0]!, ".git"))}\n`);
+        // The gitdir file names another existing directory: the cwd is not under it.
+        fs.mkdirSync(path.join(root, "other"));
+        fs.writeFileSync(path.join(admin, "outside", "gitdir"), `${path.join(root, "other", ".git")}\n`);
+
+        expect({
+            relativeGitdir: isCodexWorktreeCwd(path.join(worktrees[0]!, "missing", "dir")),
+            otherDirectory: isCodexWorktreeCwd(worktrees[1]!),
+        }).toEqual({relativeGitdir: true, otherDirectory: false});
+    });
+});
+
+describe("CodexWorktreeMarks", () => {
+    let root: string;
+
+    beforeEach(() => {
+        root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-worktrees-")));
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+        fs.rmSync(root, {recursive: true, force: true});
+    });
+
+    it("keeps its reads for the TTL: a marker written later shows once the entry expires", () => {
+        const {worktrees} = createRepository(root, ["codex"]);
+        let now = 1_000;
+        const marks = new CodexWorktreeMarks({ttlMs: 60_000, clock: () => now});
+
+        const before = marks.isCodexWorktreeCwd(worktrees[0]!);
+        fs.writeFileSync(path.join(root, "repo", ".git", "worktrees", "codex", "codex-thread.json"), "{}\n");
+        now += 59_999;
+        const withinTtl = marks.isCodexWorktreeCwd(worktrees[0]!);
+        now += 1;
+        const afterTtl = marks.isCodexWorktreeCwd(worktrees[0]!);
+
+        expect([before, withinTtl, afterTtl]).toEqual([false, false, true]);
+    });
+
+    it("reads nothing from the disk for a cwd it read within the TTL", () => {
+        const {worktrees} = createRepository(root, ["codex"]);
+        fs.writeFileSync(path.join(root, "repo", ".git", "worktrees", "codex", "codex-thread.json"), "{}\n");
+        const marks = new CodexWorktreeMarks({clock: () => 0});
+        expect(marks.isCodexWorktreeCwd(worktrees[0]!)).toBe(true);
+        const reads = [
+            vi.spyOn(fs, "statSync"),
+            vi.spyOn(fs, "lstatSync"),
+            vi.spyOn(fs, "readFileSync"),
+            vi.spyOn(fs, "readdirSync"),
+            vi.spyOn(fs.realpathSync, "native"),
+        ];
+
+        expect(marks.isCodexWorktreeCwd(worktrees[0]!)).toBe(true);
+        expect(reads.map(read => read.mock.calls.length)).toEqual([0, 0, 0, 0, 0]);
+    });
+});
+
+describe("isUncPath", () => {
+    it("tells a UNC path, such as a WSL one", () => {
+        expect([
+            isUncPath("\\\\wsl.localhost\\Ubuntu\\home\\user"),
+            isUncPath("\\\\server\\share"),
+            isUncPath("C:\\repo"),
+            isUncPath("/home/user"),
+        ]).toEqual([true, true, false, false]);
     });
 });

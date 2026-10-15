@@ -1105,15 +1105,31 @@ A row whose `Thread.cwd` is the root of a linked Git worktree, or a directory in
 { "sessionId": "…", "cwd": "/repo-worktrees/fix-login/src", "title": "…", "updatedAt": "…", "_meta": { "jetbrains": { "air": { "version": 1, "archived": false, "agentWorktree": true } } } }
 ```
 
-- Codex made a worktree when its own Git directory, `<git-common-dir>/worktrees/<name>/`, holds the file
-  `codex-thread.json`, which Codex writes there as `{"version":1,"ownerThreadId":"<thread id>"}`. AIR's native
-  Codex provider reads the same file.
+- Codex made a worktree when its own Git directory, `<main>/.git/worktrees/<name>/`, holds the regular file
+  `codex-thread.json`, which Codex writes there as `{"version":1,"ownerThreadId":"<thread id>"}`. A link to a
+  regular file counts too.
 - Only the existence of the file counts, not `ownerThreadId`: several threads can work in one Codex worktree, and
   each of their rows is marked.
-- The primary checkout is never marked, and neither is a worktree whose administrative link does not point back
-  to it, the same check as for `includeWorktrees`.
-- The adapter finds the worktree of each distinct cwd of a page from the Git administrative files and checks the
-  file with one `lstat`; it never runs Git. A missing cwd is not marked.
+- The rule gives the same answer as AIR's native Codex provider (`codexMadeWorktreeDirectoryOf`), step by step:
+  - The nearest `.git` entry at or above the cwd decides. A `.git` directory, with or without `HEAD`, is a main
+    worktree, which is never marked; a `.git` file, or a link to one, is read as `gitdir: <main>/.git/worktrees/<name>`;
+    any other entry, such as a broken link, marks nothing.
+  - The common Git directory is what the `commondir` file of that Git directory names, or `<gitdir>/../..` without
+    the file. It must be a directory named `.git`: the worktrees of a bare repository are not marked.
+  - The worktrees Codex made are the parents of the `.git` files that the `gitdir` files of the marked Git directories
+    of `<main>/.git/worktrees/` name, when they are directories. A row is marked when its cwd is one of them or a path
+    below one, compared by whole names, ignoring case on Windows. So a worktree whose `gitdir` file names another
+    directory marks only the rows under that directory.
+  - Paths are normalized but not resolved to their real path, so the cwd is matched as Codex stored it, the string
+    that AIR matches too. A cwd that reaches the worktree through a symbolic link is not marked; a cwd below the
+    worktree that no longer exists is.
+- The adapter reads the Git administrative files and never runs Git. Like AIR, it keeps what it read for a minute:
+  the main worktree per cwd and the worktrees Codex made per main worktree.
+- A `codex-thread.json` written after a row went out shows with the next change of that thread or the next list read,
+  once the minute has passed; the file alone sends no `_session/list/changes`.
+- A `session/list` without an absolute `cwd` does not mark rows whose cwd is a UNC path, such as
+  `\\wsl.localhost\…`, so that a list of every thread does not read each network share. AIR's native rule has no
+  such exception.
 - `cwd` stays `Thread.cwd`. The mark does not depend on `includeWorktrees`: a list of the worktree's own cwd marks
   its rows too. `_session/list/changes` rows carry it, as they are the rows of the list.
 
@@ -1257,7 +1273,7 @@ The names and the semantics are the RFDs'. The transport differs:
 | `SessionInfo._meta.jetbrains.air.lastPromptAt` = `Thread.recencyAt`, the order key | `SessionInfo.lastPromptAt`; the list order `lastPromptAt ?? updatedAt` |
 | `SessionInfo._meta.jetbrains.air.{model, forkedFrom, state, lastTurnEndedAt}` | the `SessionInfo` fields of the same names |
 | `SessionInfo._meta.jetbrains.air.archived` | `SessionInfo.archived` (#2161) |
-| agent capability `sessionWorktrees`; `SessionInfo._meta.jetbrains.air.agentWorktree` | none yet: a proposal for the session list extensions RFD ([#2323](https://github.com/agentclientprotocol/agent-client-protocol/pull/2323)) |
+| agent capability `sessionWorktrees`; `SessionInfo._meta.jetbrains.air.agentWorktree` | `SessionInfo.agentWorktree` and the agent capability marker `agentWorktrees`, as proposed for the session list extensions RFD in [#2323](https://github.com/agentclientprotocol/agent-client-protocol/pull/2323), not merged yet |
 | `session_info_update._meta.jetbrains.air.archived` | `SessionInfoUpdate.archived` (#2161) |
 | `_session/archive`, `_session/unarchive` | `session/archive`, `session/unarchive` (#2161) |
 | `_session/rename` | `session/set_title`, client-set titles (#1987) |
