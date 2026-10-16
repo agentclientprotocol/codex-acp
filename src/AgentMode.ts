@@ -49,6 +49,22 @@ export class AgentMode {
         },
         "read-only",
     );
+    static readonly AskAlways = new AgentMode(
+        "ask-always",
+        "Ask every time",
+        "Ask before every command and file edit, including reads. Approved commands run in the workspace sandbox without network access.",
+        "standard",
+        "untrusted",
+        "user",
+        {
+            type: "workspaceWrite",
+            writableRoots: [],
+            networkAccess: false,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false,
+        },
+        "workspace-write",
+    );
     static readonly WorkspaceWrite = new AgentMode(
         "workspace-write",
         "Workspace access",
@@ -133,7 +149,13 @@ export class AgentMode {
     }
 
     static all(): AgentMode[] {
-        return [AgentMode.ReadOnly, AgentMode.WorkspaceWrite, AgentMode.Agent, AgentMode.AgentFullAccess];
+        return [
+            AgentMode.ReadOnly,
+            AgentMode.WorkspaceWrite,
+            AgentMode.Agent,
+            AgentMode.AgentFullAccess,
+            AgentMode.AskAlways,
+        ];
     }
 
     static find(modeId: string): AgentMode | null {
