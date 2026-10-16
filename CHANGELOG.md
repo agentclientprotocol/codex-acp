@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.3.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.2...v2.3.0) (2026-10-16)
+
+
+### Features
+
+* add ACP v2 support again ([#620](https://github.com/agentclientprotocol/codex-acp/issues/620)) ([9e1690f](https://github.com/agentclientprotocol/codex-acp/commit/9e1690ff79aad55f173721907c7a65d9fe8b8d64))
+* mark session list rows of worktrees Codex made (agentWorktree) ([#631](https://github.com/agentclientprotocol/codex-acp/issues/631)) ([aa02d43](https://github.com/agentclientprotocol/codex-acp/commit/aa02d439f2d7a47a1338c9db92b62780555a460b))
+* narrow models to what the providers/set gateway lists ([#627](https://github.com/agentclientprotocol/codex-acp/issues/627)) ([3f555f9](https://github.com/agentclientprotocol/codex-acp/commit/3f555f9cd9566b759aef2711d1dbec1e3220dfa3))
+* support AIR sessionIndex extension ([#590](https://github.com/agentclientprotocol/codex-acp/issues/590)) v2 ([#622](https://github.com/agentclientprotocol/codex-acp/issues/622)) ([2fd758c](https://github.com/agentclientprotocol/codex-acp/commit/2fd758ce212e0f1121f0fe608d7d59cc169cc65c))
+
+
+### Bug Fixes
+
+* display the selected wire provider as JetBrains Air Gateway ([#589](https://github.com/agentclientprotocol/codex-acp/issues/589)) ([cc54abf](https://github.com/agentclientprotocol/codex-acp/commit/cc54abf3e4cdb6e58629b24060b0a1e39be73c0a))
+* explain Codex config load errors caused by a deleted working directory ([#626](https://github.com/agentclientprotocol/codex-acp/issues/626)) ([a636804](https://github.com/agentclientprotocol/codex-acp/commit/a636804e57d41c3ec52c40aab9ffcef70de3db5d))
+* hold a fork back from the session list until its session/fork response is out ([#642](https://github.com/agentclientprotocol/codex-acp/issues/642)) ([59974c7](https://github.com/agentclientprotocol/codex-acp/commit/59974c7d173e4fd6ef9498fc1e91779606c2404d))
+* include subagent edits in the agent file-change report ([#632](https://github.com/agentclientprotocol/codex-acp/issues/632)) ([7d07123](https://github.com/agentclientprotocol/codex-acp/commit/7d071236c66e12c20f83e4b04d7a3619fd90de2d))
+* leave codex exec runs out of the session list without sessionIndex ([#639](https://github.com/agentclientprotocol/codex-acp/issues/639)) ([df75d2b](https://github.com/agentclientprotocol/codex-acp/commit/df75d2b70fe2a0540cd621ebe664883860b90c6c))
+* show a Codex subagent's follow-up turn in a new subagent session ([#634](https://github.com/agentclientprotocol/codex-acp/issues/634)) ([7c761c7](https://github.com/agentclientprotocol/codex-acp/commit/7c761c7f8fb3f6166587013f5cf9eb48911d3617))
+
 ## [2.2.2](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.1...v2.2.2) (2026-10-10)
 
 
