@@ -2013,6 +2013,63 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(published()).toBe(2);
     });
 
+    it('publishes the commands once a burst of skill file changes settles', async () => {
+        vi.useFakeTimers();
+        try {
+            const mockFixture = createCodexMockTestFixture();
+            const codexAcpAgent = mockFixture.getCodexAcpAgent();
+            const skill = (name: string) => ({
+                name, description: name, shortDescription: name, path: "/workspace", scope: "user" as const, enabled: true, pluginId: null,
+            });
+            const listSkills = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills")
+                .mockResolvedValue({data: [{cwd: "/workspace", skills: [skill("build")], errors: []}]});
+            const sessionState = createTestSessionState({sessionId: "session-id", cwd: "/workspace"});
+            vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+            // @ts-expect-error - exercising private state
+            codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
+            const published = () => mockFixture.getAcpConnectionEvents([])
+                .filter(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "available_commands_update")
+                .length;
+            // @ts-expect-error - exercising private helper
+            const skillsChanged = () => codexAcpAgent.handleSkillsChanged(sessionState, {method: "skills/changed", params: {}});
+
+            skillsChanged();
+            skillsChanged();
+            await vi.advanceTimersByTimeAsync(400);
+
+            expect(listSkills).toHaveBeenCalledTimes(1);
+            expect(published()).toBe(1);
+
+            listSkills.mockResolvedValue({data: [{cwd: "/workspace", skills: [skill("build"), skill("deploy")], errors: []}]});
+            skillsChanged();
+            await vi.advanceTimersByTimeAsync(400);
+
+            expect(published()).toBe(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('publishes nothing for a session that closed while its skill change settled', async () => {
+        vi.useFakeTimers();
+        try {
+            const mockFixture = createCodexMockTestFixture();
+            const codexAcpAgent = mockFixture.getCodexAcpAgent();
+            const listSkills = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills")
+                .mockResolvedValue({data: []});
+            const sessionState = createTestSessionState({sessionId: "session-id", cwd: "/workspace"});
+
+            // The session is never installed, so it is gone by the time the publish runs.
+            // @ts-expect-error - exercising private helper
+            codexAcpAgent.handleSkillsChanged(sessionState, {method: "skills/changed", params: {}});
+            await vi.advanceTimersByTimeAsync(400);
+
+            expect(listSkills).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('handles builtin slash command locally', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();

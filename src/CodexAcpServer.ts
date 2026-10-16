@@ -1416,6 +1416,7 @@ export class CodexAcpServer {
                 }
                 await this.trackCodexTurnStart(sessionState, event);
                 await this.trackSteerLanding(sessionState, event);
+                this.handleSkillsChanged(sessionState, event);
                 // Codex-started turns carry no `userMessage` item; `handleSessionScopedNotification`
                 // already drops that item type, so nothing is synthesized here.
                 await baselineEventHandler.handleSessionScopedNotification(event);
@@ -2960,6 +2961,23 @@ export class CodexAcpServer {
         await this.publishGoalSnapshot(sessionState, snapshot, force, false);
     }
 
+    /**
+     * Lists the skills of a session again when Codex reports that its skill files changed.
+     *
+     * The notification carries no thread, so app-server sends it to every subscribed session, and each one lists
+     * its own cwds. A skill that appears while a session is open - a new file, a new symlink, a changed link
+     * target - becomes a command right away instead of only after the next turn.
+     */
+    private handleSkillsChanged(sessionState: SessionState, event: ServerNotification): void {
+        if (event.method !== "skills/changed") {
+            return;
+        }
+        this.availableCommands.publishOnSkillsChanged(
+            sessionState,
+            () => this.sessions.get(sessionState.sessionId) === sessionState,
+        );
+    }
+
     private sessionPublishIsCurrent(sessionState: SessionState, sessionGeneration: number): boolean {
         return this.sessions.get(sessionState.sessionId) === sessionState
             && this.getSessionGeneration(sessionState.sessionId) === sessionGeneration
@@ -4368,6 +4386,7 @@ export class CodexAcpServer {
                     // notifications for as long as no later prompt replaces it.
                     await this.trackCodexTurnStart(sessionState, event);
                     await this.trackSteerLanding(sessionState, event);
+                    this.handleSkillsChanged(sessionState, event);
                     if (pendingInsertion !== undefined
                         && isInsertedUserMessage(event, params.sessionId, pendingInsertion.clientUserMessageId)) {
                         await resolvePendingInsertion();
@@ -4722,8 +4741,9 @@ export class CodexAcpServer {
 
             await clearRecoveredSessionFailure(eventHandler);
 
-            // Codex sends no notification for a new skill file. A skill that appeared during the turn becomes a
-            // slash command after it. Never await: the prompt response does not wait for the skill list.
+            // A skill that appeared during the turn becomes a slash command after it, even when the
+            // `skills/changed` notification of its file was missed. Never await: the prompt response does not
+            // wait for the skill list.
             void this.availableCommands.publish(
                 sessionState,
                 () => this.sessions.get(sessionState.sessionId) === sessionState,

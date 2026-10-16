@@ -697,6 +697,9 @@ export class CodexEventHandler {
             case "account/gatewayOAuth/changed":
                 // Gateway login state is account-scoped and has no ACP session update counterpart.
                 return null;
+            case "skills/changed":
+                // The server lists the skills again and publishes the commands. The change itself is no update.
+                return null;
             // ignored events
             case "thread/deleted":
             case "thread/reverted":
@@ -733,7 +736,6 @@ export class CodexEventHandler {
             case "thread/realtime/closed":
             case "windowsSandbox/setupCompleted":
             case "account/login/completed":
-            case "skills/changed":
             case "mcpServer/oauthLogin/completed":
             case "externalAgentConfig/import/completed":
             case "rawResponseItem/completed":

@@ -46,6 +46,9 @@ export type CommandHandleOptions = {
 
 export type LogoutHandler = () => void | Promise<void>;
 
+/** How long a `skills/changed` burst settles before the commands are listed again. */
+const SKILLS_CHANGED_PUBLISH_DELAY_MS = 300;
+
 export class CodexCommands {
     private readonly connection: AcpClientConnection;
     private readonly codexAcpClient: CodexAcpClient;
@@ -54,6 +57,8 @@ export class CodexCommands {
     private readonly mcpCommand: McpCommand;
     /** The commands that each session got last, to skip a publish that changes nothing. */
     private readonly published = new WeakMap<SessionState, string>();
+    /** The pending publish of each session whose skills changed, so one burst of file changes lists once. */
+    private readonly pendingSkillsPublishes = new WeakMap<SessionState, ReturnType<typeof setTimeout>>();
 
     constructor(
         connection: AcpClientConnection,
@@ -67,6 +72,28 @@ export class CodexCommands {
         this.runWithProcessCheck = runWithProcessCheck;
         this.onLogout = onLogout;
         this.mcpCommand = new McpCommand(codexAcpClient, runWithProcessCheck, mcpServerSignIn);
+    }
+
+    /**
+     * Lists the skills again and publishes the commands once the skill files settle.
+     *
+     * Codex watches the skill files and reports every change as `skills/changed`, naming nothing that changed, so
+     * the list is the only way to learn what a session has now. An editor that writes a skill, or a checkout that
+     * adds one, fires several of those notifications, so the publish waits out the burst. Each session keeps one
+     * pending publish, and a publish that changes no command sends nothing.
+     */
+    publishOnSkillsChanged(sessionState: SessionState, shouldPublish: () => boolean = () => true): void {
+        const pending = this.pendingSkillsPublishes.get(sessionState);
+        if (pending !== undefined) {
+            clearTimeout(pending);
+        }
+        const timer = setTimeout(() => {
+            this.pendingSkillsPublishes.delete(sessionState);
+            void this.publish(sessionState, shouldPublish, true);
+        }, SKILLS_CHANGED_PUBLISH_DELAY_MS);
+        // The adapter must not stay alive for a publish that no one waits for.
+        timer.unref?.();
+        this.pendingSkillsPublishes.set(sessionState, timer);
     }
 
     /** Sends the available commands. With `onlyChanges`, it sends nothing when the commands did not change. */
