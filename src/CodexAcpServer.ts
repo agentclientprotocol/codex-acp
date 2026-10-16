@@ -1783,6 +1783,9 @@ export class CodexAcpServer {
                 this.turnStartQueueTail.delete(params.sessionId);
                 this.queuedV2PromptCancellers.delete(params.sessionId);
                 this.steeringQueues.delete(params.sessionId);
+                if (sessionState) {
+                    this.availableCommands.cancelPendingSkillsPublish(sessionState);
+                }
             }
             this.endSessionCloseFence(params.sessionId);
         }
@@ -2972,9 +2975,10 @@ export class CodexAcpServer {
         if (event.method !== "skills/changed") {
             return;
         }
+        const sessionGeneration = this.getSessionGeneration(sessionState.sessionId);
         this.availableCommands.publishOnSkillsChanged(
             sessionState,
-            () => this.sessions.get(sessionState.sessionId) === sessionState,
+            () => this.sessionPublishIsCurrent(sessionState, sessionGeneration),
         );
     }
 
@@ -4744,9 +4748,10 @@ export class CodexAcpServer {
             // A skill that appeared during the turn becomes a slash command after it, even when the
             // `skills/changed` notification of its file was missed. Never await: the prompt response does not
             // wait for the skill list.
+            const turnSessionGeneration = this.getSessionGeneration(sessionState.sessionId);
             void this.availableCommands.publish(
                 sessionState,
-                () => this.sessions.get(sessionState.sessionId) === sessionState,
+                () => this.sessionPublishIsCurrent(sessionState, turnSessionGeneration),
                 true,
             );
 

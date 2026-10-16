@@ -2013,58 +2013,31 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(published()).toBe(2);
     });
 
-    it('publishes the commands once a burst of skill file changes settles', async () => {
+    // The event-driven side of `skills/changed` lives in `skills-changed.test.ts`; this covers only the cap
+    // that keeps a burst from holding the publish back forever.
+    it('publishes a never-ending burst of skill file changes anyway', async () => {
         vi.useFakeTimers();
         try {
             const mockFixture = createCodexMockTestFixture();
             const codexAcpAgent = mockFixture.getCodexAcpAgent();
-            const skill = (name: string) => ({
-                name, description: name, shortDescription: name, path: "/workspace", scope: "user" as const, enabled: true, pluginId: null,
-            });
             const listSkills = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills")
-                .mockResolvedValue({data: [{cwd: "/workspace", skills: [skill("build")], errors: []}]});
+                .mockResolvedValue({data: [{cwd: "/workspace", skills: [{
+                    name: "build", description: "build", shortDescription: "build",
+                    path: "/workspace", scope: "user" as const, enabled: true, pluginId: null,
+                }], errors: []}]});
             const sessionState = createTestSessionState({sessionId: "session-id", cwd: "/workspace"});
-            vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
             // @ts-expect-error - exercising private state
             codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
-            const published = () => mockFixture.getAcpConnectionEvents([])
-                .filter(event => event.method === "sessionUpdate" && event.args[0].update.sessionUpdate === "available_commands_update")
-                .length;
             // @ts-expect-error - exercising private helper
             const skillsChanged = () => codexAcpAgent.handleSkillsChanged(sessionState, {method: "skills/changed", params: {}});
 
-            skillsChanged();
-            skillsChanged();
-            await vi.advanceTimersByTimeAsync(400);
+            // A writer that never pauses for 300 ms: a trailing debounce alone would never fire.
+            for (let elapsed = 0; elapsed < 2_500; elapsed += 200) {
+                skillsChanged();
+                await vi.advanceTimersByTimeAsync(200);
+            }
 
             expect(listSkills).toHaveBeenCalledTimes(1);
-            expect(published()).toBe(1);
-
-            listSkills.mockResolvedValue({data: [{cwd: "/workspace", skills: [skill("build"), skill("deploy")], errors: []}]});
-            skillsChanged();
-            await vi.advanceTimersByTimeAsync(400);
-
-            expect(published()).toBe(2);
-        } finally {
-            vi.useRealTimers();
-        }
-    });
-
-    it('publishes nothing for a session that closed while its skill change settled', async () => {
-        vi.useFakeTimers();
-        try {
-            const mockFixture = createCodexMockTestFixture();
-            const codexAcpAgent = mockFixture.getCodexAcpAgent();
-            const listSkills = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills")
-                .mockResolvedValue({data: []});
-            const sessionState = createTestSessionState({sessionId: "session-id", cwd: "/workspace"});
-
-            // The session is never installed, so it is gone by the time the publish runs.
-            // @ts-expect-error - exercising private helper
-            codexAcpAgent.handleSkillsChanged(sessionState, {method: "skills/changed", params: {}});
-            await vi.advanceTimersByTimeAsync(400);
-
-            expect(listSkills).not.toHaveBeenCalled();
         } finally {
             vi.useRealTimers();
         }
