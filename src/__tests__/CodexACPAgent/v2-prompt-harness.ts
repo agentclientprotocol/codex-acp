@@ -54,6 +54,7 @@ export function createTurn(status: TurnStatus, id = turnId): Turn {
     return {
         id,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded",
         status,
         error: null,

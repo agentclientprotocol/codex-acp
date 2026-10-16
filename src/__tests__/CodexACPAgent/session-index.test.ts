@@ -265,7 +265,7 @@ describe("session/list", () => {
             method: "turn/completed",
             params: {
                 threadId: "idle",
-                turn: {id: "turn-1", items: [], itemsView: "notLoaded", status: "completed", error: null, startedAt: 400, completedAt: 500, durationMs: 100000},
+                turn: {id: "turn-1", items: [], rootTurnId: null, itemsView: "notLoaded", status: "completed", error: null, startedAt: 400, completedAt: 500, durationMs: 100000},
             },
         });
 
@@ -276,7 +276,7 @@ describe("session/list", () => {
 
     it("answers state error for a loaded thread whose last turn failed, until a new turn starts", async () => {
         const turn = (status: string, error: unknown) => ({
-            id: "turn-1", items: [], itemsView: "notLoaded", status, error, startedAt: 400, completedAt: 500, durationMs: 100000,
+            id: "turn-1", items: [], rootTurnId: null, itemsView: "notLoaded", status, error, startedAt: 400, completedAt: 500, durationMs: 100000,
         });
         const failure = {message: "boom", codexErrorInfo: null, additionalDetails: null, misalignment: null};
         const threads = [
@@ -305,7 +305,7 @@ describe("session/list", () => {
 
     it("answers state reviewing in Codex review mode, under requires_action and over running and error", async () => {
         const item = (type: string) => ({type, id: `${type}-1`, review: "Review the diff"});
-        const turn = (status: string) => ({id: "turn-1", items: [], itemsView: "notLoaded", status, error: status === "failed" ? {message: "boom", codexErrorInfo: null, additionalDetails: null, misalignment: null} : null, startedAt: 400, completedAt: 500, durationMs: 1});
+        const turn = (status: string) => ({id: "turn-1", items: [], rootTurnId: null, itemsView: "notLoaded", status, error: status === "failed" ? {message: "boom", codexErrorInfo: null, additionalDetails: null, misalignment: null} : null, startedAt: 400, completedAt: 500, durationMs: 1});
         const {fixture, agent, threadList} = await createAgent("sessionIndex");
         const listWith = async (status: Thread["status"]) => {
             threadList.mockResolvedValue({data: [createThread({status})], nextCursor: null, backwardsCursor: null});
@@ -713,7 +713,7 @@ describe("session/list", () => {
         await openLocalSession(fixture, threadId);
         const completed = (id: string) => fixture.sendServerNotification({
             method: "turn/completed",
-            params: {threadId: id, turn: {id: "turn-1", items: [], itemsView: "notLoaded", status: "completed", error: null, startedAt: 400, completedAt: 500, durationMs: 100000}},
+            params: {threadId: id, turn: {id: "turn-1", items: [], rootTurnId: null, itemsView: "notLoaded", status: "completed", error: null, startedAt: 400, completedAt: 500, durationMs: 100000}},
         });
         const activities = async () => (await agent.listSessions({cwd: "/repo/project"})).sessions
             .map(session => (session._meta as any)?.jetbrains?.air?.lastTurnEndedAt ?? null);

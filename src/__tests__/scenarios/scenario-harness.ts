@@ -60,7 +60,7 @@ type TurnCompletion = {threadId: string; turn: Record<string, unknown>};
 
 function turn(id: string, status: string): Record<string, unknown> {
     return {
-        id, items: [], itemsView: "notLoaded", status, error: null, startedAt: null, completedAt: null, durationMs: null,
+        id, items: [], rootTurnId: null, itemsView: "notLoaded", status, error: null, startedAt: null, completedAt: null, durationMs: null,
     };
 }
 
@@ -71,7 +71,7 @@ function thread(items: Record<string, unknown>[], cwd: string): Record<string, u
         reasoningEffort: null, createdAt: 1, updatedAt: 2, recencyAt: null, status: {type: "idle"}, path: null,
         cwd, cliVersion: "0.0.0", section: null, sectionEnteredAt: null, projectId: null,
         historyMode: "legacy", source: "cli", agentNickname: null, agentRole: null, gitInfo: null, name: null,
-        turns: [{...turn("history-turn", "completed"), itemsView: "full", items}],
+        turns: [{...turn("history-turn", "completed"), rootTurnId: null, itemsView: "full", items}],
     };
 }
 
