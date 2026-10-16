@@ -577,6 +577,12 @@ export function sessionIndexRowSignature(row: acp.SessionInfo): string {
     ]);
 }
 
+/** The AIR field `forkedFrom` of a row: the thread that its thread was forked from, else `null`. */
+export function sessionIndexRowForkedFrom(row: acp.SessionInfo): string | null {
+    const forkedFrom = asRecord(asRecord(asRecord(row._meta)[JETBRAINS_META_KEY])[AIR_META_KEY])[AIR_FORKED_FROM_KEY];
+    return typeof forkedFrom === "string" ? forkedFrom : null;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value)
         ? value as Record<string, unknown>

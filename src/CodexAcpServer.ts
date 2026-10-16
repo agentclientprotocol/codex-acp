@@ -1099,7 +1099,11 @@ export class CodexAcpServer {
             sessionMetadata = await this.runWithProcessCheck(() => {
                 openGeneration = this.recovery?.generation ?? 0;
                 mcpServerStartupVersion = readMcpServerStartupVersion();
-                return this.codexAcpClient.forkSession(forkRequest, threadId => this.releaseFailedFork(threadId));
+                return this.codexAcpClient.forkSession(
+                    forkRequest,
+                    threadId => this.releaseFailedFork(threadId),
+                    threadId => this.sessionIndex.forkCreated(forkRequest.sessionId, threadId),
+                );
             });
         } else {
             logger.log(`Create new session...`);
@@ -1682,6 +1686,10 @@ export class CodexAcpServer {
     }
 
     async forkSession(params: WithAcpMcpServers<acp.ForkSessionRequest>): Promise<acp.ForkSessionResponse> {
+        return this.sessionIndex.forking(params.sessionId, () => this.createFork(params));
+    }
+
+    private async createFork(params: WithAcpMcpServers<acp.ForkSessionRequest>): Promise<acp.ForkSessionResponse> {
         if (this.providerUpdate !== null) {
             await this.waitForProviderUpdate();
         }

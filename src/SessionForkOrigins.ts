@@ -54,6 +54,12 @@ export class SessionForkOrigins {
         return null;
     }
 
+    /** This adapter forked `parentId` into `threadId`: the fork parent is known without a read of the rollout. */
+    remember(threadId: string, parentId: string): void {
+        this.pending.delete(threadId);
+        remember(this.origins, threadId, parentId);
+    }
+
     /** Drops the pending reads. */
     dispose(): void {
         this.disposed = true;

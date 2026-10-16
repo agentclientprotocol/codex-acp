@@ -26,7 +26,7 @@ import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadReadParams, ThreadReadResponse} from "./app-server/v2";
 import {CodexHomeWatcher, type CodexHomeWatcherListener} from "./CodexHomeWatcher";
 import {logger} from "./Logger";
-import {sessionIndexRowSignature} from "./SessionIndex";
+import {sessionIndexRowForkedFrom, sessionIndexRowSignature} from "./SessionIndex";
 import {isArchivedRolloutPath, isMissingThreadError} from "./SessionIndexMutations";
 import {SessionNameLog} from "./SessionNameLog";
 
@@ -182,6 +182,11 @@ export class SessionListSubscriptions {
     private readonly lastChangeAt = new Map<string, number>();
     /** Threads of the own app-server that the list never shows: ephemeral, subagent and other helper threads. */
     private readonly ignoredThreads = new Set<string>();
+    /**
+     * The threads with a `session/fork` in flight: the number of their forks in flight, and the threads that
+     * `thread/fork` created for them. See {@link forkStarted}.
+     */
+    private readonly forking = new Map<string, {count: number, forks: Set<string>}>();
     private disposed = false;
 
     constructor(private readonly deps: SessionListSubscriptionDeps) {
@@ -343,6 +348,51 @@ export class SessionListSubscriptions {
         for (const threadId of threadIds) {
             if (!this.ignoredThreads.has(threadId)) this.threadChanged(threadId);
         }
+    }
+
+    /**
+     * A `session/fork` of a thread started. The rows of its forks wait in {@link Subscription.held} until
+     * {@link forkAnswered}: the client gets the id of a fork from the fork response before a list change shows the
+     * fork. Otherwise the client sees an unknown session and lists it as a session of its own.
+     */
+    forkStarted(sourceId: string): void {
+        const source = this.forking.get(sourceId);
+        if (source !== undefined) source.count++;
+        else this.forking.set(sourceId, {count: 1, forks: new Set()});
+    }
+
+    /**
+     * `thread/fork` of a thread answered with the thread of the fork. Its rows wait by its id too: a row of a scan
+     * can come before the fork parent is known.
+     */
+    forkCreated(sourceId: string, forkId: string): void {
+        this.forking.get(sourceId)?.forks.add(forkId);
+    }
+
+    /** The response of a `session/fork` of a thread is out: the next flush sends the held rows of its forks. */
+    forkAnswered(sourceId: string): void {
+        const source = this.forking.get(sourceId);
+        if (source === undefined) return;
+        if (--source.count > 0) return;
+        this.forking.delete(sourceId);
+        if ([...this.subscriptions.values()].some(subscription => subscription.held !== null)) this.requestThreads(0);
+    }
+
+    /** Splits held changes into the ones to send now and the rows of forks whose fork response is not out yet. */
+    private withoutForksInFlight(changes: SessionListChanges): {now: SessionListChanges | null, later: SessionListChanges | null} {
+        if (this.forking.size === 0) return {now: changes, later: null};
+        const inFlight = (row: acp.SessionInfo) => {
+            const forkedFrom = sessionIndexRowForkedFrom(row);
+            return (forkedFrom !== null && this.forking.has(forkedFrom))
+                || [...this.forking.values()].some(source => source.forks.has(row.sessionId));
+        };
+        const later = changes.sessions.filter(inFlight);
+        if (later.length === 0) return {now: changes, later: null};
+        const sessions = changes.sessions.filter(row => !inFlight(row));
+        return {
+            now: sessions.length === 0 && changes.removed.length === 0 ? null : {...changes, sessions},
+            later: {subscriptionId: changes.subscriptionId, sessions: later, removed: []},
+        };
     }
 
     private threadChanged(threadId: string): void {
@@ -607,8 +657,9 @@ export class SessionListSubscriptions {
         const sent: SessionListChanges[] = [];
         for (const subscription of this.subscriptions.values()) {
             if (this.disposed || !subscription.ready || subscription.held === null) continue;
-            const changes = subscription.held;
-            subscription.held = null;
+            const {now: changes, later} = this.withoutForksInFlight(subscription.held);
+            subscription.held = later;
+            if (changes === null) continue;
             await this.send(changes);
             sent.push(changes);
         }

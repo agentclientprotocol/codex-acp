@@ -196,6 +196,38 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("holds the row of a fork back until the response of its session/fork is out", async () => {
+        const {codex, subscriptions, sent} = setup();
+        // The resolved form, so that the subscription covers the threads on every OS.
+        const cwd = path.resolve("/repo");
+        codex.put(thread("source", {cwd}));
+        const subscriptionId = await subscriptions.subscribe(cwd);
+        await vi.advanceTimersByTimeAsync(0);
+
+        subscriptions.forkStarted("source");
+        codex.put(thread("fork", {cwd, forkedFromId: "source"}));
+        // A fork whose row does not name its parent, as a row of `thread/list`: it waits by its id.
+        codex.put(thread("unmarked", {cwd}));
+        subscriptions.forkCreated("source", "unmarked");
+        codex.put(thread("other", {cwd}));
+        for (const id of ["fork", "unmarked", "other"]) {
+            subscriptions.observe(own("thread/started", {thread: codex.threads.get(id)!.thread}));
+        }
+        await vi.advanceTimersByTimeAsync(2_000);
+        // A thread that is no fork of the source goes out meanwhile.
+        expect(sent).toEqual([{subscriptionId, sessions: [expect.objectContaining({sessionId: "other"})], removed: []}]);
+
+        subscriptions.forkAnswered("source");
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sent).toHaveLength(2);
+        expect(sent[1]).toEqual({subscriptionId, sessions: expect.arrayContaining([
+            expect.objectContaining({sessionId: "fork"}),
+            expect.objectContaining({sessionId: "unmarked"}),
+        ]), removed: []});
+        expect((sent[1]!.sessions.find(row => row.sessionId === "fork")!._meta as any).jetbrains.air.forkedFrom).toBe("source");
+        subscriptions.dispose();
+    });
+
     it("sends a thread that another process changed after a WAL write, read by one thread/list without cwd", async () => {
         const {codex, subscriptions, sent, listener} = setup();
         codex.put(thread("a", {updatedAt: 1_000}));

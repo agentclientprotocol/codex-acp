@@ -23,6 +23,8 @@ export type SessionForkDependencies = {
     getCollaborationMode(sessionId: string): ModeKind;
     /** Gives back the subscription of a fork that failed after `thread/fork`, unless another open of it began. */
     releaseFailedFork(threadId: string): Promise<void>;
+    /** `thread/fork` answered with the thread of the fork. */
+    forkCreated(threadId: string): void;
 };
 
 export async function forkSession(
@@ -45,6 +47,7 @@ export async function forkSession(
         modelProvider: await dependencies.getResumeModelProvider(),
         threadId: request.sessionId,
     });
+    dependencies.forkCreated(response.thread.id);
     // `thread/fork` subscribes this connection to the new thread, and only to it: the source thread keeps the
     // subscription it had. The fork stays subscribed, as ACP lets the client prompt it at once. Codex keeps an
     // unsubscribed thread loaded and runs its turns, but sends their notifications to subscribers only.

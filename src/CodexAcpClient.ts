@@ -711,6 +711,7 @@ export class CodexAcpClient {
     async forkSession(
         request: WithAcpMcpServers<acp.ForkSessionRequest>,
         releaseFailedFork: (threadId: string) => Promise<void> = threadId => this.closeSession(threadId),
+        forkCreated: (threadId: string) => void = () => {},
     ): Promise<SessionMetadata> {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         return await runForkSession(request, additionalDirectories, {
@@ -724,6 +725,7 @@ export class CodexAcpClient {
                 this.createModelId(models, model, reasoningEffort).toString(),
             getCollaborationMode: sessionId => this.getCollaborationMode(sessionId),
             releaseFailedFork,
+            forkCreated,
         });
     }
 

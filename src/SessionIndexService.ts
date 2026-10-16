@@ -185,6 +185,30 @@ export class SessionIndexService {
         return {};
     }
 
+    /**
+     * Runs `fork`, a `session/fork` request of a thread. The list subscriptions hold back the rows of its forks until
+     * its response is out, see {@link SessionListSubscriptions.forkStarted}.
+     */
+    async forking<T>(sourceId: string, fork: () => Promise<T>): Promise<T> {
+        this.subscriptions.forkStarted(sourceId);
+        try {
+            return await fork();
+        } finally {
+            // The response goes out when the handler returns, before any timer.
+            setTimeout(() => this.subscriptions.forkAnswered(sourceId), 0);
+        }
+    }
+
+    /**
+     * `thread/fork` of a source answered with the thread of the fork. Every row of the fork carries `forkedFrom` from
+     * now on, also a row of `thread/list`, which answers no `forkedFromId`. The list subscriptions hold the fork back
+     * by its id until the fork response is out.
+     */
+    forkCreated(sourceId: string, forkId: string): void {
+        this.forkOrigins.remember(forkId, sourceId);
+        this.subscriptions.forkCreated(sourceId, forkId);
+    }
+
     /** The subscriptions of the connection, for tests. */
     subscriptionResources(): ReturnType<SessionListSubscriptions["resources"]> {
         return this.subscriptions.resources();
