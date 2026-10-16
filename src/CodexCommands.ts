@@ -46,6 +46,15 @@ export type CommandHandleOptions = {
 
 export type LogoutHandler = () => void | Promise<void>;
 
+/** How long a `skills/changed` burst settles before the commands are listed again. */
+const SKILLS_CHANGED_PUBLISH_DELAY_MS = 300;
+
+/** How long a `skills/changed` burst may hold the publish back before it goes out anyway. */
+const SKILLS_CHANGED_PUBLISH_MAX_DELAY_MS = 2_000;
+
+/** A publish that waits out a burst of skill file changes, and the moment it stops waiting for more. */
+type PendingSkillsPublish = {timer: ReturnType<typeof setTimeout>; deadline: number};
+
 export class CodexCommands {
     private readonly connection: AcpClientConnection;
     private readonly codexAcpClient: CodexAcpClient;
@@ -54,6 +63,10 @@ export class CodexCommands {
     private readonly mcpCommand: McpCommand;
     /** The commands that each session got last, to skip a publish that changes nothing. */
     private readonly published = new WeakMap<SessionState, string>();
+    /** The pending publish of each session whose skills changed, so one burst of file changes lists once. */
+    private readonly pendingSkillsPublishes = new WeakMap<SessionState, PendingSkillsPublish>();
+    /** The publish each session started last, so a slower earlier one does not overwrite its list. */
+    private readonly publishRevisions = new WeakMap<SessionState, number>();
 
     constructor(
         connection: AcpClientConnection,
@@ -69,6 +82,39 @@ export class CodexCommands {
         this.mcpCommand = new McpCommand(codexAcpClient, runWithProcessCheck, mcpServerSignIn);
     }
 
+    /**
+     * Lists the skills again and publishes the commands once the skill files settle.
+     *
+     * Codex watches the skill files and reports every change as `skills/changed`, naming nothing that changed, so
+     * the list is the only way to learn what a session has now. An editor that writes a skill, or a checkout that
+     * adds one, fires several of those notifications, so the publish waits out the burst. Each session keeps one
+     * pending publish, and a publish that changes no command sends nothing.
+     */
+    publishOnSkillsChanged(sessionState: SessionState, shouldPublish: () => boolean): void {
+        const pending = this.pendingSkillsPublishes.get(sessionState);
+        clearTimeout(pending?.timer);
+        // A checkout, or a watcher that keeps writing, would otherwise push the publish out forever.
+        const deadline = pending?.deadline ?? Date.now() + SKILLS_CHANGED_PUBLISH_MAX_DELAY_MS;
+        const delay = Math.max(0, Math.min(SKILLS_CHANGED_PUBLISH_DELAY_MS, deadline - Date.now()));
+        const timer = setTimeout(() => {
+            this.pendingSkillsPublishes.delete(sessionState);
+            void this.publish(sessionState, shouldPublish, true);
+        }, delay);
+        // The adapter must not stay alive for a publish that no one waits for.
+        timer.unref?.();
+        this.pendingSkillsPublishes.set(sessionState, {timer, deadline});
+    }
+
+    /** Drops the publish a closing session was still waiting out. */
+    cancelPendingSkillsPublish(sessionState: SessionState): void {
+        const pending = this.pendingSkillsPublishes.get(sessionState);
+        if (pending === undefined) {
+            return;
+        }
+        clearTimeout(pending.timer);
+        this.pendingSkillsPublishes.delete(sessionState);
+    }
+
     /** Sends the available commands. With `onlyChanges`, it sends nothing when the commands did not change. */
     async publish(
         sessionState: SessionState,
@@ -79,11 +125,17 @@ export class CodexCommands {
             if (!shouldPublish()) {
                 return;
             }
+            const revision = (this.publishRevisions.get(sessionState) ?? 0) + 1;
+            this.publishRevisions.set(sessionState, revision);
             const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
             const availableCommands = this.buildAvailableCommands(
                 skillsResponse?.data ?? [],
                 sessionState.clientCapabilities.airClient,
             );
+            // A publish that started later already listed the skills, and its list is the newer one.
+            if (this.publishRevisions.get(sessionState) !== revision) {
+                return;
+            }
             if (availableCommands.length === 0 || !shouldPublish()) {
                 return;
             }

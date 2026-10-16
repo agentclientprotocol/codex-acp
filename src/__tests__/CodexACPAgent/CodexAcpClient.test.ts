@@ -2013,6 +2013,36 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(published()).toBe(2);
     });
 
+    // The event-driven side of `skills/changed` lives in `skills-changed.test.ts`; this covers only the cap
+    // that keeps a burst from holding the publish back forever.
+    it('publishes a never-ending burst of skill file changes anyway', async () => {
+        vi.useFakeTimers();
+        try {
+            const mockFixture = createCodexMockTestFixture();
+            const codexAcpAgent = mockFixture.getCodexAcpAgent();
+            const listSkills = vi.spyOn(mockFixture.getCodexAcpClient(), "listSkills")
+                .mockResolvedValue({data: [{cwd: "/workspace", skills: [{
+                    name: "build", description: "build", shortDescription: "build",
+                    path: "/workspace", scope: "user" as const, enabled: true, pluginId: null,
+                }], errors: []}]});
+            const sessionState = createTestSessionState({sessionId: "session-id", cwd: "/workspace"});
+            // @ts-expect-error - exercising private state
+            codexAcpAgent.sessions.set(sessionState.sessionId, sessionState);
+            // @ts-expect-error - exercising private helper
+            const skillsChanged = () => codexAcpAgent.handleSkillsChanged(sessionState, {method: "skills/changed", params: {}});
+
+            // A writer that never pauses for 300 ms: a trailing debounce alone would never fire.
+            for (let elapsed = 0; elapsed < 2_500; elapsed += 200) {
+                skillsChanged();
+                await vi.advanceTimersByTimeAsync(200);
+            }
+
+            expect(listSkills).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('handles builtin slash command locally', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
