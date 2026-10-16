@@ -1297,10 +1297,10 @@ export class CodexAcpClient {
     }
 
     async listSessions(request: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+        // `codex exec` and `codex review` runs are not chats, so the list leaves them out, as the Codex TUI does.
         const sourceKinds: ThreadSourceKind[] = [
             "cli",
             "vscode",
-            "exec",
             "appServer",
             "unknown",
         ];

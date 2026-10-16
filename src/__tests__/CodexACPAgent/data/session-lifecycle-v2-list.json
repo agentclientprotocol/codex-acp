@@ -19,7 +19,6 @@
         "sourceKinds": [
           "cli",
           "vscode",
-          "exec",
           "appServer",
           "unknown"
         ],
