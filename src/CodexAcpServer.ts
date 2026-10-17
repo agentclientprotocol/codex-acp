@@ -1471,10 +1471,10 @@ export class CodexAcpServer {
         if (sessionState.codexReportedRunningTurnId === event.params.turn.id) {
             sessionState.codexReportedRunningTurnId = null;
         }
-        await this.reportUnownedTurnState(sessionState.sessionId, {
-            state: "idle",
-            stopReason: stopReasonForUnownedTurn(event.params.turn.status),
-        });
+        await this.reportUnownedTurnState(
+            sessionState.sessionId,
+            toV2IdleState({stopReason: stopReasonForUnownedTurn(event.params.turn.status)}),
+        );
     }
 
     /**

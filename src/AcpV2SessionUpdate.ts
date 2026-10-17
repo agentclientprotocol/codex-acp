@@ -74,9 +74,9 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         case "available_commands_update":
             return {
                 ...update,
-                availableCommands: update.availableCommands.map((command) => ({
+                availableCommands: update.availableCommands.map(({input, ...command}) => ({
                     ...command,
-                    ...(command.input != null ? {input: {...command.input, type: "text" as const}} : {}),
+                    ...(input !== undefined ? {input: input && {...input, type: "text" as const}} : {}),
                 })),
             };
         // v2 removed the modes API. codex-acp never emits this (mode changes go out as
@@ -114,9 +114,9 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
                 ...(content !== undefined ? {content: content && content.map(toV2ToolCallContent)} : {}),
             };
         }
-        // Subagent RFD (spec PR #1992, unmerged) uses a single upsert-style update. Sent under a
-        // `_`-prefixed tag because the RFD's `subagent_update` isn't in the v2 unstable schema yet;
-        // rename to `subagent_update` once it lands there. The AIR `nativeSubagentSessions` gate
+        // The subagent RFD uses a single upsert-style update. Sent under a `_`-prefixed tag because
+        // this payload predates the `subagent_update` now in the v2 unstable schema and does not
+        // have its fields yet; rename once it does. The AIR `nativeSubagentSessions` gate
         // already ran upstream (whatever created this update), so no gate check is needed here.
         case "subagent_spawned": {
             const {subagentSessionId, name, task, _meta} = update;
@@ -145,6 +145,9 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         case "async_task_state_update":
             return {...update, sessionUpdate: "_async_task_state_update"};
         // Declared as a type but never emitted; no v2 rendering to give it yet.
+        case "subagent_update":
+        case "session_message":
+        case "session_message_chunk":
         case "async_task_progress":
             throw acp.RequestError.internalError(
                 undefined,

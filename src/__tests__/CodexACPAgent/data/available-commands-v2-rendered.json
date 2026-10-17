@@ -4,12 +4,12 @@
     {
       "name": "review",
       "description": "Review changes",
+      "_meta": {
+        "kind": "hint"
+      },
       "input": {
         "hint": "focus",
         "type": "text"
-      },
-      "_meta": {
-        "kind": "hint"
       }
     },
     {

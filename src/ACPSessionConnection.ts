@@ -84,10 +84,13 @@ export class AcpV2Connection {
      * is no v1 shape for them, so this bypasses `toV2SessionUpdates` entirely.
      */
     async startReplayMessage(sessionId: string, kind: ReplayMessageKind, messageId: string): Promise<void> {
-        await this.client.notify(acpV2.methods.client.session.update, {
-            sessionId,
-            update: {sessionUpdate: kind, messageId, content: []},
-        });
+        // One literal per kind: TypeScript does not match a union-typed tag against the v2 union.
+        const message = {messageId, content: []};
+        const update: acpV2.SessionUpdate =
+            kind === "user_message" ? {sessionUpdate: kind, ...message}
+            : kind === "agent_message" ? {sessionUpdate: kind, ...message}
+            : {sessionUpdate: kind, ...message};
+        await this.client.notify(acpV2.methods.client.session.update, {sessionId, update});
     }
 
     /** `updateState`, with send failures caught and logged instead of propagated. */

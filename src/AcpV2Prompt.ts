@@ -69,12 +69,14 @@ export function toV1PromptRequest(params: acpV2.PromptRequest): acp.PromptReques
  * negotiated it).
  */
 export function toV2IdleState(response: acp.PromptResponse): acpV2.StateUpdate {
+    // Every v1 stop reason is a v2 one. The v2 type is a union per stop reason, which TypeScript
+    // does not match against a union-typed `stopReason`, hence the cast.
     return {
         state: "idle",
         stopReason: response.stopReason,
         ...(response.usage != null ? {usage: response.usage} : {}),
         ...(response._meta != null ? {_meta: response._meta} : {}),
-    };
+    } as acpV2.StateUpdate;
 }
 
 /**

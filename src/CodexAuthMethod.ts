@@ -1,5 +1,5 @@
 
-import type {AuthenticateRequest, AuthMethod, ClientCapabilities} from "@agentclientprotocol/sdk";
+import type {AuthenticateRequest, AuthMethodAgent, ClientCapabilities} from "@agentclientprotocol/sdk";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 
@@ -15,7 +15,7 @@ export interface ApiKeyAuthRequest extends AuthenticateRequest {
     } | null;
 }
 
-const ApiKeyAuthMethod: AuthMethod = {
+const ApiKeyAuthMethod: AuthMethodAgent = {
     id: "api-key",
     name: "API Key",
     description: "Use an API key to authenticate",
@@ -26,7 +26,7 @@ const ApiKeyAuthMethod: AuthMethod = {
     }
 }
 
-const ChatGptAuthMethod: AuthMethod = {
+const ChatGptAuthMethod: AuthMethodAgent = {
     id: "chat-gpt",
     name: "ChatGPT",
     description: "Use ChatGPT to authenticate"
@@ -36,7 +36,7 @@ export interface ChatGPTAuthRequest extends AuthenticateRequest {
     methodId: "chat-gpt";
 }
 
-const ChatGptDeviceCodeAuthMethod: AuthMethod = {
+const ChatGptDeviceCodeAuthMethod: AuthMethodAgent = {
     id: "chat-gpt-device-code",
     name: "ChatGPT (device code)",
     description: "Sign in to ChatGPT by opening a verification page and entering a one-time code"
@@ -69,8 +69,8 @@ export interface GatewayAuthRequest extends AuthenticateRequest {
     };
 }
 
-export function getCodexAuthMethods(clientCapabilities?: ClientCapabilities | null, env: NodeJS.ProcessEnv = process.env): AuthMethod[] {
-    const authMethods: AuthMethod[] = [ApiKeyAuthMethod];
+export function getCodexAuthMethods(clientCapabilities?: ClientCapabilities | null, env: NodeJS.ProcessEnv = process.env): AuthMethodAgent[] {
+    const authMethods: AuthMethodAgent[] = [ApiKeyAuthMethod];
     if (!env["NO_BROWSER"]) {
         authMethods.push(ChatGptAuthMethod);
     }
