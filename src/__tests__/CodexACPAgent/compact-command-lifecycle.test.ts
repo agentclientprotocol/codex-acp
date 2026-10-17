@@ -202,7 +202,7 @@ function turnCompleted(status: "failed" | "interrupted"): Extract<ServerNotifica
 
 function turn(status: Turn["status"]): Turn {
     return {
-        id: turnId, items: [], itemsView: "full", status,
+        id: turnId, items: [], rootTurnId: null, itemsView: "full", status,
         error: status === "failed" ? {
             message: "Compaction service failed.", codexErrorInfo: "serverOverloaded", additionalDetails: null, misalignment: null,
         } : null,

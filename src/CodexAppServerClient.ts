@@ -360,6 +360,7 @@ export class CodexAppServerClient {
                 turn: {
                     id: error.turnId,
                     items: [],
+                    rootTurnId: null,
                     itemsView: "notLoaded",
                     status: "failed",
                     error: error.error,
@@ -951,6 +952,7 @@ export class CodexAppServerClient {
             turn: {
                 id: turnId,
                 items: [],
+                rootTurnId: null,
                 itemsView: "notLoaded",
                 status: "interrupted",
                 error: null,

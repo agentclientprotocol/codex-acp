@@ -79,7 +79,7 @@ function reportsOfEachKind(): Record<string, ToolFacts[]> {
         } as never)],
         collab: [CollabAgentReporter.started(collab as never)],
         subagentActivity: [SubagentActivityReporter.activity({
-            type: "subAgentActivity", id: "act", kind: "started", agentThreadId: "child", agentPath: "/root/child",
+            type: "subAgentActivity", model: null, reasoningEffort: null, id: "act", kind: "started", agentThreadId: "child", agentPath: "/root/child",
         } as never, "in_progress", "start")],
         fuzzySearch: [new FuzzySearchReporter().updated({sessionId: "f", query: "App", files: []} as never)],
         guardian: [new GuardianReporter().completed(guardianEvent as never)],

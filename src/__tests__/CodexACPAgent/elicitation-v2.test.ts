@@ -40,7 +40,7 @@ function deferred<T>(): {promise: Promise<T>; resolve: (value: T) => void} {
  */
 async function startRunningPrompt(client: PromptSession) {
     client.setTurnStart(async () => ({
-        turn: {id: turnId, items: [], itemsView: "notLoaded" as const, status: "inProgress" as const, error: null, startedAt: null, completedAt: null, durationMs: null},
+        turn: {id: turnId, items: [], rootTurnId: null, itemsView: "notLoaded" as const, status: "inProgress" as const, error: null, startedAt: null, completedAt: null, durationMs: null},
     }));
     const response = client.sendPrompt([{type: "text", text: "Hello"}]);
     await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
