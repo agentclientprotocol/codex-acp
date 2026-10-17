@@ -222,6 +222,7 @@ import {
 export interface SessionState extends SessionIndexTitleState {
     sessionId: string,
     currentModelId: string,
+    defaultModeModelId: string | null,
     availableModels: Array<Model>,
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     supportedInputModalities: Array<InputModality>,
@@ -1141,6 +1142,7 @@ export class CodexAcpServer {
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
+            defaultModeModelId: null,
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
@@ -2179,8 +2181,13 @@ export class CodexAcpServer {
                 await this.applyResumedModels(session, client, metadata);
                 return {collaborationMode: metadata.collaborationMode};
             },
-            applyCollaborationMode: (session, client) =>
-                client.setCollaborationMode(session.sessionId, session.collaborationMode, session.currentModelId),
+            applyCollaborationMode: async (session, client) => {
+                if (session.collaborationMode === PLAN_COLLABORATION_MODE && session.defaultModeModelId === null) {
+                    session.defaultModeModelId = session.currentModelId;
+                    session.currentModelId = await this.createPlanModeModelId(session, client);
+                }
+                await client.setCollaborationMode(session.sessionId, session.collaborationMode, session.currentModelId);
+            },
             collaborationMode: (session) => session.collaborationMode,
             resumed: (session) => session.asyncTasks.refresh(),
             sessionLifetime: (session) => this.getSessionGeneration(session.sessionId),
@@ -2481,12 +2488,32 @@ export class CodexAcpServer {
             throw RequestError.invalidParams();
         }
         if (this.recovery !== null && !this.recovery.sessionIsLive(sessionState)) {
-            // The thread is not loaded in a running app-server. Its resume applies the mode, see AppServerRecovery.
+            // Defer the config read until the app-server has resumed the thread.
             sessionState.collaborationMode = mode;
             return;
         }
+        if (mode === PLAN_COLLABORATION_MODE && sessionState.collaborationMode !== PLAN_COLLABORATION_MODE) {
+            sessionState.defaultModeModelId = sessionState.currentModelId;
+            sessionState.currentModelId = await this.createPlanModeModelId(sessionState);
+        } else if (mode === DEFAULT_COLLABORATION_MODE && sessionState.defaultModeModelId !== null) {
+            sessionState.currentModelId = sessionState.defaultModeModelId;
+            sessionState.defaultModeModelId = null;
+        }
         await this.runWithProcessCheck(() => this.codexAcpClient.setCollaborationMode(sessionState.sessionId, mode, sessionState.currentModelId));
         sessionState.collaborationMode = mode;
+    }
+
+    private async createPlanModeModelId(sessionState: SessionState, client = this.codexAcpClient): Promise<string> {
+        const planEffort = await client.getPlanModeReasoningEffort(sessionState.cwd);
+        if (!planEffort) {
+            return sessionState.currentModelId;
+        }
+        const effort = findSupportedEffort(sessionState.supportedReasoningEfforts, planEffort);
+        if (!effort) {
+            return sessionState.currentModelId;
+        }
+        const {model} = ModelId.fromString(sessionState.currentModelId);
+        return ModelId.create(model, effort).toString();
     }
 
     private applyModelChange(sessionState: SessionState, value: string): void {
@@ -3098,6 +3125,7 @@ export class CodexAcpServer {
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
+            defaultModeModelId: null,
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
