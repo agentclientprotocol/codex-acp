@@ -4214,7 +4214,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             .rejects.toThrow("Invalid request");
     });
 
-    it ('should accept prompt with images when model supports image input', async () => {
+    it ('should encode image data inline when model supports image input', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({
             supportedInputModalities: ["text", "image"],
         });
@@ -4229,7 +4229,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
             input: [
                 { type: "text", text: "Hello", text_elements: [] },
-                { type: "image", url: "https://example.com/image.png" },
+                { type: "image", url: "data:image/png;base64,abc123" },
             ]
         }));
     });
@@ -4272,7 +4272,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         }));
     });
 
-    it ('should preserve data image URLs', async () => {
+    it ('should use ACP image data instead of an image URI data URL', async () => {
         const { mockFixture, turnStartSpy } = setupPromptFixture({
             supportedInputModalities: ["text", "image"],
         });
@@ -4285,7 +4285,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
             input: [
-                { type: "image", url: "data:image/png;base64,abc123" },
+                { type: "image", url: "data:image/png;base64,fallback" },
             ]
         }));
     });
