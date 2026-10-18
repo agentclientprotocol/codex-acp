@@ -5,9 +5,9 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {describe, expect, it, vi} from "vitest";
 import {CodexAppServerClient} from "../../../CodexAppServerClient";
-import {prepareCodexHookConfig} from "../../../CodexHookConfig";
 import {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD, listCodexHooks, trustCodexHooks} from "../../../CodexHookTrust";
 import {startCodexConnection} from "../../../CodexJsonRpcConnection";
+import {prepareCodexStartupConfig} from "../../../CodexStartupConfig";
 import type {HookMetadata} from "../../../app-server/v2/HookMetadata";
 import {requireLiveApiKey} from "./acp-e2e-test-utils";
 import {createSpawnedAgentFixture, type SpawnedAgentFixture} from "./spawned-agent-fixture";
@@ -37,7 +37,7 @@ describe.skipIf(process.env["RUN_E2E_TESTS"] !== "true")("ACP hook review", () =
         const home = await mkdtemp(join(tmpdir(), "codex-hook-test-"));
         await writeFile(join(home, "config.toml"),
             '[hooks]\nPostToolUse = [{matcher = "Bash", hooks = [{type = "command", command = "echo user"}]}]\n');
-        const config = prepareCodexHookConfig({
+        const config = prepareCodexStartupConfig({
             hooks: {PostToolUse: [{matcher: "Bash", hooks: [{type: "command", command: "echo ready"}]}]},
         });
         const connection = startCodexConnection(undefined, {...process.env, CODEX_HOME: home}, config.appServerStartupArgs);
