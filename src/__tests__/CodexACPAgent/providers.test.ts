@@ -355,6 +355,24 @@ describe("Configurable LLM providers (providers/*)", () => {
         expect(replacementRewind).toHaveBeenCalledOnce();
     });
 
+    it("leaves the conversation as it is when a turn is running", async () => {
+        const fixture = createCodexMockTestFixture();
+        const rewind = vi.spyOn(fixture.getCodexAcpClient(), "rewindSession");
+        const agent = fixture.getCodexAcpAgent();
+        const sessions = (agent as unknown as {sessions: Map<string, ReturnType<typeof createTestSessionState>>}).sessions;
+        sessions.set("thread-1", createTestSessionState({sessionId: "thread-1", cwd: "/workspace", currentTurnId: "turn-9"}));
+
+        await expect(agent.extMethod(SESSION_REWIND_METHOD, {
+            sessionId: "thread-1",
+            beforeMessage: {
+                messageId: "user-1",
+                messageFingerprint: `sha256:${"0".repeat(64)}`,
+                messageOccurrence: 1,
+            },
+        })).resolves.toEqual({rewound: false});
+        expect(rewind).not.toHaveBeenCalled();
+    });
+
     it("rejects rewind for a thread that is not a loaded ACP session", async () => {
         const fixture = createCodexMockTestFixture();
         const rewind = vi.spyOn(fixture.getCodexAcpClient(), "rewindSession");

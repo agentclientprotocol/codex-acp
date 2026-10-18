@@ -49,10 +49,14 @@ export async function rewindSession(
         );
     }
     // `thread/revert` replaces a paginated thread's durable history. A legacy
-    // thread has no such operation, so the only honest answer is that the
-    // conversation was left as it was and the client keeps its own transcript.
+    // thread has no such operation at all, so the client is told the thread
+    // cannot be rewound rather than being left to read a silent refusal as a
+    // rewind that changed nothing.
     if (history.thread.historyMode === "legacy") {
-        return {rewound: false};
+        throw RequestError.invalidRequest(
+            {sessionId: request.sessionId, historyMode: history.thread.historyMode},
+            `Session ${request.sessionId} was created with legacy history, which Codex cannot rewind`,
+        );
     }
     await client.threadRevert({threadId: request.sessionId, beforeTurnId: match.turn.id});
     return {rewound: true};

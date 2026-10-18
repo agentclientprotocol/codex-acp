@@ -1353,16 +1353,20 @@ A client sends the method only when the capability is there.
   The adapter matches the id first, and the fingerprint occurrence when restored Codex history carries other ids.
   An id with a `:segment:<n>` suffix also matches the message without the suffix.
 - The response is `{"rewound": true}` only after Codex accepted the rewind.
-  `{"rewound": false}` means the conversation was left as it was, and the client then keeps its own transcript too.
+- `{"rewound": false}` means the conversation was left as it was, and the client then keeps its own transcript too.
+  The adapter answers it while a turn is running: that turn writes the history the rewind would replace.
 - When no message matches, the request fails with `invalidParams`.
 - A message that is a steer inside an existing turn fails with `invalidParams`:
   Codex removes whole turns, not a suffix of one.
+- A session created with legacy thread history fails with `invalidRequest` and
+  `data: {sessionId, historyMode: "legacy"}`. Only threads with paginated history can be rewound,
+  and a client that gets this error can offer the fork instead.
 
 Codex mapping:
 
 - The adapter reads the thread history and resolves `beforeMessage` to the turn it starts.
 - Paginated history calls `thread/revert` with that turn as the exclusive boundary.
-  Legacy history has no such operation and answers `{"rewound": false}`.
+  Legacy history has no such operation in the app-server protocol at all, which is the `invalidRequest` above.
 - The Codex thread id stays the ACP session id. No `thread/fork`, no new thread, no session-list entry.
 - `thread/revert` changes the persisted conversation only. It does not revert file changes.
 

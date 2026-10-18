@@ -836,19 +836,24 @@ export class CodexAcpServer {
                     ),
                 };
             }
-            case SESSION_REWIND_METHOD:
+            case SESSION_REWIND_METHOD: {
                 if (this.providerUpdate !== null) {
                     await this.providerUpdate;
                 }
-                if (!this.sessions.has(methodRequest.params.sessionId)) {
+                const sessionState = this.sessions.get(methodRequest.params.sessionId);
+                if (!sessionState) {
                     throw RequestError.invalidParams(
                         undefined,
                         `Unknown session: ${methodRequest.params.sessionId}`,
                     );
                 }
+                // A running turn writes the history the rewind would replace, so the
+                // conversation is left as it is and the client keeps its own transcript.
+                if (sessionState.currentTurnId !== null) return {rewound: false};
                 return await this.runWithProcessCheck(
                     () => this.codexAcpClient.rewindSession(methodRequest.params as SessionRewindRequest),
                 );
+            }
             case GOAL_CONTROL_METHOD:
             case LEGACY_GOAL_CONTROL_METHOD: {
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);

@@ -146,7 +146,7 @@ describe("session rewind", () => {
         expect(client.threadRevert).toHaveBeenCalledWith({threadId: "thread-1", beforeTurnId: "turn-1"});
     });
 
-    it("leaves a legacy-history thread as it is", async () => {
+    it("reports that a legacy-history thread cannot be rewound", async () => {
         const client = {
             threadReadWithHistory: vi.fn().mockResolvedValue({
                 thread: {
@@ -161,16 +161,15 @@ describe("session rewind", () => {
             threadRevert: vi.fn(),
         } as unknown as CodexAppServerClient;
 
-        const result = await rewindSession({
+        await expect(rewindSession({
             sessionId: "thread-1",
             beforeMessage: {
                 messageId: "user-2",
                 messageFingerprint: "sha256:3fc4ccfe745870e2c0d99f71f30ff0656c8d1ed5d3f3b71b17a64d1c0d9a4f5f",
                 messageOccurrence: 1,
             },
-        }, client);
+        }, client)).rejects.toThrow("legacy history, which Codex cannot rewind");
 
-        expect(result).toEqual({rewound: false});
         expect(client.threadRevert).not.toHaveBeenCalled();
     });
 
