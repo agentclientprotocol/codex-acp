@@ -18,6 +18,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
 - [Background terminal tasks](docs/air-extensions.md#async-tasks) in AIR, with task status and targeted stop support after capability negotiation.
 - Session-scoped long-running goals in AIR through the [goal extension](docs/air-extensions.md#goal).
+- In-place message editing in AIR through the [session rewind extension](docs/air-extensions.md#session-rewind), without a provider fork.
 - Typed warnings and errors through the opt-in [AIR session failure extension](docs/air-extensions.md#session-failure).
 - All AIR extensions, capabilities, and `_meta` keys: [AIR extensions](docs/air-extensions.md).
 - A per-turn [agent file-change report](docs/air-extensions.md#agent-file-change-report) after capability negotiation.

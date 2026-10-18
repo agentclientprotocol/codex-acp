@@ -75,6 +75,8 @@ import type {
     Turn,
     ThreadResumeParams,
     ThreadResumeResponse,
+    ThreadRevertParams,
+    ThreadRevertResponse,
     ThreadSettings,
     ThreadStartParams,
     ThreadStartResponse,
@@ -682,6 +684,10 @@ export class CodexAppServerClient {
 
     async threadFork(params: ThreadForkParams): Promise<ThreadForkResponse> {
         return await this.sendRequest({ method: "thread/fork", params: params });
+    }
+
+    async threadRevert(params: ThreadRevertParams): Promise<ThreadRevertResponse> {
+        return await this.sendRequest({method: "thread/revert", params});
     }
 
     getThreadSettings(threadId: string): ThreadSettings | undefined {
