@@ -6,6 +6,7 @@
     "nativeSubagentSessions",
     "asyncTasks",
     "recommendedValue",
+    "sessionRewind",
     "sessionIndex",
     "sessionArchive",
     "sessionRename",

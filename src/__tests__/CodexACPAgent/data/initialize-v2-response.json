@@ -86,7 +86,8 @@
           "customInstructions",
           "nativeSubagentSessions",
           "asyncTasks",
-          "recommendedValue"
+          "recommendedValue",
+          "sessionRewind"
         ]
       }
     }

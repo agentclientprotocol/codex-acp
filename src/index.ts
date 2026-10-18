@@ -15,6 +15,7 @@ import {prepareCodexHookConfig} from "./CodexHookConfig";
 import {createAcpAgentRouter} from "./AcpAgentRouter";
 import type {AcpClientConnection, AcpV2Connection} from "./ACPSessionConnection";
 
+
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
     process.exit(0);

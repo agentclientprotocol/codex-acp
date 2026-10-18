@@ -1,7 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
 import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage} from "./CodexEventHandler";
-import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
+import {attachmentFileUri} from "./DesktopAttachmentHistory";
+import {userInputToContentBlocks} from "./UserInputContent";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
@@ -122,6 +123,8 @@ import {
     type LegacySetSessionModelRequest,
     type LegacySetSessionModelResponse,
     SESSION_STEERING_METHOD,
+    SESSION_REWIND_METHOD,
+    type SessionRewindRequest,
     type SessionSteeringResponse,
     type SessionSteerRequest,
 } from "./AcpExtensions";
@@ -191,6 +194,7 @@ import {
     AIR_PLAN_CONTENT_DELTA_KEY,
     AIR_RAW_INPUT_RENDERING_KEY,
     AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+    AIR_SESSION_REWIND_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_GOAL_KEY,
@@ -755,6 +759,7 @@ export class CodexAcpServer {
                 AIR_RAW_INPUT_RENDERING_KEY,
                 AIR_PLAN_CONTENT_DELTA_KEY,
                 AIR_CODEX_HOOKS_KEY,
+                AIR_SESSION_REWIND_KEY,
                 ...this.sessionIndex.agentCapabilities(),
             ]
             : [
@@ -764,6 +769,7 @@ export class CodexAcpServer {
                 AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                 AIR_ASYNC_TASKS_KEY,
                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+                AIR_SESSION_REWIND_KEY,
                 ...this.sessionIndex.agentCapabilities(),
             ];
         return {
@@ -829,6 +835,24 @@ export class CodexAcpServer {
                         () => sessionState.asyncTasks.stop(methodRequest.params.asyncTaskId),
                     ),
                 };
+            }
+            case SESSION_REWIND_METHOD: {
+                if (this.providerUpdate !== null) {
+                    await this.providerUpdate;
+                }
+                const sessionState = this.sessions.get(methodRequest.params.sessionId);
+                if (!sessionState) {
+                    throw RequestError.invalidParams(
+                        undefined,
+                        `Unknown session: ${methodRequest.params.sessionId}`,
+                    );
+                }
+                // A running turn writes the history the rewind would replace, so the
+                // conversation is left as it is and the client keeps its own transcript.
+                if (sessionState.currentTurnId !== null) return {rewound: false};
+                return await this.runWithProcessCheck(
+                    () => this.codexAcpClient.rewindSession(methodRequest.params as SessionRewindRequest),
+                );
             }
             case GOAL_CONTROL_METHOD:
             case LEGACY_GOAL_CONTROL_METHOD: {
@@ -3531,7 +3555,7 @@ export class CodexAcpServer {
         // provided then (`clientId`), so it round-trips as the same message on reconnect; v1 has
         // no such client-minted id and keeps using Codex's own item id.
         const messageId = this.protocolVersion === 2 ? (item.clientId ?? item.id) : item.id;
-        const contentBlocks = item.content.map(input => this.userInputToContentBlocks(input));
+        const contentBlocks = item.content.map(input => userInputToContentBlocks(input));
         const attachmentUris = new Set(contentBlocks.flatMap((blocks, index) =>
             item.content[index]?.type === "text"
                 ? blocks.flatMap(block => block.type === "resource_link" ? [block.uri] : [])
@@ -3589,47 +3613,6 @@ export class CodexAcpServer {
             item.id,
             createMessagePhaseMeta("final_answer", this.capabilities.airClient),
         );
-    }
-
-    private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
-        switch (input.type) {
-            case "text":
-                return desktopAttachmentHistory(input.text)
-                    ?? (input.text.length > 0 ? [{ type: "text", text: input.text }] : []);
-            case "image":
-                return [{
-                    type: "text",
-                    text: "url" in input
-                        ? this.formatUriAsLink("image", input.url)
-                        : `image:${input.fileId}`,
-                }];
-            case "localImage":
-            case "localAudio":
-            case "mention": {
-                const uri = attachmentFileUri(input.path);
-                const fileName = input.path.split(/[\\/]/).pop() || input.type;
-                const name = input.type === "mention" && input.name.trim().length > 0 ? input.name : fileName;
-                return uri !== null
-                    ? [{type: "resource_link", name, uri}]
-                    : [{type: "text", text: this.formatUriAsLink(name, input.path)}];
-            }
-            case "skill":
-                return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
-            case "audio":
-                return [{type: "text", text: this.formatUriAsLink("audio", input.url)}];
-        }
-    }
-
-    private formatUriAsLink(name: string | null, uri: string): string {
-        if (name && name.length > 0) {
-            return `[@${name}](${uri})`;
-        }
-        if (uri.startsWith("file://")) {
-            const path = uri.replace("file://", "");
-            const fileName = path.split("/").pop() ?? path;
-            return `[@${fileName}](${uri})`;
-        }
-        return uri;
     }
 
     getSessionState(sessionId: string): SessionState {

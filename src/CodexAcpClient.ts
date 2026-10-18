@@ -65,6 +65,7 @@ import type {ModeKind} from "./app-server/ModeKind";
 import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUtils";
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
+import {rewindSession as runRewindSession, type SessionRewindRequest} from "./SessionRewind";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 import {
     isMissingRolloutError,
@@ -727,6 +728,12 @@ export class CodexAcpClient {
             releaseFailedFork,
             forkCreated,
         });
+    }
+
+    async rewindSession(request: SessionRewindRequest): Promise<{rewound: boolean}> {
+        const response = await runRewindSession(request, this.codexClient);
+        await this.waitForSessionNotifications(request.sessionId);
+        return response;
     }
 
     async loadSession(request: WithAcpMcpServers<acp.LoadSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {

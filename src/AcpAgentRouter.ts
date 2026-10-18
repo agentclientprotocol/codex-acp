@@ -10,6 +10,7 @@ import {
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+import {SESSION_REWIND_METHOD} from "./SessionRewind";
 import {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD} from "./CodexHookTrust";
 import {
     SESSION_ARCHIVE_METHOD,
@@ -52,6 +53,18 @@ const goalControlParamsParser = z.discriminatedUnion("action", [
 const asyncTaskStopParamsParser = z.object({
     sessionId: z.string().trim().min(1),
     asyncTaskId: z.string().trim().min(1),
+}).passthrough();
+
+const sessionHistoryPointParser = z.object({
+    messageId: z.string().trim().min(1),
+    messageFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    messageOccurrence: z.number().int().positive(),
+});
+
+const sessionRewindParamsParser = z.object({
+    sessionId: z.string().trim().min(1),
+    beforeMessage: sessionHistoryPointParser,
+    resumeAtMessage: sessionHistoryPointParser.optional(),
 }).passthrough();
 
 const hooksListParamsParser = z.object({cwd: z.string().trim().min(1)});
@@ -150,6 +163,7 @@ export function createAcpAgentRouter(
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
+        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent().extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
         .onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
@@ -182,6 +196,7 @@ export function createAcpAgentRouter(
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
+        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent().extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent().sessionIndex.rename(ctx.params))
         .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, true))
         .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, false))
