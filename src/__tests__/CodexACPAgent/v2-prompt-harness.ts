@@ -106,6 +106,8 @@ export type PromptSession = {
     transcript: TranscriptEntry[];
     /** Updates published while the session was being set up, before `transcript` starts recording. */
     setupUpdates: acpV2.SessionUpdate[];
+    /** Every request sent to the mocked Codex app-server. */
+    codexRequests: Array<{method: string, params: unknown}>;
     turnStartParams: Array<Record<string, unknown>>;
     setTurnStart(handler: (params: Record<string, unknown>) => Promise<unknown>): void;
     /** Overrides the canned Codex response for a request method other than `turn/start`. */
@@ -135,7 +137,10 @@ export type PromptSession = {
 /** Connects a client (v2 by default) to the agent through the router, over a mocked Codex app-server, and opens a session. */
 export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     mcpServers?: acpV2.McpServer[],
+    mcpServersV1?: acp.McpServer[],
     mcpStartup?: McpStartupResult,
+    /** Use the real notification-driven startup tracker instead of a resolved test double. */
+    realMcpStartup?: boolean,
     /** Sent on `initialize` (v2 only). */
     clientCapabilities?: acpV2.ClientCapabilities,
     /** The Codex process exit code the agent sees (`null` = still running). */
@@ -153,6 +158,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
 } = {}): Promise<PromptSession> {
     const mocks = createMockConnections();
     const transcript: TranscriptEntry[] = [];
+    const codexRequests: Array<{method: string, params: unknown}> = [];
     const turnStartParams: Array<Record<string, unknown>> = [];
     const codexResponseOverrides = new Map<string, (params: unknown) => Promise<unknown>>(
         Object.entries(options.codexResponses ?? {}),
@@ -161,6 +167,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         turn: createTurn("inProgress", `turn-${turnStartParams.length}`),
     });
     mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params?: any) => {
+        codexRequests.push({method, params});
         // The session title is generated on a separate ephemeral thread; keep it out of the way.
         if (method === "thread/start" && params?.ephemeral) {
             return {thread: {...createThread(), id: titleThreadId, ephemeral: true}};
@@ -183,7 +190,10 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
     vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
     vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
-    vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockResolvedValue(options.mcpStartup ?? {ready: [], failed: [], cancelled: []});
+    if (!options.realMcpStartup) {
+        vi.spyOn(codexAcpClient, "awaitMcpServerStartup")
+            .mockResolvedValue(options.mcpStartup ?? {ready: [], failed: [], cancelled: []});
+    }
     let agent: CodexAcpServer | null = null;
     const router = createAcpAgentRouter((connection) => {
         agent = new CodexAcpServer(connection, codexAcpClient, undefined, options.exitCode);
@@ -248,7 +258,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             .onNotification(acp.methods.client.session.update, (ctx) => onUpdate(ctx.params.update))
             .connect(clientStream);
         await v1Connection.agent.request(acp.methods.agent.initialize, {protocolVersion: acp.PROTOCOL_VERSION});
-        await v1Connection.agent.request(acp.methods.agent.session.new, {cwd, mcpServers: []});
+        await v1Connection.agent.request(acp.methods.agent.session.new, {cwd, mcpServers: options.mcpServersV1 ?? []});
         connection = v1Connection;
         request = (method, params, signal) => v1Connection.agent.request(
             method as typeof acp.methods.agent.session.prompt,
@@ -288,6 +298,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         connection,
         transcript,
         setupUpdates,
+        codexRequests,
         turnStartParams,
         setTurnStart: (handler: typeof turnStart) => {
             turnStart = handler;
