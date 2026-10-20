@@ -1,0 +1,45 @@
+{
+  "configReadWithDeletedDirectory": {
+    "code": -32603,
+    "message": "Codex cannot read its configuration: its working directory <working directory> was deleted or replaced after the agent started. Restart the agent.",
+    "data": {
+      "extra": 1
+    }
+  },
+  "threadStartWithDeletedDirectory": {
+    "code": -32600,
+    "message": "Codex cannot read its configuration: its working directory <working directory> was deleted or replaced after the agent started. Restart the agent.",
+    "data": null
+  },
+  "otherConfigReadFailureWithDeletedDirectory": {
+    "code": -32603,
+    "message": "failed to load configuration: invalid TOML in config.toml\n\nCheck /home/codex and project .codex directories, especially their config.toml files, or any CODEX_CONFIG override.",
+    "data": null
+  },
+  "threadStartWithRecreatedDirectory": {
+    "code": -32600,
+    "message": "Codex cannot read its configuration: its working directory <working directory> was deleted or replaced after the agent started. Restart the agent.",
+    "data": null
+  },
+  "configReadWithPresentDirectory": {
+    "code": -32603,
+    "message": "failed to load configuration: No such file or directory (os error 2)\n\nCheck /home/codex and project .codex directories, especially their config.toml files, or any CODEX_CONFIG override.",
+    "data": {
+      "extra": 1
+    }
+  },
+  "threadStartWithPresentDirectory": {
+    "code": -32600,
+    "message": "failed to load configuration: No such file or directory (os error 2)\n\nCheck /home/codex and project .codex directories, especially their config.toml files, or any CODEX_CONFIG override.",
+    "data": null
+  },
+  "reloadFailure": {
+    "message": "failed to reload config: filesystem path `/tmp` must be absolute\n\nCheck /home/codex and project .codex directories, especially their config.toml files, or any CODEX_CONFIG override.",
+    "data": null
+  },
+  "reloadFailureThatNeedsLogout": {
+    "code": -32603,
+    "message": "failed to reload config: Your refresh token was already used. Please log out and sign in again.",
+    "data": null
+  }
+}

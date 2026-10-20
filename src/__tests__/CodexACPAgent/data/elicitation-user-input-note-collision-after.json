@@ -1,0 +1,87 @@
+{
+  "method": "createElicitation",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "toolCallId": "request-user-input-1",
+      "mode": "form",
+      "message": "Codex needs your input to continue.",
+      "requestedSchema": {
+        "type": "object",
+        "properties": {
+          "choice": {
+            "title": "What should I do next?",
+            "description": "Next step",
+            "_meta": {
+              "codex": {
+                "isOther": true,
+                "isSecret": true
+              }
+            },
+            "type": "string",
+            "oneOf": [
+              {
+                "const": "Run tests",
+                "title": "Run tests",
+                "description": "Run the focused test suite."
+              },
+              {
+                "const": "Stop",
+                "title": "Stop",
+                "description": "Stop and report current status."
+              },
+              {
+                "const": "None of the above",
+                "title": "None of the above",
+                "description": "Provide a different answer in the note field."
+              }
+            ]
+          },
+          "choice_note2": {
+            "type": "string",
+            "title": "Additional answer or note",
+            "_meta": {
+              "codex": {
+                "questionId": "choice",
+                "role": "user_note",
+                "isSecret": true
+              }
+            }
+          },
+          "choice_note": {
+            "title": "Which constraints should I follow?",
+            "description": "Constraints",
+            "_meta": {
+              "codex": {
+                "isOther": false,
+                "isSecret": false
+              }
+            },
+            "type": "string"
+          },
+          "choice_note1": {
+            "title": "What private context should I consider?",
+            "description": "Private",
+            "_meta": {
+              "codex": {
+                "isOther": false,
+                "isSecret": true
+              }
+            },
+            "type": "string"
+          }
+        },
+        "required": [
+          "choice",
+          "choice_note",
+          "choice_note1"
+        ]
+      },
+      "_meta": {
+        "codex": {
+          "autoResolutionMs": null
+        }
+      }
+    }
+  ]
+}

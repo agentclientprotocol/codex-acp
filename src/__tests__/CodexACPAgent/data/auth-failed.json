@@ -7,6 +7,5 @@
 }
 {
   "eventType": "response",
-  "account": null,
-  "requiresOpenaiAuth": true
+  "placeholder": "account/read"
 }

@@ -1,0 +1,42 @@
+[
+  {
+    "terminalId": "item-shell",
+    "command": "npm test",
+    "cwd": "/workspace",
+    "sessionUpdate": "terminal_update"
+  },
+  {
+    "toolCallId": "item-shell",
+    "title": "npm test",
+    "kind": "execute",
+    "status": "in_progress",
+    "content": [
+      {
+        "terminalId": "item-shell",
+        "type": "terminal"
+      }
+    ],
+    "rawInput": {
+      "command": "/bin/zsh -lc 'npm test'",
+      "cwd": "/workspace"
+    },
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "terminalId": "item-shell",
+    "output": {
+      "data": "aGVsbG8K"
+    },
+    "exitStatus": {
+      "exitCode": 0,
+      "signal": null
+    },
+    "sessionUpdate": "terminal_update",
+    "decodedOutput": "hello\n"
+  },
+  {
+    "toolCallId": "item-shell",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]

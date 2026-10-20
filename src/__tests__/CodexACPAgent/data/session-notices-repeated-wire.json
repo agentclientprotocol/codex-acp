@@ -1,0 +1,50 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-repeated-notice",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Repeated warning"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-repeated-notice",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Repeated warning"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-repeated-notice",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Different warning"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-repeated-notice",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Repeated warning"
+      }
+    }
+  }
+]

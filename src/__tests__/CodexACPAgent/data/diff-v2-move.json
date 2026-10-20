@@ -1,0 +1,33 @@
+[
+  {
+    "toolCallId": "item-move",
+    "title": "Editing files",
+    "kind": "edit",
+    "status": "in_progress",
+    "content": [
+      {
+        "changes": [
+          {
+            "oldPath": "/workspace/old-name.ts",
+            "path": "/workspace/new-name.ts",
+            "operation": "move"
+          }
+        ],
+        "patch": {
+          "format": "git_patch",
+          "text": "diff --git a/workspace/old-name.ts b/workspace/new-name.ts\nrename from workspace/old-name.ts\nrename to workspace/new-name.ts\n--- a/workspace/old-name.ts\n+++ b/workspace/new-name.ts\n@@ -1 +1 @@\n-old code line\n+new code line\n"
+        },
+        "_meta": {
+          "kind": "update"
+        },
+        "type": "diff"
+      }
+    ],
+    "sessionUpdate": "tool_call_update"
+  },
+  {
+    "toolCallId": "item-move",
+    "status": "completed",
+    "sessionUpdate": "tool_call_update"
+  }
+]

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ServerNotification } from "../../app-server";
 import { setupPromptTestSession } from "../acp-test-utils";
+import { MAX_SESSION_TITLE_LENGTH } from "../../SessionTitle";
 
 describe("CodexEventHandler - session info updates", () => {
     const sessionId = "test-session-id";
@@ -24,6 +25,49 @@ describe("CodexEventHandler - session info updates", () => {
         );
     });
 
+    it("cuts a long fallback session title to the limit", async () => {
+        const { mockFixture } = setupPromptTestSession({
+            sessionId,
+            sessionTitleSource: "unset",
+        });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "a".repeat(25_023) }],
+        });
+
+        expect(mockFixture.getAcpConnectionEvents([])).toContainEqual({
+            method: "sessionUpdate",
+            args: [{ sessionId, update: { sessionUpdate: "session_info_update", title: `${"a".repeat(MAX_SESSION_TITLE_LENGTH - 1)}…` } }],
+        });
+    });
+
+    it("cuts a long thread name to the limit", async () => {
+        const { mockFixture } = setupPromptTestSession({ sessionId });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "test" }],
+        });
+
+        mockFixture.clearAcpConnectionDump();
+
+        mockFixture.sendServerNotification({
+            method: "thread/name/updated",
+            params: {
+                threadId: sessionId,
+                threadName: "b".repeat(1_000),
+            },
+        });
+
+        await vi.waitFor(() => {
+            expect(mockFixture.getAcpConnectionEvents([])).toContainEqual({
+                method: "sessionUpdate",
+                args: [{ sessionId, update: { sessionUpdate: "session_info_update", title: `${"b".repeat(MAX_SESSION_TITLE_LENGTH - 1)}…` } }],
+            });
+        });
+    });
+
     it("does not replace an explicit session title with the prompt fallback", async () => {
         const { mockFixture } = setupPromptTestSession({
             sessionId,
@@ -37,6 +81,49 @@ describe("CodexEventHandler - session info updates", () => {
         });
 
         expect(mockFixture.getAcpConnectionEvents([])).toEqual([]);
+    });
+
+    it("ignores a late automatic title echo after a sessionIndex rename", async () => {
+        const { mockFixture } = setupPromptTestSession({
+            sessionId,
+            sessionTitle: "Explicit",
+            sessionTitleSource: "explicit",
+            sessionIndexExplicitTitle: "Explicit",
+            automaticTitleEcho: "Automatic",
+        });
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId, prompt: [{ type: "text", text: "test" }] });
+        mockFixture.clearAcpConnectionDump();
+
+        mockFixture.sendServerNotification({ method: "thread/name/updated", params: { threadId: sessionId, threadName: "Automatic" } });
+        mockFixture.sendServerNotification({ method: "thread/name/updated", params: { threadId: sessionId, threadName: "Explicit" } });
+
+        await vi.waitFor(() => {
+            expect(mockFixture.getAcpConnectionEvents([])).toEqual([{
+                method: "sessionUpdate",
+                args: [{ sessionId, update: { sessionUpdate: "session_info_update", title: "Explicit" } }],
+            }]);
+        });
+    });
+
+    it("shows a later rename from elsewhere after a sessionIndex rename", async () => {
+        const { mockFixture } = setupPromptTestSession({
+            sessionId,
+            sessionTitle: "Explicit",
+            sessionTitleSource: "explicit",
+            sessionIndexExplicitTitle: "Explicit",
+            automaticTitleEcho: "Automatic",
+        });
+        await mockFixture.getCodexAcpAgent().prompt({ sessionId, prompt: [{ type: "text", text: "test" }] });
+        mockFixture.clearAcpConnectionDump();
+
+        for (const threadName of ["Explicit", "From the TUI", "Automatic"]) {
+            mockFixture.sendServerNotification({ method: "thread/name/updated", params: { threadId: sessionId, threadName } });
+        }
+
+        await vi.waitFor(() => {
+            expect(mockFixture.getAcpConnectionEvents([]).map(event => event.args[0].update.title))
+                .toEqual(["Explicit", "From the TUI", "Automatic"]);
+        });
     });
 
     it("maps thread name updates to ACP session info updates", async () => {

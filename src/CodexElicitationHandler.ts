@@ -23,13 +23,18 @@ import {
     type McpElicitationContext,
 } from "./permissions/mcp";
 import type {PermissionPromptContext} from "./permissions/lifecycle";
+import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
+import {ElicitationReporter} from "./tool-calls/reporters/ElicitationReporter";
 import {isRecord, normalizeJsonObject, normalizeJsonValue, recordOrNull} from "./permissions/json";
+import {AIR_CUSTOM_ANSWER_KEY, LEGACY_AIR_CUSTOM_ANSWER_KEY, isAirClient, withAirMeta} from "./AirExtension";
 type AcpBackedMcpElicitationParams = Extract<
     McpServerElicitationRequestParams,
     { mode: "form" } | { mode: "url" }
 >;
 
-const USER_INPUT_OTHER_FIELD_SUFFIX = "__other";
+const USER_INPUT_NOTE_FIELD_SUFFIX = "_note";
+const USER_INPUT_OTHER_OPTION = "None of the above";
+const USER_INPUT_NOTE_PREFIX = "user_note: ";
 
 function normalizeElicitationSchema(value: unknown): acp.ElicitationSchema {
     const normalized = normalizeElicitationSchemaValue(value);
@@ -109,17 +114,25 @@ function elicitationResponseMeta(
     return Object.keys(meta).length === 0 ? null : meta;
 }
 
-function userInputOtherFieldId(questionId: string, questionIds: Set<string>): string {
-    const base = `${questionId}${USER_INPUT_OTHER_FIELD_SUFFIX}`;
-    if (!questionIds.has(base)) {
-        return base;
-    }
-
+function userInputNoteFieldId(questionId: string, questionIds: ReadonlySet<string>): string {
+    const base = `${questionId}${USER_INPUT_NOTE_FIELD_SUFFIX}`;
+    let fieldId = base;
     let index = 1;
-    while (questionIds.has(`${base}${index}`)) {
-        index += 1;
+    while (questionIds.has(fieldId)) {
+        fieldId = `${base}${index++}`;
     }
-    return `${base}${index}`;
+    return fieldId;
+}
+
+/** The text that AIR sends in a choice field when the user types an own answer instead of choosing an option. */
+function typedChoiceAnswer(
+    value: acp.ElicitationContentValue | undefined,
+    question: ToolRequestUserInputParams["questions"][number],
+): string | undefined {
+    if (typeof value !== "string" || value === USER_INPUT_OTHER_OPTION) {
+        return undefined;
+    }
+    return question.options?.some(option => option.label === value) ? undefined : value;
 }
 
 function userInputResponseValue(
@@ -138,6 +151,7 @@ function userInputResponseValue(
 
 export class CodexElicitationHandler implements ElicitationHandler {
     private readonly connection: AcpClientConnection;
+    private readonly renderer: AcpToolCallRenderer;
     private readonly permissionContext: PermissionPromptContext;
     private readonly clientCapabilities: acp.ClientCapabilities | null;
     private readonly cancellationSignal: AbortSignal | undefined;
@@ -160,9 +174,11 @@ export class CodexElicitationHandler implements ElicitationHandler {
     constructor(
         connection: AcpClientConnection,
         permissionContext: PermissionPromptContext,
-        clientCapabilities: acp.ClientCapabilities | null = null,
-        cancellationSignal?: AbortSignal
+        clientCapabilities: acp.ClientCapabilities | null,
+        cancellationSignal: AbortSignal | undefined,
+        renderer: AcpToolCallRenderer,
     ) {
+        this.renderer = renderer;
         this.connection = connection;
         this.permissionContext = permissionContext;
         this.clientCapabilities = clientCapabilities;
@@ -206,6 +222,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 params,
                 context,
                 () => this.permissionContext.nextStandaloneMcpToolCallId(params.serverName),
+                this.renderer,
             );
             const response = await this.connection.request(
                 acp.methods.client.session.requestPermission,
@@ -221,21 +238,16 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 if (result.action === "accept") {
                     await this.connection.notify(acp.methods.client.session.update, {
                         sessionId: params.threadId,
-                        update: { sessionUpdate: "tool_call_update", toolCallId: correlatedCallId, status: "in_progress" },
+                        update: this.renderer.render(ElicitationReporter.accepted(correlatedCallId)),
                     });
                 }
             } else {
                 try {
                     await this.connection.notify(acp.methods.client.session.update, {
                         sessionId: params.threadId,
-                        update: {
-                            sessionUpdate: "tool_call_update",
-                            toolCallId: request.toolCall.toolCallId,
-                            status: "completed",
-                            title: request.toolCall.title,
-                            content: request.toolCall.content,
-                            rawOutput: { action: result.action },
-                        },
+                        update: this.renderer.render(
+                            ElicitationReporter.answered(request.toolCall.toolCallId, result.action),
+                        ),
                     });
                 } catch (error) {
                     logger.error("Failed to finalize standalone MCP elicitation tool call", error);
@@ -394,14 +406,15 @@ export class CodexElicitationHandler implements ElicitationHandler {
         const properties: Record<string, acp.ElicitationPropertySchema> = {};
         const required: string[] = [];
         const questionIds = new Set(params.questions.map(question => question.id));
+        const airClient = isAirClient(this.clientCapabilities);
 
         for (const question of params.questions) {
             const options = question.options ?? [];
             const hasOptions = options.length > 0;
             const hasOtherAnswer = question.isOther && hasOptions;
             const base = {
-                title: question.header || question.id,
-                description: question.question,
+                title: question.question || question.header || question.id,
+                ...(question.header ? { description: question.header } : {}),
                 _meta: {
                     codex: {
                         isOther: question.isOther,
@@ -409,47 +422,51 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     },
                 },
             };
-            if (!hasOtherAnswer) {
-                required.push(question.id);
-            }
+            required.push(question.id);
             properties[question.id] = hasOptions
                 ? {
                     ...base,
                     type: "string",
-                    oneOf: options.map(option => ({
-                        const: option.label,
-                        title: option.label,
-                        description: option.description,
-                    })),
+                    oneOf: [
+                        ...options.map(option => ({
+                            const: option.label,
+                            title: option.label,
+                            ...(option.description ? { description: option.description } : {}),
+                        })),
+                        ...(hasOtherAnswer && !airClient && !options.some(option => option.label === USER_INPUT_OTHER_OPTION) ? [{
+                            const: USER_INPUT_OTHER_OPTION,
+                            title: USER_INPUT_OTHER_OPTION,
+                            description: "Provide a different answer in the note field.",
+                        }] : []),
+                    ],
                 }
                 : {
                     ...base,
                     type: "string",
                 };
             if (hasOtherAnswer) {
-                properties[userInputOtherFieldId(question.id, questionIds)] = {
-                    type: "string",
-                    title: "Other",
-                    description: "Type your own answer instead of choosing an option above.",
-                    _meta: {
-                        codex: {
-                            questionId: question.id,
-                            isOtherAnswer: true,
-                            isSecret: question.isSecret,
-                        },
+                const noteMeta = {
+                    codex: {
+                        questionId: question.id,
+                        role: "user_note",
+                        isSecret: question.isSecret,
                     },
+                };
+                properties[userInputNoteFieldId(question.id, questionIds)] = {
+                    type: "string",
+                    title: "Additional answer or note",
+                    _meta: airClient
+                        ? withAirMeta({...noteMeta, [LEGACY_AIR_CUSTOM_ANSWER_KEY]: true}, AIR_CUSTOM_ANSWER_KEY, true)
+                        : noteMeta,
                 };
             }
         }
 
-        const firstQuestion = params.questions[0];
         return {
             sessionId: params.threadId,
             toolCallId: params.itemId,
             mode: "form",
-            message: params.questions.length === 1 && firstQuestion
-                ? firstQuestion.question
-                : "Input requested",
+            message: "Codex needs your input to continue.",
             requestedSchema: {
                 type: "object",
                 properties,
@@ -522,18 +539,29 @@ export class CodexElicitationHandler implements ElicitationHandler {
         const answers: ToolRequestUserInputResponse["answers"] = {};
         const content = contentRecord(response.content);
         const questionIds = new Set(params.questions.map(question => question.id));
+        const airClient = isAirClient(this.clientCapabilities);
         for (const question of params.questions) {
-            const value = question.isOther && question.options != null && question.options.length > 0
-                ? userInputResponseValue(content, userInputOtherFieldId(question.id, questionIds))
-                    ?? userInputResponseValue(content, question.id)
-                : userInputResponseValue(content, question.id);
-            if (value === undefined) {
+            const answerValues: string[] = [];
+            const hasOtherAnswer = question.isOther && question.options != null && question.options.length > 0;
+            const value = userInputResponseValue(content, question.id);
+            const typedAnswer = airClient && hasOtherAnswer ? typedChoiceAnswer(value, question) : undefined;
+            if (typedAnswer !== undefined) {
+                answerValues.push(USER_INPUT_OTHER_OPTION, `${USER_INPUT_NOTE_PREFIX}${typedAnswer.trim()}`);
+            } else if (value !== undefined) {
+                answerValues.push(...(Array.isArray(value) ? value.map(String) : [String(value)]));
+            }
+            if (hasOtherAnswer) {
+                const note = userInputResponseValue(content, userInputNoteFieldId(question.id, questionIds));
+                if (note !== undefined) {
+                    const notes = Array.isArray(note) ? note : [note];
+                    answerValues.push(...notes.map(item => `${USER_INPUT_NOTE_PREFIX}${String(item).trim()}`));
+                }
+            }
+            if (answerValues.length === 0) {
                 continue;
             }
             answers[question.id] = {
-                answers: Array.isArray(value)
-                    ? value.map(String)
-                    : [String(value)],
+                answers: answerValues,
             };
         }
         return { answers };
@@ -549,8 +577,18 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
         await this.connection.notify(acp.methods.client.session.update, {
             sessionId,
-            update: { sessionUpdate: "tool_call_update", toolCallId: context.correlatedCallId, status: "in_progress" },
+            update: this.renderer.render(ElicitationReporter.accepted(context.correlatedCallId)),
         });
+    }
+
+    /**
+     * Completes every accepted URL elicitation: the app-server died and will never resolve them, so the client must
+     * not keep their flow open.
+     */
+    async completeAllUrlElicitations(): Promise<void> {
+        for (const threadId of [...this.pendingUrlElicitations.keys()]) {
+            await this.completeUrlElicitations(threadId);
+        }
     }
 
     private trackUrlElicitation(threadId: string, elicitationId: string): void {

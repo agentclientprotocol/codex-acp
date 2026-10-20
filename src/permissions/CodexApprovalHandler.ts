@@ -27,14 +27,18 @@ import {
     CODEX_NETWORK_PERMISSION_TITLE,
     requestPermissionMeta,
 } from "./metadata";
-import {additionalPermissionsToolCall, commandToolCall, fileChangeToolCall} from "./presentation";
 import type {PermissionPromptContext} from "./lifecycle";
+import {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
+import {CommandReporter} from "../tool-calls/reporters/CommandReporter";
+import {FileChangeReporter} from "../tool-calls/reporters/FileChangeReporter";
+import {SandboxPermissionReporter} from "../tool-calls/reporters/SandboxPermissionReporter";
 
 export class CodexApprovalHandler implements ApprovalHandler {
     constructor(
         private readonly connection: AcpClientConnection,
         private readonly permissionContext: PermissionPromptContext,
-        private readonly cancellationSignal?: AbortSignal,
+        private readonly cancellationSignal: AbortSignal | undefined,
+        private readonly renderer: AcpToolCallRenderer,
     ) {}
 
     async handleCommandExecution(
@@ -50,9 +54,14 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const response = await this.requestPermission({
                 sessionId: params.threadId,
-                toolCall: commandToolCall(authoritativeParams),
+                toolCall: this.renderer.renderPermissionToolCall(CommandReporter.permission(
+                    authoritativeParams,
+                    this.permissionContext.commandStarted(params.threadId, params.itemId),
+                    this.permissionContext.commandName(params.threadId, params.itemId),
+                )),
                 options: decisions.map(({option}) => option),
-                _meta: requestPermissionMeta(
+                ...requestPermissionMeta(
+                    this.renderer.capabilities,
                     params.networkApprovalContext ? CODEX_NETWORK_PERMISSION_TITLE : CODEX_COMMAND_PERMISSION_TITLE,
                     params.reason,
                 ),
@@ -69,9 +78,16 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const response = await this.requestPermission({
                 sessionId: params.threadId,
-                toolCall: fileChangeToolCall(params, this.permissionContext),
+                toolCall: this.renderer.renderPermissionToolCall(FileChangeReporter.permission(
+                    params,
+                    this.permissionContext.fileChange(params.threadId, params.itemId),
+                )),
                 options: decisions.map(({option}) => option),
-                _meta: requestPermissionMeta(CODEX_FILE_CHANGE_PERMISSION_TITLE, params.reason),
+                ...requestPermissionMeta(
+                    this.renderer.capabilities,
+                    CODEX_FILE_CHANGE_PERMISSION_TITLE,
+                    params.reason,
+                ),
             });
             return {decision: this.selectedDecision(response, decisions) ?? "cancel"};
         } catch (error) {
@@ -86,14 +102,18 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const response = await this.requestPermission({
                 sessionId: params.threadId,
-                toolCall: additionalPermissionsToolCall(
+                toolCall: this.renderer.renderPermissionToolCall(SandboxPermissionReporter.permission(
                     params.itemId,
                     params.cwd,
                     params.environmentId,
                     params.permissions,
-                ),
+                )),
                 options: permissionProfileOptions(),
-                _meta: requestPermissionMeta(CODEX_ADDITIONAL_PERMISSIONS_TITLE, params.reason),
+                ...requestPermissionMeta(
+                    this.renderer.capabilities,
+                    CODEX_ADDITIONAL_PERMISSIONS_TITLE,
+                    params.reason,
+                ),
             });
             return this.permissionsResponse(params.permissions, response);
         } catch (error) {
@@ -111,7 +131,9 @@ export class CodexApprovalHandler implements ApprovalHandler {
     }
 
     private selectedDecision<T>(response: acp.RequestPermissionResponse, decisions: DecisionOption<T>[]): T | undefined {
-        if (response.outcome.outcome === "cancelled") return undefined;
+        // A v2 client may answer with a custom outcome instead of "cancelled"; only "selected"
+        // carries an `optionId` (ACP-ENUM-203).
+        if (response.outcome.outcome !== "selected") return undefined;
         const optionId = response.outcome.optionId;
         return decisions.find(({option}) => option.optionId === optionId)?.decision;
     }
@@ -120,7 +142,7 @@ export class CodexApprovalHandler implements ApprovalHandler {
         permissions: RequestPermissionProfile,
         response: acp.RequestPermissionResponse,
     ): PermissionsRequestApprovalResponse {
-        if (response.outcome.outcome === "cancelled") return this.rejectPermissionsResponse();
+        if (response.outcome.outcome !== "selected") return this.rejectPermissionsResponse();
         switch (response.outcome.optionId) {
             case ApprovalOptionId.AllowPermissionsForTurn:
                 return this.grantedPermissionsResponse(permissions, "turn", false);

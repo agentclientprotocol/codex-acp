@@ -1,0 +1,10 @@
+[
+  {
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "user",
+    "sandboxPolicy": {
+      "type": "readOnly",
+      "networkAccess": false
+    }
+  }
+]

@@ -6,9 +6,9 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "command-list-no-path",
-        "status": "completed",
         "kind": "read",
-        "title": "List files"
+        "title": "List files",
+        "status": "completed"
       }
     }
   ]

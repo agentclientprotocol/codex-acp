@@ -4,6 +4,7 @@ import {createRateLimitsMap, mergeRateLimitSnapshot} from "../RateLimitsMap";
 
 function snapshot(overrides: Partial<RateLimitSnapshot> = {}): RateLimitSnapshot {
     return {
+        normalModelSlug: null,
         limitId: "codex",
         limitName: "Codex",
         primary: null,
@@ -23,6 +24,7 @@ describe("RateLimitsMap", () => {
         const fast = snapshot({limitId: "fast", limitName: "Fast"});
 
         const result = createRateLimitsMap({
+            ordinaryUsageAllowed: null,
             rateLimits: codex,
             rateLimitsByLimitId: {codex, fast},
             rateLimitResetCredits: null,

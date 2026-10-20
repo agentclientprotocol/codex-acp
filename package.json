@@ -3,7 +3,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "1.11.0",
+  "version": "2.2.2",
   "description": "",
   "main": "dist/index.js",
   "bin": {
@@ -38,7 +38,8 @@
     "example:steering:multistep": "node --import tsx examples/steering.ts",
     "generate-types": "./node_modules/.bin/codex app-server generate-ts --out src/app-server",
     "release:preflight": "bash scripts/release-preflight.sh",
-    "test": "vitest run --no-file-parallelism --retry=2",
+    "test": "vitest run --no-file-parallelism --retry=2 --exclude 'src/__tests__/integration/**' --exclude '**/node_modules/**' --exclude '**/.git/**'",
+    "test:integration": "vitest run --no-file-parallelism --hookTimeout=30000 src/__tests__/integration",
     "test:e2e": "npm run build && RUN_E2E_TESTS=true vitest run --no-file-parallelism --retry=2 src/__tests__/CodexACPAgent/e2e",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc --noEmit -p examples/tsconfig.json",
@@ -57,16 +58,19 @@
   "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/node": "^26.1.0",
+    "ajv": "^8.20.0",
     "esbuild": "^0.28.2",
     "mcp-hello-world": "^1.1.2",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.1"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^1.4.0",
-    "@openai/codex": "^0.153.4",
+    "@agentclientprotocol/sdk": "~1.5.0",
+    "@openai/codex": "^0.160.1",
+    "cross-spawn": "^7.0.6",
     "diff": "^9.0.0",
     "open": "^11.0.1",
     "vscode-jsonrpc": "^9.0.1",

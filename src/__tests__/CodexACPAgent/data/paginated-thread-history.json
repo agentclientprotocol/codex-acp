@@ -11,17 +11,26 @@
       {
         "threadId": "history",
         "cursor": null,
-        "limit": 50,
+        "limit": 1,
         "sortDirection": "desc",
+        "itemsView": "notLoaded"
+      }
+    ],
+    [
+      {
+        "threadId": "history",
+        "cursor": null,
+        "limit": 5,
+        "sortDirection": "asc",
         "itemsView": "full"
       }
     ],
     [
       {
         "threadId": "history",
-        "cursor": "next-page",
-        "limit": 50,
-        "sortDirection": "desc",
+        "cursor": "asc:2",
+        "limit": 5,
+        "sortDirection": "asc",
         "itemsView": "full"
       }
     ]

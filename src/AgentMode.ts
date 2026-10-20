@@ -1,5 +1,6 @@
 import type {ApprovalsReviewer, AskForApproval, SandboxMode, SandboxPolicy} from "./app-server/v2";
 import type {SessionConfigOption, SessionMode, SessionModeState} from "@agentclientprotocol/sdk";
+import {AIR_KIND_KEY, airOnlyMeta} from "./AirExtension";
 
 export const MODE_CONFIG_ID = "mode";
 
@@ -37,8 +38,21 @@ export class AgentMode {
 
     static readonly ReadOnly = new AgentMode(
         "read-only",
-        "Ask for approval",
-        "Always ask to edit external files and use the internet",
+        "Read-only",
+        "Requires approval to edit files and access the internet.",
+        "standard",
+        "on-request",
+        "user",
+        {
+            type: "readOnly",
+            networkAccess: false,
+        },
+        "read-only",
+    );
+    static readonly WorkspaceWrite = new AgentMode(
+        "workspace-write",
+        "Workspace access",
+        "Edit workspace files; ask before writing outside the workspace or accessing the network.",
         "standard",
         "on-request",
         "user",
@@ -53,7 +67,7 @@ export class AgentMode {
     );
     static readonly Agent = new AgentMode(
         "agent",
-        "Approve for me",
+        "Auto review",
         "Only ask for actions detected as potentially unsafe",
         "auto_review",
         "on-request",
@@ -80,23 +94,25 @@ export class AgentMode {
 
     static DEFAULT_AGENT_MODE = AgentMode.Agent;
 
-    toSessionMode(): SessionMode {
+    /** Only AIR gets the mode kind, in `_meta.jetbrains.air.kind`. */
+    toSessionMode(airClient: boolean): SessionMode {
+        const meta = airOnlyMeta(airClient, AIR_KIND_KEY, this.kind);
         return {
             id: this.id,
             name: this.name,
             description: this.description,
-            _meta: {kind: this.kind},
+            ...(meta ? {_meta: meta} : {}),
         };
     }
 
-    toSessionModeState(): SessionModeState {
+    toSessionModeState(airClient: boolean): SessionModeState {
         return {
-            availableModes: AgentMode.all().map(mode => mode.toSessionMode()),
+            availableModes: AgentMode.all().map(mode => mode.toSessionMode(airClient)),
             currentModeId: this.id
         };
     }
 
-    toConfigOption(): SessionConfigOption {
+    toConfigOption(airClient: boolean): SessionConfigOption {
         return {
             id: MODE_CONFIG_ID,
             name: "Mode",
@@ -104,17 +120,20 @@ export class AgentMode {
             category: "mode",
             type: "select",
             currentValue: this.id,
-            options: AgentMode.all().map(mode => ({
-                value: mode.id,
-                name: mode.name,
-                description: mode.description,
-                _meta: {kind: mode.kind},
-            })),
+            options: AgentMode.all().map(mode => {
+                const meta = airOnlyMeta(airClient, AIR_KIND_KEY, mode.kind);
+                return {
+                    value: mode.id,
+                    name: mode.name,
+                    description: mode.description,
+                    ...(meta ? {_meta: meta} : {}),
+                };
+            }),
         };
     }
 
     static all(): AgentMode[] {
-        return [AgentMode.ReadOnly, AgentMode.Agent, AgentMode.AgentFullAccess];
+        return [AgentMode.ReadOnly, AgentMode.WorkspaceWrite, AgentMode.Agent, AgentMode.AgentFullAccess];
     }
 
     static find(modeId: string): AgentMode | null {

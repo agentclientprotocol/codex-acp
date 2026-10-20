@@ -6,8 +6,8 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-delete-raw",
-        "title": "Editing files",
         "kind": "edit",
+        "title": "Editing files",
         "status": "completed",
         "content": [
           {

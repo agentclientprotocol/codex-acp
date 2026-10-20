@@ -56,10 +56,6 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-flow",
         "status": "completed",
-        "rawOutput": {
-          "formatted_output": "hello\n",
-          "exit_code": 0
-        },
         "_meta": {
           "terminal_exit": {
             "exit_code": 0,

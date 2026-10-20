@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it, onTestFinished, vi} from "vitest";
 import {AgentMode} from "../../../AgentMode";
+import {ASYNC_TASK_STOP_METHOD} from "../../../async-tasks/AsyncTaskExtension";
 import {ApprovalOptionId} from "../../../permissions/option-ids";
 import {
     createAuthenticatedFixture,
@@ -18,6 +19,9 @@ import {
 
 const FIRST_FILE_NAME = "approval-first.txt";
 const SECOND_FILE_NAME = "approval-second.txt";
+// Without this hint the model may run the command sandboxed, hit the read-only
+// filesystem and end the turn without ever requesting approval.
+const ESCALATE = "It writes outside the sandbox, so request escalated permissions on the first attempt.";
 
 describeE2E("E2E shell approval tests", () => {
     let fixture: SpawnedAgentFixture;
@@ -43,8 +47,8 @@ describeE2E("E2E shell approval tests", () => {
         expectedStopReasons: ["end_turn" | "cancelled", "end_turn" | "cancelled"],
     ): Promise<void> {
         const prompts = [
-            `Use your shell tool to run exactly \`${command}\`.`,
-            `Use your shell tool to run exactly the same command again: \`${command}\`.`,
+            `Use your shell tool to run exactly \`${command}\`. ${ESCALATE}`,
+            `Use your shell tool to run exactly the same command again: \`${command}\`. ${ESCALATE}`,
         ];
         for (const [index, text] of prompts.entries()) {
             const response = await fixture.connection.prompt({
@@ -103,17 +107,63 @@ describeE2E("E2E read-only mode shell permission tests", () => {
         await fixture.dispose();
     });
 
-    it("runs a workspace command without prompting for permission", async () => {
-        const sessionId = await writeToFile(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()));
+    it("requests permission for a command that writes inside the workspace", async () => {
+        fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowOnce));
+        const sessionId = await writeToFile(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()), ESCALATE);
 
-        expectNoPermissionRequests(fixture, sessionId);
+        expect(fixture.readPermissionRequests(sessionId, "execute").length).toBeGreaterThanOrEqual(1);
+        expect(fixture.readPermissionRequests(sessionId, "edit")).toHaveLength(0);
     });
+
+    it.each(["rejected", "cancelled"] as const)(
+        "does not write inside the workspace when shell permission is %s",
+        async (outcome) => {
+            fixture.setPermissionResponder(request => {
+                const reject = request.options.find(option => option.kind === "reject_once");
+                return outcome === "rejected" && reject
+                    ? {outcome: {outcome: "selected", optionId: reject.optionId}}
+                    : createPermissionResponse(null);
+            });
+            const filePath = path.join(fixture.workspaceDir, generateFileNameForTest());
+            const sessionId = (await fixture.createSession()).sessionId;
+            const response = await fixture.connection.prompt({
+                sessionId,
+                prompt: [{
+                    type: "text",
+                    text: `Use your shell tool to run exactly \`printf 'blocked' > '${filePath}'\`. Do not modify files any other way.`,
+                }],
+            });
+
+            // Refusing before requesting permission is also safe. Assert the write
+            // was blocked without requiring a particular model response or stop reason.
+            expect(fs.existsSync(filePath),
+                `stopReason=${response.stopReason}; agent said: ${fixture.readText(sessionId)}`,
+            ).toBe(false);
+        },
+    );
 
     it("requests permission for a command that writes outside the workspace", async () => {
         const dir = createDirOutsideWorkspace(fixture);
         fixture.setPermissionResponder(createPermissionResponder("execute", ApprovalOptionId.AllowOnce));
-        const sessionId = await writeToFile(fixture, path.join(dir, generateFileNameForTest()));
+        const sessionId = await writeToFile(fixture, path.join(dir, generateFileNameForTest()), ESCALATE);
         expectPermissionRequests(fixture, sessionId, {execute: 1, edit: 0});
+    });
+});
+
+describeE2E("E2E workspace access mode shell permission tests", () => {
+    let fixture: SpawnedAgentFixture;
+
+    beforeEach(async () => {
+        fixture = await createAuthenticatedFixture(AgentMode.WorkspaceWrite);
+    });
+
+    afterEach(async () => {
+        await fixture.dispose();
+    });
+
+    it("runs a workspace command without prompting for permission", async () => {
+        const sessionId = await writeToFile(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()));
+        expectNoPermissionRequests(fixture, sessionId);
     });
 });
 
@@ -152,8 +202,10 @@ describeE2E("E2E shell cancellation tests", () => {
         }
     }
 
-    it("cancels a running shell command", async () => {
-        fixture = await createAuthenticatedFixture(AgentMode.AgentFullAccess);
+    // Codex keeps a running command as a background terminal when the turn is interrupted,
+    // so cancel ends the turn and the async task stop request ends the process.
+    it("cancels the turn of a running shell command and stops it as an async task", async () => {
+        fixture = await createAuthenticatedFixture(AgentMode.AgentFullAccess, undefined, ["asyncTasks"]);
         const sessionId = (await fixture.createSession()).sessionId;
         const pidFilePath = path.join(fixture.workspaceDir, "cancel-command.pid");
         const command = `/bin/sh -c 'echo $$ > "${pidFilePath}"; exec sleep 100'`;
@@ -169,17 +221,37 @@ describeE2E("E2E shell cancellation tests", () => {
             expect(parsed).toBeGreaterThan(0);
             return parsed;
         }, {timeout: 10_000});
+        onTestFinished(() => {
+            if (isProcessRunning(pid)) process.kill(pid, "SIGKILL");
+        });
         expect(isProcessRunning(pid)).toBe(true);
+        // The process can start before Codex tracks it in the turn, so wait until the client sees it.
+        const toolCallId = await vi.waitFor(() => {
+            const [toolCall] = fixture?.readToolCalls(sessionId, "execute") ?? [];
+            expect(toolCall).toBeDefined();
+            return toolCall!.toolCallId;
+        }, {timeout: 10_000});
         await fixture.connection.cancel({sessionId});
 
         expect((await promptResponse).stopReason).toBe("cancelled");
+        expect(isProcessRunning(pid)).toBe(true);
+
+        // The SDK client rejects the `async_task_spawned` update it has no schema for, but a root
+        // command's async task id is its tool call id. Stop fails until the adapter publishes the task.
+        await vi.waitFor(async () => {
+            const response = await fixture?.connection.extMethod(ASYNC_TASK_STOP_METHOD, {
+                sessionId,
+                asyncTaskId: toolCallId,
+            });
+            expect(response).toEqual({stopped: true});
+        }, {timeout: 10_000});
         await vi.waitFor(() => {
             expect(isProcessRunning(pid)).toBe(false);
         }, {timeout: 5_000});
     });
 });
 
-async function writeToFile(fixture: SpawnedAgentFixture, filePath: string): Promise<string> {
+async function writeToFile(fixture: SpawnedAgentFixture, filePath: string, hint?: string): Promise<string> {
     const content = "hello from e2e";
     const command = `printf '${content}' > '${filePath}'`;
     const sessionId = (await fixture.createSession()).sessionId;
@@ -187,7 +259,7 @@ async function writeToFile(fixture: SpawnedAgentFixture, filePath: string): Prom
         sessionId,
         prompt: [{
             type: "text",
-            text: `Use your shell tool to run exactly \`${command}\`. Do not modify files any other way.`,
+            text: `Use your shell tool to run exactly \`${command}\`. Do not modify files any other way.${hint ? ` ${hint}` : ""}`,
         }],
     });
     expectEndTurn(response);

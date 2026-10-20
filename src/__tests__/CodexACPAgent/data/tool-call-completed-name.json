@@ -1,0 +1,21 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "tool-names-session",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "unifiedExecStartup-execute",
+        "name": "exec_command",
+        "status": "completed",
+        "_meta": {
+          "terminal_exit": {
+            "exit_code": null,
+            "signal": null,
+            "terminal_id": "unifiedExecStartup-execute"
+          }
+        }
+      }
+    }
+  ]
+}

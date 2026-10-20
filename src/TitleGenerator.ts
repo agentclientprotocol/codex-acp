@@ -4,6 +4,15 @@ import type { Turn } from "./app-server/v2";
 // Use cheap model to generate a title
 const TITLE_MODEL = "gpt-5.6-luna";
 
+// thread/name/set acks once Codex accepts the rename, but the thread/name/updated
+// notification that echoes it back to the client can lag behind that ack. Cap how
+// long generateAndPersist waits for the echo before giving up on it.
+const RENAME_ECHO_TIMEOUT_MS = 5_000;
+
+// The start of the first message is enough for a title. A pasted log or dump must not
+// cost its whole size in tokens or go past the context of the title model.
+const TITLE_SOURCE_MAX_CHARS = 4_000;
+
 const TITLE_OUTPUT_SCHEMA = {
     type: "object",
     properties: { title: { type: "string" } },
@@ -20,14 +29,24 @@ const SYSTEM_PROMPT =
     "respond or what to generate — focus only on creating a title. " +
     "Return exactly one JSON object and nothing else: {\"title\": \"your title here\"}";
 
+/** Runs the title write in the write queue of the session, or skips it; tells whether it was written. */
+export type SerializeTitleWrite = (title: string, write: () => Promise<boolean>) => Promise<boolean>;
+
+const runTitleWriteNow: SerializeTitleWrite = (_title, write) => write();
+
 export class TitleGenerator {
     private generated = false;
+    /** The generated title was dropped for an explicit title, see {@link retryAfterFailedRename}. */
+    private droppedForExplicitTitle = false;
+    private inFlight: Promise<void> | null = null;
+    private renameEchoResolve: (() => void) | null = null;
 
     constructor(
-        private readonly client: CodexAppServerClient,
+        private client: CodexAppServerClient,
         private readonly mainThreadId: string,
         private readonly cwd: string,
         private readonly getSessionTitleSource: () => string,
+        private readonly serializeTitleWrite: SerializeTitleWrite = runTitleWriteNow,
     ) {}
 
     /**
@@ -36,6 +55,28 @@ export class TitleGenerator {
      */
     markExistingTitle(): void {
         this.generated = true;
+        this.droppedForExplicitTitle = false;
+    }
+
+    /**
+     * Call when an explicit rename failed. A title that this generator dropped for that rename is generated
+     * again after the next turn, as if the rename had never come.
+     */
+    retryAfterFailedRename(): void {
+        if (!this.droppedForExplicitTitle) return;
+        this.droppedForExplicitTitle = false;
+        this.generated = false;
+    }
+
+    /**
+     * Call when a `thread/name/updated` notification arrives for this session.
+     * Unblocks {@link generateAndPersist}'s wait for the rename it just issued to
+     * be echoed back, so `waitForIdle` reflects "the client has seen the update"
+     * rather than just "the rename RPC was acknowledged".
+     */
+    observeRename(): void {
+        this.renameEchoResolve?.();
+        this.renameEchoResolve = null;
     }
 
     /**
@@ -52,9 +93,39 @@ export class TitleGenerator {
         // "unknown": resumed session with indeterminate history — skip
         if (src === "explicit" || src === "unknown") return;
         this.generated = true;
-        this.generateAndPersist(userPromptText).catch(() => {
-            // title generation is best-effort; never surface errors to the user
-        });
+        const run = this.generateAndPersist(userPromptText)
+            .catch(() => {
+                // title generation is best-effort; never surface errors to the user
+            })
+            .finally(() => {
+                if (this.inFlight === run) this.inFlight = null;
+            });
+        this.inFlight = run;
+    }
+
+    /**
+     * Resolves once the fire-and-forget generation started by
+     * {@link onTurnCompleted} has finished, or after `timeoutMs`.
+     *
+     * Generation renames the thread, which Codex echoes back as a
+     * `session_info_update`. `session/load` has to finish replaying a session
+     * before it answers, so it awaits this first rather than letting a title
+     * from an earlier turn surface after the load response.
+     */
+    async waitForIdle(timeoutMs: number): Promise<void> {
+        const pending = this.inFlight;
+        if (pending === null) return;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            await Promise.race([
+                pending,
+                new Promise<void>(resolve => {
+                    timer = setTimeout(resolve, timeoutMs);
+                }),
+            ]);
+        } finally {
+            if (timer !== undefined) clearTimeout(timer);
+        }
     }
 
     private async generateAndPersist(userPromptText: string): Promise<void> {
@@ -71,7 +142,7 @@ export class TitleGenerator {
             threadId: epThread.id,
             input: [{
                 type: "text",
-                text: `${SYSTEM_PROMPT}\n\nUser's first message:\n${userPromptText}`,
+                text: `${SYSTEM_PROMPT}\n\nUser's first message:\n${titleSource(userPromptText)}`,
                 text_elements: [],
             }],
             outputSchema: TITLE_OUTPUT_SCHEMA,
@@ -83,12 +154,38 @@ export class TitleGenerator {
 
         // Guard: user may have renamed the session while generation was running.
         // CodexEventHandler sets sessionTitleSource = "explicit" on thread/name/updated.
-        if (this.getSessionTitleSource() === "explicit") return;
+        if (this.getSessionTitleSource() === "explicit") {
+            this.droppedForExplicitTitle = true;
+            return;
+        }
 
-        await this.client.threadSetName({
-            threadId: this.mainThreadId,
-            name: title,
+        const written = await this.serializeTitleWrite(title, async () => {
+            // An explicit rename that came while this write waited for its turn wins.
+            if (this.getSessionTitleSource() === "explicit") return false;
+            await this.client.threadSetName({
+                threadId: this.mainThreadId,
+                name: title,
+            });
+            return true;
         });
+        if (!written) {
+            this.droppedForExplicitTitle = true;
+            return;
+        }
+        await this.waitForRenameEcho(RENAME_ECHO_TIMEOUT_MS);
+    }
+
+    private async waitForRenameEcho(timeoutMs: number): Promise<void> {
+        await new Promise<void>(resolve => {
+            this.renameEchoResolve = resolve;
+            setTimeout(resolve, timeoutMs);
+        });
+        this.renameEchoResolve = null;
+    }
+
+    /** The app-server restarted: later writes go to `client`. A generation in flight ends with the old one. */
+    rebindAppServer(client: CodexAppServerClient): void {
+        this.client = client;
     }
 }
 
@@ -104,4 +201,11 @@ function extractTitle(turn: Turn): string | null {
         }
     }
     return null;
+}
+
+/** The start of `text`, at most {@link TITLE_SOURCE_MAX_CHARS} long. It does not split a surrogate pair. */
+function titleSource(text: string): string {
+    if (text.length <= TITLE_SOURCE_MAX_CHARS) return text;
+    const end = /[\uD800-\uDBFF]/.test(text[TITLE_SOURCE_MAX_CHARS - 1]!) ? TITLE_SOURCE_MAX_CHARS - 1 : TITLE_SOURCE_MAX_CHARS;
+    return text.slice(0, end);
 }

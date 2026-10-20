@@ -7,7 +7,7 @@
         "sessionUpdate": "agent_message_chunk",
         "content": {
           "type": "text",
-          "text": "Configured MCP servers:\n- fs: 1 tools, 1 resources, auth=bearerToken\n- browser: 0 tools, 0 resources, auth=notLoggedIn"
+          "text": "**MCP servers:** 2 (2 unknown)\n\n**Unknown**\n- `fs`: 1 tool\n- `browser`: not signed in"
         }
       }
     }

@@ -1,0 +1,82 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Optional integration unavailable"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Optional integration unavailable"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Configuration fallback",
+        "description": "Using the default configuration.\nCheck the configured path."
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Deprecated setting",
+        "description": "Use the replacement setting."
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "info",
+        "title": "Model rerouted",
+        "description": "Switched from original-model to fallback-model (highRiskCyberActivity)."
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "info",
+        "title": "Context compacted",
+        "description": "Conversation compacted to fit the model's context window."
+      }
+    }
+  ]
+}

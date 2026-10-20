@@ -6,6 +6,10 @@ import {CodexAcpServer} from "../../CodexAcpServer";
 import {createTestSessionState} from "../acp-test-utils";
 import {createMockConnections} from "./test-utils";
 
+const noticeCapabilities: acp.ClientCapabilities = {
+    session: {notices: {}},
+};
+
 const typedFailureCapabilities: acp.ClientCapabilities = {
     _meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}},
 };
@@ -412,6 +416,180 @@ describe("typed session failures over ACP transport", () => {
     });
 });
 
+describe("standard session notices over ACP transport", () => {
+    it.each([
+        ["without AIR session failures", noticeCapabilities],
+        ["with AIR session failures", {...typedFailureCapabilities, ...noticeCapabilities}],
+    ])("serializes standard notices %s", async (_name, clientCapabilities) => {
+        const fixture = await createNegotiatedNoticeFixture("wire-notices", clientCapabilities);
+
+        for (const notification of [
+            {
+                method: "warning",
+                params: {
+                    threadId: fixture.sessionId,
+                    message: "Heads up: Long threads and multiple compactions can cause the model to be less accurate.",
+                },
+            },
+            {
+                method: "configWarning",
+                params: {summary: "Unknown key `foo`", details: "in ~/.codex/config.toml"},
+            },
+            {
+                method: "deprecationNotice",
+                params: {summary: "`--legacy-flag` is deprecated", details: "Use `--flag` instead."},
+            },
+        ]) {
+            fixture.sendServerNotification(notification);
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(3));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+
+        await expect(`${JSON.stringify(fixture.wireUpdates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/session-notices-wire.json",
+        );
+    });
+
+    it("preserves absent and empty descriptions and supplies nonempty titles", async () => {
+        const fixture = await createNegotiatedNoticeFixture("wire-notice-defaults");
+
+        for (const notification of [
+            {method: "warning", params: {threadId: fixture.sessionId, message: ""}},
+            {method: "configWarning", params: {summary: "", details: null}},
+            {method: "deprecationNotice", params: {summary: "", details: null}},
+            {method: "configWarning", params: {summary: "Configuration details", details: ""}},
+            {method: "deprecationNotice", params: {summary: "Deprecated option", details: ""}},
+        ]) {
+            fixture.sendServerNotification(notification);
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(5));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+
+        await expect(`${JSON.stringify(fixture.wireUpdates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/session-notices-defaults-wire.json",
+        );
+    });
+
+    it("emits each repeated warning as an independent notice", async () => {
+        const fixture = await createNegotiatedNoticeFixture("wire-repeated-notice");
+
+        for (const message of ["Repeated warning", "Repeated warning", "Different warning", "Repeated warning"]) {
+            fixture.sendServerNotification({
+                method: "warning",
+                params: {threadId: fixture.sessionId, message},
+            });
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(4));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+
+        await expect(`${JSON.stringify(fixture.wireUpdates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/session-notices-repeated-wire.json",
+        );
+    });
+
+    it("keeps notices separate from the revision sequence of a typed failure", async () => {
+        const fixture = await createNegotiatedNoticeFixture("wire-mixed", {
+            ...typedFailureCapabilities,
+            ...noticeCapabilities,
+        });
+        const failure = {
+            method: "error",
+            params: {
+                threadId: fixture.sessionId,
+                turnId: "turn-id",
+                willRetry: false,
+                error: {message: "provider blew up", codexErrorInfo: "serverOverloaded", additionalDetails: null},
+            },
+        };
+
+        fixture.sendServerNotification(failure);
+        fixture.sendServerNotification({
+            method: "warning",
+            params: {threadId: fixture.sessionId, message: "Unrelated advisory"},
+        });
+        fixture.sendServerNotification(failure);
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(3));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+
+        await expect(`${JSON.stringify(fixture.wireUpdates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/session-notices-with-failure-wire.json",
+        );
+    });
+
+    it.each<{name: string; capabilities?: unknown}>([
+        {name: "omitted capabilities"},
+        {name: "empty capabilities", capabilities: {}},
+        {name: "null session capabilities", capabilities: {session: null}},
+        {name: "empty session capabilities", capabilities: {session: {}}},
+        {name: "null notice capability", capabilities: {session: {notices: null}}},
+        {name: "array notice capability", capabilities: {session: {notices: []}}},
+        {name: "true notice capability", capabilities: {session: {notices: true}}},
+        {name: "false notice capability", capabilities: {session: {notices: false}}},
+        {name: "string notice capability", capabilities: {session: {notices: "supported"}}},
+        {name: "numeric notice capability", capabilities: {session: {notices: 1}}},
+    ])("retains legacy behavior without notice support: $name", async ({capabilities}) => {
+        const wireFixture = createWireFixture();
+        const initialize = vi.spyOn(wireFixture.server, "initialize");
+        await wireFixture.client.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            // Intentionally send malformed values through the real SDK capability parser.
+            ...(capabilities === undefined ? {} : {clientCapabilities: capabilities as acp.ClientCapabilities}),
+        });
+        expect(initialize.mock.calls[0]![0].clientCapabilities?.session?.notices ?? null).toBeNull();
+        const fixture = await settleSession(wireFixture, "wire-legacy-notices");
+
+        fixture.sendServerNotification({
+            method: "warning",
+            params: {threadId: fixture.sessionId, message: "Legacy warning"},
+        });
+        fixture.sendServerNotification({
+            method: "configWarning",
+            params: {summary: "Legacy configuration warning", details: "Configuration details"},
+        });
+        fixture.sendServerNotification({
+            method: "deprecationNotice",
+            params: {summary: "Legacy deprecation", details: "Deprecated configuration details"},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(2));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+
+        await expect(`${JSON.stringify(fixture.wireUpdates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/session-notices-legacy-wire.json",
+        );
+    });
+
+    it("delivers notices to the SDK client and allows it to continue prompting", async () => {
+        const fixture = await createNegotiatedNoticeFixture("wire-notice-client");
+
+        fixture.sendServerNotification({
+            method: "warning",
+            params: {threadId: fixture.sessionId, message: "A warning before the next prompt"},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(1));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+        expect(fixture.updates[0]!.update).toEqual({
+            sessionUpdate: "notice",
+            severity: "warning",
+            title: "A warning before the next prompt",
+        });
+
+        const response = await fixture.client.prompt({
+            sessionId: fixture.sessionId,
+            prompt: [{type: "text", text: "continue after the notice"}],
+        });
+
+        expect(response.stopReason).toBe("end_turn");
+        expect(fixture.updates).toHaveLength(1);
+        expect(fixture.appServer.turnStart).toHaveBeenCalledTimes(2);
+    });
+});
+
 /** A fixture whose session already completed a turn, so notifications route to a live event handler. */
 async function createIdleFixture(
     sessionId: string,
@@ -419,6 +597,21 @@ async function createIdleFixture(
 ) {
     const fixture = createWireFixture();
     await fixture.initialize(clientCapabilities);
+    return settleSession(fixture, sessionId);
+}
+
+async function createNegotiatedNoticeFixture(
+    sessionId: string,
+    clientCapabilities: acp.ClientCapabilities = noticeCapabilities,
+) {
+    const fixture = createWireFixture();
+    const initialize = vi.spyOn(fixture.server, "initialize");
+    await fixture.initialize(clientCapabilities);
+    expect(initialize.mock.calls[0]![0].clientCapabilities?.session?.notices).toEqual({});
+    return settleSession(fixture, sessionId);
+}
+
+async function settleSession(fixture: ReturnType<typeof createWireFixture>, sessionId: string) {
     const sessionState = createTestSessionState({sessionId, account: {type: "apiKey"}});
     vi.spyOn(fixture.server, "getSessionState").mockReturnValue(sessionState);
     vi.spyOn(fixture.appServer, "turnStart").mockResolvedValue({turn: createTurn("inProgress")});
@@ -432,6 +625,7 @@ async function createIdleFixture(
         prompt: [{type: "text", text: "settle the session"}],
     });
     fixture.updates.splice(0);
+    fixture.wireUpdates.splice(0);
 
     return {...fixture, sessionId};
 }
@@ -443,7 +637,25 @@ function createWireFixture(options: {exitCode?: number | null; stderr?: string} 
     vi.spyOn(appServer, "initialize").mockResolvedValue({codexHome: null} as never);
 
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
-    const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
+    const wireUpdates: Array<{
+        jsonrpc: "2.0";
+        method: "session/update";
+        params: {sessionId: string; update: Record<string, unknown>};
+    }> = [];
+    const decoder = new TextDecoder();
+    let pending = "";
+    const agentToClient = new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+            pending += decoder.decode(chunk, {stream: true});
+            let newline: number;
+            while ((newline = pending.indexOf("\n")) !== -1) {
+                const message = JSON.parse(pending.slice(0, newline));
+                pending = pending.slice(newline + 1);
+                if (message.method === "session/update") wireUpdates.push(message);
+            }
+            controller.enqueue(chunk);
+        },
+    });
     const updates: acp.SessionNotification[] = [];
     let server!: CodexAcpServer;
     const client = new acp.ClientSideConnection(
@@ -474,6 +686,7 @@ function createWireFixture(options: {exitCode?: number | null; stderr?: string} 
         codexClient,
         appServer,
         updates,
+        wireUpdates,
         get server(): CodexAcpServer {
             return server;
         },
