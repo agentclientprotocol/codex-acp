@@ -169,8 +169,8 @@ describe('AIR sessionIndex over ACP v2', () => {
     it('lists, renames, archives and unarchives sessions', async () => {
         const {connection, initialize, codexRequests, updates} = await connectV2Client(["sessionIndex"]);
         closeClient = () => connection.close();
-        await connection.agent.request(acpV2.methods.agent.session.new, {cwd});
-        await vi.waitFor(() => expect(updates.length).toBeGreaterThan(0));
+        const session = await connection.agent.request(acpV2.methods.agent.session.new, {cwd});
+        expect(session.availableCommands?.length).toBeGreaterThan(0);
         updates.length = 0;
 
         const list = await connection.agent.request(acpV2.methods.agent.session.list, {

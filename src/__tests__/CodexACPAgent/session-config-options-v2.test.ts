@@ -91,7 +91,7 @@ describe('Session config options over ACP v2', () => {
         closeClient = () => connection.close();
 
         // @ts-expect-error - private method, called directly to test the response shape in isolation
-        const response = agent.createSessionConfigOptionsResponseV2(sessionState);
+        const response = agent.createSessionSetupResponseV2(sessionState);
 
         await expect(dump(response)).toMatchFileSnapshot('data/session-config-options-v2-list.json');
     });

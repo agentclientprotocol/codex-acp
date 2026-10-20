@@ -80,6 +80,81 @@
         "description": "How much reasoning effort the model should use",
         "category": "thought_level"
       }
+    ],
+    "availableCommands": [
+      {
+        "name": "plan",
+        "description": "Turn plan mode on.",
+        "input": null
+      },
+      {
+        "name": "mcp",
+        "description": "Show the status of the MCP servers, or reconnect them.",
+        "input": {
+          "hint": "[reconnect]",
+          "type": "text"
+        }
+      },
+      {
+        "name": "skills",
+        "description": "List available skills.",
+        "input": null
+      },
+      {
+        "name": "status",
+        "description": "Display session configuration and token usage.",
+        "input": null
+      },
+      {
+        "name": "review",
+        "description": "Review uncommitted changes, or review with custom instructions.",
+        "input": {
+          "hint": "optional review instructions",
+          "type": "text"
+        }
+      },
+      {
+        "name": "review-branch",
+        "description": "Review changes relative to a base branch.",
+        "input": {
+          "hint": "branch name",
+          "type": "text"
+        }
+      },
+      {
+        "name": "review-commit",
+        "description": "Review a specific commit.",
+        "input": {
+          "hint": "commit sha",
+          "type": "text"
+        }
+      },
+      {
+        "name": "compact",
+        "description": "Summarize conversation to avoid hitting the context limit.",
+        "input": null
+      },
+      {
+        "name": "goal",
+        "description": "Set a goal to keep pursuing.",
+        "input": {
+          "hint": "[<objective>|clear|pause|resume]",
+          "type": "text"
+        }
+      },
+      {
+        "name": "rename",
+        "description": "Rename the current session.",
+        "input": {
+          "hint": "new name",
+          "type": "text"
+        }
+      },
+      {
+        "name": "logout",
+        "description": "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
+        "input": null
+      }
     ]
   },
   "codexRequests": [
@@ -104,87 +179,6 @@
     }
   ],
   "updates": [
-    {
-      "sessionId": "thread-1",
-      "update": {
-        "availableCommands": [
-          {
-            "name": "plan",
-            "description": "Turn plan mode on.",
-            "input": null
-          },
-          {
-            "name": "mcp",
-            "description": "Show the status of the MCP servers, or reconnect them.",
-            "input": {
-              "hint": "[reconnect]",
-              "type": "text"
-            }
-          },
-          {
-            "name": "skills",
-            "description": "List available skills.",
-            "input": null
-          },
-          {
-            "name": "status",
-            "description": "Display session configuration and token usage.",
-            "input": null
-          },
-          {
-            "name": "review",
-            "description": "Review uncommitted changes, or review with custom instructions.",
-            "input": {
-              "hint": "optional review instructions",
-              "type": "text"
-            }
-          },
-          {
-            "name": "review-branch",
-            "description": "Review changes relative to a base branch.",
-            "input": {
-              "hint": "branch name",
-              "type": "text"
-            }
-          },
-          {
-            "name": "review-commit",
-            "description": "Review a specific commit.",
-            "input": {
-              "hint": "commit sha",
-              "type": "text"
-            }
-          },
-          {
-            "name": "compact",
-            "description": "Summarize conversation to avoid hitting the context limit.",
-            "input": null
-          },
-          {
-            "name": "goal",
-            "description": "Set a goal to keep pursuing.",
-            "input": {
-              "hint": "[<objective>|clear|pause|resume]",
-              "type": "text"
-            }
-          },
-          {
-            "name": "rename",
-            "description": "Rename the current session.",
-            "input": {
-              "hint": "new name",
-              "type": "text"
-            }
-          },
-          {
-            "name": "logout",
-            "description": "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
-            "input": null
-          }
-        ],
-        "sessionUpdate": "available_commands_update"
-      }
-    },
     {
       "sessionId": "thread-1",
       "update": {

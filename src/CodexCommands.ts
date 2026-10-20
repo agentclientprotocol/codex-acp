@@ -67,6 +67,8 @@ export class CodexCommands {
     private readonly pendingSkillsPublishes = new WeakMap<SessionState, PendingSkillsPublish>();
     /** The publish each session started last, so a slower earlier one does not overwrite its list. */
     private readonly publishRevisions = new WeakMap<SessionState, number>();
+    /** Latest completed list, also used by v2 setup responses after history replay. */
+    private readonly snapshots = new WeakMap<SessionState, {revision: number; commands: AvailableCommand[]}>();
 
     constructor(
         connection: AcpClientConnection,
@@ -115,6 +117,41 @@ export class CodexCommands {
         this.pendingSkillsPublishes.delete(sessionState);
     }
 
+    /** Loads v2's initial commands without sending an initial notification. */
+    async initialize(sessionState: SessionState, shouldPublish: () => boolean): Promise<void> {
+        try {
+            if (shouldPublish()) {
+                await this.loadCommands(sessionState);
+            }
+        } catch (err) {
+            if (shouldPublish()) {
+                logger.error(`Failed to load initial commands for session ${sessionState.sessionId}`, err);
+            }
+        }
+    }
+
+    /** Takes the response snapshot and seeds change detection for later notifications. */
+    initialCommands(sessionState: SessionState): AvailableCommand[] {
+        const commands = this.snapshots.get(sessionState)?.commands ?? [];
+        this.published.set(sessionState, JSON.stringify(commands));
+        return commands;
+    }
+
+    private async loadCommands(sessionState: SessionState): Promise<{revision: number; commands: AvailableCommand[]}> {
+        const revision = (this.publishRevisions.get(sessionState) ?? 0) + 1;
+        this.publishRevisions.set(sessionState, revision);
+        const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
+        const commands = this.buildAvailableCommands(
+            skillsResponse?.data ?? [],
+            sessionState.clientCapabilities.airClient,
+        );
+        // A slower initial read must not replace a newer list published during setup or replay.
+        if ((this.snapshots.get(sessionState)?.revision ?? 0) < revision) {
+            this.snapshots.set(sessionState, {revision, commands});
+        }
+        return {revision, commands};
+    }
+
     /** Sends the available commands. With `onlyChanges`, it sends nothing when the commands did not change. */
     async publish(
         sessionState: SessionState,
@@ -125,13 +162,7 @@ export class CodexCommands {
             if (!shouldPublish()) {
                 return;
             }
-            const revision = (this.publishRevisions.get(sessionState) ?? 0) + 1;
-            this.publishRevisions.set(sessionState, revision);
-            const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
-            const availableCommands = this.buildAvailableCommands(
-                skillsResponse?.data ?? [],
-                sessionState.clientCapabilities.airClient,
-            );
+            const {revision, commands: availableCommands} = await this.loadCommands(sessionState);
             // A publish that started later already listed the skills, and its list is the newer one.
             if (this.publishRevisions.get(sessionState) !== revision) {
                 return;

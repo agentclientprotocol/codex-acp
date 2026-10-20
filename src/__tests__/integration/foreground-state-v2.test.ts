@@ -49,6 +49,10 @@ describeIntegration("integration: ACP v2 foreground state", () => {
                 _meta: {gateway: {baseUrl: mock.baseUrl, headers: {}}},
             });
             const failedSession = await connection.agent.request(acpV2.methods.agent.session.new, {cwd});
+            expect(failedSession.availableCommands).toEqual(expect.arrayContaining([
+                expect.objectContaining({name: "review", input: {type: "text", hint: "optional review instructions"}}),
+            ]));
+            expect(updates.some(({update}) => update.sessionUpdate === "available_commands_update")).toBe(false);
             mock.setErrorResponse({
                 status: 401,
                 body: {error: {type: "authentication_error", message: "Mock authentication required", debug: "private diagnostics"}},
@@ -93,15 +97,22 @@ describeIntegration("integration: ACP v2 foreground state", () => {
 
             for (const replayFrom of [undefined, null, {type: "start" as const}]) {
                 updates.splice(0);
-                await connection.agent.request(acpV2.methods.agent.session.resume, {
+                const resumed = await connection.agent.request(acpV2.methods.agent.session.resume, {
                     sessionId, cwd, ...(replayFrom === undefined ? {} : {replayFrom}),
                 });
+                expect(resumed.availableCommands).toEqual(failedSession.availableCommands);
+                expect(updates.some(({update}) => update.sessionUpdate === "available_commands_update")).toBe(false);
                 expect(updates.filter(({update}) => update.sessionUpdate === "state_update").map(({update}) => update))
                     .toEqual([{sessionUpdate: "state_update", state: "idle"}]);
                 const replayedMessages = updates.some(({update}) => update.sessionUpdate === "user_message"
                     || update.sessionUpdate === "user_message_chunk");
                 expect(replayedMessages).toBe(replayFrom != null);
             }
+            updates.splice(0);
+            const fork = await connection.agent.request(acpV2.methods.agent.session.fork, {sessionId, cwd});
+            expect(fork.availableCommands).toEqual(failedSession.availableCommands);
+            expect(updates.some(({update}) => update.sessionUpdate === "available_commands_update")).toBe(false);
+            await connection.agent.request(acpV2.methods.agent.session.close, {sessionId: fork.sessionId});
             expect(mock.unexpectedRequests).toBe(0);
             await connection.agent.request(acpV2.methods.agent.session.close, {sessionId});
         } finally {

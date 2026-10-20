@@ -157,6 +157,10 @@ to v2; it reuses the runtime environment variables above.
 These are behaviors the AIR (JetBrains) ACP client relies on that aren't obvious from the wire
 schema alone:
 
+- Initial commands come from `availableCommands` in v2 `session/new`, `session/resume`, and
+  `session/fork` responses, not an initial `available_commands_update`. Later command changes still
+  use notifications. Text inputs use `type: "text"`, and AIR command actions and skill paths are
+  preserved. Skill discovery is best-effort: setup succeeds without initial commands if it fails.
 - Failed foreground work ends with `state: "idle"`, `stopReason: "error"` and a standard `error`
   object containing `code` and a user-facing `message`. Before insertion, the prompt also fails
   with a JSON-RPC error; after insertion, its successful `messageId` response is not revoked.

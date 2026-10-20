@@ -52,6 +52,7 @@ import {
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {toV1ClientCapabilitiesView} from "./AcpV2ClientCapabilities";
 import {toV1SetSessionConfigOptionRequest, toV2ConfigOptions} from "./AcpV2ConfigOptions";
+import {toV2AvailableCommands} from "./AcpV2SessionUpdate";
 import {
     isInsertedUserMessage,
     postInsertionFailureText,
@@ -1213,7 +1214,9 @@ export class CodexAcpServer {
             }
         }
 
-        if (canPublishSessionUpdates) {
+        if (this.protocolVersion === 2) {
+            await this.initializeAvailableCommandsV2(sessionState, sessionGeneration);
+        } else if (canPublishSessionUpdates) {
             this.publishAvailableCommandsAsync(sessionState, sessionGeneration);
         }
         if (operation === "resume") {
@@ -1704,14 +1707,14 @@ export class CodexAcpServer {
         if (replayFrom == null) {
             await this.resumeSession(request);
             await this.snapshotForegroundState(params.sessionId);
-            return this.createSessionConfigOptionsResponseV2(this.getSessionState(params.sessionId));
+            return this.createSessionSetupResponseV2(this.getSessionState(params.sessionId));
         }
         if (replayFrom.type !== "start") {
             throw RequestError.invalidParams(undefined, `Unsupported replayFrom type: ${replayFrom.type}`);
         }
         const {sessionId} = await this.loadSessionAndReplayHistory(request);
         await this.snapshotForegroundState(sessionId);
-        return this.createSessionConfigOptionsResponseV2(this.getSessionState(sessionId));
+        return this.createSessionSetupResponseV2(this.getSessionState(sessionId));
     }
 
     private async snapshotForegroundState(sessionId: string): Promise<void> {
@@ -1752,7 +1755,7 @@ export class CodexAcpServer {
         const {sessionId} = await this.forkSession(request);
         return {
             sessionId,
-            ...this.createSessionConfigOptionsResponseV2(this.getSessionState(sessionId)),
+            ...this.createSessionSetupResponseV2(this.getSessionState(sessionId)),
         };
     }
 
@@ -1904,7 +1907,7 @@ export class CodexAcpServer {
         const {sessionId} = await this.newSession(request);
         return {
             sessionId,
-            ...this.createSessionConfigOptionsResponseV2(this.getSessionState(sessionId)),
+            ...this.createSessionSetupResponseV2(this.getSessionState(sessionId)),
         };
     }
 
@@ -2945,12 +2948,17 @@ export class CodexAcpServer {
         };
     }
 
-    /** The v2 `configOptions` field for session responses (`session/new`, `session/resume`). */
-    private createSessionConfigOptionsResponseV2(sessionState: SessionState): {
+    /** Initial v2 configuration and commands for new, resumed, and forked sessions. */
+    private createSessionSetupResponseV2(sessionState: SessionState): {
         configOptions?: Array<acpV2.SessionConfigOption>;
+        availableCommands?: Array<acpV2.AvailableCommand>;
     } {
         const {configOptions} = this.createSessionConfigOptionsResponse(sessionState);
-        return configOptions ? {configOptions: toV2ConfigOptions(configOptions)} : {};
+        const commands = this.availableCommands.initialCommands(sessionState);
+        return {
+            ...(configOptions ? {configOptions: toV2ConfigOptions(configOptions)} : {}),
+            ...(commands.length > 0 ? {availableCommands: toV2AvailableCommands(commands)} : {}),
+        };
     }
 
     private isSessionConfigEnabled(): boolean {
@@ -2960,6 +2968,16 @@ export class CodexAcpServer {
 
     private publishAvailableCommandsAsync(sessionState: SessionState, sessionGeneration: number): void {
         void this.publishAvailableCommands(sessionState, sessionGeneration);
+    }
+
+    private async initializeAvailableCommandsV2(sessionState: SessionState, sessionGeneration: number): Promise<void> {
+        await this.availableCommands.initialize(
+            sessionState,
+            () => this.sessionPublishIsCurrent(sessionState, sessionGeneration),
+        );
+        if (!this.sessionPublishIsCurrent(sessionState, sessionGeneration)) {
+            throw RequestError.invalidRequest(undefined, `Session ${sessionState.sessionId} was closed or replaced during setup`);
+        }
     }
 
     private async publishAvailableCommands(sessionState: SessionState, sessionGeneration: number): Promise<void> {
@@ -3221,7 +3239,11 @@ export class CodexAcpServer {
             });
         }
 
-        await this.publishAvailableCommands(sessionState, requestedSessionGeneration);
+        if (this.protocolVersion === 2) {
+            await this.initializeAvailableCommandsV2(sessionState, requestedSessionGeneration);
+        } else {
+            await this.publishAvailableCommands(sessionState, requestedSessionGeneration);
+        }
         await this.publishCurrentGoalBestEffort(sessionState, requestedSessionGeneration, true);
         const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
         const sessionModeState: SessionModeState =

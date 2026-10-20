@@ -258,8 +258,10 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         notifyCancel = () => v1Connection.agent.notify(acp.methods.agent.session.cancel, {sessionId});
     }
     const promptSpy = vi.spyOn(agent!, "prompt");
-    // Session setup publishes updates of its own; wait for them before recording the prompt.
-    await vi.waitFor(() => expect(setupUpdates.map(update => update.sessionUpdate)).toContain("available_commands_update"));
+    // V1 sends initial commands asynchronously; v2 includes them in the setup response.
+    if (protocolVersion === 1) {
+        await vi.waitFor(() => expect(setupUpdates.map(update => update.sessionUpdate)).toContain("available_commands_update"));
+    }
     recordUpdates = true;
 
     const emit = (notification: ServerNotification) => {
