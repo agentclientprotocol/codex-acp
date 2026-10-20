@@ -1,0 +1,28 @@
+{
+  "error": {
+    "code": -32603,
+    "message": "Try again later."
+  },
+  "stopReason": "error",
+  "_meta": {
+    "quota": {
+      "token_count": null,
+      "model_usage": []
+    },
+    "jetbrains": {
+      "air": {
+        "version": 1,
+        "sessionFailure": {
+          "id": "turn-1:error",
+          "revision": 1,
+          "category": "limit",
+          "severity": "error",
+          "title": "Try again later.",
+          "actions": []
+        }
+      }
+    }
+  },
+  "state": "idle",
+  "sessionUpdate": "state_update"
+}

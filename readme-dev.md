@@ -157,6 +157,12 @@ to v2; it reuses the runtime environment variables above.
 These are behaviors the AIR (JetBrains) ACP client relies on that aren't obvious from the wire
 schema alone:
 
+- Failed foreground work ends with `state: "idle"`, `stopReason: "error"` and a standard `error`
+  object containing `code` and a user-facing `message`. Before insertion, the prompt also fails
+  with a JSON-RPC error; after insertion, its successful `messageId` response is not revoked.
+  Cancellation remains `cancelled`. Retries, individual failed tools, and idle background errors
+  do not become terminal session failures. Raw process stderr and opaque error data are not sent
+  in the standard error object.
 - On a failed prompt, read `sessionFailure` (`_meta.jetbrains.air.sessionFailure`) and `quota`
   (`_meta.quota`) from the idle `state_update` that ends the turn, not from a separate error
   channel. The same `_meta` v1 attaches to `PromptResponse` is copied onto the v2 idle update.

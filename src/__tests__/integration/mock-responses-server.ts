@@ -1,6 +1,8 @@
 import http from "node:http";
 import type {AddressInfo} from "node:net";
 
+type MockErrorResponse = {status: number; body: unknown};
+
 /**
  * Local stand-in for the OpenAI Responses API. Each `POST /v1/responses` from Codex gets the next queued reply;
  * a tool-call turn needs two: the call, then the answer after Codex sends the tool output.
@@ -14,6 +16,8 @@ export interface MockResponsesServer {
     readonly unexpectedRequests: number;
     /** Queues replies built with `textResponse`, `execCommandResponse` or `applyPatchResponse`. */
     enqueue(...responses: string[]): void;
+    /** Keeps returning the HTTP error across runtime retries, until cleared with null. */
+    setErrorResponse(response: MockErrorResponse | null): void;
     close(): Promise<void>;
 }
 
@@ -28,6 +32,7 @@ function parseBody(body: string): unknown {
 
 export async function startMockResponsesServer(): Promise<MockResponsesServer> {
     const queue: string[] = [];
+    let errorResponse: MockErrorResponse | null = null;
     const requests: unknown[] = [];
     let unexpectedRequests = 0;
     let requestCount = 0;
@@ -39,15 +44,20 @@ export async function startMockResponsesServer(): Promise<MockResponsesServer> {
             requestCount++;
             requests.push(parseBody(body));
             const isResponsesCall = req.method === "POST" && (req.url ?? "").split("?")[0]!.endsWith("/responses");
-            const next = isResponsesCall ? queue.shift() : undefined;
+            const next = isResponsesCall ? errorResponse ?? queue.shift() : undefined;
             if (next === undefined) {
                 unexpectedRequests++;
                 res.writeHead(isResponsesCall ? 400 : 404);
                 res.end(`mock: unexpected request #${requestCount}`);
                 return;
             }
-            res.writeHead(200, {"content-type": "text/event-stream"});
-            res.end(next);
+            if (typeof next === "string") {
+                res.writeHead(200, {"content-type": "text/event-stream"});
+                res.end(next);
+            } else {
+                res.writeHead(next.status, {"content-type": "application/json"});
+                res.end(JSON.stringify(next.body));
+            }
         });
     });
     await new Promise<void>((resolve, reject) => {
@@ -65,6 +75,7 @@ export async function startMockResponsesServer(): Promise<MockResponsesServer> {
         enqueue: (...responses) => {
             queue.push(...responses);
         },
+        setErrorResponse: response => { errorResponse = response; },
         close: async () => {
             server.closeAllConnections();
             await new Promise<void>((resolve) => server.close(() => resolve()));

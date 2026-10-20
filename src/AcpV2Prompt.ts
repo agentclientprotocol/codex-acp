@@ -1,6 +1,9 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import type {ServerNotification} from "./app-server";
+import {CODEX_PROCESS_EXITED_ERROR_CODE} from "./app-server-recovery/AppServerExit";
+import {readableServiceErrorMessage} from "./ServiceErrorMessage";
+import {ResponseError} from "vscode-jsonrpc";
 
 /**
  * Lets a prompt report when Codex records its user message. On v2 that moment, not the turn
@@ -29,6 +32,8 @@ export type UserMessageInsertion = {
      * ids. Lets a pending `$/cancel_request` interrupt the right turn before insertion.
      */
     onTurnStarted?: (turn: {threadId: string, turnId: string}) => void;
+    /** Reports terminal work failure without changing the v1 prompt response or depending on AIR. */
+    onFailure?: (error: acpV2.Error) => void;
 };
 
 /**
@@ -64,16 +69,16 @@ export function toV1PromptRequest(params: acpV2.PromptRequest): acp.PromptReques
 }
 
 /**
- * The `idle` state that ends a v2 turn carries what v1 answers the prompt with: the stop reason,
- * the token usage and the `_meta` (quota, and a typed session failure for clients that
- * negotiated it).
+ * Carry v1 usage and metadata into v2, but report terminal failures through the standard error
+ * stop reason. Cancellation takes precedence over errors raised while aborting work.
  */
-export function toV2IdleState(response: acp.PromptResponse): acpV2.StateUpdate {
+export function toV2IdleState(response: acp.PromptResponse, failure?: acpV2.Error | null): acpV2.StateUpdate {
     const state = {
         state: "idle" as const,
         ...(response.usage != null ? {usage: response.usage} : {}),
         ...(response._meta != null ? {_meta: response._meta} : {}),
     };
+    if (failure != null && response.stopReason !== "cancelled") return {...state, stopReason: "error", error: failure};
     switch (response.stopReason) {
         case "end_turn":
             return {...state, stopReason: "end_turn"};
@@ -86,6 +91,17 @@ export function toV2IdleState(response: acp.PromptResponse): acpV2.StateUpdate {
         case "cancelled":
             return {...state, stopReason: "cancelled"};
     }
+}
+
+/** Opaque request data and process diagnostics are not user-facing failure details. */
+export function toV2Failure(error: unknown): acpV2.Error {
+    if (error instanceof acp.RequestError || error instanceof ResponseError) {
+        if (error.code === CODEX_PROCESS_EXITED_ERROR_CODE) {
+            return {code: error.code, message: "Connection to Codex was lost."};
+        }
+        return {code: error.code, message: readableServiceErrorMessage(error.message)};
+    }
+    return {code: -32603, message: "Codex encountered an internal error."};
 }
 
 /**

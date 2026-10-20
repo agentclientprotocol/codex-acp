@@ -32,7 +32,11 @@
   },
   {
     "sessionUpdate": {
-      "stopReason": "end_turn",
+      "error": {
+        "code": -32603,
+        "message": "thread name could not be saved"
+      },
+      "stopReason": "error",
       "_meta": {
         "quota": {
           "token_count": null,

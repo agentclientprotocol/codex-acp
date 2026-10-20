@@ -7,7 +7,7 @@ import type {
     SessionFailureCategory,
     SessionState,
 } from "./CodexAcpServer";
-import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk/unstable";
+import {type Error as AcpError, type PlanEntry, RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import {normalizeSessionTitle} from "./SessionTitle";
 import type {
@@ -219,6 +219,7 @@ export class CodexEventHandler {
     private lastSessionNotice: {key: string; failure: SessionFailure} | undefined;
     private nextNoticeId = 1;
     private failure: RequestError | null = null;
+    private terminalTurnError: {turnId: string; error: ErrorNotification["error"]} | null = null;
     private completedPlan: CompletedPlan | null = null;
     private readonly activeImageGenerationItems = new Set<string>();
     private readonly emittedImageViewItems = new Set<string>();
@@ -271,6 +272,23 @@ export class CodexEventHandler {
         return this.failure;
     }
 
+    /** Runtime outcomes, not AIR capability negotiation, determine standard v2 failures. */
+    getTurnFailure(turn: Turn): AcpError | null {
+        if (turn.status !== "failed") return null;
+        const error = turn.error ?? (this.terminalTurnError?.turnId === turn.id ? this.terminalTurnError.error : null);
+        if (this.isAuthenticationRequiredError(error?.codexErrorInfo ?? null)) {
+            return {code: -32000, message: "Authentication required"};
+        }
+        return {code: -32603, message: readableServiceErrorMessage(error?.message ?? "Codex turn failed.")};
+    }
+
+    private recordTerminalTurnError(notification: ServerNotification): void {
+        if (notification.method === "error" && notification.params.threadId === this.sessionState.sessionId
+            && !notification.params.willRetry) {
+            this.terminalTurnError = {turnId: notification.params.turnId, error: notification.params.error};
+        }
+    }
+
     /** The root turn's diff followed by the diffs of the subagent turns that ran during it. */
     getTurnDiff(turnId: string): string {
         const diffs = [this.turnDiffs.get(turnId) ?? ""];
@@ -312,6 +330,7 @@ export class CodexEventHandler {
      * instead of entering a turn buffer that will never be flushed.
      */
     async handleSessionScopedNotification(notification: ServerNotification): Promise<void> {
+        this.recordTerminalTurnError(notification);
         if (notification.method !== "error") {
             await this.handleNotification(notification);
             return;
@@ -407,6 +426,7 @@ export class CodexEventHandler {
     }
 
     async handleNotification(notification: ServerNotification) {
+        this.recordTerminalTurnError(notification);
         if (notification.method === "item/started"
             && notification.params.threadId === this.sessionState.sessionId
             && isModelOutputItem(notification.params.item)) {
@@ -595,6 +615,11 @@ export class CodexEventHandler {
                 this.latestRootTurnId = this.sessionState.currentTurnId ?? this.latestRootTurnId;
                 this.sessionState.currentTurnId = null;
                 this.sessionState.interruptTurnId = null;
+                if (this.session.protocolVersion === 2 && notification.params.turn.status === "failed") {
+                    for (const update of this.sessionState.openToolCalls.finishOutstanding()) {
+                        await this.session.update(update, this.subagents.notificationSessionId(notification));
+                    }
+                }
                 this.sessionState.toolCallReports.releaseOpen(this.subagents.notificationSessionId(notification));
                 // An item that missed its item/completed (e.g. dropped by a provider restart
                 // mid-turn) must not linger past its own turn and get failed by a later restart.

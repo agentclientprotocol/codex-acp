@@ -10,7 +10,7 @@ import {describeIntegration, INTEGRATION_MODEL_ID} from "./integration-fixture";
 import {startMockResponsesServer, textResponse} from "./mock-responses-server";
 
 describeIntegration("integration: ACP v2 foreground state", () => {
-    it("reports work before insertion and synchronizes idle before a resume response", async () => {
+    it("reports a structured auth failure, recovers, and synchronizes state on resume", async () => {
         const mock = await startMockResponsesServer();
         const temporaryRoot = join(process.cwd(), "tmp");
         mkdirSync(temporaryRoot, {recursive: true});
@@ -48,6 +48,30 @@ describeIntegration("integration: ACP v2 foreground state", () => {
                 methodId: "gateway",
                 _meta: {gateway: {baseUrl: mock.baseUrl, headers: {}}},
             });
+            const failedSession = await connection.agent.request(acpV2.methods.agent.session.new, {cwd});
+            mock.setErrorResponse({
+                status: 401,
+                body: {error: {type: "authentication_error", message: "Mock authentication required", debug: "private diagnostics"}},
+            });
+            const accepted = await connection.agent.request(acpV2.methods.agent.session.prompt, {
+                sessionId: failedSession.sessionId,
+                prompt: [{type: "text", text: "Trigger an authentication failure"}],
+            });
+            expect(accepted.messageId).toEqual(expect.any(String));
+            await vi.waitFor(() => {
+                expect(updates.some(({sessionId, update}) => sessionId === failedSession.sessionId
+                    && update.sessionUpdate === "state_update" && update.state === "idle"), stderr).toBe(true);
+            }, {timeout: 10_000});
+            const failedIdle = updates.filter(({sessionId, update}) => sessionId === failedSession.sessionId
+                && update.sessionUpdate === "state_update" && update.state === "idle").at(-1)?.update;
+            expect(failedIdle).toMatchObject({
+                state: "idle", stopReason: "error", error: {code: -32000, message: "Authentication required"},
+            });
+            expect(JSON.stringify(failedIdle)).not.toContain("private diagnostics");
+            mock.setErrorResponse(null);
+            await connection.agent.request(acpV2.methods.agent.session.close, {sessionId: failedSession.sessionId});
+            updates.splice(0);
+
             const {sessionId} = await connection.agent.request(acpV2.methods.agent.session.new, {cwd});
             mock.enqueue(textResponse("v2-", "foreground-ok"), textResponse("V2 foreground test"));
             const {messageId} = await connection.agent.request(acpV2.methods.agent.session.prompt, {

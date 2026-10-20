@@ -56,6 +56,7 @@ import {
     isInsertedUserMessage,
     postInsertionFailureText,
     toV1PromptRequest,
+    toV2Failure,
     toV2IdleState,
     type UserMessageInsertion,
 } from "./AcpV2Prompt";
@@ -70,6 +71,7 @@ import type {
     ThreadGoal,
     ThreadItem,
     ThreadItemEntry,
+    Turn,
     TurnStatus,
     UserInput
 } from "./app-server/v2";
@@ -345,9 +347,7 @@ function codexRunningTurnId(sessionState: SessionState, turnId: string): string 
 }
 
 /**
- * Simplified `turn/completed` status to v1 stop reason mapping for a turn no `session/prompt`
- * owns, where there is no richer terminal-failure handling to consult: only an interruption
- * counts as cancelled, a failure still ends the turn normally.
+ * Legacy stop reason for an unowned runtime turn. Standard v2 failure details are supplied separately.
  */
 function stopReasonForUnownedTurn(status: TurnStatus): acp.StopReason {
     switch (status) {
@@ -1417,7 +1417,7 @@ export class CodexAcpServer {
                 // Codex-started turns carry no `userMessage` item; `handleSessionScopedNotification`
                 // already drops that item type, so nothing is synthesized here.
                 await baselineEventHandler.handleSessionScopedNotification(event);
-                await this.trackCodexTurnCompletion(sessionState, event);
+                await this.trackCodexTurnCompletion(sessionState, event, baselineEventHandler);
             },
             DENY_ALL_APPROVALS,
             DENY_ALL_ELICITATIONS,
@@ -1484,16 +1484,24 @@ export class CodexAcpServer {
      * owns, after the notification's own content has already been handled so `idle`
      * stays the last thing sent for the turn.
      */
-    private async trackCodexTurnCompletion(sessionState: SessionState, event: ServerNotification): Promise<void> {
+    private async trackCodexTurnCompletion(
+        sessionState: SessionState,
+        event: ServerNotification,
+        eventHandler: CodexEventHandler,
+    ): Promise<void> {
         if (event.method !== "turn/completed" || event.params.threadId !== sessionState.sessionId) {
             return;
         }
         if (sessionState.codexReportedRunningTurnId === event.params.turn.id) {
             sessionState.codexReportedRunningTurnId = null;
         }
+        const failure = eventHandler.getTurnFailure(event.params.turn);
+        if (this.protocolVersion === 2 && failure !== null && !this.v2PromptsInFlight.has(sessionState.sessionId)) {
+            await this.finishOutstandingToolCalls(sessionState);
+        }
         await this.reportCodexTurnState(sessionState.sessionId, toV2IdleState({
             stopReason: stopReasonForUnownedTurn(event.params.turn.status),
-        }));
+        }, failure));
     }
 
     /**
@@ -4099,6 +4107,7 @@ export class CodexAcpServer {
         const promptKind = this.availableCommands.classifyPrompt(request.prompt);
         const messageId = randomUUID();
         const session = new ACPSessionConnection(this.connection, sessionId);
+        let failure: acpV2.Error | null = null;
         this.v2PromptsInFlight.add(sessionId);
         const sendState = async (state: acpV2.StateUpdate) => {
             try {
@@ -4113,6 +4122,16 @@ export class CodexAcpServer {
             } catch (error) {
                 logger.error(`Failed to report foreground work for session ${sessionId}`, error);
             }
+        };
+        const sendIdle = async (response: acp.PromptResponse) => {
+            if (failure !== null && response.stopReason !== "cancelled") {
+                try {
+                    await this.finishOutstandingToolCalls(sessionState);
+                } catch (error) {
+                    logger.error(`Failed to close tools for failed work in session ${sessionId}`, error);
+                }
+            }
+            await sendState(toV2IdleState(response, failure));
         };
         return await new Promise<acpV2.PromptResponse>((resolve, reject) => {
             let running: Promise<void> | null = null;
@@ -4166,7 +4185,6 @@ export class CodexAcpServer {
             const run = async () => {
                 if (promptKind.kind === "localCommand") {
                     await onInserted();
-                    return await this.prompt(request, undefined, undefined, undefined, reservation);
                 }
                 return await this.prompt(request, undefined, undefined, {
                     clientUserMessageId: messageId,
@@ -4188,6 +4206,7 @@ export class CodexAcpServer {
                         // An accepted Codex turn can run hooks before inserting user input.
                         running = startWork();
                     },
+                    onFailure: (error) => { failure ??= error; },
                 }, reservation);
             };
             run().then(
@@ -4200,13 +4219,15 @@ export class CodexAcpServer {
                         // never inserted, so it is dropped with `-32800` like a queued prompt.
                         reject(response.stopReason === "cancelled"
                             ? RequestError.requestCancelled(undefined, notInsertedMessage)
-                            : RequestError.internalError(undefined, notInsertedMessage));
+                            : failure !== null
+                                ? new RequestError(failure.code, failure.message)
+                                : RequestError.internalError(undefined, notInsertedMessage));
                         // Codex dropped the steered input before the adopted turn ended: that
                         // turn's `running` still needs exactly one matching `idle`, and nothing
                         // else will send it now that this prompt is no longer in flight.
                         if (turnWasAdopted || startedTurn !== null) {
                             if (running !== null) await running;
-                            await sendState(toV2IdleState(response));
+                            await sendIdle(response);
                         }
                         return;
                     }
@@ -4216,9 +4237,10 @@ export class CodexAcpServer {
                     // The session takes the next prompt before `idle` goes out, so a client that
                     // prompts again as soon as it sees `idle` is not rejected as overlapping.
                     // What v1 would have answered with ends the v2 turn.
-                    await sendState(toV2IdleState(response));
+                    await sendIdle(response);
                 },
                 async (error: unknown) => {
+                    failure ??= toV2Failure(error);
                     if (!inserted) {
                         this.v2PromptsInFlight.delete(sessionId);
                         reject(error);
@@ -4226,7 +4248,7 @@ export class CodexAcpServer {
                             || this.recovery !== null && !this.recovery.isReady();
                         if (turnWasAdopted || startedTurn !== null || runtimeLost) {
                             if (running !== null) await running;
-                            await sendState(toV2IdleState(this.failedPromptResponse(sessionId)));
+                            await sendIdle(this.failedPromptResponse(sessionId));
                         }
                         return;
                     }
@@ -4239,7 +4261,7 @@ export class CodexAcpServer {
                     if (!failureWasShownAsMessage(error)) {
                         try {
                             await session.update(createAgentTextMessageChunk(postInsertionFailureText(
-                                error,
+                                new Error(failure.message),
                                 promptKind.kind === "localCommand" ? promptKind.name : undefined,
                             )));
                         } catch (sendError) {
@@ -4247,7 +4269,7 @@ export class CodexAcpServer {
                         }
                     }
                     this.v2PromptsInFlight.delete(sessionId);
-                    await sendState(toV2IdleState(this.failedPromptResponse(sessionId)));
+                    await sendIdle(this.failedPromptResponse(sessionId));
                 },
             ).finally(() => {
                 signal?.removeEventListener("abort", dropPendingRequest);
@@ -4320,6 +4342,10 @@ export class CodexAcpServer {
         };
         const disposePromptRequestCancellation = this.observePromptRequestCancellation(signal, sessionState, activePrompt);
         let eventHandler: CodexEventHandler | null = null;
+        const reportTurnFailure = (turn: Turn) => {
+            const error = eventHandler?.getTurnFailure(turn);
+            if (error) insertion?.onFailure?.(error);
+        };
         let promptNotificationsActive = true;
         // The app-server of this prompt. A restart during the prompt must not mix clients, see AppServerRecovery.
         let promptClient = this.codexAcpClient;
@@ -4451,7 +4477,7 @@ export class CodexAcpServer {
                     await observeInteraction(event);
                     if (!promptNotificationsActive) {
                         await promptEventHandler.handleSessionScopedNotification(event);
-                        await this.trackCodexTurnCompletion(sessionState, event);
+                        await this.trackCodexTurnCompletion(sessionState, event, promptEventHandler);
                         return;
                     }
                     const completesActiveTurn = event.method === "turn/completed"
@@ -4463,7 +4489,7 @@ export class CodexAcpServer {
                         // the causal boundary so a queued late error cannot enter the completed turn's buffer.
                         promptNotificationsActive = false;
                     }
-                    await this.trackCodexTurnCompletion(sessionState, event);
+                    await this.trackCodexTurnCompletion(sessionState, event, promptEventHandler);
                 },
                 approvalHandler,
                 elicitationHandler,
@@ -4532,6 +4558,10 @@ export class CodexAcpServer {
                 await eventHandler.flushPendingErrorsAsSessionScoped();
                 if (commandResult.turnCompleted) {
                     await eventHandler.handleFailedTurn(commandResult.turnCompleted.turn);
+                    if (insertion && activePrompt.clientCancelled && commandResult.turnCompleted.turn.status === "failed") {
+                        return cancelledPromptResponse();
+                    }
+                    reportTurnFailure(commandResult.turnCompleted.turn);
                 }
                 if (commandResult.turnCompleted?.turn.status === "interrupted") {
                     return cancelledPromptResponse();
@@ -4648,6 +4678,10 @@ export class CodexAcpServer {
             }
             await eventHandler.flushPendingErrors();
             await eventHandler.handleFailedTurn(turnCompleted.turn);
+            if (insertion && activePrompt.clientCancelled && turnCompleted.turn.status === "failed") {
+                return cancelledPromptResponse();
+            }
+            reportTurnFailure(turnCompleted.turn);
             promptNotificationsActive = false;
 
             if (turnCompleted.turn.status === "interrupted") {
@@ -4764,6 +4798,10 @@ export class CodexAcpServer {
                     }
                     await eventHandler.flushPendingErrors();
                     await eventHandler.handleFailedTurn(turnCompleted.turn);
+                    if (insertion && activePrompt.clientCancelled && turnCompleted.turn.status === "failed") {
+                        return cancelledPromptResponse();
+                    }
+                    reportTurnFailure(turnCompleted.turn);
                     promptNotificationsActive = false;
                     if (turnCompleted.turn.status === "interrupted") {
                         await eventHandler.flushPendingPlanUpdates();
@@ -4833,7 +4871,7 @@ export class CodexAcpServer {
             const lostAppServer = this.recovery !== null
                 && err instanceof RequestError
                 && err.code === CODEX_PROCESS_EXITED_ERROR_CODE;
-            if (activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId)) {
+            if (activePrompt.signal.aborted || this.sessionIsClosing(params.sessionId) || insertion && activePrompt.clientCancelled) {
                 if (lostAppServer) await this.finishPromptAfterAppServerLoss(sessionState, eventHandler, promptClient, promptElicitations, "cancelled");
                 return cancelledPromptResponse();
             }
@@ -4853,6 +4891,7 @@ export class CodexAcpServer {
                     return cancelledPromptResponse();
                 }
             }
+            insertion?.onFailure?.(toV2Failure(err));
             const isUnexpectedFailure = !(err instanceof RequestError);
             if (eventHandler !== null
                 && clientSupportsTypedSessionFailures(this.clientCapabilities)

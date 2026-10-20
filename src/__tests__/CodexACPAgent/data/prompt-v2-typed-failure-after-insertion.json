@@ -64,7 +64,11 @@
   },
   {
     "sessionUpdate": {
-      "stopReason": "end_turn",
+      "error": {
+        "code": -32603,
+        "message": "You've hit your usage limit."
+      },
+      "stopReason": "error",
       "_meta": {
         "quota": {
           "token_count": null,

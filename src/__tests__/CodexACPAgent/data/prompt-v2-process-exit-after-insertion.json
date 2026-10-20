@@ -63,7 +63,7 @@
         "sessionUpdate": {
           "messageId": "<agentMessageId>",
           "content": {
-            "text": "Codex process has exited with code 1",
+            "text": "Connection to Codex was lost.",
             "type": "text"
           },
           "sessionUpdate": "agent_message_chunk"
@@ -71,7 +71,11 @@
       },
       {
         "sessionUpdate": {
-          "stopReason": "end_turn",
+          "error": {
+            "code": 1001,
+            "message": "Connection to Codex was lost."
+          },
+          "stopReason": "error",
           "_meta": {
             "quota": {
               "token_count": null,
@@ -146,7 +150,11 @@
       },
       {
         "sessionUpdate": {
-          "stopReason": "end_turn",
+          "error": {
+            "code": 1001,
+            "message": "Connection to Codex was lost."
+          },
+          "stopReason": "error",
           "_meta": {
             "quota": {
               "token_count": null,
