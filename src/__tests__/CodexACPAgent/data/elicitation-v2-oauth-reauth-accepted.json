@@ -14,11 +14,5 @@
       "message": "Please authorize access",
       "_meta": null
     }
-  },
-  {
-    "sessionUpdate": {
-      "state": "running",
-      "sessionUpdate": "state_update"
-    }
   }
 ]

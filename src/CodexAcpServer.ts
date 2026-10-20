@@ -574,11 +574,7 @@ export class CodexAcpServer {
             this.reportingConnection = new ToolCallReportingConnection(connection.extensionOnlyV1View());
             this.connection = this.reportingConnection.asClientConnection();
             connection.registerView(this.connection);
-            // A permission request that outlives its turn must not undo the `idle` already sent
-            // for it: only send `running` back if the session is actually still busy --
-            // either a Codex turn is running, or a v2 prompt is in flight between two Codex
-            // turns of the same prompt (e.g. the plan/implementation approval gap), where no
-            // `codexReportedRunningTurnId` is set yet but the client is still mid-`requires_action`.
+            // Foreground work includes adapter pauses between runtime turns, such as plan review.
             connection.setTurnRunningCheck((sessionId) => this.isSessionBusy(sessionId));
         } else {
             this.protocolVersion = 1;
@@ -1187,6 +1183,7 @@ export class CodexAcpServer {
             this.sessionIndex.titleWriter(sessionId),
         );
         this.installSessionState(sessionState);
+        AcpV2Connection.of(this.connection)?.restoreForegroundState(sessionId, sessionMetadata.threadStatus?.type === "active");
         this.recovery?.markLoaded(sessionState, openGeneration);
         if (settleTrackerReady) {
             settleTrackerReady(sessionState);
@@ -1414,7 +1411,7 @@ export class CodexAcpServer {
                         clientSupportsNotices(this.clientCapabilities),
                     );
                 }
-                await this.trackCodexTurnStart(sessionState, event);
+                await this.trackCodexForegroundWork(sessionState, event);
                 await this.trackSteerLanding(sessionState, event);
                 this.handleSkillsChanged(sessionState, event);
                 // Codex-started turns carry no `userMessage` item; `handleSessionScopedNotification`
@@ -1449,19 +1446,41 @@ export class CodexAcpServer {
     }
 
     /**
-     * Tracks a Codex-reported turn starting, independent of whether a `session/prompt` started
-     * it, and sends `running` for a turn no v2 prompt owns.
+     * Tracks runtime work before prompt insertion, including parallel items that can still progress.
      */
-    private async trackCodexTurnStart(sessionState: SessionState, event: ServerNotification): Promise<void> {
+    private async trackCodexForegroundWork(sessionState: SessionState, event: ServerNotification): Promise<void> {
+        const v2 = AcpV2Connection.of(this.connection);
+        // Active with no waits means Codex is running, even when no item is currently streaming.
+        // Nonempty flags only count pending requests; they do not prove aggregate blocking.
+        if (event.method === "thread/status/changed" && event.params.threadId === sessionState.sessionId
+            && event.params.status.type === "active" && event.params.status.activeFlags.length === 0) {
+            await this.reportCodexTurnState(sessionState.sessionId, {state: "running"});
+        }
+        if ((event.method === "item/started" || event.method === "item/completed")
+            && event.params.threadId === sessionState.sessionId
+            && event.params.turnId === sessionState.codexReportedRunningTurnId
+            && event.params.item.type !== "userMessage") {
+            if (event.method === "item/started") {
+                await v2?.startForegroundItem(sessionState.sessionId, event.params.item.id);
+            } else {
+                await v2?.completeForegroundItem(sessionState.sessionId, event.params.item.id);
+            }
+        }
+        if ((event.method === "item/agentMessage/delta" || event.method === "item/reasoning/textDelta"
+            || event.method === "item/reasoning/summaryTextDelta")
+            && event.params.threadId === sessionState.sessionId
+            && event.params.turnId === sessionState.codexReportedRunningTurnId) {
+            await v2?.startForegroundItem(sessionState.sessionId, event.params.itemId);
+        }
         if (event.method !== "turn/started" || event.params.threadId !== sessionState.sessionId) {
             return;
         }
         sessionState.codexReportedRunningTurnId = event.params.turn.id;
-        await this.reportUnownedTurnState(sessionState.sessionId, {state: "running"});
+        await this.reportCodexTurnState(sessionState.sessionId, {state: "running"});
     }
 
     /**
-     * The other half of `trackCodexTurnStart`: sends exactly one `idle` for a turn no v2 prompt
+     * The other half of `trackCodexForegroundWork`: sends exactly one `idle` for a turn no v2 prompt
      * owns, after the notification's own content has already been handled so `idle`
      * stays the last thing sent for the turn.
      */
@@ -1472,18 +1491,17 @@ export class CodexAcpServer {
         if (sessionState.codexReportedRunningTurnId === event.params.turn.id) {
             sessionState.codexReportedRunningTurnId = null;
         }
-        await this.reportUnownedTurnState(sessionState.sessionId, toV2IdleState({
+        await this.reportCodexTurnState(sessionState.sessionId, toV2IdleState({
             stopReason: stopReasonForUnownedTurn(event.params.turn.status),
         }));
     }
 
     /**
-     * Sends the v2 `state_update` for a Codex-reported turn no `session/prompt` owns. A turn a
-     * v2 prompt owns sends its own states already, so this is a no-op while one is in flight for
-     * the session; it is also a no-op on v1, which has no `state_update`.
+     * Prompt-owned workflows may span several runtime turns; their caller reports the final idle.
+     * Runtime starts report running independently of insertion. v1 has no foreground-state updates.
      */
-    private async reportUnownedTurnState(sessionId: string, state: acpV2.StateUpdate): Promise<void> {
-        if (this.v2PromptsInFlight.has(sessionId)) {
+    private async reportCodexTurnState(sessionId: string, state: acpV2.StateUpdate): Promise<void> {
+        if (this.v2PromptsInFlight.has(sessionId) && state.state === "idle") {
             return;
         }
         const session = new ACPSessionConnection(this.connection, sessionId);
@@ -1677,13 +1695,22 @@ export class CodexAcpServer {
         const {replayFrom, systemPrompt: _systemPrompt, ...request} = params;
         if (replayFrom == null) {
             await this.resumeSession(request);
+            await this.snapshotForegroundState(params.sessionId);
             return this.createSessionConfigOptionsResponseV2(this.getSessionState(params.sessionId));
         }
         if (replayFrom.type !== "start") {
             throw RequestError.invalidParams(undefined, `Unsupported replayFrom type: ${replayFrom.type}`);
         }
         const {sessionId} = await this.loadSessionAndReplayHistory(request);
+        await this.snapshotForegroundState(sessionId);
         return this.createSessionConfigOptionsResponseV2(this.getSessionState(sessionId));
+    }
+
+    private async snapshotForegroundState(sessionId: string): Promise<void> {
+        // Drain live events released by setup/replay before taking the ordered snapshot.
+        await this.codexAcpClient.waitForSessionNotifications(sessionId);
+        this.getSessionState(sessionId);
+        await AcpV2Connection.of(this.connection)!.snapshotForegroundState(sessionId);
     }
 
     async forkSession(params: WithAcpMcpServers<acp.ForkSessionRequest>): Promise<acp.ForkSessionResponse> {
@@ -1773,10 +1800,14 @@ export class CodexAcpServer {
                 // The thread is not loaded in a running app-server: nothing to close there, and no restart for it.
                 logger.log("Session closed without an app-server call: its app-server is gone", {sessionId: params.sessionId});
             }
+            await this.reportCodexTurnState(params.sessionId, {state: "idle", stopReason: "cancelled"});
             logger.log("Session closed", {sessionId: params.sessionId});
         } finally {
             if (this.getSessionGeneration(params.sessionId) === closeGeneration) {
                 this.sessions.delete(params.sessionId);
+                if (!this.v2PromptsInFlight.has(params.sessionId)) {
+                    AcpV2Connection.of(this.connection)?.forgetSession(params.sessionId);
+                }
                 this.mcpSessionStartup.close(params.sessionId);
                 this.codexAcpClient.appServerClient.mcpStartup.forgetThread(params.sessionId);
                 this.pendingTurnStarts.delete(params.sessionId);
@@ -2020,7 +2051,7 @@ export class CodexAcpServer {
                     // those tool calls -- and end their terminals -- before the turn's own
                     // idle/cancelled close-out below.
                     await this.finishOutstandingToolCalls(session);
-                    await this.reportUnownedTurnState(session.sessionId, {state: "idle", stopReason: "cancelled"});
+                    await this.reportCodexTurnState(session.sessionId, {state: "idle", stopReason: "cancelled"});
                 }
 
                 session.asyncTasks.setAppServer(replacement.appServerClient);
@@ -3168,6 +3199,7 @@ export class CodexAcpServer {
             this.sessionIndex.titleWriter(sessionId),
         );
         this.installSessionState(sessionState);
+        AcpV2Connection.of(this.connection)?.restoreForegroundState(sessionId, thread.status.type === "active");
         this.recovery?.markLoaded(sessionState, openGeneration);
         if (knownAccount === "pending") {
             this.applyLateAccountRead(sessionState, authorization, authStatusVersionAtStart);
@@ -4075,6 +4107,13 @@ export class CodexAcpServer {
                 logger.error(`Failed to send the '${state.state}' state for session ${sessionId}`, error);
             }
         };
+        const startWork = async () => {
+            try {
+                await AcpV2Connection.of(this.connection)?.startForegroundWork(sessionId);
+            } catch (error) {
+                logger.error(`Failed to report foreground work for session ${sessionId}`, error);
+            }
+        };
         return await new Promise<acpV2.PromptResponse>((resolve, reject) => {
             let running: Promise<void> | null = null;
             let inserted = false;
@@ -4120,11 +4159,8 @@ export class CodexAcpServer {
                 if (turnWasAdopted) {
                     return;
                 }
-                // Report `running` only after the response has been queued, as the spec's sequence
-                // shows (response, user message, then `running`). Awaiting it here holds back the
-                // turn's later updates until it is sent.
-                running = new Promise<void>(resolveTimer => setTimeout(resolveTimer, 0))
-                    .then(() => sendState({state: "running"}));
+                // Local commands have no runtime turn; insertion starts their foreground work.
+                running ??= startWork();
                 await running;
             };
             const run = async () => {
@@ -4149,6 +4185,8 @@ export class CodexAcpServer {
                     },
                     onTurnStarted: (turn) => {
                         startedTurn = turn;
+                        // An accepted Codex turn can run hooks before inserting user input.
+                        running = startWork();
                     },
                 }, reservation);
             };
@@ -4166,7 +4204,8 @@ export class CodexAcpServer {
                         // Codex dropped the steered input before the adopted turn ended: that
                         // turn's `running` still needs exactly one matching `idle`, and nothing
                         // else will send it now that this prompt is no longer in flight.
-                        if (turnWasAdopted) {
+                        if (turnWasAdopted || startedTurn !== null) {
+                            if (running !== null) await running;
                             await sendState(toV2IdleState(response));
                         }
                         return;
@@ -4183,7 +4222,10 @@ export class CodexAcpServer {
                     if (!inserted) {
                         this.v2PromptsInFlight.delete(sessionId);
                         reject(error);
-                        if (turnWasAdopted) {
+                        const runtimeLost = this.getExitCode() !== null
+                            || this.recovery !== null && !this.recovery.isReady();
+                        if (turnWasAdopted || startedTurn !== null || runtimeLost) {
+                            if (running !== null) await running;
                             await sendState(toV2IdleState(this.failedPromptResponse(sessionId)));
                         }
                         return;
@@ -4210,6 +4252,7 @@ export class CodexAcpServer {
             ).finally(() => {
                 signal?.removeEventListener("abort", dropPendingRequest);
                 reservation.release();
+                if (!this.sessions.has(sessionId)) AcpV2Connection.of(this.connection)?.forgetSession(sessionId);
             });
         });
     }
@@ -4390,7 +4433,7 @@ export class CodexAcpServer {
                     // Tracks turns this prompt doesn't own too (a `/goal` continuation after this
                     // prompt's own turn already went idle): the same subscription keeps receiving
                     // notifications for as long as no later prompt replaces it.
-                    await this.trackCodexTurnStart(sessionState, event);
+                    await this.trackCodexForegroundWork(sessionState, event);
                     await this.trackSteerLanding(sessionState, event);
                     this.handleSkillsChanged(sessionState, event);
                     if (pendingInsertion !== undefined

@@ -167,7 +167,7 @@ describe('agent-initiated Codex turns over ACP v2', () => {
         ]);
     });
 
-    it('resends `running` for a permission request that settles while an unowned turn is still running', async () => {
+    it('resumes an unowned turn only after the runtime confirms progress following a permission answer', async () => {
         const client = await connectSession(2, {
             onRequestPermission: async () => ({outcome: {outcome: "selected", optionId: "allow_once"}}),
         });
@@ -181,14 +181,18 @@ describe('agent-initiated Codex turns over ACP v2', () => {
 
         const response = await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams({turnId: "turn-2"}));
         expect(response).toEqual({decision: "accept"});
+        expect(stateUpdates(client.transcript.slice(start))).toEqual([{state: "running"}, {state: "requires_action"}]);
+        client.emit({
+            method: "thread/status/changed",
+            params: {threadId: sessionId, status: {type: "active", activeFlags: []}},
+        });
+        await settle();
 
         client.emit(turnCompleted("turn-2"));
         await settle();
 
         const transcript = client.transcript.slice(start);
-        // `running` from the tracked turn start, then `requires_action`/`running` bracketing the
-        // permission request (a turn is genuinely running, so `running` is not suppressed here --
-        // unlike the no-turn-running case covered in permissions-v2.test.ts), then `idle`.
+        // The runtime, not the permission response, establishes resumed progress.
         expect(stateUpdates(transcript)).toEqual([
             {state: "running"},
             {state: "requires_action"},

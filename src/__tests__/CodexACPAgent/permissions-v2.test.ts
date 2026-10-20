@@ -11,6 +11,8 @@ import {
     cwd,
     connectSession,
     userMessageItem,
+    commandExecutionItem,
+    itemStarted,
     itemCompleted,
     turnStarted,
     turnCompleted,
@@ -26,8 +28,7 @@ import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
 /**
  * Starts a prompt and lets its turn actually start (`turn/started` emitted) before returning, so
  * a permission request triggered against it finds a real turn running -- matching how command/
- * file-change approvals are only ever raised mid-turn -- and its trailing `running` fires once
- * the request settles.
+ * file-change approvals are only ever raised mid-turn. Progress is reported separately from the answer.
  */
 async function startRunningPrompt(client: PromptSession) {
     client.setTurnStart(async () => ({
@@ -94,9 +95,8 @@ describe('session/request_permission over ACP v2', () => {
 
         expect(response).toEqual({decision: "accept"});
         const transcript = client.transcript.slice(start);
-        // The turn is running when the approval fires, so its trailing `running` closes the
-        // `requires_action` bracket once the client answers.
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
+        // No runtime progress was observed after the answer.
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
         const requiresAction = indexOf(transcript, isState("requires_action"));
         const permission = indexOf(transcript, entry => "permissionRequest" in entry);
         expect(requiresAction).toBeLessThan(permission);
@@ -128,6 +128,65 @@ describe('session/request_permission over ACP v2', () => {
         await finishTurn();
     });
 
+    it('keeps parallel work running and reports blocked state only when every open item waits', async () => {
+        const answers = new Map<string, () => void>();
+        const client = await connectSession(2, {
+            onRequestPermission: async request => {
+                const subject = request.subject as {toolCall: {toolCallId: string}};
+                await new Promise<void>(resolve => { answers.set(subject.toolCall.toolCallId, resolve); });
+                return {outcome: {outcome: "selected", optionId: "allow_once"}};
+            },
+        });
+        closeClient = () => client.connection.close();
+        const {finishTurn} = await startRunningPrompt(client);
+        client.emit(itemStarted(commandExecutionItem("first")));
+        client.emit(itemStarted(commandExecutionItem("second")));
+        await settle();
+        const start = client.transcript.length;
+        const first = client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams({itemId: "first"}));
+        await vi.waitFor(() => expect(answers.has("first")).toBe(true));
+        expect(stateUpdates(client.transcript.slice(start))).toEqual([]);
+        const second = client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams({itemId: "second"}));
+        await vi.waitFor(() => expect(answers.has("second")).toBe(true));
+        answers.get("first")!();
+        await first;
+        client.emit(itemCompleted(commandExecutionItem("first", "completed")));
+        await settle();
+        answers.get("second")!();
+        await second;
+        client.emit(itemCompleted(commandExecutionItem("second", "completed")));
+        await finishTurn();
+        await settle();
+
+        await expect(dump(stateUpdates(client.transcript.slice(start))))
+            .toMatchFileSnapshot('data/permissions-v2-parallel-state.json');
+    });
+
+    it('synchronizes requires_action when resuming a session with a pending permission', async () => {
+        let answer!: (response: acpV2.RequestPermissionResponse) => void;
+        const client = await connectSession(2, {
+            onRequestPermission: () => new Promise(resolve => { answer = resolve; }),
+        });
+        closeClient = () => client.connection.close();
+        const {response} = await startRunningPrompt(client);
+        client.emit(itemCompleted(userMessageItem(client.turnStartParams[0]!["clientUserMessageId"] as string)));
+        await response;
+        const approval = client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams());
+        await vi.waitFor(() => expect(answer).toBeDefined());
+        const start = client.transcript.length;
+
+        await client.request("session/resume", {sessionId, cwd});
+        expect(stateUpdates(client.transcript.slice(start))).toEqual([{state: "requires_action"}]);
+        answer({outcome: {outcome: "selected", optionId: "allow_once"}});
+        await approval;
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        await settle();
+
+        await expect(dump(stateUpdates(client.transcript.slice(start))))
+            .toMatchFileSnapshot('data/permissions-v2-resume-blocked-state.json');
+    });
+
     it('sends a command approval request and applies the rejected decision', async () => {
         const client = await connectSession(2, {
             onRequestPermission: async () => ({outcome: {outcome: "selected", optionId: "decline"}}),
@@ -140,8 +199,8 @@ describe('session/request_permission over ACP v2', () => {
 
         expect(response).toEqual({decision: "decline"});
         const transcript = client.transcript.slice(start);
-        // The turn is running when the approval fires (see the allowed test).
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
+        // The answer alone does not establish resumed foreground progress.
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
         await expect(dump(transcript)).toMatchFileSnapshot('data/permissions-v2-command-rejected.json');
 
         await finishTurn();
@@ -159,8 +218,8 @@ describe('session/request_permission over ACP v2', () => {
 
         expect(response).toEqual({decision: "accept"});
         const transcript = client.transcript.slice(start);
-        // The turn is running when the approval fires (see the allowed test).
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
+        // The answer alone does not establish resumed foreground progress.
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
         await expect(dump(transcript)).toMatchFileSnapshot('data/permissions-v2-file-change-allowed.json');
 
         await finishTurn();
@@ -178,9 +237,8 @@ describe('session/request_permission over ACP v2', () => {
 
         expect(response).toEqual({decision: "cancel"});
         const transcript = client.transcript.slice(start);
-        // The turn is running when the approval fires, even though the request was cancelled
-        // (see the allowed test).
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
+        // Cancelling the decision is not evidence of resumed progress.
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
 
         await finishTurn();
     });
@@ -198,7 +256,7 @@ describe('session/request_permission over ACP v2', () => {
         await finishTurn();
     });
 
-    it('cancels the decision and still resumes `running` when the client request errors', async () => {
+    it('cancels the decision without inventing progress when the client request errors', async () => {
         const client = await connectSession(2, {
             onRequestPermission: async () => {
                 throw new Error("client failed to answer");
@@ -211,9 +269,7 @@ describe('session/request_permission over ACP v2', () => {
         const response = await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams());
 
         expect(response).toEqual({decision: "cancel"});
-        // The turn is running when the approval fires, so `running` resumes even though the
-        // request itself failed (see the allowed test).
-        expect(stateUpdates(client.transcript.slice(start))).toEqual([{state: "requires_action"}, {state: "running"}]);
+        expect(stateUpdates(client.transcript.slice(start))).toEqual([{state: "requires_action"}]);
 
         await finishTurn();
     });
@@ -267,8 +323,8 @@ describe('session/request_permission over ACP v2', () => {
         // The prompt's own `running` (from insertion) brackets the whole exchange. The plan
         // permission request fires after the proposal's turn already completed and before the
         // implementation turn starts, so no Codex turn is running while it's pending -- but the
-        // v2 prompt itself is still in flight, so the session is still busy and the trailing
-        // `running` still closes the `requires_action` bracket once the client approves.
+        // v2 prompt itself is still in flight. Work resumes when the implementation turn starts,
+        // rather than merely because the client answered the plan review.
         expect(stateUpdates(transcript)).toEqual([
             {state: "running"},
             {state: "requires_action"},

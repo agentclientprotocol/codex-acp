@@ -33,6 +33,12 @@
         "codexResponse": "turn/start"
       },
       {
+        "sessionUpdate": {
+          "state": "running",
+          "sessionUpdate": "state_update"
+        }
+      },
+      {
         "codexNotification": "turn/started"
       },
       {
@@ -51,12 +57,6 @@
       {
         "promptResponse": {
           "messageId": "<messageId>"
-        }
-      },
-      {
-        "sessionUpdate": {
-          "state": "running",
-          "sessionUpdate": "state_update"
         }
       },
       {
@@ -118,6 +118,12 @@
         "codexResponse": "turn/start"
       },
       {
+        "sessionUpdate": {
+          "state": "running",
+          "sessionUpdate": "state_update"
+        }
+      },
+      {
         "codexNotification": "turn/started"
       },
       {
@@ -136,12 +142,6 @@
       {
         "promptResponse": {
           "messageId": "<messageId>"
-        }
-      },
-      {
-        "sessionUpdate": {
-          "state": "running",
-          "sessionUpdate": "state_update"
         }
       },
       {

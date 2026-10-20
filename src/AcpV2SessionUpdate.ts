@@ -116,10 +116,8 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
                 ...(content !== undefined ? {content: content && content.map(toV2ToolCallContent)} : {}),
             };
         }
-        // Subagent RFD (spec PR #1992, unmerged) uses a single upsert-style update. Sent under a
-        // `_`-prefixed tag because the RFD's `subagent_update` isn't in the v2 unstable schema yet;
-        // rename to `subagent_update` once it lands there. The AIR `nativeSubagentSessions` gate
-        // already ran upstream (whatever created this update), so no gate check is needed here.
+        // Preserve AIR's existing subagent contract. The standard schema uses different fields
+        // and work states; that migration is separate. The AIR capability gate already ran upstream.
         case "subagent_spawned": {
             const {subagentSessionId, name, task, _meta} = update;
             return {

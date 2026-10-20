@@ -161,12 +161,17 @@ schema alone:
   (`_meta.quota`) from the idle `state_update` that ends the turn, not from a separate error
   channel. The same `_meta` v1 attaches to `PromptResponse` is copied onto the v2 idle update.
 - Custom session updates are renamed on v2: `subagent_spawned`/`subagent_state_update` become a
-  single `_subagent_update` (gated on the AIR `nativeSubagentSessions` capability; it will rename to
-  `subagent_update` once the subagent RFD, spec PR #1992, lands), and
+  single `_subagent_update` (gated on the AIR `nativeSubagentSessions` capability; this contract is
+  retained until the adapter migrates to the standard subagent model), and
   `async_task_spawned`/`async_task_state_update` become `_async_task_spawned`/`_async_task_state_update`
   (gated on the AIR `asyncTasks` capability). Payload shapes are unchanged.
-- The SDK client treats any `idle` state update as the stop of whichever prompt is pending, not just
-  one paired 1:1 with a `session/prompt` call.
+- Foreground state is independent of prompt acceptance. `running` can precede the user-message
+  echo, including while Codex runs hooks. A successful prompt response still waits for insertion.
+- Every successful `session/resume` sends a current-state snapshot after any replay and before its
+  response. An idle snapshot is not another completed turn and repeats no usage or failure metadata.
+- Permission and elicitation requests affect aggregate foreground state: another runnable item keeps
+  the session running, and answering one wait does not resume work that remains blocked. Withdrawing
+  a request on cancellation does not resume the workflow; late answers cannot revive an ended turn.
 - A steer (`_session/steering`) shows up as a `user_message` once it actually lands in the turn.
 - On cancel, any permission or elicitation request still waiting on a client response is withdrawn
   with `$/cancel_request`, not just the underlying Codex turn.

@@ -1,0 +1,12 @@
+[
+  {
+    "state": "running"
+  },
+  {
+    "state": "running"
+  },
+  {
+    "state": "idle",
+    "stopReason": "cancelled"
+  }
+]

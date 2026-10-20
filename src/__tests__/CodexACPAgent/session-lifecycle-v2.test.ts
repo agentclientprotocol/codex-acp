@@ -235,15 +235,16 @@ describe('Session lifecycle over ACP v2', () => {
         closeClient = () => connection.close();
 
         const response = await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd});
-        // Only the command list; no history is replayed. The current goal is AIR-only.
-        const sessionUpdates = await waitForSessionUpdates(updates, ["available_commands_update"]);
+        expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle"});
+        // Commands and a current-state snapshot, but no replayed history.
+        const sessionUpdates = await waitForSessionUpdates(updates, ["available_commands_update", "state_update"]);
 
         await expect(dump({response, codexRequests, updates: sessionUpdates}))
             .toMatchFileSnapshot('data/session-lifecycle-v2-resume.json');
     });
 
     it('resumes a session with a null replayFrom the same way', async () => {
-        const {connection, codexRequests} = await connectV2Client();
+        const {connection, codexRequests, updates} = await connectV2Client();
         closeClient = () => connection.close();
 
         const response = await connection.agent.request(acpV2.methods.agent.session.resume, {
@@ -251,6 +252,7 @@ describe('Session lifecycle over ACP v2', () => {
             cwd,
             replayFrom: null,
         });
+        expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle"});
 
         await expect(dump({response, codexRequests}))
             .toMatchFileSnapshot('data/session-lifecycle-v2-resume-null-replay.json');
@@ -334,6 +336,7 @@ describe('Session lifecycle over ACP v2', () => {
         // resolves; nothing should still be pending afterwards.
         const replayedUpdates = [...updates];
         expect(agent().getSessionState(sessionId)).toBeTruthy();
+        expect(replayedUpdates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle"});
 
         await expect(dump({response, codexRequests, updates: replayedUpdates}))
             .toMatchFileSnapshot('data/session-lifecycle-v2-resume-start-replay.json');
@@ -344,7 +347,7 @@ describe('Session lifecycle over ACP v2', () => {
         closeClient = () => connection.close();
 
         await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd});
-        await waitForSessionUpdates(updates, ["available_commands_update"]);
+        await waitForSessionUpdates(updates, ["available_commands_update", "state_update"]);
 
         expect(updates.some(({update}) => update.sessionUpdate.endsWith("_message_chunk")
             || update.sessionUpdate.endsWith("_message")

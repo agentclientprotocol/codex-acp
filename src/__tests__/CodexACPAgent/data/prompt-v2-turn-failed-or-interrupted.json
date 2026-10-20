@@ -33,6 +33,12 @@
         "codexResponse": "turn/start"
       },
       {
+        "sessionUpdate": {
+          "state": "running",
+          "sessionUpdate": "state_update"
+        }
+      },
+      {
         "codexNotification": "turn/started"
       },
       {
@@ -55,12 +61,6 @@
       },
       {
         "codexNotification": "turn/completed"
-      },
-      {
-        "sessionUpdate": {
-          "state": "running",
-          "sessionUpdate": "state_update"
-        }
       },
       {
         "sessionUpdate": {
@@ -117,6 +117,12 @@
         "codexResponse": "turn/start"
       },
       {
+        "sessionUpdate": {
+          "state": "running",
+          "sessionUpdate": "state_update"
+        }
+      },
+      {
         "codexNotification": "turn/started"
       },
       {
@@ -139,12 +145,6 @@
       },
       {
         "codexNotification": "turn/completed"
-      },
-      {
-        "sessionUpdate": {
-          "state": "running",
-          "sessionUpdate": "state_update"
-        }
       },
       {
         "sessionUpdate": {

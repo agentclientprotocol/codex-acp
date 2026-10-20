@@ -291,6 +291,13 @@
         },
         "sessionUpdate": "terminal_update"
       }
+    },
+    {
+      "sessionId": "thread-1",
+      "update": {
+        "state": "idle",
+        "sessionUpdate": "state_update"
+      }
     }
   ]
 }

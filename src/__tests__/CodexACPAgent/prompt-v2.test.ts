@@ -113,12 +113,12 @@ describe('session/prompt over ACP v2', () => {
         const userMessages = client.transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
             .filter(update => update.sessionUpdate === "user_message_chunk");
         expect(userMessages).toEqual([{sessionUpdate: "user_message_chunk", messageId, content: {type: "text", text: "Hello"}}]);
-        // Insertion (response + user message) comes first, then `running`, then exactly one `idle`.
+        // Foreground work starts before insertion; acceptance still waits for the user-message echo.
         expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
         const running = indexOf(client.transcript, isState("running"));
-        expect(indexOf(client.transcript, entry => "promptResponse" in entry)).toBeLessThan(running);
-        expect(indexOf(client.transcript, entry => "sessionUpdate" in entry
-            && entry.sessionUpdate.sessionUpdate === "user_message_chunk")).toBeLessThan(running);
+        expect(running).toBeLessThan(indexOf(client.transcript, entry => "promptResponse" in entry));
+        expect(running).toBeLessThan(indexOf(client.transcript, entry => "sessionUpdate" in entry
+            && entry.sessionUpdate.sessionUpdate === "user_message_chunk"));
         expect(running).toBeLessThan(indexOf(client.transcript, isState("idle")));
         expect(indexOf(client.transcript, isState("idle")))
             .toBeGreaterThan(indexOf(client.transcript, entry => "codexNotification" in entry
@@ -310,6 +310,28 @@ describe('session/prompt over ACP v2', () => {
         await expect(dump(idle)).toMatchFileSnapshot('data/prompt-v2-idle-usage-and-quota.json');
     });
 
+    it('ends observed foreground work if the runtime dies before acknowledging turn/start', async () => {
+        let exitCode: number | null = null;
+        const client = await connectSession(2, {exitCode: () => exitCode});
+        closeClient = () => client.connection.close();
+        let fail!: (error: Error) => void;
+        client.setTurnStart(() => new Promise((_, reject) => { fail = reject; }));
+        const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        client.emit(turnStarted());
+        await settle();
+        exitCode = 1;
+        fail(new Error("transport lost before turn/start response"));
+        await expect(response).rejects.toThrow();
+        await client.promptRunFinished();
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+        ]);
+        expect(sessionUpdates(client.transcript).some(update => update.sessionUpdate === "user_message_chunk")).toBe(false);
+    });
+
     it('fails the prompt when turn/start is rejected', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
@@ -346,7 +368,7 @@ describe('session/prompt over ACP v2', () => {
         expect(error).not.toBeNull();
         expect(client.transcript.some(entry => "sessionUpdate" in entry
             && entry.sessionUpdate.sessionUpdate === "user_message_chunk")).toBe(false);
-        expect(stateUpdates(client.transcript)).toEqual([]);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
         // Not inserted: the fallback title from the prompt text must not be published either.
         expect(sessionUpdates(client.transcript).map(update => update.sessionUpdate))
             .not.toEqual(expect.arrayContaining(["session_info_update"]));
@@ -375,7 +397,9 @@ describe('session/prompt over ACP v2', () => {
         client.emit(turnCompleted());
         await client.promptRunFinished();
         await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
-        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "end_turn"}, {state: "running"},
+        ]);
 
         const secondClientUserMessageId = client.turnStartParams[1]!["clientUserMessageId"] as string;
         client.emit(turnStarted("turn-2"));
@@ -482,7 +506,9 @@ describe('session/prompt over ACP v2', () => {
         client.emit(turnFinished("failed"));
         await client.promptRunFinished();
         await settle();
-        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "end_turn"}, {state: "running"},
+        ]);
 
         await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
         const secondClientUserMessageId = client.turnStartParams[1]!["clientUserMessageId"] as string;

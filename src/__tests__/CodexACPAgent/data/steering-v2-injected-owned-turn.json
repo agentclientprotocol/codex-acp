@@ -30,6 +30,12 @@
     "codexResponse": "turn/start"
   },
   {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
     "codexNotification": "turn/started"
   },
   {
@@ -52,12 +58,6 @@
   },
   {
     "codexNotification": "item/started"
-  },
-  {
-    "sessionUpdate": {
-      "state": "running",
-      "sessionUpdate": "state_update"
-    }
   },
   {
     "sessionUpdate": {

@@ -10,6 +10,12 @@
     }
   },
   {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
     "promptResponse": {
       "messageId": "<messageId>"
     }
@@ -25,12 +31,6 @@
         "type": "text"
       },
       "sessionUpdate": "agent_message_chunk"
-    }
-  },
-  {
-    "sessionUpdate": {
-      "state": "running",
-      "sessionUpdate": "state_update"
     }
   },
   {

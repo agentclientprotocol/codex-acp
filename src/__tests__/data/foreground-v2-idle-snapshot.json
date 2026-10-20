@@ -1,0 +1,25 @@
+[
+  {
+    "state": "running"
+  },
+  {
+    "state": "idle",
+    "stopReason": "end_turn",
+    "usage": {
+      "totalTokens": 3,
+      "inputTokens": 1,
+      "outputTokens": 2
+    },
+    "_meta": {
+      "quota": {
+        "total": 3
+      }
+    }
+  },
+  {
+    "state": "idle"
+  },
+  {
+    "state": "idle"
+  }
+]
