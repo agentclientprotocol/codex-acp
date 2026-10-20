@@ -14,13 +14,27 @@ export interface ExplanationContext {
     readonly codexHome: string | null;
 }
 
+interface ErrorExplanation {
+    /** Full diagnostic text retained in the structured ACP error detail. */
+    readonly message: string;
+    /** Fixed guidance that is safe to present as the primary ACP error message. */
+    readonly safeMessage: string;
+}
+
+const safeMessages = new WeakMap<Error, string>();
+
 /** Returns the error with the likely cause in its message, or the same error when no rule applies. */
 export function explainCodexError(err: Error, context: ExplanationContext): Error {
     for (const rule of RULES) {
-        const message = rule(err, context);
-        if (message !== null) return withMessage(err, message);
+        const explanation = rule(err, context);
+        if (explanation !== null) return withExplanation(err, explanation);
     }
     return err;
+}
+
+/** The reviewed user-facing guidance attached by {@link explainCodexError}, if any. */
+export function safeCodexErrorMessage(err: unknown): string | null {
+    return err instanceof Error ? safeMessages.get(err) ?? null : null;
 }
 
 /** True for an error that a new login fixes, so the agent logs out. */
@@ -29,7 +43,7 @@ export function requiresLogout(err: Error): boolean {
 }
 
 /** Returns the new message, or `null` when the rule does not apply. */
-type ExplanationRule = (err: Error, context: ExplanationContext) => string | null;
+type ExplanationRule = (err: Error, context: ExplanationContext) => ErrorExplanation | null;
 
 /**
  * `config/read` wraps every config load failure as "failed to resolve feature override precedence"
@@ -49,8 +63,12 @@ const deletedWorkingDirectory: ExplanationRule = ({message}) => {
     if (!configLoadFailure || !message.includes("No such file or directory") || !workingDirectoryDeleted()) {
         return null;
     }
-    return `Codex cannot read its configuration: its working directory ${workingDirectory} `
-        + "was deleted or replaced after the agent started. Restart the agent.";
+    return {
+        message: `Codex cannot read its configuration: its working directory ${workingDirectory} `
+            + "was deleted or replaced after the agent started. Restart the agent.",
+        safeMessage: "Codex cannot read its configuration because its working directory was deleted or replaced. "
+            + "Restart the agent.",
+    };
 };
 
 /** Points a config load failure to the config files. A failure that needs a new login is not about them. */
@@ -60,14 +78,22 @@ const configFiles: ExplanationRule = (err, {codexHome}) => {
         ? CONFIG_LOAD_FAILURE_PREFIX + err.message.slice(FEATURE_OVERRIDE_PRECEDENCE_PREFIX.length)
         : err.message;
     if (!message.includes("load config")) return null;
-    return `${message}\n\nCheck ${codexHome ?? "global"} and project .codex directories, `
-        + "especially their config.toml files, or any CODEX_CONFIG override.";
+    return {
+        message: `${message}\n\nCheck ${codexHome ?? "global"} and project .codex directories, `
+            + "especially their config.toml files, or any CODEX_CONFIG override.",
+        safeMessage: "Codex could not load its configuration. Check the global and project .codex directories, "
+            + "especially config.toml files or any CODEX_CONFIG override.",
+    };
 };
 
 const RULES: readonly ExplanationRule[] = [deletedWorkingDirectory, configFiles];
 
-function withMessage(err: Error, message: string): Error {
-    return err instanceof ResponseError ? new ResponseError(err.code, message, err.data) : new Error(message, {cause: err});
+function withExplanation(err: Error, explanation: ErrorExplanation): Error {
+    const explained = err instanceof ResponseError
+        ? new ResponseError(err.code, explanation.message, err.data)
+        : new Error(explanation.message, {cause: err});
+    safeMessages.set(explained, explanation.safeMessage);
+    return explained;
 }
 
 // Read at start: the agent never changes it, and `process.cwd()` can fail once the directory is deleted.

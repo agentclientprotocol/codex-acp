@@ -29,7 +29,7 @@ import {
     isNoActiveTurnError,
     parseExpectedActiveTurnMismatch,
 } from "./CodexThreadErrors";
-import {requiresLogout} from "./CodexErrorExplanations";
+import {requiresLogout, safeCodexErrorMessage} from "./CodexErrorExplanations";
 import {type CodexConnection} from "./CodexJsonRpcConnection";
 import {AppServerRecovery, recoveryLimitsFromEnv} from "./app-server-recovery/AppServerRecovery";
 import {
@@ -5203,18 +5203,24 @@ export class CodexAcpServer {
             return await operation();
         } catch (err) {
             if (this.recovery !== null) {
-                throw this.recovery.mapError(err, client);
+                const mapped = this.recovery.mapError(err, client);
+                if (mapped !== err) throw mapped;
+            } else {
+                const exitCode = this.getExitCode();
+                const requestErrorCode = CODEX_PROCESS_EXITED_ERROR_CODE;
+                if (exitCode == 3221225781) {
+                    throw new RequestError(requestErrorCode, `VC++ redistributable should be installed`);
+                }
+                if (exitCode !== null) {
+                    await this.finishAllAsyncTasks("failed", "after the Codex process exited");
+                    const stderr = this.getRecentStderr().trim();
+                    const detail = stderr ? `:\n${stderr}` : "";
+                    throw new RequestError(requestErrorCode, `Codex process has exited with code ${exitCode}${detail}`);
+                }
             }
-            const exitCode = this.getExitCode();
-            const requestErrorCode = CODEX_PROCESS_EXITED_ERROR_CODE;
-            if (exitCode == 3221225781) {
-                throw new RequestError(requestErrorCode, `VC++ redistributable should be installed`);
-            }
-            if (exitCode !== null) {
-                await this.finishAllAsyncTasks("failed", "after the Codex process exited");
-                const stderr = this.getRecentStderr().trim();
-                const detail = stderr ? `:\n${stderr}` : "";
-                throw new RequestError(requestErrorCode, `Codex process has exited with code ${exitCode}${detail}`);
+            const safeMessage = safeCodexErrorMessage(err);
+            if (safeMessage !== null && err instanceof Error) {
+                throw RequestError.internalError({details: err.message}, safeMessage);
             }
             throw err;
         }
