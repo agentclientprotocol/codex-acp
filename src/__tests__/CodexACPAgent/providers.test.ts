@@ -236,8 +236,8 @@ describe("Configurable LLM providers (providers/*)", () => {
         expect(secondSessionPrepare).toHaveBeenCalledOnce();
         expect(firstSessionSetAppServer).toHaveBeenCalledWith(firstGatewayReplacement.appServerClient);
         expect(secondSessionSetAppServer).toHaveBeenCalledWith(firstGatewayReplacement.appServerClient);
-        expect(firstGatewayResume).toHaveBeenCalledWith(expect.objectContaining({sessionId: "thread-1", cwd: "/one"}));
-        expect(firstGatewayResume).toHaveBeenCalledWith(expect.objectContaining({sessionId: "thread-2", cwd: "/two"}));
+        expect(firstGatewayResume).toHaveBeenCalledWith(expect.objectContaining({sessionId: "thread-1", cwd: "/one"}), undefined, undefined);
+        expect(firstGatewayResume).toHaveBeenCalledWith(expect.objectContaining({sessionId: "thread-2", cwd: "/two"}), undefined, undefined);
 
         await agent.setProvider({
             providerId: OPENAI_PROVIDER_ID,

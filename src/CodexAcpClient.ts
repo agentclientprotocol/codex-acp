@@ -68,11 +68,13 @@ import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 import {
     isMissingRolloutError,
+    isThreadNotMaterializedError,
     isThreadActiveWriterError,
     isUnknownThreadError,
     threadActiveWriterRequestError,
 } from "./CodexThreadErrors";
 import {airCustomInstructions} from "./AirExtension";
+import {changesSystemPrompt, clientSystemPromptText, type SessionInstructions} from "./ClientSystemPrompt";
 import {
     GatewayListingError,
     type GatewayModelIds,
@@ -680,18 +682,24 @@ export class CodexAcpClient {
         }
     }
 
-    async resumeSession(request: WithAcpMcpServers<acp.ResumeSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadata> {
+    async resumeSession(
+        request: WithAcpMcpServers<acp.ResumeSessionRequest>,
+        onSubscribed?: () => void,
+        previousInstructions?: SessionInstructions,
+    ): Promise<SessionMetadata> {
+        const instructions = await this.resolveSessionInstructions(request, previousInstructions);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
-        const response = await this.resumeThread({
+        const response = await this.resumeThreadWithInstructions({
             excludeTurns: true,
             config: sessionConfig.config,
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
-        });
+            ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
+        }, request, previousInstructions);
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
@@ -706,6 +714,7 @@ export class CodexAcpClient {
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
             skippedMcpServers: sessionConfig.skippedMcpServers,
+            ...(instructions ? {instructions} : {}),
         }
     }
 
@@ -713,7 +722,9 @@ export class CodexAcpClient {
         request: WithAcpMcpServers<acp.ForkSessionRequest>,
         releaseFailedFork: (threadId: string) => Promise<void> = threadId => this.closeSession(threadId),
         forkCreated: (threadId: string) => void = () => {},
+        previousInstructions?: SessionInstructions,
     ): Promise<SessionMetadata> {
+        const instructions = await this.resolveSessionInstructions(request, previousInstructions);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         return await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
@@ -727,21 +738,27 @@ export class CodexAcpClient {
             getCollaborationMode: sessionId => this.getCollaborationMode(sessionId),
             releaseFailedFork,
             forkCreated,
-        });
+        }, instructions);
     }
 
-    async loadSession(request: WithAcpMcpServers<acp.LoadSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+    async loadSession(
+        request: WithAcpMcpServers<acp.LoadSessionRequest>,
+        onSubscribed?: () => void,
+        previousInstructions?: SessionInstructions,
+    ): Promise<SessionMetadataWithThread> {
+        const instructions = await this.resolveSessionInstructions(request, previousInstructions);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
-        const response = await this.resumeThread({
+        const response = await this.resumeThreadWithInstructions({
             excludeTurns: true,
             config: sessionConfig.config,
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
-        });
+            ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
+        }, request, previousInstructions);
         onSubscribed?.();
         // Resume cursors bound durable history; later turns arrive through live events.
         // A null paginated cursor means there was no durable history at resume time.
@@ -779,6 +796,7 @@ export class CodexAcpClient {
             history,
             additionalDirectories,
             skippedMcpServers: sessionConfig.skippedMcpServers,
+            ...(instructions ? {instructions} : {}),
         };
     }
 
@@ -809,8 +827,9 @@ export class CodexAcpClient {
     }
 
     async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>): Promise<SessionMetadata> {
+        const instructions = await this.resolveSessionInstructions(request, undefined, true);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
-        const developerInstructions = airCustomInstructions(request._meta);
+        const developerInstructions = instructions?.developerInstructions;
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
@@ -835,7 +854,95 @@ export class CodexAcpClient {
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
             skippedMcpServers: sessionConfig.skippedMcpServers,
+            ...(instructions ? {instructions} : {}),
         };
+    }
+
+    private async resolveSessionInstructions(
+        request: {cwd: string; systemPrompt?: unknown; _meta?: unknown},
+        previous?: SessionInstructions,
+        creating = false,
+    ): Promise<SessionInstructions | undefined> {
+        const text = clientSystemPromptText(request.systemPrompt);
+        if (text === undefined) {
+            if (!creating) return previous;
+            const airInstructions = airCustomInstructions(request._meta);
+            return airInstructions === undefined ? undefined : {airInstructions, developerInstructions: airInstructions};
+        }
+        if (!changesSystemPrompt(request, previous)) return previous;
+        // AIR already replaces configured developer instructions. Append to that same baseline.
+        const airInstructions = airCustomInstructions(request._meta) ?? previous?.airInstructions;
+        const baseline = airInstructions ?? this.config["developer_instructions"]
+            ?? (await this.codexClient.configRead({cwd: request.cwd, includeLayers: false}))?.config?.developer_instructions
+            ?? "";
+        if (typeof baseline !== "string") {
+            throw acp.RequestError.invalidParams(undefined, "Configured developer instructions must be text");
+        }
+        return {
+            text,
+            ...(airInstructions !== undefined ? {airInstructions} : {}),
+            developerInstructions: [baseline, text].filter(part => part.length > 0).join("\n\n"),
+        };
+    }
+
+    private async resumeThreadWithInstructions(
+        params: ThreadResumeParams,
+        request: {sessionId: string; systemPrompt?: unknown; _meta?: unknown},
+        previous?: SessionInstructions,
+    ): Promise<ResumedThread> {
+        if (!changesSystemPrompt(request, previous)) return this.resumeThread(params);
+        const {thread} = await this.codexClient.threadRead({threadId: request.sessionId});
+        if (thread.status.type === "notLoaded") return this.resumeThread(params);
+        if (thread.status.type !== "idle" || thread.path === null) {
+            throw acp.RequestError.invalidParams(
+                undefined,
+                "Changing systemPrompt requires an idle, persisted session; finish the turn or create a new session",
+            );
+        }
+        const terminals = await this.codexClient.threadBackgroundTerminalsList({threadId: request.sessionId, limit: 1});
+        if (terminals.data.length > 0) {
+            throw RequestError.invalidParams(undefined, "Cannot change systemPrompt while background terminals are running");
+        }
+        // A start response contains a planned rollout path even before the file exists.
+        try {
+            await this.codexClient.threadTurnsList({threadId: request.sessionId, limit: 1, itemsView: "notLoaded"});
+        } catch (error) {
+            if (!isMissingRolloutError(error) && !isThreadNotMaterializedError(error)) throw error;
+            throw RequestError.invalidParams(undefined, "Changing systemPrompt requires a persisted session; create a new session instead");
+        }
+        // Subscribed threads ignore resume overrides. Idle, detached threads can be rebuilt.
+        // Retained developer messages are replaced at the next compaction.
+        let unloaded = false;
+        let detached = false;
+        let resumed = false;
+        const release = this.codexClient.onClientTransportEvent(event => {
+            if (event.eventType === "notification" && event.method === "thread/status/changed"
+                && event.params.threadId === request.sessionId && event.params.status.type === "notLoaded") {
+                unloaded = true;
+            }
+        });
+        try {
+            await this.codexClient.threadUnsubscribe({threadId: request.sessionId});
+            detached = true;
+            const response = await this.resumeThread(params);
+            resumed = true;
+            if (!unloaded) {
+                throw RequestError.invalidParams(
+                    undefined,
+                    "Codex kept the existing thread loaded; systemPrompt could not be changed. Retry when idle",
+                );
+            }
+            return response;
+        } catch (error) {
+            if (detached && !resumed) {
+                await this.resumeThread({threadId: request.sessionId, excludeTurns: true}).catch(restoreError => {
+                    logger.error(`Failed to restore session ${request.sessionId} after an instruction update`, restoreError);
+                });
+            }
+            throw error;
+        } finally {
+            release();
+        }
     }
 
     async closeSession(sessionId: string): Promise<void> {

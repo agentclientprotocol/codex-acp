@@ -28,6 +28,11 @@ export function isMissingRolloutError(err: unknown): boolean {
     return errorText(err).includes("no rollout found for thread id");
 }
 
+/** History paging rejects a live thread whose rollout has not been written yet. */
+export function isThreadNotMaterializedError(err: unknown): boolean {
+    return errorText(err).includes("not materialized");
+}
+
 /**
  * `thread/unarchive` answers this for a thread that has no archived rollout:
  * a thread that is not archived, or one Codex has never seen.

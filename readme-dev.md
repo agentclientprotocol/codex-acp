@@ -152,6 +152,30 @@ v1 `modes` field (v2 removed the modes API in favor of config options), and fork
 get an `available_commands_update`, matching v1. There are no new environment/config knobs specific
 to v2; it reuses the runtime environment variables above.
 
+#### Client system prompts
+
+Both ACP versions advertise `systemPrompt: {}`: text-only `append` mode. Override and non-text
+content are rejected with `-32602` before a session is created or a fork is made.
+Text blocks are joined with a blank line and appended to the existing developer-instruction
+baseline: AIR `customInstructions` when supplied, otherwise configured Codex developer instructions.
+Codex's base instructions and workspace context remain intact. Requests without `systemPrompt`
+keep the legacy AIR behavior.
+
+New sessions use the instructions on their first turn. A changed prompt on an idle, persisted
+session detaches and reloads that thread under the same session ID. **The retained model context
+changes at the next compaction**, not immediately after resume; the adapter does not force a
+compaction. Forks with changed instructions have the same deferred behavior.
+
+Changed prompts are rejected while session work or background terminals are running, when a live
+session has no saved rollout yet, or when Codex cannot confirm a reload. Existing work is not
+cancelled. Retry after work finishes, or create a new session for immediate instructions.
+New prompts, steering, and config changes cannot race an instruction reload.
+
+Omitted/null prompts keep the instructions known to the currently open adapter session, including
+through app-server recovery and provider restarts. After closing a session or restarting the
+adapter, clients should resend their prompt on load/resume/fork; without it, Codex's retained
+context and configured defaults determine the instructions.
+
 #### AIR v2 client contract
 
 These are behaviors the AIR (JetBrains) ACP client relies on that aren't obvious from the wire

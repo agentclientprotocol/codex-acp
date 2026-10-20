@@ -53,6 +53,7 @@ import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {toV1ClientCapabilitiesView} from "./AcpV2ClientCapabilities";
 import {toV1SetSessionConfigOptionRequest, toV2ConfigOptions} from "./AcpV2ConfigOptions";
 import {toV2AvailableCommands} from "./AcpV2SessionUpdate";
+import {changesSystemPrompt, clientSystemPromptText, toV1SystemPrompt, type SessionInstructions} from "./ClientSystemPrompt";
 import {
     isInsertedUserMessage,
     postInsertionFailureText,
@@ -224,6 +225,7 @@ import {
 
 export interface SessionState extends SessionIndexTitleState {
     sessionId: string,
+    instructions?: SessionInstructions;
     currentModelId: string,
     availableModels: Array<Model>,
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
@@ -513,6 +515,7 @@ export class CodexAcpServer {
     private readonly pendingSteerLandings: Map<string, {sessionId: string; prompt: acp.ContentBlock[]}>;
     /** Sessions with a v2 prompt that has not finished yet, including before its turn starts. */
     private readonly v2PromptsInFlight = new Set<string>();
+    private readonly instructionUpdates = new Set<string>();
     /**
      * Per-session callbacks that abort a v2 `session/prompt` still waiting in the turn-start FIFO
      * (queued behind a running turn, not yet inserted). `session/cancel`/`session/close` drop the
@@ -646,6 +649,7 @@ export class CodexAcpServer {
             fork: { },
             additionalDirectories: {},
             subagents: {},
+            systemPrompt: {},
         };
         return {
             protocolVersion: acp.PROTOCOL_VERSION,
@@ -727,6 +731,7 @@ export class CodexAcpServer {
                     delete: {},
                     additionalDirectories: {},
                     fork: {},
+                    systemPrompt: {},
                 },
             },
             authMethods: getCodexAuthMethodsV2(clientCapabilities),
@@ -944,6 +949,40 @@ export class CodexAcpServer {
         }
     }
 
+    private async withSystemPromptUpdate<T>(
+        request: {sessionId: string; systemPrompt?: unknown; _meta?: unknown},
+        action: () => Promise<T>,
+    ): Promise<T> {
+        this.assertInstructionsReady(request.sessionId);
+        if (!changesSystemPrompt(request, this.sessions.get(request.sessionId)?.instructions)) return action();
+        const sessionId = request.sessionId;
+        if (this.isSessionBusy(sessionId) || this.activePrompts.has(sessionId)
+            || this.pendingTurnStarts.has(sessionId) || this.turnStartQueueTail.get(sessionId)?.settled === false) {
+            throw RequestError.invalidParams(undefined, "Cannot change systemPrompt while session work is in progress; retry when idle");
+        }
+        this.instructionUpdates.add(sessionId);
+        try {
+            return await action();
+        } finally {
+            this.instructionUpdates.delete(sessionId);
+        }
+    }
+
+    private restoreExistingSessionTracker(sessionId: string): void {
+        const session = this.sessions.get(sessionId);
+        if (this.instructionUpdates.has(sessionId) && session && !this.sessionIsClosing(sessionId)) {
+            this.startCodexTurnTracker(sessionId, Promise.resolve(session));
+        } else {
+            this.codexAcpClient.discardSessionSubscription(sessionId);
+        }
+    }
+
+    private assertInstructionsReady(sessionId: string): void {
+        if (this.instructionUpdates.has(sessionId)) {
+            throw RequestError.invalidRequest(undefined, "Session instructions are being updated; retry after session setup");
+        }
+    }
+
     private beginSessionOpen(sessionId: string): number {
         const generation = this.getSessionGeneration(sessionId);
         if (this.sessionIsClosing(sessionId)) {
@@ -1044,7 +1083,9 @@ export class CodexAcpServer {
             | WithAcpMcpServers<acp.ForkSessionRequest>,
         operation: "new" | "resume" | "fork" = "sessionId" in request ? "resume" : "new",
     ): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
+        clientSystemPromptText(request.systemPrompt);
         const existingSessionRequest = request as WithAcpMcpServers<acp.ResumeSessionRequest> | WithAcpMcpServers<acp.ForkSessionRequest>;
+        const previousInstructions = "sessionId" in request ? this.sessions.get(request.sessionId)?.instructions : undefined;
         const requestedSessionGeneration = operation === "resume"
             ? this.beginSessionOpen(existingSessionRequest.sessionId)
             : null;
@@ -1077,16 +1118,16 @@ export class CodexAcpServer {
                     mcpServerStartupVersion = readMcpServerStartupVersion();
                     return this.codexAcpClient.resumeSession(resumeRequest, () => {
                         resumeSubscribed = true;
-                    });
+                    }, previousInstructions);
                 });
             } catch (err) {
-                settleTrackerReady?.(null);
+                settleTrackerReady?.(!resumeSubscribed && this.instructionUpdates.has(resumeRequest.sessionId)
+                    ? this.sessions.get(resumeRequest.sessionId) ?? null : null);
                 if (resumeSubscribed && requestedSessionGeneration !== null) {
                     await this.cleanupStaleSessionOpen(resumeRequest.sessionId, requestedSessionGeneration);
                 } else {
-                    // `thread/resume` never subscribed the connection, so there is nothing for
-                    // `cleanupStaleSessionOpen` to unsubscribe; just drop the local handler.
-                    this.codexAcpClient.discardSessionSubscription(resumeRequest.sessionId);
+                    // A rejected instruction change keeps the original session's event delivery.
+                    this.restoreExistingSessionTracker(resumeRequest.sessionId);
                 }
                 throw err;
             }
@@ -1100,6 +1141,7 @@ export class CodexAcpServer {
                     forkRequest,
                     threadId => this.releaseFailedFork(threadId),
                     threadId => this.sessionIndex.forkCreated(forkRequest.sessionId, threadId),
+                    previousInstructions,
                 );
             });
         } else {
@@ -1150,6 +1192,7 @@ export class CodexAcpServer {
             totalTokenUsage: null,
             promptTokenUsage: null,
             threadHasHistory: operation !== "new",
+            ...(sessionMetadata.instructions ? {instructions: sessionMetadata.instructions} : {}),
             modelContextWindow: null,
             rateLimits: null,
             account: authState.account,
@@ -1632,6 +1675,12 @@ export class CodexAcpServer {
         modelState: LegacySessionModelState;
         modeState: SessionModeState;
     }> {
+        return this.withSystemPromptUpdate(params, () => this.loadSessionAndReplayHistoryOnce(params));
+    }
+
+    private async loadSessionAndReplayHistoryOnce(
+        params: WithAcpMcpServers<acp.LoadSessionRequest>,
+    ): Promise<{sessionId: SessionId; modelState: LegacySessionModelState; modeState: SessionModeState}> {
         // Captured before the load installs a fresh SessionState: a title
         // generation started by an earlier turn on this session belongs to the
         // state being replaced, and has to settle before we answer.
@@ -1675,9 +1724,9 @@ export class CodexAcpServer {
     }
 
     async resumeSession(params: WithAcpMcpServers<acp.ResumeSessionRequest>): Promise<LegacyResumeSessionResponse> {
-        return this.recovery === null
+        return this.withSystemPromptUpdate(params, async () => this.recovery === null
             ? await this.resumeSessionOnce(params)
-            : await this.recovery.trackOpen(params.sessionId, () => this.resumeSessionOnce(params));
+            : await this.recovery.trackOpen(params.sessionId, () => this.resumeSessionOnce(params)));
     }
 
     private async resumeSessionOnce(params: WithAcpMcpServers<acp.ResumeSessionRequest>): Promise<LegacyResumeSessionResponse> {
@@ -1702,8 +1751,8 @@ export class CodexAcpServer {
     }
 
     async resumeSessionV2(params: acpV2.ResumeSessionRequest): Promise<acpV2.ResumeSessionResponse> {
-        // System prompts are not advertised or applied yet.
-        const {replayFrom, systemPrompt: _systemPrompt, ...request} = params;
+        const {replayFrom, systemPrompt, ...rest} = params;
+        const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
         if (replayFrom == null) {
             await this.resumeSession(request);
             await this.snapshotForegroundState(params.sessionId);
@@ -1725,6 +1774,8 @@ export class CodexAcpServer {
     }
 
     async forkSession(params: WithAcpMcpServers<acp.ForkSessionRequest>): Promise<acp.ForkSessionResponse> {
+        clientSystemPromptText(params.systemPrompt);
+        this.assertInstructionsReady(params.sessionId);
         return this.sessionIndex.forking(params.sessionId, () => this.createFork(params));
     }
 
@@ -1751,7 +1802,8 @@ export class CodexAcpServer {
     }
 
     async forkSessionV2(params: acpV2.ForkSessionRequest): Promise<acpV2.ForkSessionResponse> {
-        const {systemPrompt: _systemPrompt, ...request} = params;
+        const {systemPrompt, ...rest} = params;
+        const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
         const {sessionId} = await this.forkSession(request);
         return {
             sessionId,
@@ -1903,7 +1955,8 @@ export class CodexAcpServer {
     }
 
     async newSessionV2(params: acpV2.NewSessionRequest): Promise<acpV2.NewSessionResponse> {
-        const {systemPrompt: _systemPrompt, ...request} = params;
+        const {systemPrompt, ...rest} = params;
+        const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
         const {sessionId} = await this.newSession(request);
         return {
             sessionId,
@@ -2086,8 +2139,8 @@ export class CodexAcpServer {
                     let resumed: SessionMetadata | null = null;
                     const resume = async (onSubscribed?: () => void) => {
                         resumed = onSubscribed === undefined
-                            ? await replacement.resumeSession(request)
-                            : await replacement.resumeSession(request, onSubscribed);
+                            ? await replacement.resumeSession(request, undefined, session.instructions)
+                            : await replacement.resumeSession(request, onSubscribed, session.instructions);
                         return resumed;
                     };
                     await (this.recovery?.resumeForReplacement(session, replacementGeneration, replacement, resume) ?? resume());
@@ -2222,7 +2275,7 @@ export class CodexAcpServer {
                     cwd: session.cwd,
                     additionalDirectories: session.additionalDirectories,
                     mcpServers: session.mcpServers ?? [],
-                }, onSubscribed);
+                }, onSubscribed, session.instructions);
                 // A session the provider restart failed to resume gets the models of the routing here.
                 await this.applyResumedModels(session, client, metadata);
                 return {collaborationMode: metadata.collaborationMode};
@@ -2441,6 +2494,7 @@ export class CodexAcpServer {
     async setSessionMode(
         _params: acp.SetSessionModeRequest,
     ): Promise<acp.SetSessionModeResponse> {
+        this.assertInstructionsReady(_params.sessionId);
         logger.log("Set session mode requested", {
             sessionId: _params.sessionId,
             modeId: _params.modeId
@@ -2453,6 +2507,7 @@ export class CodexAcpServer {
     }
 
     async setSessionConfigOption(params: acp.SetSessionConfigOptionRequest): Promise<acp.SetSessionConfigOptionResponse> {
+        this.assertInstructionsReady(params.sessionId);
         logger.log("Set session config option requested", {
             sessionId: params.sessionId,
             configId: params.configId,
@@ -2590,6 +2645,7 @@ export class CodexAcpServer {
     }
 
     async unstable_setSessionModel(params: LegacySetSessionModelRequest): Promise<LegacySetSessionModelResponse> {
+        this.assertInstructionsReady(params.sessionId);
         logger.log("Set session model requested", {
             sessionId: params.sessionId,
             modelId: params.modelId
@@ -2652,6 +2708,7 @@ export class CodexAcpServer {
      *     {@link performSteeringRequest}.
      */
     async executeOrQueueSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+        this.assertInstructionsReady(params.sessionId);
         const queue = this.getSteeringQueue(params.sessionId);
         try {
             return await queue.enqueue(params);
@@ -3098,6 +3155,8 @@ export class CodexAcpServer {
         // live goal-turn frame Codex fires right after resume/load never races ahead of replay.
         settleTrackerReady: (state: SessionState | null) => void;
     }> {
+        clientSystemPromptText(request.systemPrompt);
+        const previousInstructions = this.sessions.get(request.sessionId)?.instructions;
         const requestedSessionGeneration = this.beginSessionOpen(request.sessionId);
         const loadStartedAt = performance.now();
         const graceLeftMs = () => ACCOUNT_READ_LOAD_GRACE_MS - (performance.now() - loadStartedAt);
@@ -3135,7 +3194,7 @@ export class CodexAcpServer {
                     mcpServerStartupVersion = readMcpServerStartupVersion();
                     return this.codexAcpClient.loadSession(request, () => {
                         subscribed = true;
-                    });
+                    }, previousInstructions);
                 });
             } catch (err) {
                 // An auth error that is known within the grace time comes first, as it did when the check ran
@@ -3145,13 +3204,13 @@ export class CodexAcpServer {
             }
             knownAccount = await settledWithin(authorization, graceLeftMs());
         } catch (err) {
-            settleTrackerReady(null);
+            settleTrackerReady(!subscribed && this.instructionUpdates.has(request.sessionId)
+                ? this.sessions.get(request.sessionId) ?? null : null);
             if (subscribed) {
                 await this.cleanupStaleSessionOpen(request.sessionId, requestedSessionGeneration);
             } else {
-                // `thread/resume` never subscribed the connection, so there is nothing for
-                // `cleanupStaleSessionOpen` to unsubscribe; just drop the local handler.
-                this.codexAcpClient.discardSessionSubscription(request.sessionId);
+                // A rejected instruction change keeps the original session's event delivery.
+                this.restoreExistingSessionTracker(request.sessionId);
             }
             throw err;
         }
@@ -3191,6 +3250,7 @@ export class CodexAcpServer {
             totalTokenUsage: null,
             promptTokenUsage: null,
             threadHasHistory: true,
+            ...(sessionMetadata.instructions ? {instructions: sessionMetadata.instructions} : {}),
             modelContextWindow: null,
             rateLimits: null,
             account: authState.account,
@@ -4085,6 +4145,7 @@ export class CodexAcpServer {
      * message; a locally handled command has no Codex turn, so it is inserted right away.
      */
     async promptV2(params: acpV2.PromptRequest, signal?: AbortSignal): Promise<acpV2.PromptResponse> {
+        this.assertInstructionsReady(params.sessionId);
         const sessionId = params.sessionId;
         const request = toV1PromptRequest(params);
         const sessionState = this.getSessionState(sessionId);
@@ -4308,6 +4369,7 @@ export class CodexAcpServer {
         insertion?: UserMessageInsertion,
         reservation?: TurnStartReservation,
     ): Promise<acp.PromptResponse> {
+        this.assertInstructionsReady(params.sessionId);
         // Callers that need to gate additional checks (closing, canStart) atomically with the
         // turn-start slot acquire their own reservation and pass it in; otherwise this call is
         // the v1 entry point and takes the session's turn-start slot itself.

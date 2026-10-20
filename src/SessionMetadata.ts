@@ -1,6 +1,7 @@
 import type {ModeKind} from "./app-server/ModeKind";
 import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model, Thread, ThreadItemEntry, ThreadStatus} from "./app-server/v2";
+import type {SessionInstructions} from "./ClientSystemPrompt";
 
 export type SessionMetadata = {
     sessionId: string,
@@ -12,6 +13,7 @@ export type SessionMetadata = {
     threadStatus?: ThreadStatus,
     additionalDirectories: string[],
     skippedMcpServers?: string[],
+    instructions?: SessionInstructions,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {

@@ -8,6 +8,7 @@ import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
 import type {AcpMcpServer, WithAcpMcpServers} from "./McpServerConfig";
+import type {SessionInstructions} from "./ClientSystemPrompt";
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
@@ -31,6 +32,7 @@ export async function forkSession(
     request: WithAcpMcpServers<acp.ForkSessionRequest>,
     additionalDirectories: string[],
     dependencies: SessionForkDependencies,
+    instructions?: SessionInstructions,
 ): Promise<SessionMetadata> {
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
     const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
@@ -46,6 +48,7 @@ export async function forkSession(
         ...(lastTurnId !== undefined && {lastTurnId}),
         modelProvider: await dependencies.getResumeModelProvider(),
         threadId: request.sessionId,
+        ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
     });
     dependencies.forkCreated(response.thread.id);
     // `thread/fork` subscribes this connection to the new thread, and only to it: the source thread keeps the
@@ -68,6 +71,7 @@ export async function forkSession(
         currentServiceTier: response.serviceTier as ServiceTier ?? null,
         additionalDirectories,
         skippedMcpServers: sessionConfig.skippedMcpServers,
+        ...(instructions ? {instructions} : {}),
     };
 }
 

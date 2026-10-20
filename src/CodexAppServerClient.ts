@@ -984,6 +984,10 @@ export class CodexAppServerClient {
     private codexEventHandlers: Array<(event: CodexConnectionEvent) => void> = [];
     onClientTransportEvent(callback: (event: CodexConnectionEvent) => void){
         this.codexEventHandlers.push(callback);
+        return () => {
+            const index = this.codexEventHandlers.indexOf(callback);
+            if (index !== -1) this.codexEventHandlers.splice(index, 1);
+        };
     }
 
     private notificationHandlers = new Map<string, (event: ServerNotification) => void>();

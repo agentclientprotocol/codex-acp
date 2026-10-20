@@ -22,7 +22,8 @@
       "delete": {},
       "fork": {},
       "additionalDirectories": {},
-      "subagents": {}
+      "subagents": {},
+      "systemPrompt": {}
     },
     "mcpCapabilities": {
       "acp": false,

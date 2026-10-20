@@ -55,6 +55,7 @@ describe('CodexACPAgent - initialize', () => {
                     fork: {},
                     additionalDirectories: {},
                     subagents: {},
+                    systemPrompt: {},
                 },
                 mcpCapabilities: {
                     acp: false,
