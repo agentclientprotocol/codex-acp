@@ -100,6 +100,36 @@ describe("MCP startup cancellation reconciliation", () => {
         expect(statusParams.every(params => (params as {threadId?: string}).threadId === sessionId)).toBe(true);
     });
 
+    it.each(versions)("ACP v%s rejects connected evidence from incomplete repeated-cursor pagination", async version => {
+        const statusParams: Array<{cursor?: string | null, threadId?: string}> = [];
+        const client = await connectSession(version, {
+            realMcpStartup: true,
+            ...(version === 2
+                ? {mcpServers: [{type: "stdio", name: serverName, command: "/usr/bin/everything"} as acpV2.McpServer]}
+                : {mcpServersV1: [{name: serverName, command: "/usr/bin/everything", args: [], env: []} as acp.McpServer]}),
+            codexResponses: {
+                "mcpServerStatus/list": async params => {
+                    const page = params as {cursor?: string | null, threadId?: string};
+                    statusParams.push(page);
+                    return page.cursor === null
+                        ? {data: [server("connected")], nextCursor: "repeated"}
+                        : {data: [], nextCursor: "repeated"};
+                },
+            },
+        });
+        clients.push(client);
+        vi.useFakeTimers();
+
+        emitCancelled(client);
+        await vi.advanceTimersByTimeAsync(5_000);
+
+        expect(startupFailures(client)).toHaveLength(1);
+        expect(startupFailures(client)[0]).toMatchObject({status: "failed"});
+        expect(statusParams.length).toBeGreaterThan(2);
+        expect(statusParams.every(params => params.threadId === sessionId)).toBe(true);
+        expect(statusParams.some(params => params.cursor === "repeated")).toBe(true);
+    });
+
     it("publishes the cancellation at the deadline when the status request never settles", async () => {
         const status = deferred<{data: McpServerStatus[], nextCursor: string | null}>();
         const statusParams: unknown[] = [];
