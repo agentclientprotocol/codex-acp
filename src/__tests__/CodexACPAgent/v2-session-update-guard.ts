@@ -1,5 +1,5 @@
 import {expect} from 'vitest';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {DIFF_GIT_PATCH_META_KEY} from '../../AcpV2SessionUpdate';
 
 type Guard = (update: acpV2.SessionUpdate) => boolean;

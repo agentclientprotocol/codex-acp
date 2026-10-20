@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect, it, vi} from "vitest";
 import {ACPSessionConnection} from "../../ACPSessionConnection";
 import type {ServerNotification} from "../../app-server";

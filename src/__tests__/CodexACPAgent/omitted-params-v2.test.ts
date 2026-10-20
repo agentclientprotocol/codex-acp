@@ -1,7 +1,7 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
-import type {AnyWireMessage} from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
+import type {AnyWireMessage} from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
@@ -116,49 +116,79 @@ describe('v2 requests with omitted params', () => {
         await expect(dump(response)).toMatchFileSnapshot('data/omitted-params-v2-auth-logout.json');
     });
 
-    it('fixes a batch entry that has no params member', async () => {
+    it('accepts omitted and null params within a batch', async () => {
         const raw = connectRaw();
         await initializeV2(raw);
 
         await raw.send([
             {jsonrpc: "2.0", id: "a", method: acpV2.methods.agent.session.list},
             {jsonrpc: "2.0", id: "b", method: acpV2.methods.agent.session.list, params: {}},
+            {jsonrpc: "2.0", id: "c", method: acpV2.methods.agent.session.list, params: null},
         ] as unknown as AnyWireMessage);
         const response = await raw.nextResponse();
 
         expect(Array.isArray(response)).toBe(true);
         const errors = (response as unknown as Array<{id: unknown, error?: unknown}>)
             .map((entry) => ({id: entry.id, error: errorShape(entry as unknown as AnyWireMessage)}));
-        expect(errors).toEqual([{id: "a", error: undefined}, {id: "b", error: undefined}]);
+        expect(errors).toEqual([
+            {id: "a", error: undefined},
+            {id: "b", error: undefined},
+            {id: "c", error: undefined},
+        ]);
     });
 
-    it('leaves params: null untouched (still rejected today)', async () => {
+    it.each([
+        {method: acpV2.methods.agent.session.list, snapshot: 'data/omitted-params-v2-session-list.json'},
+        {method: acpV2.methods.agent.auth.logout, snapshot: 'data/omitted-params-v2-auth-logout.json'},
+    ])('accepts $method with null params', async ({method, snapshot}) => {
         const raw = connectRaw();
         await initializeV2(raw);
 
-        await raw.send({jsonrpc: "2.0", id: 1, method: acpV2.methods.agent.session.list, params: null});
+        await raw.send({jsonrpc: "2.0", id: 1, method, params: null});
+        const response = await raw.nextResponse();
+
+        await expect(dump(response)).toMatchFileSnapshot(snapshot);
+    });
+
+    it.each([undefined, null])('still rejects session/new with %s params', async (params) => {
+        const raw = connectRaw();
+        await initializeV2(raw);
+
+        await raw.send({
+            jsonrpc: "2.0", id: 1, method: acpV2.methods.agent.session.new,
+            ...(params === undefined ? {} : {params}),
+        });
         const response = await raw.nextResponse();
 
         expect(errorShape(response)).toEqual({code: -32602});
     });
 
-    it('still rejects session/new with no params (control: the fix is scoped to session/list and auth/logout)', async () => {
-        const raw = connectRaw();
-        await initializeV2(raw);
-
-        await raw.send({jsonrpc: "2.0", id: 1, method: acpV2.methods.agent.session.new});
-        const response = await raw.nextResponse();
-
-        expect(errorShape(response)).toEqual({code: -32602});
-    });
-
-    it('v1 session/list with no params is unchanged (still rejected)', async () => {
+    it.each([
+        {method: acp.methods.agent.session.list, snapshot: 'data/omitted-params-v2-session-list.json'},
+        {method: acp.methods.agent.logout, snapshot: 'data/omitted-params-v2-auth-logout.json'},
+    ])('also accepts v1 $method with omitted or null params', async ({method, snapshot}) => {
         const raw = connectRaw();
         await initializeV1(raw);
 
-        await raw.send({jsonrpc: "2.0", id: 1, method: acp.methods.agent.session.list});
-        const response = await raw.nextResponse();
+        for (const params of [undefined, null]) {
+            await raw.send({jsonrpc: "2.0", id: 1, method, ...(params === undefined ? {} : {params})});
+            await expect(dump(await raw.nextResponse())).toMatchFileSnapshot(snapshot);
+        }
+    });
 
-        expect(errorShape(response)).toEqual({code: -32602});
+    it.each([1, 2])('v%s still rejects malformed optional params and missing required fields', async (version) => {
+        const raw = connectRaw();
+        await (version === 1 ? initializeV1(raw) : initializeV2(raw));
+        for (const params of [false, [], 5, "invalid"]) {
+            await raw.send({jsonrpc: "2.0", id: 1, method: "session/list", params});
+            expect(errorShape(await raw.nextResponse())).toEqual({code: -32602});
+        }
+        for (const params of [undefined, null]) {
+            await raw.send({
+                jsonrpc: "2.0", id: 1, method: "session/new",
+                ...(params === undefined ? {} : {params}),
+            });
+            expect(errorShape(await raw.nextResponse())).toEqual({code: -32602});
+        }
     });
 });

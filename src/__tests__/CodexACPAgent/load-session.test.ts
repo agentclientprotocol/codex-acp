@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 import type { Model, Thread, ThreadGoal, UserInput } from "../../app-server/v2";
 

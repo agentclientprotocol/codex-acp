@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import fs from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";

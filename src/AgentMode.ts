@@ -1,5 +1,5 @@
 import type {ApprovalsReviewer, AskForApproval, SandboxMode, SandboxPolicy} from "./app-server/v2";
-import type {SessionConfigOption, SessionMode, SessionModeState} from "@agentclientprotocol/sdk";
+import type {SessionConfigOption, SessionMode, SessionModeState} from "@agentclientprotocol/sdk/unstable";
 import {AIR_KIND_KEY, airOnlyMeta} from "./AirExtension";
 
 export const MODE_CONFIG_ID = "mode";

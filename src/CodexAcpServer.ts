@@ -1,5 +1,5 @@
-import * as acp from "@agentclientprotocol/sdk";
-import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk/unstable";
 import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage} from "./CodexEventHandler";
 import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
@@ -49,7 +49,7 @@ import {
     type ReplayMessageKind,
     type UpdateSessionEvent,
 } from "./ACPSessionConnection";
-import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {toV1ClientCapabilitiesView} from "./AcpV2ClientCapabilities";
 import {toV1SetSessionConfigOptionRequest, toV2ConfigOptions} from "./AcpV2ConfigOptions";
 import {
@@ -1472,10 +1472,9 @@ export class CodexAcpServer {
         if (sessionState.codexReportedRunningTurnId === event.params.turn.id) {
             sessionState.codexReportedRunningTurnId = null;
         }
-        await this.reportUnownedTurnState(sessionState.sessionId, {
-            state: "idle",
+        await this.reportUnownedTurnState(sessionState.sessionId, toV2IdleState({
             stopReason: stopReasonForUnownedTurn(event.params.turn.status),
-        });
+        }));
     }
 
     /**
@@ -1674,7 +1673,8 @@ export class CodexAcpServer {
     }
 
     async resumeSessionV2(params: acpV2.ResumeSessionRequest): Promise<acpV2.ResumeSessionResponse> {
-        const {replayFrom, ...request} = params;
+        // System prompts are not advertised or applied yet.
+        const {replayFrom, systemPrompt: _systemPrompt, ...request} = params;
         if (replayFrom == null) {
             await this.resumeSession(request);
             return this.createSessionConfigOptionsResponseV2(this.getSessionState(params.sessionId));
@@ -1713,7 +1713,8 @@ export class CodexAcpServer {
     }
 
     async forkSessionV2(params: acpV2.ForkSessionRequest): Promise<acpV2.ForkSessionResponse> {
-        const {sessionId} = await this.forkSession(params);
+        const {systemPrompt: _systemPrompt, ...request} = params;
+        const {sessionId} = await this.forkSession(request);
         return {
             sessionId,
             ...this.createSessionConfigOptionsResponseV2(this.getSessionState(sessionId)),
@@ -1860,7 +1861,8 @@ export class CodexAcpServer {
     }
 
     async newSessionV2(params: acpV2.NewSessionRequest): Promise<acpV2.NewSessionResponse> {
-        const {sessionId} = await this.newSession(params);
+        const {systemPrompt: _systemPrompt, ...request} = params;
+        const {sessionId} = await this.newSession(request);
         return {
             sessionId,
             ...this.createSessionConfigOptionsResponseV2(this.getSessionState(sessionId)),

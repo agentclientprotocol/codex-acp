@@ -1,3 +1,4 @@
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it, onTestFinished, vi} from "vitest";
@@ -51,7 +52,7 @@ describeE2E("E2E shell approval tests", () => {
             `Use your shell tool to run exactly the same command again: \`${command}\`. ${ESCALATE}`,
         ];
         for (const [index, text] of prompts.entries()) {
-            const response = await fixture.connection.prompt({
+            const response = await fixture.connection.request(acp.methods.agent.session.prompt, {
                 sessionId,
                 prompt: [{type: "text", text}],
             });
@@ -126,7 +127,7 @@ describeE2E("E2E read-only mode shell permission tests", () => {
             });
             const filePath = path.join(fixture.workspaceDir, generateFileNameForTest());
             const sessionId = (await fixture.createSession()).sessionId;
-            const response = await fixture.connection.prompt({
+            const response = await fixture.connection.request(acp.methods.agent.session.prompt, {
                 sessionId,
                 prompt: [{
                     type: "text",
@@ -210,7 +211,7 @@ describeE2E("E2E shell cancellation tests", () => {
         const pidFilePath = path.join(fixture.workspaceDir, "cancel-command.pid");
         const command = `/bin/sh -c 'echo $$ > "${pidFilePath}"; exec sleep 100'`;
 
-        const promptResponse = fixture.connection.prompt({
+        const promptResponse = fixture.connection.request(acp.methods.agent.session.prompt, {
             sessionId,
             prompt: [{type: "text", text: `Use your shell tool to run exactly \`${command}\`.`}],
         });
@@ -231,7 +232,7 @@ describeE2E("E2E shell cancellation tests", () => {
             expect(toolCall).toBeDefined();
             return toolCall!.toolCallId;
         }, {timeout: 10_000});
-        await fixture.connection.cancel({sessionId});
+        await fixture.connection.notify(acp.methods.agent.session.cancel, {sessionId});
 
         expect((await promptResponse).stopReason).toBe("cancelled");
         expect(isProcessRunning(pid)).toBe(true);
@@ -239,7 +240,7 @@ describeE2E("E2E shell cancellation tests", () => {
         // The SDK client rejects the `async_task_spawned` update it has no schema for, but a root
         // command's async task id is its tool call id. Stop fails until the adapter publishes the task.
         await vi.waitFor(async () => {
-            const response = await fixture?.connection.extMethod(ASYNC_TASK_STOP_METHOD, {
+            const response = await fixture?.connection.request(ASYNC_TASK_STOP_METHOD, {
                 sessionId,
                 asyncTaskId: toolCallId,
             });
@@ -255,7 +256,7 @@ async function writeToFile(fixture: SpawnedAgentFixture, filePath: string, hint?
     const content = "hello from e2e";
     const command = `printf '${content}' > '${filePath}'`;
     const sessionId = (await fixture.createSession()).sessionId;
-    const response = await fixture.connection.prompt({
+    const response = await fixture.connection.request(acp.methods.agent.session.prompt, {
         sessionId,
         prompt: [{
             type: "text",

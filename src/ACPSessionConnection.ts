@@ -1,6 +1,7 @@
-import * as acp from "@agentclientprotocol/sdk";
-import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {
+    type AcpSessionNotification,
     type AcpSessionUpdate,
     asSdkSessionNotification,
 } from "./AcpSessionExtensions";
@@ -84,9 +85,21 @@ export class AcpV2Connection {
      * is no v1 shape for them, so this bypasses `toV2SessionUpdates` entirely.
      */
     async startReplayMessage(sessionId: string, kind: ReplayMessageKind, messageId: string): Promise<void> {
+        let update: acpV2.SessionUpdate;
+        switch (kind) {
+            case "user_message":
+                update = {sessionUpdate: "user_message", messageId, content: []};
+                break;
+            case "agent_message":
+                update = {sessionUpdate: "agent_message", messageId, content: []};
+                break;
+            case "agent_thought":
+                update = {sessionUpdate: "agent_thought", messageId, content: []};
+                break;
+        }
         await this.client.notify(acpV2.methods.client.session.update, {
             sessionId,
-            update: {sessionUpdate: kind, messageId, content: []},
+            update,
         });
     }
 
@@ -164,7 +177,7 @@ export class AcpV2Connection {
                     return this.client.notify(method as `_${string}`, params);
                 }
                 if (method === acp.methods.client.session.update) {
-                    const notification = params as acp.SessionNotification;
+                    const notification = params as AcpSessionNotification;
                     return this.updateSession(notification.sessionId, notification.update);
                 }
                 if (method === acp.methods.client.elicitation.complete) {

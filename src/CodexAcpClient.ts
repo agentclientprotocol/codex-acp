@@ -6,9 +6,9 @@ import {
     isCodexAuthRequest,
     OPENAI_API_KEY_ENV_VAR,
 } from "./CodexAuthMethod";
-import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
-import * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk/unstable";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import type {
     ApprovalHandler,
     CodexAppServerClient,

@@ -7,7 +7,7 @@ import type {
     SessionFailureCategory,
     SessionState,
 } from "./CodexAcpServer";
-import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
+import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import {normalizeSessionTitle} from "./SessionTitle";
 import type {

@@ -2,7 +2,7 @@
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR, type CodexAuthRequest} from "../../CodexAuthMethod";
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {
     awaitFirstAuthStatusPush,
     createCodexMockTestFixture,

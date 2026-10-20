@@ -29,7 +29,7 @@
  *     NO_COLOR                 disable ANSI colors
  */
 
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {type ChildProcess, spawn} from "node:child_process";
 import {fileURLToPath} from "node:url";
 import {mkdtemp, rm, writeFile} from "node:fs/promises";

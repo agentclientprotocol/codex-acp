@@ -1,6 +1,6 @@
 import {createHash} from "node:crypto";
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import type {SessionConfig} from "./CodexAcpClient";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import type {ModeKind} from "./app-server/ModeKind";

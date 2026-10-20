@@ -1,3 +1,4 @@
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {afterEach, expect, it} from "vitest";
 import {legacySetSessionModel, type LegacyLoadSessionResponse} from "../../../AcpExtensions";
 import {
@@ -33,7 +34,7 @@ describeE2E("E2E session persistence tests", () => {
 
         afterRestartFixture = await beforeRestartFixture.restart();
 
-        const loadSessionResponse = await afterRestartFixture.connection.loadSession({
+        const loadSessionResponse = await afterRestartFixture.connection.request(acp.methods.agent.session.load, {
             sessionId,
             cwd: afterRestartFixture.workspaceDir,
             mcpServers: [],

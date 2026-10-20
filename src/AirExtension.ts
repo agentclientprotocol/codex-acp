@@ -1,4 +1,4 @@
-import type {ClientCapabilities} from "@agentclientprotocol/sdk";
+import type {ClientCapabilities} from "@agentclientprotocol/sdk/unstable";
 
 /**
  * Wire names for the versioned JetBrains AIR ACP extension.

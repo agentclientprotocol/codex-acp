@@ -2,7 +2,7 @@ import {StringDecoder} from "node:string_decoder";
 import {finished, Readable, Writable} from "node:stream";
 import {Emitter} from "vscode-jsonrpc/node";
 import type {DataCallback, Disposable, Message, MessageReader, MessageWriter, PartialMessageInfo} from "vscode-jsonrpc/node";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {logger} from "./Logger";
 
 //TODO ask to include proper jsonrpc field and remove

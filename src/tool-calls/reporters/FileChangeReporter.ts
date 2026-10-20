@@ -1,4 +1,4 @@
-import type {ToolCallContent} from "@agentclientprotocol/sdk";
+import type {ToolCallContent} from "@agentclientprotocol/sdk/unstable";
 import {parsePatch, type StructuredPatch} from "diff";
 import {AIR_DIFF_PATCH_KEY, withAirMeta} from "../../AirExtension";
 import type {FileChangeRequestApprovalParams, FileUpdateChange, ThreadItem} from "../../app-server/v2";

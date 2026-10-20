@@ -1,5 +1,5 @@
-import * as acp from "@agentclientprotocol/sdk";
-import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {randomUUID} from "node:crypto";
 import * as path from "node:path";
 import type {AcpSessionUpdate} from "./AcpSessionExtensions";
@@ -74,10 +74,12 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         case "available_commands_update":
             return {
                 ...update,
-                availableCommands: update.availableCommands.map((command) => ({
-                    ...command,
-                    ...(command.input != null ? {input: {...command.input, type: "text" as const}} : {}),
-                })),
+                availableCommands: update.availableCommands.map((command) => {
+                    const {input, ...withoutInput} = command;
+                    return input === undefined
+                        ? withoutInput
+                        : {...command, input: input && {...input, type: "text" as const}};
+                }),
             };
         // v2 removed the modes API. codex-acp never emits this (mode changes go out as
         // `config_option_update`), so there is no v2 rendering to give it.

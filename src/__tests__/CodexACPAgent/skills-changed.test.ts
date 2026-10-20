@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it} from 'vitest';
 import {connectSession, settle, type PromptSession, type TranscriptEntry} from './v2-prompt-harness';
-import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import type {ServerNotification} from '../../app-server';
 
 /**

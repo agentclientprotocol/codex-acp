@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {AIR_PERMISSION_KEY, airOnlyMeta} from "../AirExtension";
 import type {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 

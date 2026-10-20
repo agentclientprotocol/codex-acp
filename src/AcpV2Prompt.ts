@@ -1,5 +1,5 @@
-import * as acp from "@agentclientprotocol/sdk";
-import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import type {ServerNotification} from "./app-server";
 
 /**
@@ -69,12 +69,23 @@ export function toV1PromptRequest(params: acpV2.PromptRequest): acp.PromptReques
  * negotiated it).
  */
 export function toV2IdleState(response: acp.PromptResponse): acpV2.StateUpdate {
-    return {
-        state: "idle",
-        stopReason: response.stopReason,
+    const state = {
+        state: "idle" as const,
         ...(response.usage != null ? {usage: response.usage} : {}),
         ...(response._meta != null ? {_meta: response._meta} : {}),
     };
+    switch (response.stopReason) {
+        case "end_turn":
+            return {...state, stopReason: "end_turn"};
+        case "max_tokens":
+            return {...state, stopReason: "max_tokens"};
+        case "max_turn_requests":
+            return {...state, stopReason: "max_turn_requests"};
+        case "refusal":
+            return {...state, stopReason: "refusal"};
+        case "cancelled":
+            return {...state, stopReason: "cancelled"};
+    }
 }
 
 /**

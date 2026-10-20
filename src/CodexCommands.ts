@@ -1,5 +1,5 @@
-import type * as acp from "@agentclientprotocol/sdk";
-import type {AvailableCommand} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import type {AvailableCommand} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
 import {AIR_COMMAND_ACTION_KEY, AIR_SKILL_PATH_KEY, airOnlyMeta} from "./AirExtension";
 import type {CodexAcpClient} from "./CodexAcpClient";

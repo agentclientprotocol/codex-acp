@@ -1,6 +1,6 @@
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
-import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import type {JsonObject} from "./CodexAcpClient";
 
 /**

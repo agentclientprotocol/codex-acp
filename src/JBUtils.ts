@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 
 export function isJetBrains2026_1Client(clientInfo: acp.Implementation | null): boolean {
     if (!clientInfo) {

@@ -7,7 +7,7 @@
  * predicate keeps the match anchored on the stable part of the phrasing.
  */
 
-import {RequestError} from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 
 function errorText(err: unknown): string {
     if (err instanceof Error) return err.message;

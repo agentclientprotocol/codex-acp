@@ -1,7 +1,7 @@
 import type {
     ClientCapabilities,
     SessionCapabilities,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 import {
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     clientSupportsAirCapability,

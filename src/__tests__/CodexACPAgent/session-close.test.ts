@@ -10,7 +10,7 @@ import type {CodexAcpServer} from "../../CodexAcpServer";
 import type {CodexAcpClient, SessionMetadata} from "../../CodexAcpClient";
 import type {McpStartupResult} from "../../mcp/McpStartupTracker";
 import type {TurnStartResponse} from "../../app-server/v2";
-import type {McpServer} from "@agentclientprotocol/sdk";
+import type {McpServer} from "@agentclientprotocol/sdk/unstable";
 
 const sessionId = "session-id";
 

@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from "vitest";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import type {ServerNotification} from "../../app-server";
 import type {ErrorNotification, ReviewStartResponse} from "../../app-server/v2";
 import {createCodexMockTestFixture, createTestModel, type CodexMockTestFixture} from "../acp-test-utils";

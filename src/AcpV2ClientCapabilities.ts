@@ -1,5 +1,5 @@
-import type * as acp from "@agentclientprotocol/sdk";
-import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 
 /**
  * Maps v2 client capabilities onto the v1 shape the capability readers use, so each reader

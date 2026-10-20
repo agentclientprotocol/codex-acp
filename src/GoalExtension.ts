@@ -1,4 +1,4 @@
-import type {SessionId} from "@agentclientprotocol/sdk";
+import type {SessionId} from "@agentclientprotocol/sdk/unstable";
 
 export const GOAL_EXTENSION_VERSION = 1;
 export const GOAL_CONTROL_METHOD = "_session/goal";

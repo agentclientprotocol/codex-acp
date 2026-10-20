@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CodexAcpServer } from '../../CodexAcpServer';
-import * as acp from '@agentclientprotocol/sdk';
+import * as acp from '@agentclientprotocol/sdk/unstable';
 import { createMockConnections } from './test-utils';
 import {getCodexAuthMethods} from "../../CodexAuthMethod";
 import {CodexAcpClient} from "../../CodexAcpClient";
