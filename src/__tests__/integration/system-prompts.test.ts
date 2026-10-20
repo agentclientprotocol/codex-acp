@@ -9,6 +9,7 @@ import {expect, it, vi} from "vitest";
 import {removeDirectoryWithRetry, writeCodexHomeConfig} from "../acp-test-utils";
 import {describeIntegration, INTEGRATION_MODEL_ID} from "./integration-fixture";
 import {startMockResponsesServer, textResponse} from "./mock-responses-server";
+import {developerText, findPromptRequest} from "./model-request";
 
 describeIntegration("integration: client system prompts", () => {
     it.each([1, 2] as const)("applies and defers instructions through ACP v%s", async (version) => {
@@ -61,7 +62,6 @@ describeIntegration("integration: client system prompts", () => {
             }
         };
         const systemPrompt = (text: string) => ({mode: "append", content: [{type: "text", text}]});
-        let firstPrompt = true;
 
         async function run(sessionId: string, text: string) {
             const before = mock.requests.length;
@@ -79,21 +79,19 @@ describeIntegration("integration: client system prompts", () => {
             } else {
                 expect(response.stopReason, stderr).toBe("end_turn");
             }
-            if (firstPrompt) {
-                await vi.waitFor(() => expect(mock.requests.length).toBeGreaterThanOrEqual(before + 2));
-                firstPrompt = false;
-            }
             if (text === "/compact") {
                 // /compact answers on item completion; Codex releases the turn separately.
                 await vi.waitFor(() => expect(readFileSync(logPath, "utf8").slice(logStart).split("\n").some(line =>
                     line.includes('"method":"turn/completed"') && line.includes(`"threadId":"${sessionId}"`))).toBe(true));
+                return;
             }
-            return mock.requests[before] as {input: Array<{role?: string; content: Array<{type: string; text?: string}>}>};
+            const modelRequest = findPromptRequest(mock.requests.slice(before), text);
+            expect(modelRequest, `No model request contained the user message: ${text}`).toBeDefined();
+            return modelRequest;
         }
         async function expectInstructions(sessionId: string, marker: string, absent?: string) {
             const body = await run(sessionId, `Check ${marker}`);
-            const developer = body.input.filter(item => item.role === "developer")
-                .flatMap(item => item.content.filter(block => block.type === "input_text").map(block => block.text)).join("\n");
+            const developer = developerText(body);
             expect(developer).toContain(marker);
             expect(developer).toContain("AIR_BASE_INSTRUCTIONS");
             if (absent) expect(developer).not.toContain(absent);
@@ -144,8 +142,7 @@ describeIntegration("integration: client system prompts", () => {
                 cwd, mcpServers: [], systemPrompt: systemPrompt("CONFIGURED_CLIENT_INSTRUCTIONS"),
             });
             const configuredRequest = await run(configured.sessionId, "Check configured baseline");
-            const configuredDeveloper = configuredRequest.input.filter(item => item.role === "developer")
-                .flatMap(item => item.content.map(block => block.text)).join("\n");
+            const configuredDeveloper = developerText(configuredRequest);
             expect(configuredDeveloper).toContain("CONFIGURED_BASE_INSTRUCTIONS");
             expect(configuredDeveloper).toContain("CONFIGURED_CLIENT_INSTRUCTIONS");
             expect(configuredDeveloper).not.toContain("AIR_BASE_INSTRUCTIONS");
