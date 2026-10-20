@@ -2295,9 +2295,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(promptResolved).toBe(false);
 
         mockFixture.sendServerNotification({
+            method: "turn/started",
+            params: {threadId: "session-id", turn: createTurn("compact-turn-id", "inProgress")},
+        });
+        mockFixture.sendServerNotification({
             method: "thread/compacted",
             params: { threadId: "session-id", turnId: "compact-turn-id" },
         });
+        await flushAsyncWork();
+        expect(promptResolved).toBe(false);
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "compact-turn-id"));
 
         await expect(promptPromise).resolves.toEqual(expect.objectContaining({
             stopReason: "end_turn",
@@ -3726,9 +3733,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
 
         mockFixture.sendServerNotification({
+            method: "turn/started",
+            params: {threadId: "session-id", turn: createTurn("compact-turn-id", "inProgress")},
+        });
+        mockFixture.sendServerNotification({
             method: "thread/compacted",
             params: { threadId: "session-id", turnId: "compact-turn-id" },
         });
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "compact-turn-id"));
         await flushAsyncWork();
     });
 

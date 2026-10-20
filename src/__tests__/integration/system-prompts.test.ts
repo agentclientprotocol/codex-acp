@@ -66,8 +66,6 @@ describeIntegration("integration: client system prompts", () => {
         async function run(sessionId: string, text: string) {
             const before = mock.requests.length;
             const updateStart = updates.length;
-            const logPath = join(root, "app-server.log");
-            const logStart = existsSync(logPath) ? readFileSync(logPath, "utf8").length : 0;
             // Title generation may make a second request after the first prompt of a session.
             mock.enqueue(textResponse("Done"), textResponse("System prompt test"));
             const response = await request("session/prompt", {sessionId, prompt: [{type: "text", text}]});
@@ -79,12 +77,8 @@ describeIntegration("integration: client system prompts", () => {
             } else {
                 expect(response.stopReason, stderr).toBe("end_turn");
             }
-            if (text === "/compact") {
-                // /compact answers on item completion; Codex releases the turn separately.
-                await vi.waitFor(() => expect(readFileSync(logPath, "utf8").slice(logStart).split("\n").some(line =>
-                    line.includes('"method":"turn/completed"') && line.includes(`"threadId":"${sessionId}"`))).toBe(true));
-                return;
-            }
+            // Start the next probe immediately after ACP completion, without a runtime-log wait.
+            if (text === "/compact") return;
             const modelRequest = findPromptRequest(mock.requests.slice(before), text);
             expect(modelRequest, `No model request contained the user message: ${text}`).toBeDefined();
             return modelRequest;

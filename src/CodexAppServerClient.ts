@@ -602,12 +602,11 @@ export class CodexAppServerClient {
         params: ThreadCompactStartParams,
         onTurnStarted?: (turnId: string) => void,
         onAccepted?: () => void,
-    ): Promise<CompactionCompletedNotification | Extract<ServerNotification, {method: "turn/completed"}>> {
-        type Result = CompactionCompletedNotification | Extract<ServerNotification, {method: "turn/completed"}>;
+    ): Promise<TurnCompletedNotification> {
         let compactTurnId: string | null = null;
-        let resolveCompleted: (event: Result) => void = () => {};
+        let resolveCompleted: (event: TurnCompletedNotification) => void = () => {};
         let rejectCompleted: (error: Error) => void = () => {};
-        const completed = new Promise<Result>((resolve, reject) => {
+        const completed = new Promise<TurnCompletedNotification>((resolve, reject) => {
             resolveCompleted = resolve;
             rejectCompleted = reject;
         });
@@ -617,15 +616,11 @@ export class CodexAppServerClient {
         const rejectClosed = () => rejectCompleted(new Error("Codex connection closed during compaction."));
         const closed = this.connection.onClose?.(rejectClosed);
         const disposed = this.connection.onDispose?.(rejectClosed);
-        const completeCompaction = (event: CompactionCompletedNotification) => {
-            if (compactTurnId !== null && event.params.turnId !== compactTurnId) return;
-            resolveCompleted(event);
-        };
-        const releaseCompactionCapture = this.captureCompactionCompletions(params.threadId, completeCompaction);
+        // Item completion reports progress, but Codex still owns the turn until turn/completed.
         const releaseTurnCapture = this.captureTurnCompletions(params.threadId, (event) => {
             if (compactTurnId === null || event.turn.id !== compactTurnId) return;
             if (event.turn.status !== "inProgress") {
-                resolveCompleted({method: "turn/completed", params: event});
+                resolveCompleted(event);
             }
         });
         const releaseRoutingCapture = this.captureTurnRoutings(params.threadId, (turnId, notification) => {
@@ -644,7 +639,6 @@ export class CodexAppServerClient {
         } finally {
             releaseTurnCapture();
             releaseRoutingCapture();
-            releaseCompactionCapture();
             closed?.dispose();
             disposed?.dispose();
         }

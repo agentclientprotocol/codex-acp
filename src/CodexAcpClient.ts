@@ -1005,9 +1005,8 @@ export class CodexAcpClient {
         sessionId: string,
         onTurnStarted?: (turnId: string) => void,
         onAccepted?: () => void,
-    ): Promise<TurnCompletedNotification | undefined> {
-        const completed = await this.codexClient.runCompact({threadId: sessionId}, onTurnStarted, onAccepted);
-        return completed.method === "turn/completed" ? completed.params : undefined;
+    ): Promise<TurnCompletedNotification> {
+        return await this.codexClient.runCompact({threadId: sessionId}, onTurnStarted, onAccepted);
     }
 
     async getGoal(sessionId: string): Promise<ThreadGoal | null> {

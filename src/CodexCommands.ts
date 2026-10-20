@@ -383,7 +383,7 @@ export class CodexCommands {
                     (turnId) => options.onTurnStarted?.(turnId, sessionId),
                     options.onCommandAccepted,
                 ));
-                return { handled: true, ...(turnCompleted === undefined ? {} : {turnCompleted}) };
+                return { handled: true, turnCompleted };
             }
             case "goal": {
                 return await this.runGoalCommand(sessionState, command.rest, options);

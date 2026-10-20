@@ -176,6 +176,13 @@ through app-server recovery and provider restarts. After closing a session or re
 adapter, clients should resend their prompt on load/resume/fork; without it, Codex's retained
 context and configured defaults determine the instructions.
 
+#### Manual compaction
+
+`/compact` finishes foreground work only after Codex reports `turn/completed` for the compact
+turn. Item completion still reports compaction progress, but does not release the next prompt.
+The v1 prompt response and v2 idle state wait for the turn to finish; v2's early prompt-acceptance
+response is unchanged.
+
 #### AIR v2 client contract
 
 These are behaviors the AIR (JetBrains) ACP client relies on that aren't obvious from the wire

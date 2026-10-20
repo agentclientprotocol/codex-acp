@@ -131,7 +131,11 @@ describe("session compaction", () => {
         const compactStart = vi.spyOn(fixture.getCodexAppServerClient(), "threadCompactStart");
         const prompt = fixture.getCodexAcpAgent().prompt({sessionId, prompt: [{type: "text", text: "/compact"}]});
         await vi.waitFor(() => expect(compactStart).toHaveBeenCalledWith({threadId: sessionId}));
-        await sendNotifications(fixture, [compactionStarted(), compactionCompleted()]);
+        await sendNotifications(fixture, [
+            compactionStarted(),
+            compactionCompleted(),
+            {method: "turn/completed", params: {threadId: sessionId, turn: createTurn("completed")}},
+        ]);
         await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
 
         await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
