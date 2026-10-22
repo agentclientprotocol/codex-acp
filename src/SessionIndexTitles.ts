@@ -3,7 +3,7 @@
  * `TitleGenerator` keep out of each other's way. See `docs/air-extensions.md`.
  */
 
-import {RequestError} from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection} from "./ACPSessionConnection";
 import type {SessionIndexHost} from "./SessionIndexService";
 import {renameRequestError} from "./SessionIndexMutations";

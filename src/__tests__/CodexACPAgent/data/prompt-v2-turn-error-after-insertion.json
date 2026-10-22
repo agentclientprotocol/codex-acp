@@ -33,6 +33,12 @@
         "codexResponse": "turn/start"
       },
       {
+        "sessionUpdate": {
+          "state": "running",
+          "sessionUpdate": "state_update"
+        }
+      },
+      {
         "codexNotification": "turn/started"
       },
       {
@@ -61,12 +67,6 @@
       },
       {
         "sessionUpdate": {
-          "state": "running",
-          "sessionUpdate": "state_update"
-        }
-      },
-      {
-        "sessionUpdate": {
           "messageId": "<agentMessageId>",
           "content": {
             "text": "You've hit your usage limit.\n\n",
@@ -77,7 +77,11 @@
       },
       {
         "sessionUpdate": {
-          "stopReason": "end_turn",
+          "error": {
+            "code": -32603,
+            "message": "You've hit your usage limit."
+          },
+          "stopReason": "error",
           "_meta": {
             "quota": {
               "token_count": null,
@@ -124,6 +128,12 @@
         "codexResponse": "turn/start"
       },
       {
+        "sessionUpdate": {
+          "state": "running",
+          "sessionUpdate": "state_update"
+        }
+      },
+      {
         "codexNotification": "turn/started"
       },
       {
@@ -152,12 +162,6 @@
       },
       {
         "sessionUpdate": {
-          "state": "running",
-          "sessionUpdate": "state_update"
-        }
-      },
-      {
-        "sessionUpdate": {
           "messageId": "<agentMessageId>",
           "content": {
             "text": "Authentication required",
@@ -168,7 +172,11 @@
       },
       {
         "sessionUpdate": {
-          "stopReason": "end_turn",
+          "error": {
+            "code": -32000,
+            "message": "Authentication required"
+          },
+          "stopReason": "error",
           "_meta": {
             "quota": {
               "token_count": null,

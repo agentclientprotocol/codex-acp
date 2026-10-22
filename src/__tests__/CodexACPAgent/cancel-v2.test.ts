@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {CommandExecutionApprovalRequest} from '../../CodexAppServerClient';
 import type {CommandExecutionRequestApprovalParams} from '../../app-server/v2';
 import {
@@ -262,8 +262,8 @@ describe('session/cancel and session/close over ACP v2', () => {
 
         expect(client.transcript.some(entry => "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "user_message_chunk"))
             .toBe(false);
-        // No `running`/`idle` pair: the request never got far enough to send `running`.
-        expect(stateUpdates(client.transcript)).toEqual([]);
+        // The accepted turn started work, even though cancellation prevented insertion.
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "cancelled"}]);
     });
 
     it('does not interrupt an adopted turn on `$/cancel_request`, but still drops the pending request', async () => {
@@ -355,13 +355,10 @@ describe('session/cancel and session/close over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
-        // The trailing extra `running` (before settling to `idle`) reflects a late permission
-        // answer arriving after cancellation; scoping that transition is a separate concern.
+        // Withdrawing the interaction does not resume cancelled foreground work.
         const transcript = client.transcript.slice(start);
         expect(stateUpdates(transcript)).toEqual([
             {state: "requires_action"},
-            {state: "running"},
-            {state: "running"},
             {state: "idle", stopReason: "cancelled"},
         ]);
     });
@@ -405,11 +402,9 @@ describe('session/cancel and session/close over ACP v2', () => {
 
         // No implementation turn is started once the review is cancelled.
         expect(client.turnStartParams).toHaveLength(1);
-        // The leading `running` (before settling to `idle`) reflects a late permission answer
-        // arriving after cancellation; scoping that transition is a separate concern.
+        // The withdrawn plan review does not resume foreground work.
         const transcript = client.transcript.slice(start);
         expect(stateUpdates(transcript)).toEqual([
-            {state: "running"},
             {state: "idle", stopReason: "cancelled"},
         ]);
     });

@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {
     AIR_DIFF_PATCH_KEY,
     AIR_PLAN_CONTENT_DELTA_KEY,

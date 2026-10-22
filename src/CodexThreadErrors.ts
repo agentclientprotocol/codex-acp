@@ -7,7 +7,7 @@
  * predicate keeps the match anchored on the stable part of the phrasing.
  */
 
-import {RequestError} from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 
 function errorText(err: unknown): string {
     if (err instanceof Error) return err.message;
@@ -26,6 +26,11 @@ function errorText(err: unknown): string {
  */
 export function isMissingRolloutError(err: unknown): boolean {
     return errorText(err).includes("no rollout found for thread id");
+}
+
+/** History paging rejects a live thread whose rollout has not been written yet. */
+export function isThreadNotMaterializedError(err: unknown): boolean {
+    return errorText(err).includes("not materialized");
 }
 
 /**

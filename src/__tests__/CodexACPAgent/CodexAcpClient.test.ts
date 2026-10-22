@@ -2,8 +2,8 @@
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR, type CodexAuthRequest} from "../../CodexAuthMethod";
-import {RequestError} from "@agentclientprotocol/sdk";
-import type * as acp from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {
     awaitFirstAuthStatusPush,
     createCodexMockTestFixture,
@@ -2374,9 +2374,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(promptResolved).toBe(false);
 
         mockFixture.sendServerNotification({
+            method: "turn/started",
+            params: {threadId: "session-id", turn: createTurn("compact-turn-id", "inProgress")},
+        });
+        mockFixture.sendServerNotification({
             method: "thread/compacted",
             params: { threadId: "session-id", turnId: "compact-turn-id" },
         });
+        await flushAsyncWork();
+        expect(promptResolved).toBe(false);
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "compact-turn-id"));
 
         await expect(promptPromise).resolves.toEqual(expect.objectContaining({
             stopReason: "end_turn",
@@ -3805,9 +3812,14 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
 
         mockFixture.sendServerNotification({
+            method: "turn/started",
+            params: {threadId: "session-id", turn: createTurn("compact-turn-id", "inProgress")},
+        });
+        mockFixture.sendServerNotification({
             method: "thread/compacted",
             params: { threadId: "session-id", turnId: "compact-turn-id" },
         });
+        mockFixture.sendServerNotification(createTurnCompletedNotification("session-id", "compact-turn-id"));
         await flushAsyncWork();
     });
 

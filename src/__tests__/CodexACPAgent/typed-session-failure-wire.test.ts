@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from "vitest";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAcpServer} from "../../CodexAcpServer";
@@ -17,7 +17,7 @@ const typedFailureCapabilities: acp.ClientCapabilities = {
 describe("typed session failures over ACP transport", () => {
     it("negotiates native subagents through AIR metadata across the SDK boundary", async () => {
         const fixture = createWireFixture();
-        const response = await fixture.client.initialize({
+        const response = await fixture.client.request(acp.methods.agent.initialize, {
             protocolVersion: acp.PROTOCOL_VERSION,
             clientCapabilities: {
                 _meta: {
@@ -55,7 +55,7 @@ describe("typed session failures over ACP transport", () => {
             new Error("raw transport rejection must not cross ACP"),
         );
 
-        const response = await fixture.client.prompt({
+        const response = await fixture.client.request(acp.methods.agent.session.prompt, {
             sessionId: sessionState.sessionId,
             prompt: [{type: "text", text: "trigger process failure"}],
         });
@@ -94,7 +94,7 @@ describe("typed session failures over ACP transport", () => {
         vi.spyOn(fixture.server, "getSessionState").mockReturnValue(sessionState);
         vi.spyOn(fixture.appServer, "turnStart").mockRejectedValue(new Error("transport closed"));
 
-        await expect(fixture.client.prompt({
+        await expect(fixture.client.request(acp.methods.agent.session.prompt, {
             sessionId: sessionState.sessionId,
             prompt: [{type: "text", text: "keep legacy rejection"}],
         })).rejects.toThrow("Codex process has exited with code 1:\nlegacy process stderr");
@@ -117,7 +117,7 @@ describe("typed session failures over ACP transport", () => {
             turn: createTurn("completed"),
         });
 
-        await fixture.client.prompt({
+        await fixture.client.request(acp.methods.agent.session.prompt, {
             sessionId: sessionState.sessionId,
             prompt: [{type: "text", text: "complete before late error"}],
         });
@@ -534,7 +534,7 @@ describe("standard session notices over ACP transport", () => {
     ])("retains legacy behavior without notice support: $name", async ({capabilities}) => {
         const wireFixture = createWireFixture();
         const initialize = vi.spyOn(wireFixture.server, "initialize");
-        await wireFixture.client.initialize({
+        await wireFixture.client.request(acp.methods.agent.initialize, {
             protocolVersion: acp.PROTOCOL_VERSION,
             // Intentionally send malformed values through the real SDK capability parser.
             ...(capabilities === undefined ? {} : {clientCapabilities: capabilities as acp.ClientCapabilities}),
@@ -579,7 +579,7 @@ describe("standard session notices over ACP transport", () => {
             title: "A warning before the next prompt",
         });
 
-        const response = await fixture.client.prompt({
+        const response = await fixture.client.request(acp.methods.agent.session.prompt, {
             sessionId: fixture.sessionId,
             prompt: [{type: "text", text: "continue after the notice"}],
         });
@@ -620,7 +620,7 @@ async function settleSession(fixture: ReturnType<typeof createWireFixture>, sess
         turn: createTurn("completed"),
     });
 
-    await fixture.client.prompt({
+    await fixture.client.request(acp.methods.agent.session.prompt, {
         sessionId,
         prompt: [{type: "text", text: "settle the session"}],
     });
@@ -658,27 +658,20 @@ function createWireFixture(options: {exitCode?: number | null; stderr?: string} 
     });
     const updates: acp.SessionNotification[] = [];
     let server!: CodexAcpServer;
-    const client = new acp.ClientSideConnection(
-        () => ({
-            requestPermission: () => ({outcome: {outcome: "cancelled" as const}}),
-            sessionUpdate: (params: acp.SessionNotification) => {
-                updates.push(params);
-            },
-        }),
-        acp.ndJsonStream(clientToAgent.writable, agentToClient.readable),
-    );
-    new acp.AgentSideConnection(
-        (connection) => {
-            server = new CodexAcpServer(
-                connection,
-                codexClient,
-                undefined,
-                () => options.exitCode ?? null,
-                () => options.stderr ?? "",
-            );
-            return server;
-        },
-        acp.ndJsonStream(agentToClient.writable, clientToAgent.readable),
+    const client = acp.client()
+        .onRequest(acp.methods.client.session.requestPermission, () => ({outcome: {outcome: "cancelled"}}))
+        .onNotification(acp.methods.client.session.update, ctx => { updates.push(ctx.params); })
+        .connect(acp.ndJsonStream(clientToAgent.writable, agentToClient.readable)).agent;
+    const agentConnection = acp.agent()
+        .onRequest(acp.methods.agent.initialize, ctx => server.initialize(ctx.params))
+        .onRequest(acp.methods.agent.session.prompt, ctx => server.prompt(ctx.params, ctx.signal))
+        .connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
+    server = new CodexAcpServer(
+        agentConnection.client,
+        codexClient,
+        undefined,
+        () => options.exitCode ?? null,
+        () => options.stderr ?? "",
     );
 
     return {
@@ -691,7 +684,7 @@ function createWireFixture(options: {exitCode?: number | null; stderr?: string} 
             return server;
         },
         async initialize(clientCapabilities: acp.ClientCapabilities = typedFailureCapabilities): Promise<void> {
-            await client.initialize({
+            await client.request(acp.methods.agent.initialize, {
                 protocolVersion: acp.PROTOCOL_VERSION,
                 clientCapabilities,
             });

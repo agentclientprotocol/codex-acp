@@ -1,6 +1,6 @@
 import {describe, expect, it, vi} from 'vitest';
-import type * as acp from '@agentclientprotocol/sdk';
-import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import type * as acp from '@agentclientprotocol/sdk/unstable';
+import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createCodexMockTestFixture, createTestModel} from '../acp-test-utils';
 import type {AcpMcpServer} from '../../McpServerConfig';
 

@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {UpdateSessionEvent} from "../ACPSessionConnection";
 import {AIR_CONTEXT_COMPACTION_KEY, AIR_SUBAGENT_KEY, withAirMeta} from "../AirExtension";
 import type {ClientCapabilities} from "./ClientCapabilities";

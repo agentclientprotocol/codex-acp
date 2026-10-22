@@ -5,7 +5,7 @@ import type {
     NewSessionResponse,
     ResumeSessionResponse,
     SessionId,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 import {
     GOAL_CONTROL_METHOD,
     LEGACY_GOAL_CONTROL_METHOD,

@@ -1,0 +1,27 @@
+[
+  {
+    "state": "running"
+  },
+  {
+    "state": "running"
+  },
+  {
+    "state": "requires_action"
+  },
+  {
+    "state": "requires_action"
+  },
+  {
+    "state": "running"
+  },
+  {
+    "state": "requires_action"
+  },
+  {
+    "state": "running"
+  },
+  {
+    "state": "idle",
+    "stopReason": "end_turn"
+  }
+]

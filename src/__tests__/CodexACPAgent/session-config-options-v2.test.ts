@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {ACPSessionConnection, AcpV2Connection} from '../../ACPSessionConnection';
 import {AgentMode, MODE_CONFIG_ID} from '../../AgentMode';
@@ -91,7 +91,7 @@ describe('Session config options over ACP v2', () => {
         closeClient = () => connection.close();
 
         // @ts-expect-error - private method, called directly to test the response shape in isolation
-        const response = agent.createSessionConfigOptionsResponseV2(sessionState);
+        const response = agent.createSessionSetupResponseV2(sessionState);
 
         await expect(dump(response)).toMatchFileSnapshot('data/session-config-options-v2-list.json');
     });

@@ -1,5 +1,5 @@
-import * as acp from "@agentclientprotocol/sdk";
-import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {randomUUID} from "node:crypto";
 import * as path from "node:path";
 import type {AcpSessionUpdate} from "./AcpSessionExtensions";
@@ -11,6 +11,15 @@ import {stripShellPrefix} from "./CommandUtils";
  * every update replaces it, so a constant id is stable for the whole session.
  */
 export const STRUCTURED_PLAN_ID = "codex-structured-plan";
+
+export function toV2AvailableCommands(commands: acp.AvailableCommand[]): acpV2.AvailableCommand[] {
+    return commands.map((command) => {
+        const {input, ...withoutInput} = command;
+        return input === undefined
+            ? withoutInput
+            : {...command, input: input && {...input, type: "text" as const}};
+    });
+}
 
 /**
  * Renders an internal (v1-shaped) session update as the ACP v2 updates to send, in order.
@@ -74,10 +83,7 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         case "available_commands_update":
             return {
                 ...update,
-                availableCommands: update.availableCommands.map((command) => ({
-                    ...command,
-                    ...(command.input != null ? {input: {...command.input, type: "text" as const}} : {}),
-                })),
+                availableCommands: toV2AvailableCommands(update.availableCommands),
             };
         // v2 removed the modes API. codex-acp never emits this (mode changes go out as
         // `config_option_update`), so there is no v2 rendering to give it.
@@ -114,10 +120,8 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
                 ...(content !== undefined ? {content: content && content.map(toV2ToolCallContent)} : {}),
             };
         }
-        // Subagent RFD (spec PR #1992, unmerged) uses a single upsert-style update. Sent under a
-        // `_`-prefixed tag because the RFD's `subagent_update` isn't in the v2 unstable schema yet;
-        // rename to `subagent_update` once it lands there. The AIR `nativeSubagentSessions` gate
-        // already ran upstream (whatever created this update), so no gate check is needed here.
+        // Preserve AIR's existing subagent contract. The standard schema uses different fields
+        // and work states; that migration is separate. The AIR capability gate already ran upstream.
         case "subagent_spawned": {
             const {subagentSessionId, name, task, _meta} = update;
             return {

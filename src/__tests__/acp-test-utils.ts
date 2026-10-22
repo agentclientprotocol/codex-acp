@@ -1,5 +1,5 @@
-import * as acp from "@agentclientprotocol/sdk";
-import type {CreateElicitationResponse, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import type {CreateElicitationResponse, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk/unstable";
 import {CodexAcpClient} from '../CodexAcpClient';
 import {ToolCallReports} from "../ToolCallReports";
 import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';

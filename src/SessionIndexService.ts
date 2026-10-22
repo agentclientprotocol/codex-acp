@@ -5,8 +5,8 @@
  */
 
 import path from "node:path";
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
 import {clientSupportsAirCapability, withAirMeta} from "./AirExtension";
 import type {ServerNotification} from "./app-server";

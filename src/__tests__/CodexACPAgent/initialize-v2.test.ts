@@ -1,6 +1,6 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {z} from 'zod';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {toV1ClientCapabilitiesView} from '../../AcpV2ClientCapabilities';

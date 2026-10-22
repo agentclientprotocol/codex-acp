@@ -10,6 +10,12 @@
     }
   },
   {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
     "promptResponse": {
       "messageId": "<messageId>"
     }
@@ -29,13 +35,11 @@
   },
   {
     "sessionUpdate": {
-      "state": "running",
-      "sessionUpdate": "state_update"
-    }
-  },
-  {
-    "sessionUpdate": {
-      "stopReason": "end_turn",
+      "error": {
+        "code": -32603,
+        "message": "/test/cwd is not a git repository"
+      },
+      "stopReason": "error",
       "_meta": {
         "quota": {
           "token_count": null,

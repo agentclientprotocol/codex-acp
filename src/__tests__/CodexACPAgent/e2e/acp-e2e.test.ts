@@ -1,3 +1,4 @@
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import path from "node:path";
 import {afterEach, expect, it} from "vitest";
 import {AgentMode} from "../../../AgentMode";
@@ -68,7 +69,7 @@ describeE2E("E2E tests", () => {
         );
 
         const targetMode = AgentMode.AgentFullAccess;
-        await fixture.connection.setSessionMode({
+        await fixture.connection.request(acp.methods.agent.session.setMode, {
             sessionId: session.sessionId,
             modeId: targetMode.id,
         });
@@ -115,7 +116,7 @@ describeE2E("E2E tests", () => {
             body: "This skill exists only in an additional root passed at session creation.",
         }, path.join(additionalSkillsRoot, ".agents", "skills"));
 
-        const session = await fixture.connection.newSession({
+        const session = await fixture.connection.request(acp.methods.agent.session.new, {
             cwd: fixture.workspaceDir,
             mcpServers: [],
             _meta: {

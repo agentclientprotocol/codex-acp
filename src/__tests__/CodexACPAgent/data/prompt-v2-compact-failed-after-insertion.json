@@ -28,7 +28,11 @@
   },
   {
     "sessionUpdate": {
-      "stopReason": "end_turn",
+      "error": {
+        "code": -32603,
+        "message": "Codex turn failed."
+      },
+      "stopReason": "error",
       "_meta": {
         "quota": {
           "token_count": null,

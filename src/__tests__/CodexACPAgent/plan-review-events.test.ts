@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {beforeEach, describe, expect, it, vi} from "vitest";
 import {PLAN_COLLABORATION_MODE} from "../../CollaborationModeConfig";
 import {ClientCapabilities} from "../../tool-calls/ClientCapabilities";

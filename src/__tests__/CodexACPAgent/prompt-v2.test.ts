@@ -113,12 +113,12 @@ describe('session/prompt over ACP v2', () => {
         const userMessages = client.transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
             .filter(update => update.sessionUpdate === "user_message_chunk");
         expect(userMessages).toEqual([{sessionUpdate: "user_message_chunk", messageId, content: {type: "text", text: "Hello"}}]);
-        // Insertion (response + user message) comes first, then `running`, then exactly one `idle`.
+        // Foreground work starts before insertion; acceptance still waits for the user-message echo.
         expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
         const running = indexOf(client.transcript, isState("running"));
-        expect(indexOf(client.transcript, entry => "promptResponse" in entry)).toBeLessThan(running);
-        expect(indexOf(client.transcript, entry => "sessionUpdate" in entry
-            && entry.sessionUpdate.sessionUpdate === "user_message_chunk")).toBeLessThan(running);
+        expect(running).toBeLessThan(indexOf(client.transcript, entry => "promptResponse" in entry));
+        expect(running).toBeLessThan(indexOf(client.transcript, entry => "sessionUpdate" in entry
+            && entry.sessionUpdate.sessionUpdate === "user_message_chunk"));
         expect(running).toBeLessThan(indexOf(client.transcript, isState("idle")));
         expect(indexOf(client.transcript, isState("idle")))
             .toBeGreaterThan(indexOf(client.transcript, entry => "codexNotification" in entry
@@ -126,7 +126,7 @@ describe('session/prompt over ACP v2', () => {
         await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-inserted.json');
     });
 
-    it('ends a turn that fails or is interrupted after insertion with one idle and the v1 stop reason', async () => {
+    it('distinguishes failed and interrupted work with error and cancelled stop reasons', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
@@ -145,13 +145,13 @@ describe('session/prompt over ACP v2', () => {
             await settle();
             results.push({status, transcript: JSON.parse(dump(client.transcript.slice(start), clientUserMessageId))});
             expect(stateUpdates(client.transcript.slice(start)))
-                .toEqual([{state: "running"}, {state: "idle", stopReason: status === "failed" ? "end_turn" : "cancelled"}]);
+                .toEqual([{state: "running"}, {state: "idle", stopReason: status === "failed" ? "error" : "cancelled"}]);
         }
 
         await expect(dump(results)).toMatchFileSnapshot('data/prompt-v2-turn-failed-or-interrupted.json');
     });
 
-    it('shows a usage-limit or auth error after insertion as agent text, then one idle/end_turn', async () => {
+    it('reports usage-limit and auth failures on idle/error while retaining their human-readable text', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
@@ -170,9 +170,8 @@ describe('session/prompt over ACP v2', () => {
             await settle();
 
             const transcript = client.transcript.slice(start);
-            // v1 fails this prompt with a JSON-RPC error; v2 has answered it already, so the
-            // error text the turn sent is all the client gets, and the turn still ends.
-            expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+            // The inserted request remains successful; terminal failure belongs to idle/error.
+            expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "error"}]);
             const agentMessages = sessionUpdates(transcript).filter(update => update.sessionUpdate === "agent_message_chunk");
             expect(agentMessages).toEqual([expect.objectContaining({content: {type: "text", text: expectedText}})]);
             const text = indexOf(transcript, entry => "sessionUpdate" in entry
@@ -197,7 +196,7 @@ describe('session/prompt over ACP v2', () => {
         await settle();
 
         const transcript = client.transcript.slice(start);
-        expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "error"}]);
         // Reported once, as v1 reports it once on the prompt response.
         expect(sessionUpdates(transcript).map(update => update.sessionUpdate))
             .not.toEqual(expect.arrayContaining(["agent_message_chunk"]));
@@ -238,7 +237,7 @@ describe('session/prompt over ACP v2', () => {
             await settle();
 
             const transcript = client.transcript.slice(start);
-            expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+            expect(stateUpdates(transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "error"}]);
             const agentMessages = sessionUpdates(transcript).filter(update => update.sessionUpdate === "agent_message_chunk");
             const idle = sessionUpdates(transcript).at(-1) as {_meta?: Record<string, any>};
             if (typed) {
@@ -247,7 +246,7 @@ describe('session/prompt over ACP v2', () => {
                 expect(idle._meta?.["jetbrains"]?.air?.sessionFailure).toMatchObject({category: "connection"});
             } else {
                 expect(agentMessages).toEqual([expect.objectContaining({
-                    content: {type: "text", text: "Codex process has exited with code 1"},
+                    content: {type: "text", text: "Connection to Codex was lost."},
                 })]);
                 expect(idle._meta?.["jetbrains"]).toBeUndefined();
             }
@@ -271,7 +270,7 @@ describe('session/prompt over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
-        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "error"}]);
         const agentMessages = sessionUpdates(client.transcript).filter(update => update.sessionUpdate === "agent_message_chunk");
         expect(agentMessages).toEqual([expect.objectContaining({
             content: {type: "text", text: "The '/rename' command failed: thread name could not be saved"},
@@ -310,6 +309,28 @@ describe('session/prompt over ACP v2', () => {
         await expect(dump(idle)).toMatchFileSnapshot('data/prompt-v2-idle-usage-and-quota.json');
     });
 
+    it('ends observed foreground work if the runtime dies before acknowledging turn/start', async () => {
+        let exitCode: number | null = null;
+        const client = await connectSession(2, {exitCode: () => exitCode});
+        closeClient = () => client.connection.close();
+        let fail!: (error: Error) => void;
+        client.setTurnStart(() => new Promise((_, reject) => { fail = reject; }));
+        const response = client.sendPrompt([{type: "text", text: "Hello"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        client.emit(turnStarted());
+        await settle();
+        exitCode = 1;
+        fail(new Error("transport lost before turn/start response"));
+        await expect(response).rejects.toThrow();
+        await client.promptRunFinished();
+        await settle();
+
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "error"},
+        ]);
+        expect(sessionUpdates(client.transcript).some(update => update.sessionUpdate === "user_message_chunk")).toBe(false);
+    });
+
     it('fails the prompt when turn/start is rejected', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
@@ -346,7 +367,7 @@ describe('session/prompt over ACP v2', () => {
         expect(error).not.toBeNull();
         expect(client.transcript.some(entry => "sessionUpdate" in entry
             && entry.sessionUpdate.sessionUpdate === "user_message_chunk")).toBe(false);
-        expect(stateUpdates(client.transcript)).toEqual([]);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
         // Not inserted: the fallback title from the prompt text must not be published either.
         expect(sessionUpdates(client.transcript).map(update => update.sessionUpdate))
             .not.toEqual(expect.arrayContaining(["session_info_update"]));
@@ -375,7 +396,9 @@ describe('session/prompt over ACP v2', () => {
         client.emit(turnCompleted());
         await client.promptRunFinished();
         await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
-        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "end_turn"}, {state: "running"},
+        ]);
 
         const secondClientUserMessageId = client.turnStartParams[1]!["clientUserMessageId"] as string;
         client.emit(turnStarted("turn-2"));
@@ -482,7 +505,9 @@ describe('session/prompt over ACP v2', () => {
         client.emit(turnFinished("failed"));
         await client.promptRunFinished();
         await settle();
-        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"}, {state: "idle", stopReason: "error"}, {state: "running"},
+        ]);
 
         await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
         const secondClientUserMessageId = client.turnStartParams[1]!["clientUserMessageId"] as string;
@@ -494,7 +519,7 @@ describe('session/prompt over ACP v2', () => {
         await settle();
 
         expect(stateUpdates(client.transcript)).toEqual([
-            {state: "running"}, {state: "idle", stopReason: "end_turn"},
+            {state: "running"}, {state: "idle", stopReason: "error"},
             {state: "running"}, {state: "idle", stopReason: "end_turn"},
         ]);
     });
@@ -693,7 +718,7 @@ describe('session/prompt over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
-        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "error"}]);
         await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-compact-failed-after-insertion.json');
     });
 
@@ -773,7 +798,7 @@ describe('session/prompt over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
-        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "error"}]);
         await expect(dump(stableTranscript(client.transcript, messageId)))
             .toMatchFileSnapshot('data/prompt-v2-review-unspawned-error.json');
     });
@@ -795,7 +820,7 @@ describe('session/prompt over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
-        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "error"}]);
         await expect(dump(client.transcript, messageId)).toMatchFileSnapshot('data/prompt-v2-review-failed-after-insertion.json');
     });
 

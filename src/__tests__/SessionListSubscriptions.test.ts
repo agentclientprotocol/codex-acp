@@ -2,7 +2,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {ServerNotification} from "../app-server";
 import type {Thread, ThreadListParams, ThreadListResponse} from "../app-server/v2";
 import type {CodexHomeWatcherListener} from "../CodexHomeWatcher";

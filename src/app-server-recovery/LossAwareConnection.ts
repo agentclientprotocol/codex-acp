@@ -1,4 +1,4 @@
-import type {SendRequestOptions} from "@agentclientprotocol/sdk";
+import type {SendRequestOptions} from "@agentclientprotocol/sdk/unstable";
 import type {AcpClientConnection} from "../ACPSessionConnection";
 import {AppServerConnectionLostError} from "./ConnectionLoss";
 

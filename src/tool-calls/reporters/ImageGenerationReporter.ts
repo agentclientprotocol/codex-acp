@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {ThreadItem} from "../../app-server/v2";
 import {textContent} from "../AcpToolCallRenderer";
 import type {StandardToolCallFields, ToolFacts} from "../ToolFacts";

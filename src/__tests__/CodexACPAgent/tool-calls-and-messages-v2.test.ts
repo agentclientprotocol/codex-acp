@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import type {ServerNotification} from '../../app-server';
 import type {ThreadItem} from '../../app-server/v2';
 import {

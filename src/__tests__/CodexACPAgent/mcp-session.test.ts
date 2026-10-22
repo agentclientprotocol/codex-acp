@@ -2,7 +2,7 @@
 
 import {describe, expect, it, vi, beforeEach} from 'vitest';
 import {createTestFixture, type TestFixture} from "../acp-test-utils";
-import type {McpServerStdio} from "@agentclientprotocol/sdk";
+import type {McpServerStdio} from "@agentclientprotocol/sdk/unstable";
 
 describe('MCP session configuration', { timeout: 40_000 }, () => {
 

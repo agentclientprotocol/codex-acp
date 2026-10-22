@@ -16,7 +16,7 @@ import {
     type AuthStatus,
 } from "../../AuthStatusMeta";
 import {ModelId} from "../../ModelId";
-import {PROTOCOL_VERSION} from "@agentclientprotocol/sdk";
+import {PROTOCOL_VERSION} from "@agentclientprotocol/sdk/unstable";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import type {Account, AccountUpdatedNotification, Config, ConfigReadResponse} from "../../app-server/v2";
 

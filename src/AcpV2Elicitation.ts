@@ -1,5 +1,5 @@
-import * as acp from "@agentclientprotocol/sdk";
-import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 
 /**
  * `elicitation/create`'s request/response, and `elicitation/complete`'s notification, are

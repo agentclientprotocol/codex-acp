@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
@@ -104,9 +104,8 @@ describe('elicitation/create over ACP v2', () => {
             elicitationId: "elicit-123",
             _meta: null,
         }]);
-        // The turn is running when the elicitation fires, so its trailing `running` closes the
-        // `requires_action` bracket once the client answers (mirrors `session/request_permission`).
-        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}, {state: "running"}]);
+        // An answer alone does not establish that the runtime has resumed foreground work.
+        expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
         await expect(dump(transcript)).toMatchFileSnapshot('data/elicitation-v2-oauth-reauth-accepted.json');
 
         // Codex reports the underlying MCP server request as resolved once the OAuth flow lands;
@@ -257,13 +256,10 @@ describe('elicitation/create over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
-        // The trailing extra `running` (before settling to `idle`) reflects a late elicitation
-        // answer arriving after cancellation; this mirrors the analogous permission-request test.
+        // Withdrawing the interaction does not resume cancelled foreground work.
         const transcript = client.transcript.slice(start);
         expect(stateUpdates(transcript)).toEqual([
             {state: "requires_action"},
-            {state: "running"},
-            {state: "running"},
             {state: "idle", stopReason: "cancelled"},
         ]);
     });

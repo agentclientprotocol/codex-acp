@@ -1,0 +1,66 @@
+{
+  "failures": [
+    {
+      "code": -32000,
+      "message": "Authentication required"
+    },
+    {
+      "code": -32603,
+      "message": "The command could not be completed"
+    },
+    {
+      "code": 1001,
+      "message": "Connection to Codex was lost."
+    },
+    {
+      "code": -32603,
+      "message": "Codex encountered an internal error."
+    }
+  ],
+  "failed": {
+    "state": "idle",
+    "usage": {
+      "inputTokens": 1,
+      "outputTokens": 2,
+      "totalTokens": 3
+    },
+    "_meta": {
+      "quota": {
+        "total": 3
+      }
+    },
+    "stopReason": "error",
+    "error": {
+      "code": -32000,
+      "message": "Authentication required"
+    }
+  },
+  "cancelled": {
+    "state": "idle",
+    "usage": {
+      "inputTokens": 1,
+      "outputTokens": 2,
+      "totalTokens": 3
+    },
+    "_meta": {
+      "quota": {
+        "total": 3
+      }
+    },
+    "stopReason": "cancelled"
+  },
+  "successful": {
+    "state": "idle",
+    "usage": {
+      "inputTokens": 1,
+      "outputTokens": 2,
+      "totalTokens": 3
+    },
+    "_meta": {
+      "quota": {
+        "total": 3
+      }
+    },
+    "stopReason": "end_turn"
+  }
+}

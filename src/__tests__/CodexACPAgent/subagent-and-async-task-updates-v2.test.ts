@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {ACPSessionConnection, AcpV2Connection} from '../../ACPSessionConnection';
 import {CodexSubagentEventRouter} from '../../subagents/CodexSubagentEventRouter';
 import {CodexBackgroundTerminalTasks} from '../../async-tasks/CodexBackgroundTerminalTasks';

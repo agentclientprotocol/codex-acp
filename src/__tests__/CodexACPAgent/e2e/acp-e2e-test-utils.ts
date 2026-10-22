@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect} from "vitest";
 import {AgentMode} from "../../../AgentMode";
 import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR} from "../../../CodexAuthMethod";
@@ -59,7 +59,7 @@ export async function createAuthenticatedFixture(
             throw new Error("API key authentication is not available.");
         }
 
-        await connection.authenticate({
+        await connection.request(acp.methods.agent.authenticate, {
             methodId: "api-key",
             _meta: {
                 "api-key": {
@@ -84,7 +84,7 @@ export async function createGatewayFixture(
             throw new Error("Gateway authentication is not available.");
         }
 
-        await connection.authenticate({
+        await connection.request(acp.methods.agent.authenticate, {
             methodId: "gateway",
             _meta: {
                 gateway: {
@@ -120,7 +120,7 @@ function buildClientCapabilities(airCapabilities?: string[]): acp.ClientCapabili
     };
 }
 
-type Authenticator = (connection: acp.ClientSideConnection, authMethods: acp.AuthMethod[]) => Promise<void>;
+type Authenticator = (connection: acp.ClientContext, authMethods: acp.AuthMethod[]) => Promise<void>;
 
 async function createSpawnedFixture(
     authenticate: Authenticator,
@@ -129,7 +129,7 @@ async function createSpawnedFixture(
     airCapabilities?: string[],
 ): Promise<SpawnedAgentFixture> {
     return await createSpawnedAgentFixture(async (connection) => {
-        const initializeResponse = await connection.initialize({
+        const initializeResponse = await connection.request(acp.methods.agent.initialize, {
             protocolVersion: acp.PROTOCOL_VERSION,
             clientCapabilities: buildClientCapabilities(airCapabilities),
             clientInfo: {
@@ -154,6 +154,6 @@ export function requireLiveApiKey(): string {
     return apiKey;
 }
 
-async function getAuthenticationStatus(connection: acp.ClientSideConnection): Promise<Record<string, unknown>> {
-    return await connection.extMethod("authentication/status", {});
+async function getAuthenticationStatus(connection: acp.ClientContext): Promise<Record<string, unknown>> {
+    return await connection.request<Record<string, unknown>>("authentication/status", {});
 }

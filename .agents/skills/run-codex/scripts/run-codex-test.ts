@@ -14,7 +14,8 @@ import {CodexAcpClient} from "../../../../src/CodexAcpClient";
 import {type CodexConnectionEvent, CodexAppServerClient} from "../../../../src/CodexAppServerClient";
 import {startCodexConnection} from "../../../../src/CodexJsonRpcConnection";
 import {CodexAcpServer} from "../../../../src/CodexAcpServer";
-import type {AgentSideConnection} from "@agentclientprotocol/sdk";
+import type {AcpClientConnection} from "../../../../src/ACPSessionConnection";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 
 // Parse command line arguments
 function parseArgs(): { prompt: string; cwd: string; output: string; json: boolean } {
@@ -64,15 +65,19 @@ Examples:
 
 type MethodCallEvent = { method: string; args: unknown[] };
 
-function createMockAcpConnection(events: MethodCallEvent[]): AgentSideConnection {
-    return new Proxy({} as AgentSideConnection, {
-        get(_, prop) {
-            return (...args: unknown[]) => {
-                events.push({ method: String(prop), args });
-                return Promise.resolve({ mock: "Mocked return" });
-            };
-        }
-    });
+function createMockAcpConnection(
+    events: MethodCallEvent[],
+    onNotification: (method: string, params: unknown) => void,
+): AcpClientConnection {
+    return {
+        notify: async (method: string, params?: unknown) => {
+            events.push({method, args: [params]});
+            onNotification(method, params);
+        },
+        request: async (method: string) => {
+            throw RequestError.methodNotFound(method);
+        },
+    };
 }
 
 async function main() {
@@ -108,28 +113,22 @@ async function main() {
             if (json) {
                 console.log(JSON.stringify(event));
             } else {
-                console.log(`[CODEX] ${event.type}:`, JSON.stringify(event.data, null, 2));
+                console.log(`[CODEX] ${event.eventType}:`, JSON.stringify(event, null, 2));
             }
         }
     });
 
-    const acpConnection = createMockAcpConnection(acpEvents);
-    const codexAcpClient = new CodexAcpClient(codexAppServerClient);
-    const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient, undefined, () => codexConnection.process.exitCode);
-
-    // Track ACP events
-    const originalSessionUpdate = acpConnection.sessionUpdate;
-    (acpConnection as any).sessionUpdate = async (params: unknown) => {
-        acpEvents.push({ method: "sessionUpdate", args: [params] });
+    const acpConnection = createMockAcpConnection(acpEvents, (method, params) => {
         if (output === "all" || output === "acp") {
             if (json) {
-                console.log(JSON.stringify({ method: "sessionUpdate", params }));
+                console.log(JSON.stringify({method, params}));
             } else {
-                console.log(`[ACP] sessionUpdate:`, JSON.stringify(params, null, 2));
+                console.log(`[ACP] ${method}:`, JSON.stringify(params, null, 2));
             }
         }
-        return originalSessionUpdate?.call(acpConnection, params);
-    };
+    });
+    const codexAcpClient = new CodexAcpClient(codexAppServerClient);
+    const codexAcpAgent = new CodexAcpServer(acpConnection, codexAcpClient, undefined, () => codexConnection.process.exitCode);
 
     try {
         // Initialize
@@ -137,10 +136,11 @@ async function main() {
         await codexAcpAgent.initialize({ protocolVersion: 1 });
 
         // Check auth
-        const authRequired = await codexAcpClient.authRequired();
-        if (authRequired) {
+        const authRequirement = await codexAcpClient.readAuthRequirement();
+        if (authRequirement.required) {
             console.error("Error: Authentication required. Please login to Codex first.");
-            process.exit(1);
+            process.exitCode = 1;
+            return;
         }
 
         // Create session
@@ -168,20 +168,20 @@ async function main() {
             console.log(`Codex Events: ${codexEvents.length}`);
             console.log(`ACP Events: ${acpEvents.length}`);
 
-            if (promptResponse._meta?.quota?.token_count) {
-                const tc = promptResponse._meta.quota.token_count as any;
+            const usage = promptResponse.usage;
+            if (usage) {
                 console.log(`\nToken Usage:`);
-                console.log(`  Input Tokens: ${tc.inputTokens}`);
-                console.log(`  Cached Input: ${tc.cachedInputTokens}`);
-                console.log(`  Output Tokens: ${tc.outputTokens}`);
-                console.log(`  Reasoning Tokens: ${tc.reasoningOutputTokens}`);
-                console.log(`  Total Tokens: ${tc.totalTokens}`);
+                console.log(`  Input Tokens: ${usage.inputTokens}`);
+                console.log(`  Cached Input: ${usage.cachedReadTokens ?? 0}`);
+                console.log(`  Output Tokens: ${usage.outputTokens}`);
+                console.log(`  Reasoning Tokens: ${usage.thoughtTokens ?? 0}`);
+                console.log(`  Total Tokens: ${usage.totalTokens}`);
             }
 
             // Event type breakdown
             const eventTypes = new Map<string, number>();
             for (const event of codexEvents) {
-                const key = `${event.type}:${(event.data as any)?.method || "unknown"}`;
+                const key = `${event.eventType}:${"method" in event ? event.method : "response"}`;
                 eventTypes.set(key, (eventTypes.get(key) || 0) + 1);
             }
             console.log(`\nEvent Types:`);
@@ -196,9 +196,10 @@ async function main() {
             console.log(JSON.stringify(promptResponse, null, 2));
         }
 
+        await codexAcpAgent.closeSession({sessionId: sessionResponse.sessionId});
     } catch (err) {
         console.error("Error:", err);
-        process.exit(1);
+        process.exitCode = 1;
     } finally {
         codexConnection.connection.end();
         codexConnection.process.kill();
