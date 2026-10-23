@@ -23,6 +23,28 @@ describe("ACP session close", () => {
         expect(response.agentCapabilities?.sessionCapabilities?.close).toEqual({});
     });
 
+    it("keeps experimental background stop authority after failed close and retries it", async () => {
+        const {codexAcpAgent, codexAcpClient} = await createSession();
+        const session = codexAcpAgent.getSessionState(sessionId);
+        const stop = vi.spyOn(session.asyncTasks, "stopOwnedTerminals").mockRejectedValue(new Error("native stop pending"));
+        const close = vi.spyOn(codexAcpClient, "closeSession");
+        vi.stubEnv("ACP_BACKGROUND_WORK_EXPERIMENT", "1");
+        try {
+            await expect(codexAcpAgent.closeSession({sessionId})).rejects.toThrow("native stop pending");
+            expect(codexAcpAgent.getSessionState(sessionId)).toBe(session);
+            await expect(codexAcpAgent.closeSession({sessionId})).rejects.toThrow("native stop pending");
+            expect(stop).toHaveBeenCalledTimes(2);
+            expect(close).not.toHaveBeenCalled();
+            stop.mockResolvedValue(undefined);
+            await expect(codexAcpAgent.closeSession({sessionId})).resolves.toEqual({});
+            expect(close).toHaveBeenCalledTimes(1);
+            expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow();
+        } finally {
+            session.asyncTasks.clear();
+            vi.unstubAllEnvs();
+        }
+    });
+
     it("unsubscribes idle sessions and clears local session handlers", async () => {
         const {fixture, codexAcpAgent} = await createSession();
 

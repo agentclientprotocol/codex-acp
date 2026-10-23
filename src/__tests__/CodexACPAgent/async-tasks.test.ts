@@ -555,6 +555,59 @@ describe("Codex background terminal tasks", () => {
         expect(fixture.terminate).toHaveBeenCalledWith({threadId: "child-1", processId: "42"});
     });
 
+    it("terminates owned background terminals before experimental close", async () => {
+        const fixture = createFixture();
+        fixture.list.mockResolvedValue(page([terminal()]));
+        fixture.terminate.mockResolvedValue({terminated: true});
+        await fixture.tasks.stopOwnedTerminals();
+        expect(fixture.terminate).toHaveBeenCalledWith({threadId: "thread-1", processId: "42"});
+        expect(fixture.updates.at(-1)).toMatchObject({sessionUpdate: "async_task_state_update", state: "stopped"});
+    });
+
+    it("does not acknowledge close when native termination is rejected", async () => {
+        const fixture = createFixture();
+        fixture.list.mockResolvedValue(page([terminal()]));
+        fixture.terminate.mockResolvedValue({terminated: false});
+        await expect(fixture.tasks.stopOwnedTerminals()).rejects.toThrow("termination was not accepted");
+        expect(fixture.updates).not.toContainEqual(expect.objectContaining({state: "stopped"}));
+    });
+
+    it("does not acknowledge close while per-tool termination is pending", async () => {
+        const fixture = createFixture();
+        const termination = deferred<{terminated: boolean}>();
+        fixture.list.mockResolvedValue(page([terminal()]));
+        fixture.terminate.mockReturnValue(termination.promise);
+        await fixture.tasks.sync();
+        const stopping = fixture.tasks.stop("command-1");
+        await expect(fixture.tasks.stopOwnedTerminals()).rejects.toThrow("termination is still pending");
+        termination.resolve({terminated: true});
+        await expect(stopping).resolves.toBe(true);
+    });
+
+    it("does not acknowledge close with live work while native queries are unavailable", async () => {
+        const fixture = createFixture();
+        fixture.list.mockResolvedValue(page([terminal()]));
+        await fixture.tasks.sync();
+        fixture.tasks.prepareForAppServerReplacement();
+        await expect(fixture.tasks.stopOwnedTerminals()).rejects.toThrow("native app-server is unavailable");
+    });
+
+    it("invalidates the experimental level when the app-server is replaced", async () => {
+        vi.stubEnv("ACP_BACKGROUND_WORK_EXPERIMENT", "1");
+        const fixture = createFixture();
+        try {
+            fixture.list.mockResolvedValue(page([terminal()]));
+            await fixture.tasks.sync();
+            fixture.tasks.prepareForAppServerReplacement();
+            await vi.waitFor(() => expect(fixture.updates.at(-1)).toMatchObject({
+                sessionUpdate: "session_info_update", _meta: {backgroundWorkExperiment: {taskIds: null}},
+            }));
+        } finally {
+            fixture.tasks.clear();
+            vi.unstubAllEnvs();
+        }
+    });
+
     it("does nothing when the client did not negotiate async tasks", async () => {
         const fixture = createFixture(false);
 

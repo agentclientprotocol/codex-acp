@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import {backgroundWorkStream} from "./BackgroundWorkExperiment";
 import {startCodexConnection} from "./CodexJsonRpcConnection";
 import {CodexAcpServer, type CodexProcessState} from "./CodexAcpServer";
 import {createJsonStream} from "./StdUtils";
@@ -77,7 +78,7 @@ function startAcpServer() {
         supervisor.shutdown();
     });
 
-    const acpJsonStream = createJsonStream(process.stdin, process.stdout);
+    const acpJsonStream = backgroundWorkStream(createJsonStream(process.stdin, process.stdout));
 
     function createAgent(connection: AcpClientConnection | AcpV2Connection): CodexAcpServer {
         const appServerClient = new CodexAppServerClient(codexProcessState.connection.connection);

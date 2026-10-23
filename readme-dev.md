@@ -265,3 +265,8 @@ the Codex config are not listed.
 - Open question for AIR: AIR's fork points match Codex item ids, but on v2 a user message's
   rendered id is the client-minted `clientId` (when the client supplied one), not the Codex item id.
   A fork at a user message would not resolve. This is flagged for AIR, not fixed here.
+
+### Background work RFD experiment
+
+Set `ACP_BACKGROUND_WORK_EXPERIMENT=1` for the opt-in v1/v2 wire prototype.
+See [the experiment notes](docs/background-work-experiment.md) for scope, launch and limitations.

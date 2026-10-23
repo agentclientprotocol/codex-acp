@@ -1840,12 +1840,17 @@ export class CodexAcpServer {
         const closeGeneration = this.bumpSessionGeneration(params.sessionId);
         const sessionState = this.sessions.get(params.sessionId);
         this.beginSessionCloseFence(params.sessionId);
+        let backgroundStopConfirmed = process.env["ACP_BACKGROUND_WORK_EXPERIMENT"] !== "1";
 
         try {
             // Same as `session/cancel`: drop every v2 prompt still queued for this session first.
             this.cancelQueuedV2Prompts(params.sessionId);
             if (sessionState) {
                 await this.interruptSessionTurn(sessionState, "Close", true);
+                if (process.env["ACP_BACKGROUND_WORK_EXPERIMENT"] === "1") {
+                    await sessionState.asyncTasks.stopOwnedTerminals();
+                    backgroundStopConfirmed = true;
+                }
                 sessionState.asyncTasks.clear();
             } else {
                 logger.log("Close request received for unknown local session", {sessionId: params.sessionId});
@@ -1866,7 +1871,7 @@ export class CodexAcpServer {
             await this.reportCodexTurnState(params.sessionId, {state: "idle", stopReason: "cancelled"});
             logger.log("Session closed", {sessionId: params.sessionId});
         } finally {
-            if (this.getSessionGeneration(params.sessionId) === closeGeneration) {
+            if (backgroundStopConfirmed && this.getSessionGeneration(params.sessionId) === closeGeneration) {
                 this.sessions.delete(params.sessionId);
                 if (!this.v2PromptsInFlight.has(params.sessionId)) {
                     AcpV2Connection.of(this.connection)?.forgetSession(params.sessionId);

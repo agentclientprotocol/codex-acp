@@ -52,13 +52,22 @@ export class CodexBackgroundTerminalTasks {
     private appServerGeneration = 0;
     private appServerQueriesEnabled = true;
     private disposed = false;
+    private readonly experimentPoll: ReturnType<typeof setInterval> | undefined;
 
     constructor(
         readonly enabled: boolean,
         private readonly rootSessionId: string,
         private appServer: CodexAppServerClient,
         private readonly session: ACPSessionConnection,
-    ) {}
+    ) {
+        if (enabled && process.env['ACP_BACKGROUND_WORK_EXPERIMENT'] === '1') {
+            this.experimentPoll = setInterval(() => {
+                const threads = new Map([...this.tasks.values()].filter(task => task.publication === 'published').map(task => [task.threadId, task.sessionId]));
+                for (const [threadId, sessionId] of threads) this.refresh(threadId, sessionId);
+            }, 500);
+            this.experimentPoll.unref();
+        }
+    }
 
     async handleNotification(
         notification: ServerNotification,
@@ -129,6 +138,14 @@ export class CodexBackgroundTerminalTasks {
     prepareForAppServerReplacement(): void {
         this.appServerGeneration += 1;
         this.appServerQueriesEnabled = false;
+        if (process.env["ACP_BACKGROUND_WORK_EXPERIMENT"] === "1") {
+            const sessionIds = new Set([this.rootSessionId, ...[...this.tasks.values()].map(task => task.sessionId)]);
+            for (const sessionId of sessionIds) {
+                void this.session.update({sessionUpdate: "session_info_update", _meta: {
+                    backgroundWorkExperiment: {taskIds: null},
+                }}, sessionId).catch(error => logger.error("Failed to invalidate background state", error));
+            }
+        }
     }
 
     async recover(threadId: string, sessionId: string, itemIds: ReadonlySet<string>): Promise<void> {
@@ -210,7 +227,26 @@ export class CodexBackgroundTerminalTasks {
         }
     }
 
+    /** Stops native session-owned terminals before the experimental session closes. */
+    async stopOwnedTerminals(): Promise<void> {
+        if (!this.canQueryAppServer() && this.tasks.size > 0) {
+            throw new Error("Cannot confirm background termination while the native app-server is unavailable");
+        }
+        const threads = new Map([[this.rootSessionId, this.rootSessionId],
+            ...[...this.tasks.values()].map(task => [task.threadId, task.sessionId] as const)]);
+        for (const [threadId, sessionId] of threads) await this.sync(threadId, sessionId);
+        for (const task of [...this.tasks.values()]) {
+            if (task.state === "stopping") {
+                throw new Error("Background terminal termination is still pending; retry close after it finishes");
+            }
+            if (task.state === "running" && !await this.stop(task.asyncTaskId)) {
+                throw new Error("Native background terminal termination was not accepted");
+            }
+        }
+    }
+
     clear(): void {
+        clearInterval(this.experimentPoll);
         this.disposed = true;
         this.appServerGeneration += 1;
         this.appServerQueriesEnabled = false;
@@ -258,6 +294,11 @@ export class CodexBackgroundTerminalTasks {
                 && !liveTaskIds.has(task.itemId)) {
                 await this.finish(task, "stopped");
             }
+        }
+        if (process.env['ACP_BACKGROUND_WORK_EXPERIMENT'] === '1') {
+            await this.session.update({ sessionUpdate: 'session_info_update', _meta: {
+                backgroundWorkExperiment: { taskIds: [...listedTaskIds].filter(id => !this.ended.has(id)) },
+            } }, sessionId);
         }
     }
 
