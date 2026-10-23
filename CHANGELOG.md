@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.3.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.2...v2.3.0) (2026-10-23)
+
+
+### Features
+
+* add ACP v2 support again ([#620](https://github.com/agentclientprotocol/codex-acp/issues/620)) ([9e1690f](https://github.com/agentclientprotocol/codex-acp/commit/9e1690ff79aad55f173721907c7a65d9fe8b8d64))
+* mark session list rows of worktrees Codex made (agentWorktree) ([#631](https://github.com/agentclientprotocol/codex-acp/issues/631)) ([aa02d43](https://github.com/agentclientprotocol/codex-acp/commit/aa02d439f2d7a47a1338c9db92b62780555a460b))
+* narrow models to what the providers/set gateway lists ([#627](https://github.com/agentclientprotocol/codex-acp/issues/627)) ([3f555f9](https://github.com/agentclientprotocol/codex-acp/commit/3f555f9cd9566b759aef2711d1dbec1e3220dfa3))
+* return initial ACP v2 session commands ([#652](https://github.com/agentclientprotocol/codex-acp/issues/652)) ([5e9b7c5](https://github.com/agentclientprotocol/codex-acp/commit/5e9b7c55a023683829559d6c5c90a3bc3af5903b))
+* support AIR sessionIndex extension ([#590](https://github.com/agentclientprotocol/codex-acp/issues/590)) v2 ([#622](https://github.com/agentclientprotocol/codex-acp/issues/622)) ([2fd758c](https://github.com/agentclientprotocol/codex-acp/commit/2fd758ce212e0f1121f0fe608d7d59cc169cc65c))
+* support append-mode ACP system prompts ([#653](https://github.com/agentclientprotocol/codex-acp/issues/653)) ([5993a12](https://github.com/agentclientprotocol/codex-acp/commit/5993a12febe914d556332fc81f70e2b4613ee104))
+
+
+### Bug Fixes
+
+* disable Codex's Visualize skill, whose output ACP clients show as raw text ([#667](https://github.com/agentclientprotocol/codex-acp/issues/667)) ([0ba94f5](https://github.com/agentclientprotocol/codex-acp/commit/0ba94f520ec521a5a23353dbf34e51ca488b92c9))
+* display the selected wire provider as JetBrains Air Gateway ([#589](https://github.com/agentclientprotocol/codex-acp/issues/589)) ([cc54abf](https://github.com/agentclientprotocol/codex-acp/commit/cc54abf3e4cdb6e58629b24060b0a1e39be73c0a))
+* explain Codex config load errors caused by a deleted working directory ([#626](https://github.com/agentclientprotocol/codex-acp/issues/626)) ([a636804](https://github.com/agentclientprotocol/codex-acp/commit/a636804e57d41c3ec52c40aab9ffcef70de3db5d))
+* explain invalid_encrypted_content errors after a provider change ([#668](https://github.com/agentclientprotocol/codex-acp/issues/668)) ([a77829f](https://github.com/agentclientprotocol/codex-acp/commit/a77829fecc87cebbb2e53782ce6795aee072adc8))
+* hold a fork back from the session list until its session/fork response is out ([#642](https://github.com/agentclientprotocol/codex-acp/issues/642)) ([59974c7](https://github.com/agentclientprotocol/codex-acp/commit/59974c7d173e4fd6ef9498fc1e91779606c2404d))
+* include subagent edits in the agent file-change report ([#632](https://github.com/agentclientprotocol/codex-acp/issues/632)) ([7d07123](https://github.com/agentclientprotocol/codex-acp/commit/7d071236c66e12c20f83e4b04d7a3619fd90de2d))
+* leave codex exec runs out of the session list without sessionIndex ([#639](https://github.com/agentclientprotocol/codex-acp/issues/639)) ([df75d2b](https://github.com/agentclientprotocol/codex-acp/commit/df75d2b70fe2a0540cd621ebe664883860b90c6c))
+* migrate to ACP SDK 2.0 ([#649](https://github.com/agentclientprotocol/codex-acp/issues/649)) ([c8fd166](https://github.com/agentclientprotocol/codex-acp/commit/c8fd16652b55c226329fb43d58f5419798fa541b))
+* publish the commands when the skills change ([#643](https://github.com/agentclientprotocol/codex-acp/issues/643)) ([a62b568](https://github.com/agentclientprotocol/codex-acp/commit/a62b56847f473a2be6c67ea779c1ef9c7f227c38))
+* report structured ACP v2 failures ([#651](https://github.com/agentclientprotocol/codex-acp/issues/651)) ([5377bfe](https://github.com/agentclientprotocol/codex-acp/commit/5377bfeea1c0f0d6530441046274c7c033c82db8))
+* show a Codex subagent's follow-up turn in a new subagent session ([#634](https://github.com/agentclientprotocol/codex-acp/issues/634)) ([7c761c7](https://github.com/agentclientprotocol/codex-acp/commit/7c761c7f8fb3f6166587013f5cf9eb48911d3617))
+* synchronize ACP v2 foreground state ([#650](https://github.com/agentclientprotocol/codex-acp/issues/650)) ([986955a](https://github.com/agentclientprotocol/codex-acp/commit/986955aeb4bfc2dd074b4a9e3642022f3f3b38fc))
+* update codex to 0.164.0 ([#666](https://github.com/agentclientprotocol/codex-acp/issues/666)) ([e227c0e](https://github.com/agentclientprotocol/codex-acp/commit/e227c0eb098437e3b2897eeb1aab5bcde5012c3e))
+* wait for the compact turn to finish ([#654](https://github.com/agentclientprotocol/codex-acp/issues/654)) ([ced4c34](https://github.com/agentclientprotocol/codex-acp/commit/ced4c34368d271d61bbc81f4047813b4db387623))
+
 ## [2.2.2](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.1...v2.2.2) (2026-10-10)
 
 
