@@ -73,7 +73,7 @@ async function createAgent(kind: ClientKind, threads: Thread[] = [createThread()
     return {fixture, agent, client, appServer, threadList, readAuthRequirement};
 }
 
-async function openLocalSession(fixture: CodexMockTestFixture, sessionId: string): Promise<void> {
+async function openLocalSession(fixture: CodexMockTestFixture, sessionId: string, additionalDirectories: string[] = []): Promise<void> {
     const client = fixture.getCodexAcpClient();
     vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
     vi.spyOn(client, "newSession").mockResolvedValue({
@@ -82,7 +82,7 @@ async function openLocalSession(fixture: CodexMockTestFixture, sessionId: string
         models: [createTestModel()],
         collaborationMode: "default",
         currentServiceTier: null,
-        additionalDirectories: [],
+        additionalDirectories,
     });
     await fixture.getCodexAcpAgent().newSession({cwd: "/repo/project", mcpServers: []});
     fixture.clearAcpConnectionDump();
@@ -1332,3 +1332,135 @@ describe("session/delete", () => {
 function missingRolloutError(): Error {
     return Object.assign(new Error(`no rollout found for thread id ${threadId}`), {code: -32600});
 }
+
+describe("_session/batch_get", () => {
+    const roots: string[] = [];
+    afterEach(() => {
+        for (const root of roots.splice(0)) {
+            fs.rmSync(root, {recursive: true, force: true});
+        }
+    });
+    async function setup(threads: Thread[] = []) {
+        const result = await createAgent("sessionIndex", threads);
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-batch-get-"));
+        roots.push(root);
+        vi.spyOn(result.client, "getHomePath").mockReturnValue(root);
+        const read = vi.spyOn(result.appServer, "threadRead");
+        return {...result, root, read};
+    }
+
+    it("reads older-than-50 metadata in request order with list row parity, archives and worktrees", async () => {
+        const recent = Array.from({length: 50}, (_, index) => createThread({id: `recent-${index}`, recencyAt: 1000 - index}));
+        const {agent, threadList, read, root} = await setup(recent);
+        const {repo, worktrees: [worktree]} = createGitLayout(root, ["worktree"]);
+        fs.writeFileSync(path.join(repo, ".git", "worktrees", "worktree", "codex-thread.json"), "{}");
+        const old = createThread({id: threadId, name: "Old session", recencyAt: 10, status: {type: "active", activeFlags: []}});
+        const archived = createThread({id: "archived", name: "Archived", path: path.join(root, "archived_sessions", "rollout.jsonl"), recencyAt: 5});
+        const linked = createThread({id: "worktree", cwd: worktree!, name: "Worktree", recencyAt: 1});
+        const rows = [old, archived, linked];
+        const list = await agent.listSessions({});
+        expect(list.sessions).toHaveLength(50);
+        expect(list.sessions.map(row => row.sessionId)).not.toContain(old.id);
+        threadList.mockClear();
+        const absent = "00000000-0000-4000-8000-000000000001";
+        read.mockImplementation(async ({threadId}) => {
+            if (threadId === "invalid-native-id") throw Object.assign(new Error("invalid thread id: invalid character"), {code: -32600});
+            if (threadId === absent) throw Object.assign(new Error(`thread not loaded: ${threadId}`), {code: -32600});
+            if (threadId === "corrupt") throw Object.assign(new Error("failed to read session metadata: invalid JSON"), {code: -32603});
+            return {thread: rows.find(row => row.id === threadId)!};
+        });
+
+        const batch = await agent.sessionIndex.batchGet({sessionIds: [linked.id, "corrupt", old.id, "invalid-native-id", archived.id, absent]});
+        expect(batch.sessions.map(row => row.sessionId)).toEqual([linked.id, old.id, archived.id]);
+        expect(threadList).not.toHaveBeenCalled();
+        expect(read.mock.calls.map(([params]) => params)).toEqual([linked.id, "corrupt", old.id, "invalid-native-id", archived.id, absent]
+            .map(threadId => ({threadId, includeTurns: false})));
+        // A current stored copy is supplied by Codex, exactly as it is for list: no adapter copy scan/merge.
+        threadList.mockImplementation(async params => ({data: rows.filter(row => (row.id === archived.id) === params.archived), nextCursor: null, backwardsCursor: null}));
+        const all = await agent.listSessions({_meta: {jetbrains: {air: {list: {archived: "all"}}}}});
+        expect(batch).toEqual({sessions: [linked.id, old.id, archived.id].map(id => all.sessions.find(row => row.sessionId === id))});
+        expect((batch.sessions[0]!._meta as any).jetbrains.air.agentWorktree).toBe(true);
+        expect((batch.sessions[1]!._meta as any).jetbrains.air.state).toBe("running");
+        expect((batch.sessions[2]!._meta as any).jetbrains.air.archived).toBe(true);
+        agent.sessionIndex.dispose();
+    });
+
+    it("shares live activity and additional directories with session/list", async () => {
+        const {agent, client, read, threadList, fixture, root} = await setup();
+        vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
+        await openLocalSession(fixture, threadId, [root]);
+        const current = createThread({status: {type: "idle"}});
+        read.mockResolvedValue({thread: current});
+        threadList.mockResolvedValue({data: [current], nextCursor: null, backwardsCursor: null});
+        fixture.sendServerNotification({method: "turn/completed", params: {threadId, turn: {
+            id: "turn-1", items: [], itemsView: "notLoaded", status: "completed", error: null,
+            startedAt: 400, completedAt: 500, durationMs: 100,
+        }}} as never);
+        const batch = await agent.sessionIndex.batchGet({sessionIds: [threadId]});
+        const list = await agent.listSessions({});
+        expect(batch.sessions).toEqual(list.sessions);
+        expect(batch.sessions[0]!.additionalDirectories).toEqual([root]);
+        expect((batch.sessions[0]!._meta as any).jetbrains.air).toMatchObject({state: "idle", lastTurnEndedAt: "1970-01-01T00:08:20.000Z"});
+        agent.sessionIndex.dispose();
+    });
+
+    it("does no store or process work for empty input", async () => {
+        const {agent, read, threadList, client} = await setup();
+        const home = vi.spyOn(client, "getHomePath");
+        expect(await agent.sessionIndex.batchGet({sessionIds: []})).toEqual({sessions: []});
+        expect(home).not.toHaveBeenCalled();
+        expect(read).not.toHaveBeenCalled();
+        expect(threadList).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        Object.assign(new Error("thread not loaded: known"), {code: -32600}),
+        Object.assign(new Error("no rollout found for thread id known"), {code: -32600}),
+        Object.assign(new Error("Permission denied reading one rollout"), {code: -32603}),
+        Object.assign(new Error("failed to locate thread id canonical: Permission denied"), {code: -32600}),
+        Object.assign(new Error("failed to locate archived thread id canonical: Permission denied"), {code: -32600}),
+        Object.assign(new Error("failed to read thread: thread-store internal error: failed to read thread metadata for canonical: database is locked"), {code: -32603}),
+        Object.assign(new Error("New upstream wording"), {code: -32600}),
+        Object.assign(new Error("New upstream wording"), {code: -32603}),
+        new Error("unexpected backend failure"),
+    ])("omits failed metadata reads and continues in request order: %s", async error => {
+        const {agent, read} = await setup();
+        const before = createThread({id: "before"});
+        const after = createThread({id: "after"});
+        read.mockResolvedValueOnce({thread: before}).mockRejectedValueOnce(error).mockResolvedValueOnce({thread: after});
+        const result = await agent.sessionIndex.batchGet({sessionIds: [before.id, "CANONICAL", after.id]});
+        expect(result.sessions.map(row => row.sessionId)).toEqual([before.id, after.id]);
+        read.mockRejectedValue(error);
+        expect(await agent.sessionIndex.batchGet({sessionIds: ["known"]})).toEqual({sessions: []});
+    });
+
+    it.each([
+        Object.assign(new Error("Pending response rejected since connection got disposed"), {code: -32097}),
+        Object.assign(new Error("Connection is inactive"), {code: -32096}),
+        Object.assign(new Error("failed to send"), {code: -32099}),
+        Object.assign(new Error("New upstream wording"), {code: -32600, data: {reason: "serverShuttingDown"}}),
+        new acp.RequestError(1001, "Codex process has exited"),
+    ])("rejects connection, process and shutdown failures: %s", async error => {
+        const {agent, read} = await setup();
+        read.mockRejectedValue(error);
+        await expect(agent.sessionIndex.batchGet({sessionIds: ["CANONICAL"]})).rejects.toBe(error);
+    });
+
+    it.each([null, "missing", "file"] as const)("accepts app-server metadata when the local home is %s", async localHome => {
+        const {agent, client, read, root} = await setup();
+        const home = localHome === null ? null : path.join(root, localHome);
+        if (localHome === "file") fs.writeFileSync(home!, "not a directory");
+        vi.spyOn(client, "getHomePath").mockReturnValue(home);
+        read.mockResolvedValue({thread: createThread()});
+        const result = await agent.sessionIndex.batchGet({sessionIds: [threadId]});
+        expect(result.sessions.map(row => row.sessionId)).toEqual([threadId]);
+        expect(read).toHaveBeenCalledExactlyOnceWith({threadId, includeTurns: false});
+        agent.sessionIndex.dispose();
+    });
+
+    it("does not emit a backend-normalized ID that was not requested", async () => {
+        const {agent, read} = await setup();
+        read.mockResolvedValue({thread: createThread()});
+        expect(await agent.sessionIndex.batchGet({sessionIds: [threadId.toUpperCase()]})).toEqual({sessions: []});
+    });
+});

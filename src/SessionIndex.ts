@@ -18,6 +18,9 @@ import {listedSessionTitle} from "./SessionTitle";
 import {logger} from "./Logger";
 
 export const AIR_SESSION_INDEX_KEY = "sessionIndex";
+/** Agent capability: metadata for known IDs, including sessions outside the recent page. */
+export const AIR_SESSION_BATCH_GET_KEY = "sessionBatchGet";
+export const SESSION_BATCH_GET_METHOD = "_session/batch_get";
 /** Agent capability: `_session/archive` and `_session/unarchive`. Advertised exactly with `sessionIndex`. */
 export const AIR_SESSION_ARCHIVE_KEY = "sessionArchive";
 /** Agent capability: `_session/rename`. Advertised exactly with `sessionIndex`. */
@@ -94,6 +97,15 @@ export interface SessionActivity {
 
 export type SessionRenameRequest = { sessionId: string; title: string };
 export type SessionArchiveRequest = { sessionId: string };
+export type SessionBatchGetRequest = {sessionIds: string[]};
+export type SessionBatchGetResponse = {
+    sessions: acp.SessionInfo[];
+};
+
+export const sessionBatchGetParamsParser = z.strictObject({
+    sessionIds: z.array(z.string().refine(id => id.trim().length > 0, "sessionIds must be non-empty")).max(100)
+        .refine(ids => new Set(ids).size === ids.length, "sessionIds must be distinct"),
+});
 
 export const sessionRenameParamsParser = z.object({
     sessionId: z.string(),

@@ -177,6 +177,29 @@ describe("SessionListSubscriptions", () => {
         subscriptions.dispose();
     });
 
+    it("reports changes outside the recent 50 only inside the subscribed project", async () => {
+        const {codex, subscriptions, sent} = setup();
+        for (let index = 0; index < 60; index++) codex.put(thread(`recent-${index}`));
+        codex.put(thread("old-pinned", {updatedAt: 10, recencyAt: 10}));
+        codex.put(thread("other-project-pinned", {updatedAt: 10, recencyAt: 10, cwd: "/other"}));
+        const recent = await codex.threadList({cwd: "/repo", limit: 50, sortKey: "recency_at"});
+        expect(recent.data.map(row => row.id)).not.toContain("old-pinned");
+        const subscriptionId = await subscriptions.subscribe("/repo");
+
+        for (const id of ["old-pinned", "other-project-pinned"]) {
+            codex.update(id, {name: "Renamed pinned session"});
+            subscriptions.observe(own("thread/name/updated", {threadId: id, threadName: "Renamed pinned session"}));
+        }
+        await vi.advanceTimersByTimeAsync(timings.ownChangeDelayMs);
+
+        expect(sent).toEqual([{
+            subscriptionId,
+            sessions: [expect.objectContaining({sessionId: "old-pinned", title: "Renamed pinned session"})],
+            removed: [],
+        }]);
+        subscriptions.dispose();
+    });
+
     it("sends the row of an own thread right after its notification", async () => {
         const {codex, subscriptions, sent} = setup();
         codex.put(thread("a"));
