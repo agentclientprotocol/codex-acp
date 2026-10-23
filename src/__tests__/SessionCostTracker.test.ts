@@ -12,6 +12,18 @@ const pricing: ModelPricingSnapshot = new Map([
 ]);
 
 describe("SessionCostTracker", () => {
+    it("stops reporting cost when cache writes have no known rate", async () => {
+        const tracker = new SessionCostTracker(pricing);
+        const first = usage(100, 50, 25);
+        const withWrites = {...usage(200, 100, 50), cacheWriteInputTokens: 30};
+        const costs = [
+            tracker.update(first, first, "gpt-test[medium]", false),
+            tracker.update(withWrites, withWrites, "gpt-test[medium]", false),
+            tracker.update(usage(300, 150, 75), first, "gpt-test[medium]", false),
+        ];
+        await expect(JSON.stringify(costs, null, 2)).toMatchFileSnapshot("data/cache-write-costs.json");
+    });
+
     it("accumulates USD cost from cumulative token usage", () => {
         const tracker = new SessionCostTracker(pricing);
 
@@ -56,5 +68,6 @@ function usage(inputTokens: number, cachedInputTokens: number, outputTokens: num
         cachedInputTokens,
         outputTokens,
         reasoningOutputTokens: 0,
+        cacheWriteInputTokens: 0,
     };
 }

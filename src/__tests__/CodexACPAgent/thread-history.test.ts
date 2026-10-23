@@ -1,11 +1,12 @@
 import {describe, expect, it, vi} from "vitest";
-import type {ThreadItem, ThreadItemsListParams, ThreadTurnsListParams, Turn} from "../../app-server/v2";
+import type {ThreadItem, ThreadItemEntry, ThreadItemsListParams, ThreadTurnsListParams, Turn} from "../../app-server/v2";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 
 function messageTurn(id: string): Turn {
     return {
         id,
         items: [{type: "userMessage", id: `${id}-input`, clientId: null, content: [{type: "text", text: `Question ${id}`, text_elements: []}]}, {type: "agentMessage", id: `${id}-message`, text: `Answer ${id}`, phase: "final_answer", memoryCitation: null, delivery: null, questions: null}],
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,
@@ -59,9 +60,9 @@ function itemStore(turns: Turn[], pageSize = 2) {
     };
 }
 
-async function collect(history: AsyncIterable<ThreadItem[]> | null): Promise<string[]> {
+async function collect(history: AsyncIterable<Array<ThreadItem | ThreadItemEntry>> | null): Promise<string[]> {
     const ids: string[] = [];
-    for await (const page of history ?? []) ids.push(...page.map(item => item.id));
+    for await (const page of history ?? []) ids.push(...page.map(item => "turnId" in item ? item.item.id : item.id));
     return ids;
 }
 

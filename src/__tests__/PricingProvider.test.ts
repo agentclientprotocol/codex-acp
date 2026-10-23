@@ -21,6 +21,7 @@ describe("Astra pricing", () => {
                     cachedInputTokens: 100_000,
                     outputTokens: 10_000,
                     reasoningOutputTokens: 0,
+                    cacheWriteInputTokens: 0,
                     totalTokens: inputTokens + 110_000,
                 };
                 costs.push({

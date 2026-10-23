@@ -4,6 +4,7 @@
     "totalTokens": 2500,
     "inputTokens": 1500,
     "cachedReadTokens": 500,
+    "cachedWriteTokens": 0,
     "outputTokens": 450,
     "thoughtTokens": 50
   },
@@ -13,6 +14,7 @@
         "totalTokens": 2500,
         "inputTokens": 1500,
         "cachedInputTokens": 500,
+        "cacheWriteInputTokens": 0,
         "outputTokens": 450,
         "reasoningOutputTokens": 50
       },
@@ -23,6 +25,7 @@
             "totalTokens": 2500,
             "inputTokens": 1500,
             "cachedInputTokens": 500,
+            "cacheWriteInputTokens": 0,
             "outputTokens": 450,
             "reasoningOutputTokens": 50
           }

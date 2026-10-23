@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {UpdateSessionEvent} from "../ACPSessionConnection";
 import {AIR_CONTEXT_COMPACTION_KEY, AIR_SUBAGENT_KEY, withAirMeta} from "../AirExtension";
 import type {ClientCapabilities} from "./ClientCapabilities";
@@ -28,8 +28,8 @@ export class AcpToolCallRenderer {
             ...(facts.input === undefined ? {} : {rawInput: facts.input}),
             ...(facts.opaqueResult === undefined ? {} : {rawOutput: facts.opaqueResult}),
         };
-        const meta = this.capabilities.airClient ? this.airMeta(facts) : this.standardMeta(facts);
-        if (!this.capabilities.airClient) {
+        const meta = this.capabilities.airToolCallContract ? this.airMeta(facts) : this.standardMeta(facts);
+        if (!this.capabilities.airToolCallContract) {
             applyStandardFields(rendered, facts.standard);
             const end = facts.standard?.commandEnd;
             if (end !== undefined) {
@@ -63,7 +63,7 @@ export class AcpToolCallRenderer {
             ...locationsField(facts.locations),
             ...this.contentField(facts),
         };
-        if (!this.capabilities.airClient) applyStandardFields(rendered, facts.standard);
+        if (!this.capabilities.airToolCallContract) applyStandardFields(rendered, facts.standard);
         return rendered as acp.ToolCallUpdate;
     }
 

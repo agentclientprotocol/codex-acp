@@ -25,6 +25,11 @@ class Logger {
         }
     }
 
+    /** Whether `log` writes anything. A caller checks it before it formats a large message. */
+    get enabled(): boolean {
+        return this.logFilePath !== null;
+    }
+
     error(message: string, err: unknown) {
         const formattedError = this.formatError(err);
         if (!this.logFilePath) {

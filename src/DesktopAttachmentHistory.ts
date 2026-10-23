@@ -1,4 +1,4 @@
-import type {ContentBlock} from "@agentclientprotocol/sdk";
+import type {ContentBlock} from "@agentclientprotocol/sdk/unstable";
 import {pathToFileURL} from "node:url";
 
 export function attachmentFileUri(path: string): string | null {

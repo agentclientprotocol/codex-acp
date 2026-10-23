@@ -1,6 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import {ModelId} from "../../ModelId";
+import {ResponseError, type MessageConnection} from "vscode-jsonrpc/node";
 
 describe("New session logout handling", () => {
     it("logs out when newSession fails with an error containing log out", async () => {
@@ -50,13 +51,18 @@ describe("New session logout handling", () => {
         const logoutSpy = vi.spyOn(codexAcpClient, "logout").mockResolvedValue();
 
         const errorMessage = 'Internal error: "failed to reload config: filesystem path `/tmp` must be absolute, use `~/...`, or start with `:`"';
-        vi.spyOn(codexAppServerClient, "threadStart").mockRejectedValue(new Error(errorMessage));
+        // The app-server answer goes through the error explanations of the client.
+        const {connection} = codexAppServerClient as unknown as {connection: MessageConnection};
+        vi.spyOn(connection, "sendRequest").mockImplementation((async (method: string) => {
+            if (method === "thread/start") throw new ResponseError(-32603, errorMessage);
+            return undefined;
+        }) as never);
 
-        expect(logoutSpy).toHaveBeenCalledTimes(0);
         await expect(codexAcpAgent.newSession({cwd: "", mcpServers: []}))
             .rejects.toMatchObject({
-                data: expect.stringContaining(`Check global and project .codex directories`),
+                message: expect.stringContaining(`Check global and project .codex directories`),
             });
+        expect(logoutSpy).toHaveBeenCalledTimes(0);
     });
 
     it("refreshes OpenAI sessions when newSession error forces logout", async () => {

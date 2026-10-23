@@ -244,3 +244,66 @@ describe("ToolCallReports late output", () => {
         expect(reports.prepare("s", chunk)).toEqual(chunk);
     });
 });
+
+describe("ToolCallReports large fields", () => {
+    const diff = (newText: string) => [{type: "diff" as const, path: "/w/a.ts", oldText: null, newText}];
+    const start = (newText: string) => ({
+        sessionUpdate: "tool_call" as const,
+        toolCallId: "patch-1",
+        title: "Edit a.ts",
+        kind: "edit" as const,
+        status: "in_progress" as const,
+        content: diff(newText),
+        _meta: {codex: {changes: [{path: "/w/a.ts", diff: newText}]}},
+    });
+
+    it("drops large content that did not change, and keeps a change that keeps the length", () => {
+        const text = "line\n".repeat(200_000);
+        const changed = `${text.slice(0, 500_000)}LINE\n${text.slice(500_005)}`;
+        // A separate string with the same text, as a parsed app-server message would hold.
+        const copy = Buffer.from(text).toString("utf8");
+        expect(changed.length).toBe(text.length);
+        const reports = new ToolCallReports();
+        reports.prepare("s", start(text));
+
+        expect(reports.prepare("s", {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "patch-1",
+            content: diff(copy),
+            _meta: {codex: {changes: [{path: "/w/a.ts", diff: copy}]}},
+        })).toBeNull();
+        expect(reports.prepare("s", {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "patch-1",
+            status: "completed",
+            content: diff(changed),
+            _meta: {codex: {changes: [{path: "/w/a.ts", diff: changed}]}},
+        })).toEqual({
+            sessionUpdate: "tool_call_update",
+            toolCallId: "patch-1",
+            status: "completed",
+            content: diff(changed),
+            _meta: {codex: {changes: [{path: "/w/a.ts", diff: changed}]}},
+        });
+    });
+
+    it("sends content that changed in place after the earlier report", () => {
+        const reports = new ToolCallReports();
+        const update = start("a");
+        reports.prepare("s", update);
+        update.content[0]!.newText = "b";
+
+        expect(reports.prepare("s", {sessionUpdate: "tool_call_update", toolCallId: "patch-1", content: update.content}))
+            .toEqual({sessionUpdate: "tool_call_update", toolCallId: "patch-1", content: diff("b")});
+    });
+
+    it("sends input whose keys changed order, because its serialized text changed", () => {
+        const reports = new ToolCallReports();
+        reports.prepare("s", {sessionUpdate: "tool_call", toolCallId: "t", title: "A", rawInput: {a: 1, b: 2}});
+
+        expect(reports.prepare("s", {sessionUpdate: "tool_call_update", toolCallId: "t", rawInput: {b: 2, a: 1}}))
+            .toEqual({sessionUpdate: "tool_call_update", toolCallId: "t", rawInput: {b: 2, a: 1}});
+        expect(reports.prepare("s", {sessionUpdate: "tool_call_update", toolCallId: "t", rawInput: {b: 2, a: 1, c: undefined}}))
+            .toBeNull();
+    });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import type { ErrorNotification, TurnCompletedNotification } from "../../app-server/v2";
 import type { SessionState } from "../../CodexAcpServer";
 import {
@@ -81,6 +81,22 @@ const modelRefusalEnvelope = JSON.stringify({
     type: "error", status: 400, error: {type: "invalid_request_error", message: modelRefusalMessage},
 });
 
+// The 400 that an LLM gateway returns when the provider can't decrypt reasoning from an earlier turn.
+const invalidEncryptedContentGatewayError = JSON.stringify({
+    error: {
+        message: "Provider returned error",
+        code: 400,
+        metadata: {
+            raw: JSON.stringify({error: {
+                message: "The encrypted content for item rs_1 could not be verified. Reason: Encrypted content could not be decrypted or parsed.",
+                type: "invalid_request_error", param: null, code: "invalid_encrypted_content",
+            }}, null, 2),
+            provider_name: "Azure", is_byok: false, provider_error_code: "invalid_encrypted_content",
+        },
+    },
+    user_id: "org_1",
+});
+
 describe("CodexEventHandler - auth error events", () => {
     it.each([
         {name: "terminal", retry: false, turnId: "turn-id"},
@@ -137,6 +153,20 @@ describe("CodexEventHandler - auth error events", () => {
             sessionUpdate: "agent_message_chunk", content: {type: "text", text: `${modelRefusalMessage}\n\n`},
         })]);
         expect(result).toMatchObject({data: {message: modelRefusalEnvelope, codexErrorInfo: "usageLimitExceeded"}});
+    });
+
+    it.each([
+        {name: "legacy error text", capabilities: undefined},
+        {name: "typed failure", capabilities: typedFailureCapabilities},
+    ])("explains encrypted content from another provider in the $name", async ({capabilities}) => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "encrypted-content-session", account: {type: "apiKey"},
+        }), {
+            message: invalidEncryptedContentGatewayError, codexErrorInfo: "badRequest", additionalDetails: null, misalignment: null,
+        }, false, capabilities);
+        await expect(JSON.stringify({result, updates}, null, 2)).toMatchFileSnapshot(
+            `data/invalid-encrypted-content-v1-${capabilities ? "typed-failure" : "legacy"}.json`,
+        );
     });
 
     it.each([
@@ -1061,6 +1091,7 @@ function createTurn(
     return {
         id,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded" as const,
         status,
         error,

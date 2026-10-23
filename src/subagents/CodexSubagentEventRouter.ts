@@ -64,7 +64,10 @@ export class CodexSubagentEventRouter {
 
     async handle(notification: ServerNotification): Promise<boolean> {
         if (notification.method === "turn/started") {
-            return this.isKnownChild(notification.params.threadId);
+            const childTurn = this.isKnownChild(notification.params.threadId);
+            // A follow-up can start a new turn of an ended child with no collaboration item that reports it.
+            if (childTurn) await this.reopen(notification.params.threadId);
+            return childTurn;
         }
         if (notification.method === "turn/completed") {
             const childTurn = this.isKnownChild(notification.params.threadId);
@@ -179,6 +182,11 @@ export class CodexSubagentEventRouter {
         return ignored;
     }
 
+    /** Whether the thread is a native subagent that has its own ACP session. */
+    isNativeSubagentThread(threadId: string): boolean {
+        return threadId !== this.rootSessionId && this.children.has(threadId);
+    }
+
     notificationSessionId(notification: ServerNotification): string {
         const threadId = (notification.params as {threadId?: unknown}).threadId;
         return typeof threadId === "string" && this.children.has(threadId)
@@ -210,6 +218,13 @@ export class CodexSubagentEventRouter {
             for (const child of this.closingChildSession(threadId, terminalState)) closing.set(threadId, child);
         }
         return [...closing.values()];
+    }
+
+    /** The ACP session ids of the native subagent sessions that have not ended. */
+    childSessionIds(): string[] {
+        return [...this.children.values()]
+            .filter(child => child.terminalState === undefined)
+            .map(child => child.sessionId);
     }
 
     takeBufferedNotifications(): ServerNotification[] {
@@ -426,7 +441,8 @@ export class CodexSubagentEventRouter {
         this.materializationWaiters.delete(childThreadId);
     }
 
-    private hasOutstanding(): boolean {
+    /** Some native subagent has not ended yet. */
+    hasOutstanding(): boolean {
         return this.pendingSpawns.size > 0
             || [...this.children.values()].some(child => child.terminalState === undefined);
     }

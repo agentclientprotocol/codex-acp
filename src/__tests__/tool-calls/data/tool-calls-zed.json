@@ -360,5 +360,23 @@
         }
       ]
     }
+  ],
+  "mcpSkipped": [
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "mcp_startup.docs",
+      "kind": "other",
+      "title": "mcp__docs__startup",
+      "status": "failed",
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "[codex-acp] MCP server `docs` was not started, because the Codex config already defines an MCP server with this name. Codex uses its own entry, or no server if that entry is disabled."
+          }
+        }
+      ]
+    }
   ]
 }

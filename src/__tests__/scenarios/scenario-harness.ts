@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -23,11 +23,13 @@ export const AIR_CAPABILITY_NAMES = [
     "diffPatch",
     "sessionFailure",
     "agentFileChangeReport",
+    "customInstructions",
     "nativeSubagentSessions",
     "asyncTasks",
     "recommendedValue",
     "rawInputRendering",
     "planContentDelta",
+    "codexHooks",
 ];
 
 /** The client capabilities of each client profile. */

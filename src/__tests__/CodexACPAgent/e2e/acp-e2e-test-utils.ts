@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect} from "vitest";
 import {AgentMode} from "../../../AgentMode";
 import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR} from "../../../CodexAuthMethod";
@@ -47,7 +47,11 @@ export function expectNoPermissionRequests(fixture: SpawnedAgentFixture, session
     expectPermissionRequests(fixture, sessionId, { edit: 0, execute: 0 });
 }
 
-export async function createAuthenticatedFixture(initialMode?: AgentMode, mcpServers?: acp.McpServerStdio[]): Promise<SpawnedAgentFixture> {
+export async function createAuthenticatedFixture(
+    initialMode?: AgentMode,
+    mcpServers?: acp.McpServerStdio[],
+    airCapabilities?: string[],
+): Promise<SpawnedAgentFixture> {
     const apiKey = requireLiveApiKey();
     const extraEnv = initialMode ? {INITIAL_AGENT_MODE: initialMode.id} : undefined;
     return await createSpawnedFixture(async (connection, authMethods) => {
@@ -55,7 +59,7 @@ export async function createAuthenticatedFixture(initialMode?: AgentMode, mcpSer
             throw new Error("API key authentication is not available.");
         }
 
-        await connection.authenticate({
+        await connection.request(acp.methods.agent.authenticate, {
             methodId: "api-key",
             _meta: {
                 "api-key": {
@@ -68,7 +72,7 @@ export async function createAuthenticatedFixture(initialMode?: AgentMode, mcpSer
         if (authenticationStatus["type"] !== "api-key") {
             throw new Error(`Unexpected authentication status: ${JSON.stringify(authenticationStatus)}`);
         }
-    }, extraEnv, mcpServers);
+    }, extraEnv, mcpServers, airCapabilities);
 }
 
 export async function createGatewayFixture(
@@ -80,7 +84,7 @@ export async function createGatewayFixture(
             throw new Error("Gateway authentication is not available.");
         }
 
-        await connection.authenticate({
+        await connection.request(acp.methods.agent.authenticate, {
             methodId: "gateway",
             _meta: {
                 gateway: {
@@ -97,7 +101,7 @@ export async function createGatewayFixture(
     });
 }
 
-function buildClientCapabilities(): acp.ClientCapabilities {
+function buildClientCapabilities(airCapabilities?: string[]): acp.ClientCapabilities {
     return {
         fs: {
             readTextFile: true,
@@ -111,21 +115,23 @@ function buildClientCapabilities(): acp.ClientCapabilities {
         },
         _meta: {
             "terminal-auth": true,
+            ...(airCapabilities ? {jetbrains: {air: {version: 1, capabilities: airCapabilities}}} : {}),
         },
     };
 }
 
-type Authenticator = (connection: acp.ClientSideConnection, authMethods: acp.AuthMethod[]) => Promise<void>;
+type Authenticator = (connection: acp.ClientContext, authMethods: acp.AuthMethod[]) => Promise<void>;
 
 async function createSpawnedFixture(
     authenticate: Authenticator,
     extraEnv?: NodeJS.ProcessEnv,
     mcpServers?: acp.McpServerStdio[],
+    airCapabilities?: string[],
 ): Promise<SpawnedAgentFixture> {
     return await createSpawnedAgentFixture(async (connection) => {
-        const initializeResponse = await connection.initialize({
+        const initializeResponse = await connection.request(acp.methods.agent.initialize, {
             protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: buildClientCapabilities(),
+            clientCapabilities: buildClientCapabilities(airCapabilities),
             clientInfo: {
                 name: "vitest",
                 version: "1.0.0",
@@ -148,6 +154,6 @@ export function requireLiveApiKey(): string {
     return apiKey;
 }
 
-async function getAuthenticationStatus(connection: acp.ClientSideConnection): Promise<Record<string, unknown>> {
-    return await connection.extMethod("authentication/status", {});
+async function getAuthenticationStatus(connection: acp.ClientContext): Promise<Record<string, unknown>> {
+    return await connection.request<Record<string, unknown>>("authentication/status", {});
 }

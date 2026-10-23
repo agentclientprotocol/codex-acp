@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {JsonValue} from "../app-server/serde_json/JsonValue";
 import type {
     McpServerElicitationRequestParams,
@@ -133,7 +133,9 @@ export function convertMcpPermissionResponse(
     isToolApproval: boolean,
     persistOptions: ReadonlySet<PersistValue>,
 ): McpServerElicitationRequestResponse {
-    if (response.outcome.outcome === "cancelled") return cancelledResponse();
+    // A v2 client may answer with a custom outcome instead of "cancelled"; only "selected"
+    // carries an `optionId` (ACP-ENUM-203).
+    if (response.outcome.outcome !== "selected") return cancelledResponse();
     switch (response.outcome.optionId) {
         case McpApprovalOptionId.AllowSession:
             return persistOptions.has("session")

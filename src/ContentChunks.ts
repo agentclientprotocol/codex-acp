@@ -1,4 +1,4 @@
-import type {ContentBlock} from "@agentclientprotocol/sdk";
+import type {ContentBlock} from "@agentclientprotocol/sdk/unstable";
 import type {UpdateSessionEvent} from "./ACPSessionConnection";
 import {AIR_MESSAGE_PHASE_KEY, airOnlyMeta} from "./AirExtension";
 

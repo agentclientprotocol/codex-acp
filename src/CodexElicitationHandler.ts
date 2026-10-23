@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import type { ElicitationHandler } from "./CodexAppServerClient";
 import type { ServerNotification } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
@@ -579,6 +579,16 @@ export class CodexElicitationHandler implements ElicitationHandler {
             sessionId,
             update: this.renderer.render(ElicitationReporter.accepted(context.correlatedCallId)),
         });
+    }
+
+    /**
+     * Completes every accepted URL elicitation: the app-server died and will never resolve them, so the client must
+     * not keep their flow open.
+     */
+    async completeAllUrlElicitations(): Promise<void> {
+        for (const threadId of [...this.pendingUrlElicitations.keys()]) {
+            await this.completeUrlElicitations(threadId);
+        }
     }
 
     private trackUrlElicitation(threadId: string, elicitationId: string): void {

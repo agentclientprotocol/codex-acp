@@ -1,0 +1,18 @@
+{
+  "error": {
+    "code": -32000,
+    "message": "Authentication required: Sign-in did not complete",
+    "data": {
+      "methodId": "api-key"
+    }
+  },
+  "codexRequests": [
+    {
+      "method": "account/login/start",
+      "params": {
+        "type": "apiKey",
+        "apiKey": "sk-test"
+      }
+    }
+  ]
+}

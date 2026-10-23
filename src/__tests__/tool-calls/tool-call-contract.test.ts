@@ -79,7 +79,10 @@ function reportsOfEachKind(): Record<string, ToolFacts[]> {
         } as never)],
         collab: [CollabAgentReporter.started(collab as never)],
         subagentActivity: [SubagentActivityReporter.activity({
-            type: "subAgentActivity", id: "act", kind: "started", agentThreadId: "child", agentPath: "/root/child",
+            type: "subAgentActivity",
+            model: null,
+            reasoningEffort: null,
+            id: "act", kind: "started", agentThreadId: "child", agentPath: "/root/child",
         } as never, "in_progress", "start")],
         fuzzySearch: [new FuzzySearchReporter().updated({sessionId: "f", query: "App", files: []} as never)],
         guardian: [new GuardianReporter().completed(guardianEvent as never)],
@@ -87,6 +90,8 @@ function reportsOfEachKind(): Record<string, ToolFacts[]> {
         elicitation: [ElicitationReporter.answered("ask", "accept")],
         mcpStartup: McpStartupReporter.failures({ready: [], failed: [{server: "db", error: "boom", failureReason: null}], cancelled: []} as never)
             .map(facts => ({...facts, toolCallId: "mcp_startup.db"})),
+        mcpSkipped: McpStartupReporter.skipped(["docs"])
+            .map(facts => ({...facts, toolCallId: "mcp_startup.docs"})),
     };
 }
 

@@ -7,7 +7,7 @@ import type {
     SessionFailureCategory,
     SessionState,
 } from "./CodexAcpServer";
-import {type PlanEntry, RequestError} from "@agentclientprotocol/sdk";
+import {type Error as AcpError, type PlanEntry, RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import {normalizeSessionTitle} from "./SessionTitle";
 import type {
@@ -29,13 +29,14 @@ import type {
     ThreadGoalUpdatedNotification,
     ThreadTokenUsageUpdatedNotification,
     Turn,
+    TurnDiffUpdatedNotification,
     TurnPlanUpdatedNotification,
     WarningNotification
 } from "./app-server/v2";
 import {toTokenCount} from "./TokenCount";
 import { stripShellPrefix } from "./CommandUtils";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
-import {CommandReporter} from "./tool-calls/reporters/CommandReporter";
+import {CommandReporter, commandUsesTerminal} from "./tool-calls/reporters/CommandReporter";
 import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
 import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
 import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
@@ -65,6 +66,7 @@ import type {SubagentState} from "./subagents/AcpSubagents";
 import {mergeRateLimitSnapshot} from "./RateLimitsMap";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "./AgentFileChangeReport";
 import {createSessionNotice} from "./SessionNotice";
+import {isStaleAutomaticTitleEcho} from "./SessionIndexTitles";
 import {readableServiceErrorMessage} from "./ServiceErrorMessage";
 
 export { stripShellPrefix };
@@ -150,11 +152,9 @@ type KeysOfUnion<T> = T extends unknown ? keyof T : never;
 type StructuredCodexErrorKind = KeysOfUnion<StructuredCodexErrorInfo>;
 
 /**
- * Exhaustive against the generated app-server union: a schema update cannot silently fall through
- * to provider_error. The runtime lookup still has a fallback for a newer app-server talking to an
- * older codex-acp build.
+ * Known error codes map to ACP categories; extensible upstream codes fall back to provider_error.
  */
-const STRING_CODEX_ERROR_CATEGORIES = {
+const STRING_CODEX_ERROR_CATEGORIES: Partial<Record<StringCodexErrorInfo, CodexFailureKind>> = {
     contextWindowExceeded: "context_exhausted",
     sessionBudgetExceeded: "budget_exhausted",
     usageLimitExceeded: "quota_exhausted",
@@ -172,13 +172,37 @@ const STRING_CODEX_ERROR_CATEGORIES = {
     other: "provider_error",
 } satisfies Record<StringCodexErrorInfo, CodexFailureKind>;
 
-const STRUCTURED_CODEX_ERROR_CATEGORIES = {
+const STRUCTURED_CODEX_ERROR_CATEGORIES: Partial<Record<StructuredCodexErrorKind, CodexFailureKind>> = {
     httpConnectionFailed: "transport_lost",
     responseStreamConnectionFailed: "transport_lost",
     responseStreamDisconnected: "transport_lost",
     responseTooManyFailedAttempts: "transport_lost",
     activeTurnNotSteerable: "provider_error",
 } satisfies Record<StructuredCodexErrorKind, CodexFailureKind>;
+
+/**
+ * Item types that render as a plain `tool_call`/`tool_call_update` and have no outstanding-item
+ * tracker of their own (`contextCompaction` has `CodexSessionCompactions`; `collabAgentToolCall`/
+ * `subAgentActivity` have `CodexSubagentEventRouter`). Used to track which open items a provider
+ * restart's close-out needs to fail.
+ */
+const PLAIN_TOOL_CALL_ITEM_TYPES = new Set<ThreadItem["type"]>([
+    "fileChange",
+    "commandExecution",
+    "mcpToolCall",
+    "dynamicToolCall",
+    "webSearch",
+    "imageView",
+    "imageGeneration",
+]);
+
+/** Prompt failures whose text the client has already received as an agent message. */
+const failuresShownAsMessages = new WeakSet<RequestError>();
+
+/** Whether a prompt failure's text has already been sent to the client as an agent message. */
+export function failureWasShownAsMessage(error: unknown): boolean {
+    return error instanceof RequestError && failuresShownAsMessages.has(error);
+}
 
 export class CodexEventHandler {
 
@@ -193,6 +217,7 @@ export class CodexEventHandler {
     private lastSessionNotice: {key: string; failure: SessionFailure} | undefined;
     private nextNoticeId = 1;
     private failure: RequestError | null = null;
+    private terminalTurnError: {turnId: string; error: ErrorNotification["error"]} | null = null;
     private completedPlan: CompletedPlan | null = null;
     private readonly activeImageGenerationItems = new Set<string>();
     private readonly emittedImageViewItems = new Set<string>();
@@ -207,6 +232,10 @@ export class CodexEventHandler {
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly turnDiffs = new Map<string, string>();
     private readonly oversizedTurnDiffs = new Set<string>();
+    /** Latest diff of each subagent turn, keyed by child thread and turn; `null` marks an oversized diff. */
+    private readonly childTurnDiffs = new Map<string, {rootTurnId: string; diff: string | null}>();
+    /** The last root turn that ended, for subagent turns that outlive it. */
+    private latestRootTurnId: string | null = null;
     private readonly collectTurnDiffs: boolean;
     private readonly subagents: CodexSubagentEventRouter;
     /** Connection-level `authStatus` sink; the app-server account push feeds it. */
@@ -241,12 +270,37 @@ export class CodexEventHandler {
         return this.failure;
     }
 
+    /** Runtime outcomes, not AIR capability negotiation, determine standard v2 failures. */
+    getTurnFailure(turn: Turn): AcpError | null {
+        if (turn.status !== "failed") return null;
+        const error = turn.error ?? (this.terminalTurnError?.turnId === turn.id ? this.terminalTurnError.error : null);
+        if (this.isAuthenticationRequiredError(error?.codexErrorInfo ?? null)) {
+            return {code: -32000, message: "Authentication required"};
+        }
+        return {code: -32603, message: readableServiceErrorMessage(error?.message ?? "Codex turn failed.")};
+    }
+
+    private recordTerminalTurnError(notification: ServerNotification): void {
+        if (notification.method === "error" && notification.params.threadId === this.sessionState.sessionId
+            && !notification.params.willRetry) {
+            this.terminalTurnError = {turnId: notification.params.turnId, error: notification.params.error};
+        }
+    }
+
+    /** The root turn's diff followed by the diffs of the subagent turns that ran during it. */
     getTurnDiff(turnId: string): string {
-        return this.turnDiffs.get(turnId) ?? "";
+        const diffs = [this.turnDiffs.get(turnId) ?? ""];
+        for (const child of this.childTurnDiffs.values()) {
+            if (child.rootTurnId === turnId && child.diff !== null) diffs.push(child.diff);
+        }
+        return diffs
+            .filter(diff => diff.trim() !== "")
+            .reduce((all, diff) => all === "" || all.endsWith("\n") ? all + diff : `${all}\n${diff}`, "");
     }
 
     isTurnDiffOversized(turnId: string): boolean {
-        return this.oversizedTurnDiffs.has(turnId);
+        return this.oversizedTurnDiffs.has(turnId)
+            || [...this.childTurnDiffs.values()].some(child => child.rootTurnId === turnId && child.diff === null);
     }
 
     getTerminalSessionFailureMeta(
@@ -274,6 +328,7 @@ export class CodexEventHandler {
      * instead of entering a turn buffer that will never be flushed.
      */
     async handleSessionScopedNotification(notification: ServerNotification): Promise<void> {
+        this.recordTerminalTurnError(notification);
         if (notification.method !== "error") {
             await this.handleNotification(notification);
             return;
@@ -369,6 +424,16 @@ export class CodexEventHandler {
     }
 
     async handleNotification(notification: ServerNotification) {
+        this.recordTerminalTurnError(notification);
+        if (notification.method === "item/started"
+            && notification.params.threadId === this.sessionState.sessionId
+            && isModelOutputItem(notification.params.item)) {
+            this.sessionState.promptTokenUsage?.observeModelOutput();
+        }
+        // Before subagent routing, which drops updates of ended children and of spawns that never materialized.
+        if (notification.method === "turn/diff/updated" && notification.params.threadId !== this.sessionState.sessionId) {
+            this.recordChildTurnDiff(notification.params);
+        }
         await this.flushPendingErrors();
         await this.finishCompactionsForNotification(notification);
         const closingChildren = this.subagents.closingChildSessions(notification);
@@ -472,6 +537,20 @@ export class CodexEventHandler {
         this.disposed = true;
         this.turnDiffs.clear();
         this.oversizedTurnDiffs.clear();
+        this.childTurnDiffs.clear();
+    }
+
+    /** Subagent threads report their own turn diffs; the root turn's file-change report must include them. */
+    private recordChildTurnDiff(params: TurnDiffUpdatedNotification): void {
+        if (this.disposed || !this.collectTurnDiffs) return;
+        const key = `${params.threadId}\n${params.turnId}`;
+        // A child turn stays with the root turn it started under, even if its diff updates arrive later.
+        const rootTurnId = this.childTurnDiffs.get(key)?.rootTurnId
+            ?? this.sessionState.currentTurnId
+            ?? this.latestRootTurnId;
+        if (rootTurnId === null) return;
+        const oversized = Buffer.byteLength(params.diff, "utf8") > AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES;
+        this.childTurnDiffs.set(key, {rootTurnId, diff: oversized ? null : params.diff});
     }
 
     private async createUpdateEvent(notification: ServerNotification): Promise<UpdateSessionEvent | null> {
@@ -489,11 +568,15 @@ export class CodexEventHandler {
             case "item/plan/delta":
                 this.completeRetryIncidentOnTurnProgress();
                 return this.plans.delta(notification.params.itemId, notification.params.delta);
-            case "item/started":
+            case "item/started": {
                 this.completeRetryIncidentOnTurnProgress();
-                return await this.createItemEvent(notification.params);
+                const update = await this.createItemEvent(notification.params);
+                this.trackOpenToolCall(notification.params.item);
+                return update;
+            }
             case "item/completed":
                 this.completeRetryIncidentOnTurnProgress();
+                this.sessionState.openToolCalls.complete(notification.params.item.id);
                 return await this.completeItemEvent(notification.params);
             case "turn/plan/updated":
                 this.completeRetryIncidentOnTurnProgress();
@@ -517,18 +600,36 @@ export class CodexEventHandler {
             case "error":
                 return await this.createErrorEvent(notification.params);
             case "turn/started":
-                this.sessionState.currentTurnId = notification.params.turn.id;
+                this.sessionState.interruptTurnId = notification.params.turn.id;
+                // A review's child turn starts under its own id, while the review's items, errors and
+                // completion keep the parent id already set from the `review/start` response.
+                this.sessionState.currentTurnId ??= notification.params.turn.id;
                 await this.flushPendingErrors();
                 return null;
             case "turn/completed":
                 await this.plans.flush();
                 this.plans.clearTurn();
+                // Subagents can keep running after the root turn ends; their turns still belong to it.
+                this.latestRootTurnId = this.sessionState.currentTurnId ?? this.latestRootTurnId;
                 this.sessionState.currentTurnId = null;
+                this.sessionState.interruptTurnId = null;
+                if (this.session.protocolVersion === 2 && notification.params.turn.status === "failed") {
+                    for (const update of this.sessionState.openToolCalls.finishOutstanding()) {
+                        await this.session.update(update, this.subagents.notificationSessionId(notification));
+                    }
+                }
                 this.sessionState.toolCallReports.releaseOpen(this.subagents.notificationSessionId(notification));
+                // An item that missed its item/completed (e.g. dropped by a provider restart
+                // mid-turn) must not linger past its own turn and get failed by a later restart.
+                this.sessionState.openToolCalls.clear();
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);
             case "thread/name/updated":
+                if (isStaleAutomaticTitleEcho(this.sessionState, normalizeSessionTitle(notification.params.threadName))) {
+                    this.sessionState.titleGen?.observeRename();
+                    return null;
+                }
                 this.sessionState.sessionTitle = normalizeSessionTitle(notification.params.threadName);
                 this.sessionState.sessionTitleSource = notification.params.threadName == null
                     ? "unset"
@@ -560,7 +661,7 @@ export class CodexEventHandler {
             case "item/mcpToolCall/progress":
                 this.completeRetryIncidentOnTurnProgress();
                 // AIR does not show MCP progress.
-                if (this.renderer.capabilities.airClient) return null;
+                if (this.renderer.capabilities.airToolCallContract) return null;
                 return this.renderer.render(McpToolReporter.progress(
                     notification.params.itemId,
                     notification.params.message,
@@ -619,7 +720,13 @@ export class CodexEventHandler {
             case "account/gatewayOAuth/changed":
                 // Gateway login state is account-scoped and has no ACP session update counterpart.
                 return null;
+            case "skills/changed":
+                // The server lists the skills again and publishes the commands. The change itself is no update.
+                return null;
             // ignored events
+            // Read markers and predictions have no ACP session update counterpart.
+            case "thread/readState/changed":
+            case "thread/prediction/updated":
             case "thread/deleted":
             case "thread/reverted":
             case "thread/queue/changed":
@@ -655,7 +762,6 @@ export class CodexEventHandler {
             case "thread/realtime/closed":
             case "windowsSandbox/setupCompleted":
             case "account/login/completed":
-            case "skills/changed":
             case "mcpServer/oauthLogin/completed":
             case "externalAgentConfig/import/completed":
             case "rawResponseItem/completed":
@@ -772,7 +878,7 @@ export class CodexEventHandler {
             case "fileChange":
                 return this.renderer.render(FileChangeReporter.started(
                     event.item,
-                    this.sessionState.clientCapabilities.air.diffPatch,
+                    this.sessionState.clientCapabilities.diffPatchFormat,
                 ));
             case "commandExecution":
                 return this.renderer.render(this.commands.started(event.item));
@@ -907,6 +1013,12 @@ export class CodexEventHandler {
         );
     }
 
+    private trackOpenToolCall(item: ThreadItem): void {
+        if (!PLAIN_TOOL_CALL_ITEM_TYPES.has(item.type)) return;
+        const hasTerminal = item.type === "commandExecution" && commandUsesTerminal(item);
+        this.sessionState.openToolCalls.start(item.id, hasTerminal);
+    }
+
     private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {
         const plan: PlanEntry[] = event.plan.map(value => ({
                 status: value.status == "inProgress" ? "in_progress" : value.status,
@@ -977,6 +1089,9 @@ export class CodexEventHandler {
             this.failure = RequestError.internalError(
                 this.createTurnErrorData(params.error),
             );
+        }
+        if (this.failure !== null) {
+            failuresShownAsMessages.add(this.failure);
         }
         return createAgentTextMessageChunk(`${readableServiceErrorMessage(params.error.message)}\n\n`);
     }
@@ -1107,7 +1222,9 @@ export class CodexEventHandler {
         if (this.isAuthenticationRequiredError(error)) return "auth_required";
         if (this.getHttpStatusCode(error) === 429) return "rate_limited";
         if (typeof error === "string") {
-            return STRING_CODEX_ERROR_CATEGORIES[error] ?? "provider_error";
+            return Object.hasOwn(STRING_CODEX_ERROR_CATEGORIES, error)
+                ? STRING_CODEX_ERROR_CATEGORIES[error] ?? "provider_error"
+                : "provider_error";
         }
         if (error !== null) {
             for (const kind of Object.keys(STRUCTURED_CODEX_ERROR_CATEGORIES) as StructuredCodexErrorKind[]) {
@@ -1154,14 +1271,25 @@ export class CodexEventHandler {
     private handleTokenUsageUpdated(params: ThreadTokenUsageUpdatedNotification): void {
         this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
         this.sessionState.totalTokenUsage = toTokenCount(params.tokenUsage.total);
+        this.sessionState.promptTokenUsage?.observe(this.sessionState.totalTokenUsage, this.sessionState.lastTokenUsage);
         this.sessionState.modelContextWindow = params.tokenUsage.modelContextWindow;
     }
 
     private createUsageUpdate(params: ThreadTokenUsageUpdatedNotification): UpdateSessionEvent | null {
-        this.handleTokenUsageUpdated(params);
-
-        const used = this.sessionState.lastTokenUsage?.totalTokens;
-        const size = this.sessionState.modelContextWindow;
+        let used: number | undefined;
+        let size: number | null;
+        if (params.threadId === this.sessionState.sessionId) {
+            this.handleTokenUsageUpdated(params);
+            used = this.sessionState.lastTokenUsage?.totalTokens;
+            size = this.sessionState.modelContextWindow;
+        } else if (this.subagents.isNativeSubagentThread(params.threadId)) {
+            // The usage of a native subagent belongs to its own session, where handleNotification routes the
+            // update. It must not change the usage of this session or its turn.
+            used = params.tokenUsage.last.totalTokens;
+            size = params.tokenUsage.modelContextWindow;
+        } else {
+            return null;
+        }
         if (used == null || size == null || size <= 0) {
             return null;
         }
@@ -1199,6 +1327,25 @@ export class CodexEventHandler {
         });
     }
 
+}
+
+/**
+ * Items that Codex reports for the input of a turn, for other agents, or before a model request, rather than
+ * as output of its model. Codex starts a context compaction before its request, which can send the
+ * current usage again. When a compaction is the first request of a prompt on a thread with an unknown
+ * start total and nothing was sent again before it, its own usage is taken as the start total; that
+ * undercount is the lesser error compared with counting the history's last request.
+ */
+const NON_MODEL_OUTPUT_ITEM_TYPES: ReadonlySet<ThreadItem["type"]> = new Set([
+    "userMessage",
+    "hookPrompt",
+    "enteredReviewMode",
+    "subAgentActivity",
+    "contextCompaction",
+]);
+
+function isModelOutputItem(item: ThreadItem): boolean {
+    return !NON_MODEL_OUTPUT_ITEM_TYPES.has(item.type);
 }
 
 function toolCallTitle(update: UpdateSessionEvent | null | undefined): string | undefined {

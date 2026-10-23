@@ -2,7 +2,7 @@ import {StringDecoder} from "node:string_decoder";
 import {finished, Readable, Writable} from "node:stream";
 import {Emitter} from "vscode-jsonrpc/node";
 import type {DataCallback, Disposable, Message, MessageReader, MessageWriter, PartialMessageInfo} from "vscode-jsonrpc/node";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {logger} from "./Logger";
 
 //TODO ask to include proper jsonrpc field and remove
@@ -31,9 +31,15 @@ export function createJSONRPCWriter(writable: Writable): MessageWriter {
 }
 
 //TODO ask to include proper jsonrpc field and remove
-export function createJSONRPCReader(readable: Readable): MessageReader {
+export function createJSONRPCReader(readable: Readable): MessageReader & {deliver?: (message: Message) => void} {
+    let listener: DataCallback | null = null;
     return {
+        /** Hands `message` to the connection after the messages read so far. */
+        deliver(message: Message) {
+            listener?.(message);
+        },
         listen(callback: DataCallback): Disposable {
+            listener = callback;
             const onLine = (text: string) => {
                 const line = text.trim();
                 if (!line) return;

@@ -10,7 +10,7 @@ import type {CodexAcpServer} from "../../CodexAcpServer";
 import type {CodexAcpClient, SessionMetadata} from "../../CodexAcpClient";
 import type {McpStartupResult} from "../../mcp/McpStartupTracker";
 import type {TurnStartResponse} from "../../app-server/v2";
-import type {McpServer} from "@agentclientprotocol/sdk";
+import type {McpServer} from "@agentclientprotocol/sdk/unstable";
 
 const sessionId = "session-id";
 
@@ -564,6 +564,7 @@ function createTurnStartResponse(turnId: string): TurnStartResponse {
         turn: {
             id: turnId,
             items: [],
+            rootTurnId: null,
             itemsView: "notLoaded",
             status: "inProgress",
             error: null,
@@ -578,6 +579,7 @@ function createCompletedTurn(turnId: string): TurnStartResponse["turn"] {
     return {
         id: turnId,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded",
         status: "completed",
         error: null,

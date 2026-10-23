@@ -1,0 +1,60 @@
+[
+  {
+    "id": "gpt-5.4",
+    "model": "gpt-5.4",
+    "upgrade": null,
+    "upgradeInfo": null,
+    "availabilityNux": null,
+    "modelSpecialty": null,
+    "multiAgentVersion": null,
+    "availableAccessPrograms": null,
+    "displayName": "gpt-5.4",
+    "description": "gpt-5.4 model",
+    "hidden": false,
+    "supportedReasoningEfforts": [
+      {
+        "reasoningEffort": "medium",
+        "description": "Balanced"
+      }
+    ],
+    "defaultReasoningEffort": "medium",
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "supportsPersonality": false,
+    "additionalSpeedTiers": [],
+    "serviceTiers": [],
+    "defaultServiceTier": null,
+    "isDefault": true
+  },
+  {
+    "id": "mini",
+    "model": "gpt-5.4-mini",
+    "upgrade": null,
+    "upgradeInfo": null,
+    "availabilityNux": null,
+    "modelSpecialty": null,
+    "multiAgentVersion": null,
+    "availableAccessPrograms": null,
+    "displayName": "mini",
+    "description": "mini model",
+    "hidden": false,
+    "supportedReasoningEfforts": [
+      {
+        "reasoningEffort": "medium",
+        "description": "Balanced"
+      }
+    ],
+    "defaultReasoningEffort": "medium",
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "supportsPersonality": false,
+    "additionalSpeedTiers": [],
+    "serviceTiers": [],
+    "defaultServiceTier": null,
+    "isDefault": false
+  }
+]

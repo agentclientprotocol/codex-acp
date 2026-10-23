@@ -18,6 +18,38 @@ describe("service error messages", () => {
         },
     );
 
+    describe("encrypted content from another provider", () => {
+        const providerError = {
+            message: "The encrypted content for item rs_1 could not be verified. Reason: Encrypted content could not be decrypted or parsed.",
+            type: "invalid_request_error",
+            param: null,
+            code: "invalid_encrypted_content",
+        };
+
+        it.each([
+            ["the provider error", {error: providerError}],
+            ["the Codex service envelope", {type: "error", status: 400, error: providerError}],
+            ["a gateway error with the raw provider error", {
+                error: {message: "Provider returned error", code: 400, metadata: {raw: JSON.stringify({error: providerError}, null, 2)}},
+                user_id: "org_1",
+            }],
+            ["a gateway error with the provider error code", {
+                error: {message: "Provider returned error", code: 400, metadata: {provider_name: "Azure", is_byok: false, provider_error_code: "invalid_encrypted_content"}},
+            }],
+        ])("explains %s", async (_name, error) => {
+            await expect(readableServiceErrorMessage(JSON.stringify(error)))
+                .toMatchFileSnapshot("data/service-error-invalid-encrypted-content.txt");
+        });
+
+        it.each([
+            JSON.stringify({error: {...providerError, code: "other_code"}}),
+            JSON.stringify({error: {message: "Provider returned error", metadata: {raw: "{not json}"}}}),
+            JSON.stringify({error: {message: "Provider returned error", metadata: {raw: JSON.stringify({error: {code: "other_code"}})}}}),
+        ])("keeps other provider errors verbatim: %s", text => {
+            expect(readableServiceErrorMessage(text)).toBe(text);
+        });
+    });
+
     it.each([
         "Plain error text", "", "{not json}", "null", "[]", '"json string"',
         JSON.stringify({error: {message}}),

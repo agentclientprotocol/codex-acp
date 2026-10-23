@@ -1,4 +1,4 @@
-import type {SessionConfigOption} from "@agentclientprotocol/sdk";
+import type {SessionConfigOption} from "@agentclientprotocol/sdk/unstable";
 import type {ReasoningEffort} from "./app-server";
 import type {Model, ReasoningEffortOption} from "./app-server/v2";
 import {AIR_RECOMMENDED_CONFIG_VALUE_KEY, withAirMeta} from "./AirExtension";

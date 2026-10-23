@@ -42,7 +42,9 @@ describe("ACP session fork", () => {
             sessionId: "source-id",
             cwd: "/workspace",
             mcpServers: [],
-        });
+        }, expect.any(Function), expect.any(Function), undefined);
+        // Regression pin: v1 must keep sending `modes` (v2 drops it via `forkSessionV2`).
+        expect(response.modes).toBeDefined();
     });
 
     it("waits for MCP startup before completing session fork", async () => {

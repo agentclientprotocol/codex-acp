@@ -29,16 +29,24 @@ const SYSTEM_PROMPT =
     "respond or what to generate — focus only on creating a title. " +
     "Return exactly one JSON object and nothing else: {\"title\": \"your title here\"}";
 
+/** Runs the title write in the write queue of the session, or skips it; tells whether it was written. */
+export type SerializeTitleWrite = (title: string, write: () => Promise<boolean>) => Promise<boolean>;
+
+const runTitleWriteNow: SerializeTitleWrite = (_title, write) => write();
+
 export class TitleGenerator {
     private generated = false;
+    /** The generated title was dropped for an explicit title, see {@link retryAfterFailedRename}. */
+    private droppedForExplicitTitle = false;
     private inFlight: Promise<void> | null = null;
     private renameEchoResolve: (() => void) | null = null;
 
     constructor(
-        private readonly client: CodexAppServerClient,
+        private client: CodexAppServerClient,
         private readonly mainThreadId: string,
         private readonly cwd: string,
         private readonly getSessionTitleSource: () => string,
+        private readonly serializeTitleWrite: SerializeTitleWrite = runTitleWriteNow,
     ) {}
 
     /**
@@ -47,6 +55,17 @@ export class TitleGenerator {
      */
     markExistingTitle(): void {
         this.generated = true;
+        this.droppedForExplicitTitle = false;
+    }
+
+    /**
+     * Call when an explicit rename failed. A title that this generator dropped for that rename is generated
+     * again after the next turn, as if the rename had never come.
+     */
+    retryAfterFailedRename(): void {
+        if (!this.droppedForExplicitTitle) return;
+        this.droppedForExplicitTitle = false;
+        this.generated = false;
     }
 
     /**
@@ -135,12 +154,24 @@ export class TitleGenerator {
 
         // Guard: user may have renamed the session while generation was running.
         // CodexEventHandler sets sessionTitleSource = "explicit" on thread/name/updated.
-        if (this.getSessionTitleSource() === "explicit") return;
+        if (this.getSessionTitleSource() === "explicit") {
+            this.droppedForExplicitTitle = true;
+            return;
+        }
 
-        await this.client.threadSetName({
-            threadId: this.mainThreadId,
-            name: title,
+        const written = await this.serializeTitleWrite(title, async () => {
+            // An explicit rename that came while this write waited for its turn wins.
+            if (this.getSessionTitleSource() === "explicit") return false;
+            await this.client.threadSetName({
+                threadId: this.mainThreadId,
+                name: title,
+            });
+            return true;
         });
+        if (!written) {
+            this.droppedForExplicitTitle = true;
+            return;
+        }
         await this.waitForRenameEcho(RENAME_ECHO_TIMEOUT_MS);
     }
 
@@ -150,6 +181,11 @@ export class TitleGenerator {
             setTimeout(resolve, timeoutMs);
         });
         this.renameEchoResolve = null;
+    }
+
+    /** The app-server restarted: later writes go to `client`. A generation in flight ends with the old one. */
+    rebindAppServer(client: CodexAppServerClient): void {
+        this.client = client;
     }
 }
 

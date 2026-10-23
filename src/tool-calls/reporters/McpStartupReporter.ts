@@ -3,8 +3,15 @@ import type {McpStartupCompleteEvent} from "../../app-server/McpStartupCompleteE
 import {textContent} from "../AcpToolCallRenderer";
 import type {ToolFacts} from "../ToolFacts";
 
-/** Reports the MCP servers that failed to start. Each report is a new, failed tool call. */
+/** Reports the MCP servers that failed to start or were not started. Each report is a new, failed tool call. */
 export class McpStartupReporter {
+    static skipped(serverNames: string[]): ToolFacts[] {
+        return serverNames.map(server => failure(
+            server,
+            `[codex-acp] MCP server \`${server}\` was not started, because the Codex config already defines an MCP server with this name. Codex uses its own entry, or no server if that entry is disabled.`,
+        ));
+    }
+
     static failures(event: McpStartupCompleteEvent): ToolFacts[] {
         return [
             ...event.failed.map(server => failure(

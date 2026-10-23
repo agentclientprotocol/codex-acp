@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from "vitest";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import {AgentMode, MODE_CONFIG_ID} from "../../AgentMode";
 import {
@@ -286,7 +286,7 @@ describe("Session config options", () => {
         const appServer = fixture.getCodexAppServerClient();
         vi.spyOn(appServer, "listSkills").mockResolvedValue({data: []});
         const turn: Turn = {
-            id: "turn-id", items: [], itemsView: "notLoaded", status: "inProgress", error: null,
+            id: "turn-id", rootTurnId: null, items: [], itemsView: "notLoaded", status: "inProgress", error: null,
             startedAt: null, completedAt: null, durationMs: null,
         };
         const turnStart = vi.spyOn(appServer, "turnStart").mockResolvedValue({turn});

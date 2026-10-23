@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CodexAcpServer } from '../../CodexAcpServer';
-import * as acp from '@agentclientprotocol/sdk';
+import * as acp from '@agentclientprotocol/sdk/unstable';
 import { createMockConnections } from './test-utils';
 import {getCodexAuthMethods} from "../../CodexAuthMethod";
 import {CodexAcpClient} from "../../CodexAcpClient";
@@ -55,6 +55,7 @@ describe('CodexACPAgent - initialize', () => {
                     fork: {},
                     additionalDirectories: {},
                     subagents: {},
+                    systemPrompt: {},
                 },
                 mcpCapabilities: {
                     acp: false,
@@ -91,7 +92,7 @@ describe('CodexACPAgent - initialize', () => {
                         controlMethod: "_session/goal",
                         actions: ["set", "pause", "resume", "clear"],
                     },
-                    capabilities: ["sessionFailure", "diffPatch", "agentFileChangeReport", "nativeSubagentSessions", "asyncTasks", "recommendedValue", "rawInputRendering", "planContentDelta"],
+                    capabilities: ["sessionFailure", "diffPatch", "agentFileChangeReport", "customInstructions", "nativeSubagentSessions", "asyncTasks", "recommendedValue", "rawInputRendering", "planContentDelta", "codexHooks"],
                 },
             },
         });

@@ -29,7 +29,7 @@ export class SessionCostTracker {
     ): Cost | null {
         const delta = usageDelta(totalUsage, this.previousTotalUsage);
         this.previousTotalUsage = {...totalUsage};
-        if (!this.available || delta === null) {
+        if (!this.available || delta === null || delta.cacheWriteInputTokens > 0) {
             this.available = false;
             return null;
         }
@@ -77,6 +77,7 @@ function usageDelta(current: TokenCount, previous: TokenCount | null): TokenCoun
     if (
         current.totalTokens < previous.totalTokens
         || current.inputTokens < previous.inputTokens
+        || current.cacheWriteInputTokens < previous.cacheWriteInputTokens
         || current.cachedInputTokens < previous.cachedInputTokens
         || current.outputTokens < previous.outputTokens
         || current.reasoningOutputTokens < previous.reasoningOutputTokens
@@ -87,6 +88,7 @@ function usageDelta(current: TokenCount, previous: TokenCount | null): TokenCoun
         totalTokens: current.totalTokens - previous.totalTokens,
         inputTokens: current.inputTokens - previous.inputTokens,
         cachedInputTokens: current.cachedInputTokens - previous.cachedInputTokens,
+        cacheWriteInputTokens: current.cacheWriteInputTokens - previous.cacheWriteInputTokens,
         outputTokens: current.outputTokens - previous.outputTokens,
         reasoningOutputTokens: current.reasoningOutputTokens - previous.reasoningOutputTokens,
     };

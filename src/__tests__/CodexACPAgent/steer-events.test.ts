@@ -1,6 +1,6 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {createCodexMockTestFixture, createTestSessionState} from "../acp-test-utils";
 import type {SessionState} from "../../CodexAcpServer";
 import type {TurnCompletedNotification} from "../../app-server/v2";
@@ -10,6 +10,7 @@ function createTurn(id: string, status: "inProgress" | "completed" | "interrupte
     return {
         id,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded" as const,
         status,
         error: null,
@@ -67,10 +68,13 @@ describe('_session/steering', () => {
             prompt: [{type: "text", text: "also keep backward compatibility"}],
         })).resolves.toEqual({outcome: "injected"});
 
+        // Every steer mints a fresh `clientUserMessageId` (Codex-side param only; no ACP wire
+        // change on v1).
         expect(turnSteerSpy).toHaveBeenCalledWith({
             threadId: "session-id",
             expectedTurnId: "turn-id",
             input: [{type: "text", text: "also keep backward compatibility", text_elements: []}],
+            clientUserMessageId: expect.any(String),
         });
 
         turnCompleted.resolve({
@@ -181,6 +185,7 @@ describe('_session/steering', () => {
             threadId: "session-id",
             expectedTurnId: "new-turn-id",
             input: [{type: "text", text: "second late follow-up", text_elements: []}],
+            clientUserMessageId: expect.any(String),
         });
 
         turnCompleted.resolve({
