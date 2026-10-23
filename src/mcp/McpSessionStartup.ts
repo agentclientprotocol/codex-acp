@@ -8,8 +8,12 @@ import {settledWithin} from "../StdUtils";
 import {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
 import type {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 import {McpStartupReporter} from "../tool-calls/reporters/McpStartupReporter";
+import {listMcpServerStatus} from "./McpServerStatusList";
 import type {McpServerSignIn} from "./McpServerSignIn";
 import type {McpStartupResult} from "./McpStartupTracker";
+
+const CANCELLED_STATUS_RECHECK_INTERVAL_MS = 250;
+const CANCELLED_STATUS_RECHECK_DEADLINE_MS = 5_000;
 
 interface PendingMcpStartupSession {
     requestedServers: Set<string>;
@@ -143,12 +147,32 @@ export class McpSessionStartup {
         }
 
         try {
-            const mcpStartup = await pendingStartup.startup;
+            let mcpStartup = await pendingStartup.startup;
             if (!this.isSessionOpen(sessionId)
                 || this.pendingSessions.get(sessionId) !== pendingStartup) {
                 return;
             }
-            await this.publish(sessionId, mcpStartup, pendingStartup);
+            if (mcpStartup.cancelled.length === 0) {
+                await this.publish(sessionId, mcpStartup, pendingStartup);
+            } else {
+                const reconciled = this.reconcileCancelled(sessionId, mcpStartup, pendingStartup);
+                await this.publish(sessionId, {...mcpStartup, cancelled: []}, pendingStartup);
+                if (!this.isSessionOpen(sessionId)
+                    || this.pendingSessions.get(sessionId) !== pendingStartup) {
+                    return;
+                }
+                mcpStartup = await reconciled;
+                if (!this.isSessionOpen(sessionId)
+                    || this.pendingSessions.get(sessionId) !== pendingStartup) {
+                    return;
+                }
+                await this.publish(
+                    sessionId,
+                    {ready: [], failed: [], cancelled: mcpStartup.cancelled},
+                    pendingStartup,
+                    [],
+                );
+            }
         } catch (err) {
             if (!pendingStartup.abort.signal.aborted) {
                 logger.error(`Failed to publish MCP startup status for session ${sessionId}`, err);
@@ -158,10 +182,87 @@ export class McpSessionStartup {
         }
     }
 
+    /**
+     * Codex can transiently report a server as cancelled while its connection is still settling.
+     * Recheck only those names through the read-only, thread-scoped status API. A result counts only
+     * when every page completed before the deadline; each poll replaces the previous snapshot.
+     */
+    private async reconcileCancelled(
+        sessionId: string,
+        startup: McpStartupResult,
+        pendingStartup: PendingMcpStartupSession,
+    ): Promise<McpStartupResult> {
+        const {signal} = pendingStartup.abort;
+        const cancelled = new Set(startup.cancelled);
+        const deadline = Date.now() + CANCELLED_STATUS_RECHECK_DEADLINE_MS;
+        let latestConnected: Set<string> | null = null;
+
+        while (!signal.aborted) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) {
+                break;
+            }
+
+            const attempt = new AbortController();
+            const onAbort = () => attempt.abort(signal.reason);
+            signal.addEventListener("abort", onAbort, {once: true});
+            const timer = setTimeout(
+                () => attempt.abort(new Error("MCP server status reconciliation timed out")),
+                remaining,
+            );
+            try {
+                const statuses = await waitForAbort(
+                    this.runWithProcessCheck(() => listMcpServerStatus(
+                        this.codexAcpClient(),
+                        sessionId,
+                        {signal: attempt.signal, requireComplete: true},
+                    )),
+                    attempt.signal,
+                );
+                latestConnected = new Set(statuses
+                    .filter(status => cancelled.has(status.name) && status.runtimeStatus === "connected")
+                    .map(status => status.name));
+                if (latestConnected.size === cancelled.size) {
+                    break;
+                }
+            } catch {
+                if (signal.aborted) {
+                    return startup;
+                }
+                // A read that crosses the deadline is incomplete, so no earlier snapshot is current enough.
+                if (Date.now() >= deadline) {
+                    return startup;
+                }
+                latestConnected = null;
+            } finally {
+                clearTimeout(timer);
+                signal.removeEventListener("abort", onAbort);
+            }
+
+            const wait = Math.min(CANCELLED_STATUS_RECHECK_INTERVAL_MS, deadline - Date.now());
+            if (wait > 0) {
+                try {
+                    await waitForAbort(new Promise<void>(resolve => setTimeout(resolve, wait)), signal);
+                } catch {
+                    return startup;
+                }
+            }
+        }
+
+        if (latestConnected === null) {
+            return startup;
+        }
+        return {
+            ...startup,
+            cancelled: startup.cancelled.filter(server => !latestConnected.has(server)),
+        };
+    }
+
     private async publish(
         sessionId: string,
         mcpStartup: McpStartupResult,
         pendingStartup: PendingMcpStartupSession,
+        skippedServersOverride?: Array<string>,
     ): Promise<void> {
         const {requestedServers, skippedServers, abort: {signal}} = pendingStartup;
         const filteredStartup = {
@@ -188,7 +289,7 @@ export class McpSessionStartup {
 
         const renderer = new AcpToolCallRenderer(this.capabilities());
         for (const facts of [
-            ...McpStartupReporter.skipped(skippedServers),
+            ...McpStartupReporter.skipped(skippedServersOverride ?? skippedServers),
             ...McpStartupReporter.failures({
                 ...filteredStartup,
                 ready: readyAfterOauth,
@@ -201,6 +302,24 @@ export class McpSessionStartup {
             });
         }
     }
+}
+
+async function waitForAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+    signal.throwIfAborted();
+    return await new Promise<T>((resolve, reject) => {
+        const onAbort = () => reject(signal.reason);
+        signal.addEventListener("abort", onAbort, {once: true});
+        void promise.then(
+            value => {
+                signal.removeEventListener("abort", onAbort);
+                resolve(value);
+            },
+            error => {
+                signal.removeEventListener("abort", onAbort);
+                reject(error);
+            },
+        );
+    });
 }
 
 export function getRequestedMcpServerNames(mcpServers: Array<AcpMcpServer>): Array<string> {

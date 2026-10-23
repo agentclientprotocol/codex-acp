@@ -137,6 +137,10 @@ async function runInWorkspace(
         failed: (scenario.mcpStartup?.failed ?? []).map(failure => ({...failure, failureReason: null})),
         cancelled: scenario.mcpStartup?.cancelled ?? [],
     });
+    anyClient.listMcpServers = vi.fn().mockResolvedValue({
+        data: (scenario.mcpStartup?.cancelled ?? []).map(name => ({name, runtimeStatus: "cancelled"})),
+        nextCursor: null,
+    });
     anyAppServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
     anyAppServer.threadBackgroundTerminalsList = vi.fn().mockResolvedValue({data: [], nextCursor: null});
     anyAppServer.threadResume = vi.fn().mockResolvedValue({
@@ -162,9 +166,16 @@ async function runInWorkspace(
         return [...recorded, ...collect(fixture.getAcpConnectionEvents([]))];
     }
 
+    if ((scenario.mcpStartup?.cancelled.length ?? 0) > 0) {
+        vi.useFakeTimers();
+    }
     const newSessionResponse = await agent.newSession({cwd: workspace, mcpServers});
     recorded.push({direction: "response", method: "session/new", params: newSessionResponse});
     if (scenario.mcpStartup !== undefined) {
+        if (scenario.mcpStartup.cancelled.length > 0) {
+            await vi.advanceTimersByTimeAsync(5_000);
+            vi.useRealTimers();
+        }
         await vi.waitFor(() => {
             const events = fixture.getAcpConnectionEvents([]);
             const count = events.filter(event => JSON.stringify(event).includes("mcp_startup")).length;
