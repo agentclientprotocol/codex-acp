@@ -20,6 +20,7 @@ function server(overrides: Partial<McpServerStatus> & {name: string}): McpServer
         serverCapabilities: null,
         tools: {},
         toolsError: null,
+        toolListMeta: null,
         resources: [],
         resourceTemplates: [],
         authStatus: "unsupported",

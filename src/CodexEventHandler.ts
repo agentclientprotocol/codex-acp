@@ -152,11 +152,9 @@ type KeysOfUnion<T> = T extends unknown ? keyof T : never;
 type StructuredCodexErrorKind = KeysOfUnion<StructuredCodexErrorInfo>;
 
 /**
- * Exhaustive against the generated app-server union: a schema update cannot silently fall through
- * to provider_error. The runtime lookup still has a fallback for a newer app-server talking to an
- * older codex-acp build.
+ * Known error codes map to ACP categories; extensible upstream codes fall back to provider_error.
  */
-const STRING_CODEX_ERROR_CATEGORIES = {
+const STRING_CODEX_ERROR_CATEGORIES: Partial<Record<StringCodexErrorInfo, CodexFailureKind>> = {
     contextWindowExceeded: "context_exhausted",
     sessionBudgetExceeded: "budget_exhausted",
     usageLimitExceeded: "quota_exhausted",
@@ -174,7 +172,7 @@ const STRING_CODEX_ERROR_CATEGORIES = {
     other: "provider_error",
 } satisfies Record<StringCodexErrorInfo, CodexFailureKind>;
 
-const STRUCTURED_CODEX_ERROR_CATEGORIES = {
+const STRUCTURED_CODEX_ERROR_CATEGORIES: Partial<Record<StructuredCodexErrorKind, CodexFailureKind>> = {
     httpConnectionFailed: "transport_lost",
     responseStreamConnectionFailed: "transport_lost",
     responseStreamDisconnected: "transport_lost",
@@ -726,6 +724,9 @@ export class CodexEventHandler {
                 // The server lists the skills again and publishes the commands. The change itself is no update.
                 return null;
             // ignored events
+            // Read markers and predictions have no ACP session update counterpart.
+            case "thread/readState/changed":
+            case "thread/prediction/updated":
             case "thread/deleted":
             case "thread/reverted":
             case "thread/queue/changed":
@@ -1221,7 +1222,9 @@ export class CodexEventHandler {
         if (this.isAuthenticationRequiredError(error)) return "auth_required";
         if (this.getHttpStatusCode(error) === 429) return "rate_limited";
         if (typeof error === "string") {
-            return STRING_CODEX_ERROR_CATEGORIES[error] ?? "provider_error";
+            return Object.hasOwn(STRING_CODEX_ERROR_CATEGORIES, error)
+                ? STRING_CODEX_ERROR_CATEGORIES[error] ?? "provider_error"
+                : "provider_error";
         }
         if (error !== null) {
             for (const kind of Object.keys(STRUCTURED_CODEX_ERROR_CATEGORIES) as StructuredCodexErrorKind[]) {

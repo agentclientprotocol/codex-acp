@@ -400,6 +400,7 @@ describe('Session lifecycle over ACP v2', () => {
     /** A turn with a prompt-inserted user message, a legacy one, an agent message and a tool call. */
     const replayTurns: Thread["turns"] = [{
         id: "turn-1",
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,

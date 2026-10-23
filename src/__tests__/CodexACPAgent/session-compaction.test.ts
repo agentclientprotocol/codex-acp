@@ -492,6 +492,8 @@ async function createNativeChildFixture() {
                 startedAtMs: 0,
                 item: {
                     type: "subAgentActivity",
+                    model: null,
+                    reasoningEffort: null,
                     id: "activity-compaction-child",
                     kind: "started",
                     agentThreadId: childSessionId,
@@ -526,6 +528,8 @@ function nativeChildActivityStarted(threadId: string): ServerNotification {
             startedAtMs: 0,
             item: {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: `activity-${threadId}`,
                 kind: "started",
                 agentThreadId: threadId,
@@ -578,6 +582,7 @@ function createTurn(status: Turn["status"]): Turn {
     return {
         id: turnId,
         items: [],
+        rootTurnId: null,
         itemsView: "full",
         status,
         error: null,

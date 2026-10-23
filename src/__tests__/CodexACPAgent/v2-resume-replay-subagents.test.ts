@@ -58,6 +58,7 @@ function createThread(id: string, overrides?: Partial<Thread>): Thread {
 const rootTurns: Thread["turns"] = [
     {
         id: "root-turn-1",
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,
@@ -65,8 +66,8 @@ const rootTurns: Thread["turns"] = [
         completedAt: null,
         durationMs: null,
         items: [
-            {type: "subAgentActivity", id: "activity-started", kind: "started", agentThreadId: childId, agentPath: `/${rootId}/researcher`},
-            {type: "subAgentActivity", id: "activity-completed", kind: "completed", agentThreadId: childId, agentPath: `/${rootId}/researcher`},
+            {type: "subAgentActivity", model: null, reasoningEffort: null, id: "activity-started", kind: "started", agentThreadId: childId, agentPath: `/${rootId}/researcher`},
+            {type: "subAgentActivity", model: null, reasoningEffort: null, id: "activity-completed", kind: "completed", agentThreadId: childId, agentPath: `/${rootId}/researcher`},
         ],
     },
 ];
@@ -75,6 +76,7 @@ const rootTurns: Thread["turns"] = [
 const childTurns: Thread["turns"] = [
     {
         id: "child-turn-1",
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,
@@ -239,6 +241,7 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
     it('replays a follow-up turn of a finished child as a new generation', async () => {
         const turn = (id: string, items: Thread["turns"][number]["items"]): Thread["turns"][number] => ({
             id,
+            rootTurnId: null,
             itemsView: "full",
             status: "completed",
             error: null,
@@ -249,6 +252,8 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
         });
         const activity = (id: string, kind: "started" | "interacted" | "completed") => ({
             type: "subAgentActivity" as const,
+            model: null,
+            reasoningEffort: null,
             id,
             kind,
             agentThreadId: childId,

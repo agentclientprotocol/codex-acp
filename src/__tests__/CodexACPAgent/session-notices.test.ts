@@ -128,6 +128,8 @@ describe("session notices", () => {
                 startedAtMs: 0,
                 item: {
                     type: "subAgentActivity",
+                    model: null,
+                    reasoningEffort: null,
                     id: "notice-child-activity",
                     kind: "started",
                     agentThreadId: childSessionId,
@@ -257,7 +259,7 @@ function modelRerouted(threadId: string): ServerNotification {
 }
 
 function createTurn(status: Turn["status"]): Turn {
-    return {id: turnId, items: [], itemsView: "full", status, error: null, startedAt: null, completedAt: null, durationMs: null};
+    return {id: turnId, rootTurnId: null, items: [], itemsView: "full", status, error: null, startedAt: null, completedAt: null, durationMs: null};
 }
 
 function createThread(): Thread {
