@@ -1,0 +1,74 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "title": "Worker",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "content": {
+        "text": "Retained answer",
+        "type": "text"
+      },
+      "messageId": "historical-message",
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "state": "running"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "content": {
+        "text": "Live after restore",
+        "type": "text"
+      },
+      "messageId": "live-message",
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "state": "requires_action"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "stopReason": "end_turn",
+        "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  }
+]

@@ -1,0 +1,70 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "title": "Worker",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "terminalId": "child-command",
+      "command": "sleep 12",
+      "cwd": "/workspace",
+      "sessionUpdate": "terminal_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "toolCallId": "child-command",
+      "title": "sleep 12",
+      "kind": "execute",
+      "status": "completed",
+      "content": [
+        {
+          "terminalId": "child-command",
+          "type": "terminal"
+        }
+      ],
+      "rawInput": {
+        "command": "sleep 12",
+        "cwd": "/workspace"
+      },
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "terminalId": "child-command",
+      "exitStatus": {
+        "exitCode": 0,
+        "signal": null
+      },
+      "sessionUpdate": "terminal_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "stopReason": "end_turn",
+      "state": "idle",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "stopReason": "end_turn",
+        "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  }
+]

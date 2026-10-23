@@ -1,0 +1,31 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:coordinator",
+      "description": "Delegate",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:coordinator",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "description": "Delegate",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "content": {
+        "text": "Nested historical answer",
+        "type": "text"
+      },
+      "messageId": "historical-message",
+      "sessionUpdate": "agent_message_chunk"
+    }
+  }
+]

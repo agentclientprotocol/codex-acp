@@ -49,6 +49,18 @@ export class CommandReporter {
         return startFacts(item);
     }
 
+    /** Replay seeds missing classification without forgetting output that already streamed live. */
+    restore(item: CommandItem): void {
+        if (item.status === "inProgress") {
+            if (!this.terminalCommands.has(item.id) && !this.nonTerminalCommands.has(item.id)) this.started(item);
+        } else {
+            this.nonTerminalCommands.delete(item.id);
+            this.terminalCommands.delete(item.id);
+            this.streamedCommands.delete(item.id);
+            this.standardStreamedCommands.delete(item.id);
+        }
+    }
+
     /** A chunk of command output. AIR gets the output of a read, search or list command at the end. */
     outputDelta(itemId: string, delta: string): ToolFacts {
         if (delta.length > 0) this.standardStreamedCommands.add(itemId);

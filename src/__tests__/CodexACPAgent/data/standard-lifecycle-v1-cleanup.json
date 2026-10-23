@@ -1,0 +1,37 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "title": "Worker",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "toolCallId": "child-command",
+      "status": "failed",
+      "_meta": {
+        "terminal_exit": {
+          "exit_code": null,
+          "signal": null,
+          "terminal_id": "child-command"
+        }
+      },
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "stopReason": "end_turn",
+        "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  }
+]

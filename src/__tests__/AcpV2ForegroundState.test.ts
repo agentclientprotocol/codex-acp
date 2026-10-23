@@ -15,6 +15,19 @@ function fixture() {
 }
 
 describe("ACP v2 aggregate foreground state", () => {
+    it("invalidates old interaction waits when observability is lost", async () => {
+        const {foreground, updates} = fixture();
+        await foreground.start();
+        const wait = deferred();
+        const action = foreground.withUserAction(undefined, () => wait.promise);
+        await foreground.snapshot();
+        await foreground.update({state: "unknown"});
+        wait.resolve();
+        await action;
+        await foreground.snapshot();
+        await expect(JSON.stringify(updates, null, 2)).toMatchFileSnapshot("data/foreground-v2-unknown-late-answer.json");
+    });
+
     it("keeps running while another tool can progress, then tracks which waits still block", async () => {
         const {foreground, updates} = fixture();
         await foreground.start();

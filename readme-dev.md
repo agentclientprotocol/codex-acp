@@ -183,6 +183,47 @@ turn. Item completion still reports compaction progress, but does not release th
 The v1 prompt response and v2 idle state wait for the turn to finish; v2's early prompt-acceptance
 response is unchanged.
 
+#### Standard subagent sessions
+
+Non-AIR v1 clients opt in with `clientCapabilities.subagents: {}`. On v2, standard subagent
+sessions need no feature marker. AIR retains its existing private opt-in, fallback, updates, and
+generation-based identities; a connection receives one contract, not both. The v1 marker used by
+older AIR clients also keeps that existing behavior.
+
+Standard `subagent_update` associations appear in the immediate parent's session before any child
+traffic. A child keeps its opaque ACP session ID across delegations, idle work, and replay.
+Nested children are not flattened under the root; traffic without sufficient parentage is buffered
+until the ancestor chain is known. Forked histories get a separate child identity namespace.
+
+Work state is independent of conversation lifetime. An observed work ending reports `idle` with
+its stop reason, not a permanently completed child. Lost observability reports `unknown`, not a
+fabricated failure. On v2, the same state also appears on the child's own `state_update` stream.
+Child work, plans, permissions, and elicitation can outlive the parent's foreground prompt.
+Child item-rendering state is conversation-owned too, so a new parent prompt does not reset
+an active child's terminal or streamed item tracking.
+Child Markdown plans use completed snapshots rather than interim draft deltas.
+Parent cancellation interrupts observed descendant work and withdraws child interactions; late
+answers cannot restart finished work. Closing or replacing the runtime invalidates those scopes.
+
+Children initially advertise empty capabilities. Client-initiated prompts, load/resume/fork,
+cancel, close/delete, configuration changes, and private session mutations are not enabled.
+Responding to child-scoped Agent-to-Client requests is still allowed. Replayed associations and
+transcripts do not grant controls or confirm current activity; overlapping completed items are
+deduplicated and fresh work snapshots follow the replay response. A copied history alone never
+authorizes interrupting the original child runtime.
+Restored child routes require provider-confirmed parentage through the verified ancestor chain.
+Only already-loaded runtimes are rejoined; inactive owned children are not loaded just for replay,
+but their routes can receive later live work. Foreign or unverified fork descendants stay history-only.
+Child history uses the same traversal for both Codex spawn formats and reconciles completed
+items with live tool tracking before suppressing overlapping notifications.
+Load/resume attachment operations for the same standard parent are serialized. Fresh child
+traffic follows the actual response write, including when the response is part of a batch;
+overlapping attachments publish after the latest setup's response rather than interleaving
+with its replay. Close and cancel remain independent, and a close invalidates queued setups.
+
+Dedicated `session_message` reporting and optional child controls remain follow-ups. Ordinary
+runtime tool reports remain available for operations such as waiting and follow-up tasks.
+
 #### AIR v2 client contract
 
 These are behaviors the AIR (JetBrains) ACP client relies on that aren't obvious from the wire
@@ -203,7 +244,7 @@ schema alone:
   channel. The same `_meta` v1 attaches to `PromptResponse` is copied onto the v2 idle update.
 - Custom session updates are renamed on v2: `subagent_spawned`/`subagent_state_update` become a
   single `_subagent_update` (gated on the AIR `nativeSubagentSessions` capability; this contract is
-  retained until the adapter migrates to the standard subagent model), and
+  retained independently of standard subagent sessions), and
   `async_task_spawned`/`async_task_state_update` become `_async_task_spawned`/`_async_task_state_update`
   (gated on the AIR `asyncTasks` capability). Payload shapes are unchanged.
 - Foreground state is independent of prompt acceptance. `running` can precede the user-message

@@ -5,9 +5,11 @@ import type {
 import {
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     clientSupportsAirCapability,
+    isAirClient,
 } from "../AirExtension";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 
-/** Temporary typed surface for agentclientprotocol/agent-client-protocol#1992. */
+/** AIR's existing private contract, retained independently of standard subagent sessions. */
 export type SubagentSessionCapabilities = {
     cancel?: boolean;
     close?: boolean;
@@ -36,15 +38,26 @@ export type SubagentAwareSessionCapabilities = SessionCapabilities & {
     subagents?: Record<string, never>;
 };
 
-export function clientSupportsSubagents(
+export type SubagentProtocol = "hidden" | "air" | "standard";
+
+/** Standard snapshots share their wire shape across versions; controls remain deliberately empty. */
+export type StandardSubagentUpdate = Omit<acpV2.SubagentUpdate, "capabilities"> & {
+    sessionUpdate: "subagent_update";
+    capabilities?: Record<string, never>;
+};
+
+export function subagentProtocol(
     capabilities?: ClientCapabilities | null,
-): boolean {
+    version: 1 | 2 = 1,
+): SubagentProtocol {
     const subagents = (
         capabilities as (ClientCapabilities & { subagents?: unknown }) | null | undefined
     )?.subagents;
-    if (typeof subagents === "object" && subagents !== null && !Array.isArray(subagents)) {
-        return true;
-    }
-
-    return clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY);
+    const standard = typeof subagents === "object" && subagents !== null && !Array.isArray(subagents);
+    const air = isAirClient(capabilities);
+    if (clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY)
+        || (version === 1 && air && standard)) return "air";
+    // AIR keeps its existing opt-in and fallback until its client migrates to the standard contract.
+    if (air) return "hidden";
+    return version === 2 || standard ? "standard" : "hidden";
 }

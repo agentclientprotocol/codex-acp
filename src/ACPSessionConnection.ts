@@ -248,6 +248,19 @@ export class ACPSessionConnection {
         await this.v2Connection.updateState(this.sessionId, state);
     }
 
+    /** Standard children carry one state snapshot on their own v2 stream and their parent's roster. */
+    async updateSubagentState(childSessionId: string, parentSessionId: string, state: acpV2.StateUpdate): Promise<void> {
+        if (this.v2Connection) {
+            await this.v2Connection.client.notify(acpV2.methods.client.session.update, {
+                sessionId: childSessionId, update: {sessionUpdate: "state_update", ...state},
+            });
+        }
+        await this.update({sessionUpdate: "subagent_update", sessionId: childSessionId, state}, parentSessionId);
+    }
+
+    forSession(sessionId: string): ACPSessionConnection {
+        return new ACPSessionConnection(this.connection, sessionId);
+    }
     /** `startReplayMessage`, which only exists on v2 and so needs no v1 shape. */
     async startReplayMessage(kind: ReplayMessageKind, messageId: string): Promise<void> {
         if (!this.v2Connection) {

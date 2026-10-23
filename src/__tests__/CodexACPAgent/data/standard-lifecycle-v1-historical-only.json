@@ -1,0 +1,22 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "description": "Delegate",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "content": {
+        "text": "Historical only",
+        "type": "text"
+      },
+      "messageId": "historical-message",
+      "sessionUpdate": "agent_message_chunk"
+    }
+  }
+]

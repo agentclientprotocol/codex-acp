@@ -1,0 +1,6 @@
+{
+  "status": 500,
+  "body": "mock: response handler failed",
+  "nextStatus": 200,
+  "nextBody": "Next scripted response"
+}

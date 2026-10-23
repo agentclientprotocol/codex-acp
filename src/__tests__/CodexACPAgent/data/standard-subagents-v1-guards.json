@@ -1,0 +1,50 @@
+[
+  {
+    "method": "session/prompt",
+    "code": -32600
+  },
+  {
+    "method": "session/resume",
+    "code": -32600
+  },
+  {
+    "method": "session/fork",
+    "code": -32600
+  },
+  {
+    "method": "session/close",
+    "code": -32600
+  },
+  {
+    "method": "session/delete",
+    "code": -32600
+  },
+  {
+    "method": "session/set_config_option",
+    "code": -32600
+  },
+  {
+    "method": "_session/steering",
+    "code": -32600
+  },
+  {
+    "method": "_session/goal",
+    "code": -32600
+  },
+  {
+    "method": "_session/async_task/stop",
+    "code": -32600
+  },
+  {
+    "method": "_session/rename",
+    "code": -32600
+  },
+  {
+    "method": "_session/archive",
+    "code": -32600
+  },
+  {
+    "method": "_session/unarchive",
+    "code": -32600
+  }
+]

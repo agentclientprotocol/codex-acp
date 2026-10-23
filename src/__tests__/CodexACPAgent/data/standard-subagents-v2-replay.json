@@ -1,0 +1,49 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "title": "Worker",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "persisted-reply",
+      "content": [],
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "persisted-reply",
+      "content": {
+        "text": "Historical result",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "second-reply",
+      "content": [],
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "second-reply",
+      "content": {
+        "text": "Historical follow-up",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  }
+]

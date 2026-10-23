@@ -120,8 +120,9 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
                 ...(content !== undefined ? {content: content && content.map(toV2ToolCallContent)} : {}),
             };
         }
-        // Preserve AIR's existing subagent contract. The standard schema uses different fields
-        // and work states; that migration is separate. The AIR capability gate already ran upstream.
+        case "subagent_update":
+            return update;
+        // AIR's existing private contract is selected independently upstream.
         case "subagent_spawned": {
             const {subagentSessionId, name, task, _meta} = update;
             return {

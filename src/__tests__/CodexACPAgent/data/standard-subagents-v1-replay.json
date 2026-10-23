@@ -1,0 +1,33 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "title": "Worker",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "content": {
+        "text": "Historical result",
+        "type": "text"
+      },
+      "messageId": "persisted-reply",
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "content": {
+        "text": "Historical follow-up",
+        "type": "text"
+      },
+      "messageId": "second-reply",
+      "sessionUpdate": "agent_message_chunk"
+    }
+  }
+]

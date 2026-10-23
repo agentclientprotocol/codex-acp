@@ -1,0 +1,48 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:coordinator",
+      "title": "Coordinator",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:coordinator",
+    "update": {
+      "sessionId": "thread-1:subagent:nested",
+      "title": "Nested",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:nested",
+    "update": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:coordinator",
+    "update": {
+      "sessionId": "thread-1:subagent:nested",
+      "state": {
+        "state": "running"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:nested",
+    "update": {
+      "messageId": "nested-message",
+      "content": {
+        "text": "Nested result",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  }
+]

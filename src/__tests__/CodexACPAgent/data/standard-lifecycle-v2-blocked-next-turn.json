@@ -1,0 +1,57 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "title": "Worker",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "terminalId": "during-replay",
+      "command": "sleep 12",
+      "cwd": "/workspace",
+      "sessionUpdate": "terminal_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "toolCallId": "during-replay",
+      "title": "sleep 12",
+      "kind": "execute",
+      "status": "in_progress",
+      "content": [
+        {
+          "terminalId": "during-replay",
+          "type": "terminal"
+        }
+      ],
+      "rawInput": {
+        "command": "sleep 12",
+        "cwd": "/workspace"
+      },
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "state": "requires_action",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "state": "requires_action"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  }
+]

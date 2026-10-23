@@ -32,6 +32,7 @@ import {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
 import {CommandReporter} from "../tool-calls/reporters/CommandReporter";
 import {FileChangeReporter} from "../tool-calls/reporters/FileChangeReporter";
 import {SandboxPermissionReporter} from "../tool-calls/reporters/SandboxPermissionReporter";
+import {subagentInteractionSignal, withSubagentUserAction} from "../subagents/SubagentInteraction";
 
 export class CodexApprovalHandler implements ApprovalHandler {
     constructor(
@@ -123,11 +124,12 @@ export class CodexApprovalHandler implements ApprovalHandler {
     }
 
     private requestPermission(request: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse> {
-        return this.connection.request(
+        const signal = subagentInteractionSignal(request.sessionId, this.cancellationSignal);
+        return withSubagentUserAction(request.sessionId, () => this.connection.request(
             acp.methods.client.session.requestPermission,
             request,
-            this.cancellationSignal ? {cancellationSignal: this.cancellationSignal} : undefined,
-        );
+            signal ? {cancellationSignal: signal} : undefined,
+        ), request.toolCall.toolCallId);
     }
 
     private selectedDecision<T>(response: acp.RequestPermissionResponse, decisions: DecisionOption<T>[]): T | undefined {
