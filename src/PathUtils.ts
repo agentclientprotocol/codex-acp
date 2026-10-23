@@ -2,7 +2,9 @@ import path from "node:path";
 
 export function isAbsolutePathLike(value: string): boolean {
     const trimmed = value.trim();
-    return path.isAbsolute(trimmed) || isWindowsAbsolutePath(trimmed);
+    return path.isAbsolute(trimmed)
+        || isWindowsAbsolutePath(trimmed)
+        || isWslWindowsMountPath(trimmed);
 }
 
 export function arePathsEqual(left: string, right: string): boolean {
@@ -29,6 +31,11 @@ export function normalizePathForComparison(value: string): string {
         return trimTrailingPathSeparators(normalized).toLowerCase();
     }
 
+    if (isWslWindowsMountPath(trimmed)) {
+        const normalized = path.posix.normalize(trimmed);
+        return trimTrailingPathSeparators(normalized).toLowerCase();
+    }
+
     const pathForComparison = path.isAbsolute(trimmed)
         ? trimmed
         : trimmed.replace(/\\/g, "/");
@@ -41,8 +48,15 @@ function isWindowsAbsolutePath(value: string): boolean {
     return /^[A-Za-z]:\//.test(portableValue) || /^\/\/[^/]+\/[^/]+/.test(portableValue);
 }
 
+function isWslWindowsMountPath(value: string): boolean {
+    return /^\/mnt\/[A-Za-z](?:\/|$)/.test(value);
+}
+
 function shouldComparePathCaseInsensitive(value: string): boolean {
-    return isWindowsAbsolutePath(value) || /^[A-Za-z]:/.test(value) || value.includes("\\");
+    return isWindowsAbsolutePath(value)
+        || isWslWindowsMountPath(value)
+        || /^[A-Za-z]:/.test(value)
+        || value.includes("\\");
 }
 
 function trimTrailingPathSeparators(value: string): string {
