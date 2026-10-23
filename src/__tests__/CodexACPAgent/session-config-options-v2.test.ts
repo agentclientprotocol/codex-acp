@@ -7,7 +7,7 @@ import {AgentMode, MODE_CONFIG_ID} from '../../AgentMode';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
-import {FAST_MODE_CONFIG_ID} from '../../FastModeConfig';
+import {FAST_MODE_CONFIG_ID, modelSupportsFast} from '../../FastModeConfig';
 import type {ReasoningEffortOption} from '../../app-server/v2';
 import {createTestModel, createTestSessionState} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
@@ -21,7 +21,7 @@ function createSessionState() {
         displayName: "Fast model",
         description: "Frontier",
         supportedReasoningEfforts: [lowEffort, mediumEffort],
-        additionalSpeedTiers: ["fast"],
+        serviceTiers: [{id: "priority", name: "Fast", description: "Priority processing"}],
     });
     const slow = createTestModel({id: "slow-model", displayName: "Slow model", isDefault: false});
     return createTestSessionState({
@@ -29,7 +29,7 @@ function createSessionState() {
         currentModelId: "fast-model[medium]",
         availableModels: [fast, slow],
         supportedReasoningEfforts: [lowEffort, mediumEffort],
-        currentModelSupportsFast: true,
+        currentModelSupportsFast: modelSupportsFast(fast),
     });
 }
 
