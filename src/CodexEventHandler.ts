@@ -231,6 +231,8 @@ export class CodexEventHandler {
     private readonly plans: CodexPlanStream;
     private disposed = false;
     private readonly seenReasoningDeltaItemIds = new Set<string>();
+    private readonly completedAsyncMessages = new Set<string>();
+    private readonly streamedMessages = new Set<string>();
     private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly turnDiffs = new Map<string, string>();
     private readonly oversizedTurnDiffs = new Set<string>();
@@ -253,6 +255,7 @@ export class CodexEventHandler {
         collectTurnDiffs: boolean,
         private readonly supportsCompaction: boolean,
         private readonly supportsNotices: boolean,
+        private readonly onAsyncQuestions?: (event: ItemCompletedNotification) => void,
     ) {
         this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
@@ -787,6 +790,7 @@ export class CodexEventHandler {
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
+        this.streamedMessages.add(event.itemId);
         const phase = this.agentMessagePhases.get(event.itemId) ?? null;
         const meta = createMessagePhaseMeta(phase, this.sessionState.clientCapabilities.airClient);
         return createAgentTextMessageChunk(event.delta, event.itemId, meta);
@@ -947,9 +951,17 @@ export class CodexEventHandler {
                 return this.renderer.render(WebSearchReporter.completed(event.item));
             case "collabAgentToolCall":
                 return this.renderer.render(this.subagents.legacyCollaborationCompleted(event.item));
-            case "agentMessage":
+            case "agentMessage": {
                 this.rememberAgentMessagePhase(event.item);
-                return null;
+                const streamed = this.streamedMessages.delete(event.item.id);
+                if (event.item.delivery !== "async" || this.completedAsyncMessages.has(event.item.id)) return null;
+                this.completedAsyncMessages.add(event.item.id);
+                this.onAsyncQuestions?.(event);
+                return streamed || !event.item.text ? null : createAgentTextMessageChunk(
+                    event.item.text, event.item.id,
+                    createMessagePhaseMeta(event.item.phase, this.sessionState.clientCapabilities.airClient),
+                );
+            }
             case "plan":
                 return await this.createCompletedPlanEvent(event.item);
             case "exitedReviewMode":

@@ -113,3 +113,18 @@ describe("SteeringQueue", () => {
         expect(queue.isIdle).toBe(true);
     });
 });
+
+
+it("skips an async answer cancelled while queued behind another steer", async () => {
+    const gate = deferred<SessionSteeringResponse>();
+    const seen: SessionSteerRequest[] = [];
+    const queue = new SteeringQueue(async params => { seen.push(params); return gate.promise; });
+    const first = queue.enqueue(request("first"));
+    const controller = new AbortController();
+    const answer = queue.enqueue(request("late answer"), controller.signal);
+    controller.abort();
+    gate.resolve({outcome: "injected"});
+    await first;
+    await expect(answer).resolves.toEqual({outcome: "failed"});
+    expect(seen).toEqual([request("first")]);
+});

@@ -4,6 +4,7 @@ import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage} from ".
 import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
+import {CodexAsyncQuestions} from "./CodexAsyncQuestions";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {type CodexAuthRequest, getCodexAuthMethods, getCodexAuthMethodsV2, isCodexAuthRequest} from "./CodexAuthMethod";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
@@ -504,6 +505,7 @@ export class CodexAcpServer {
     private readonly activePrompts: Map<string, ActivePrompt>;
     /** Tail of the per-session turn-start FIFO; see `acquireTurnStartReservation`. */
     private readonly turnStartQueueTail: Map<string, {promise: Promise<void>; settled: boolean}>;
+    private readonly asyncQuestions: CodexAsyncQuestions;
     private readonly steeringQueues: Map<string, SteeringQueue>;
     /**
      * Steers awaiting their `userMessage` landing, keyed by the minted `clientUserMessageId`
@@ -587,6 +589,11 @@ export class CodexAcpServer {
             this.connection = this.reportingConnection.asClientConnection();
         }
         this.codexAcpClient = codexAcpClient;
+        this.asyncQuestions = new CodexAsyncQuestions(this.connection, () => this.clientCapabilities,
+            async (sessionId, text, signal) => {
+                const result = await this.executeOrQueueSteeringRequest({sessionId, prompt: [{type: "text", text}]}, signal);
+                if (result.outcome === "failed" && !signal.aborted) throw new Error("Could not deliver the user's answers");
+            });
         this.mcpServerSignIn = createMcpServerSignIn(
             this.connection,
             () => this.codexAcpClient,
@@ -1055,6 +1062,7 @@ export class CodexAcpServer {
     }
 
     private beginSessionCloseFence(sessionId: string): void {
+        this.asyncQuestions.forget(sessionId);
         this.closingSessions.set(sessionId, (this.closingSessions.get(sessionId) ?? 0) + 1);
     }
 
@@ -1445,6 +1453,7 @@ export class CodexAcpServer {
                 const sessionState = await ready;
                 if (!sessionState) return;
                 if (!baselineEventHandler) {
+                    const loss = this.codexAcpClient.appServerClient.connectionLoss;
                     baselineEventHandler = new CodexEventHandler(
                         this.connection,
                         sessionState,
@@ -1455,6 +1464,10 @@ export class CodexAcpServer {
                         false,
                         clientSupportsCompaction(this.clientCapabilities),
                         clientSupportsNotices(this.clientCapabilities),
+                        event => {
+                            if (event.threadId === sessionId && this.sessions.get(sessionId) === sessionState
+                                && !this.sessionIsClosing(sessionId)) this.asyncQuestions.handle(event, loss);
+                        },
                     );
                 }
                 await this.trackCodexForegroundWork(sessionState, event);
@@ -2707,11 +2720,11 @@ export class CodexAcpServer {
      *     new one ("startedNewTurn"), or could not be applied ("failed"); see
      *     {@link performSteeringRequest}.
      */
-    async executeOrQueueSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+    async executeOrQueueSteeringRequest(params: SessionSteerRequest, signal?: AbortSignal): Promise<SessionSteeringResponse> {
         this.assertInstructionsReady(params.sessionId);
         const queue = this.getSteeringQueue(params.sessionId);
         try {
-            return await queue.enqueue(params);
+            return await queue.enqueue(params, signal);
         } catch (error) {
             if (error instanceof RequestError) {
                 throw error;
@@ -2735,7 +2748,7 @@ export class CodexAcpServer {
     private getSteeringQueue(sessionId: string): SteeringQueue {
         let queue = this.steeringQueues.get(sessionId);
         if (!queue) {
-            queue = new SteeringQueue((params) => this.performSteeringRequest(params));
+            queue = new SteeringQueue((params, signal) => this.performSteeringRequest(params, signal));
             this.steeringQueues.set(sessionId, queue);
         }
         return queue;
@@ -2749,7 +2762,7 @@ export class CodexAcpServer {
      * @returns "injected" when the prompt joined an existing turn, otherwise the
      *     outcome of starting a new turn.
      */
-    private async performSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+    private async performSteeringRequest(params: SessionSteerRequest, signal?: AbortSignal): Promise<SessionSteeringResponse> {
         logger.log("Steering session requested", {
             sessionId: params.sessionId,
             prompt: params.prompt,
@@ -2763,6 +2776,7 @@ export class CodexAcpServer {
         // shown once the steer lands (the steering response itself carries no id).
         const clientUserMessageId = randomUUID();
         const turnId = await this.getSteerableTurnId(sessionState);
+        if (signal?.aborted) return {outcome: "failed"};
         if (turnId) {
             const injected = await this.injectSteerIntoActiveTurn(params, turnId, sessionState, clientUserMessageId);
             if (injected) {
@@ -2770,7 +2784,7 @@ export class CodexAcpServer {
                 return {outcome: "injected"};
             }
         }
-        return await this.startNewTurnFromSteering(params, clientUserMessageId);
+        return await this.startNewTurnFromSteering(params, clientUserMessageId, signal);
     }
 
     /**
@@ -2839,15 +2853,16 @@ export class CodexAcpServer {
     private async startNewTurnFromSteering(
         params: SessionSteerRequest,
         clientUserMessageId: string,
+        signal?: AbortSignal,
     ): Promise<SessionSteeringResponse> {
-        await this.startNewTurnFromExternalPrompt(params, "Steering", undefined, {
+        const started = await this.startNewTurnFromExternalPrompt(params, "Steering", async () => !signal?.aborted, {
             clientUserMessageId,
             onInserted: async () => {
                 await this.emitLiveSteerUserMessage(params.sessionId, clientUserMessageId, params.prompt);
             },
             onSyntheticInserted: async () => {},
         });
-        return {outcome: "startedNewTurn"};
+        return {outcome: signal?.aborted && !started ? "failed" : "startedNewTurn"};
     }
 
     private async startNewTurnFromExternalPrompt(
@@ -2939,6 +2954,7 @@ export class CodexAcpServer {
             return codexRunningTurnId(sessionState, sessionState.currentTurnId);
         }
 
+        if (sessionState.codexReportedRunningTurnId) return sessionState.codexReportedRunningTurnId;
         const pendingTurnStart = this.pendingTurnStarts.get(sessionState.sessionId);
         if (!pendingTurnStart) {
             return null;
@@ -4121,6 +4137,7 @@ export class CodexAcpServer {
             return sessionState.currentTurnId;
         }
 
+        if (sessionState.codexReportedRunningTurnId) return sessionState.codexReportedRunningTurnId;
         const pendingTurnStart = this.pendingTurnStarts.get(sessionState.sessionId);
         if (!pendingTurnStart) {
             logger.log(`${requestName} request rejected: no current turn`, {sessionId: sessionState.sessionId});
@@ -4507,6 +4524,12 @@ export class CodexAcpServer {
                 agentFileChangeReportRequest !== null,
                 clientSupportsCompaction(this.clientCapabilities),
                 clientSupportsNotices(this.clientCapabilities),
+                event => {
+                    if (event.threadId === params.sessionId && this.sessions.get(params.sessionId) === sessionState
+                        && !this.sessionIsClosing(params.sessionId)) {
+                        this.asyncQuestions.handle(event, promptClient.appServerClient.connectionLoss, activePrompt.interactionSignal);
+                    }
+                },
             );
             eventHandler = promptEventHandler;
             const permissionLifecycle = this.permissionLifecycleContext(sessionState);
@@ -5231,6 +5254,7 @@ export class CodexAcpServer {
     }
 
     async cancel(params: acp.CancelNotification): Promise<void> {
+        this.asyncQuestions.cancel(params.sessionId);
         this.activePrompts.get(params.sessionId)?.requestClientCancel();
         const sessionState = this.sessions.get(params.sessionId);
         if (!sessionState) {

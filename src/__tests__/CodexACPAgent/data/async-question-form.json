@@ -1,0 +1,29 @@
+[
+  {
+    "sessionId": "thread-1",
+    "requestedSchema": {
+      "type": "object",
+      "properties": {
+        "question_1": {
+          "title": "Which theme?",
+          "enum": [
+            "Light",
+            "Dark",
+            "Other (write below)"
+          ],
+          "type": "string"
+        },
+        "question_1_custom": {
+          "title": "Custom answer: Which theme?",
+          "description": "Used when you select \"Other (write below)\".",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question_1"
+      ]
+    },
+    "mode": "form",
+    "message": "Codex has questions. It can continue working while you answer."
+  }
+]
