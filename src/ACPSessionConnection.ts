@@ -142,6 +142,7 @@ export class AcpV2Connection {
     async createElicitation(
         request: acp.CreateElicitationRequest,
         options?: acp.SendRequestOptions,
+        foreground = true,
     ): Promise<acp.CreateElicitationResponse> {
         const sendRequest = async () => {
             const response = await this.client.request(
@@ -152,7 +153,7 @@ export class AcpV2Connection {
             return toV1CreateElicitationResponse(response);
         };
         const sessionId = elicitationSessionId(request);
-        if (sessionId === undefined) {
+        if (sessionId === undefined || !foreground) {
             return sendRequest();
         }
         const toolCallId = "toolCallId" in request && typeof request.toolCallId === "string" ? request.toolCallId : undefined;

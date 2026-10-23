@@ -1,6 +1,7 @@
 import {expect, vi} from 'vitest';
 import * as acp from '@agentclientprotocol/sdk/unstable';
 import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
+import {toV2CreateElicitationRequest, toV1CreateElicitationResponse} from "../../AcpV2Elicitation";
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
@@ -245,9 +246,14 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         notifyCancel = () => v2Connection.agent.notify(acpV2.methods.agent.session.cancel, {sessionId});
     } else {
         const v1Connection = acp.client({name: "test-client"})
+            .onRequest(acp.methods.client.elicitation.create, async (ctx) => {
+                transcript.push({elicitationRequest: toV2CreateElicitationRequest(ctx.params)});
+                if (!options.onElicitation) throw new Error("Unexpected elicitation");
+                return toV1CreateElicitationResponse(await options.onElicitation(toV2CreateElicitationRequest(ctx.params), ctx.signal));
+            })
             .onNotification(acp.methods.client.session.update, (ctx) => onUpdate(ctx.params.update))
             .connect(clientStream);
-        await v1Connection.agent.request(acp.methods.agent.initialize, {protocolVersion: acp.PROTOCOL_VERSION});
+        await v1Connection.agent.request(acp.methods.agent.initialize, {protocolVersion: acp.PROTOCOL_VERSION, ...(options.clientCapabilities ? {clientCapabilities: options.clientCapabilities} : {})});
         await v1Connection.agent.request(acp.methods.agent.session.new, {cwd, mcpServers: []});
         connection = v1Connection;
         request = (method, params, signal) => v1Connection.agent.request(
