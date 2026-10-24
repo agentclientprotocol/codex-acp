@@ -12,12 +12,13 @@ describeIntegration("integration: configured service tier", () => {
         await stopAll(agent, mock);
     });
 
-    it("sends configured Ultrafast to the model on consecutive turns with Fast disabled", async () => {
+    it("sends a configured non-Fast tier to the model on consecutive turns with Fast disabled", async () => {
         mock = await startMockResponsesServer();
         agent = await createSpawnedAgentFixture(async () => {}, {
             CODEX_CONFIG: JSON.stringify({
                 model: "gpt-6-astra",
-                service_tier: "ultrafast",
+                // Flex is supported without an account-specific model catalog; Ultrafast is not.
+                service_tier: "flex",
                 features: {fast_mode: false},
             }),
         });
@@ -26,12 +27,12 @@ describeIntegration("integration: configured service tier", () => {
         // The first prompt may also generate a session title.
         mock.enqueue(textResponse("ok"), textResponse("ok"), textResponse("ok"));
 
-        for (const prompt of ["First Ultrafast prompt", "Second Ultrafast prompt"]) {
+        for (const prompt of ["First Flex prompt", "Second Flex prompt"]) {
             const response = await sendPrompt(agent, sessionId, prompt);
             expect(response.stopReason).toBe("end_turn");
             expect(findPromptRequest(mock.requests, prompt)).toMatchObject({
                 model: "gpt-6-astra",
-                service_tier: "ultrafast",
+                service_tier: "flex",
             });
         }
         expectNoUnscriptedModelRequests(mock);
