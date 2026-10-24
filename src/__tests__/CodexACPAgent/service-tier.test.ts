@@ -20,7 +20,10 @@ describe.each(["new", "resume", "load", "fork"] as const)("Service tier after se
         vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
-        appServer.threadStart = vi.fn().mockResolvedValue(response);
+        appServer.threadStart = vi.fn().mockImplementation(async (params: {ephemeral?: boolean | null}) => ({
+            ...response,
+            thread: {...thread, id: params.ephemeral ? "title-session" : thread.id},
+        }));
         appServer.threadResume = vi.fn().mockResolvedValue(response);
         appServer.threadFork = vi.fn().mockResolvedValue(response);
         const turnStartSpy = mockPromptTurn(fixture, thread.id);
@@ -37,9 +40,11 @@ describe.each(["new", "resume", "load", "fork"] as const)("Service tier after se
             await agent.prompt({sessionId: thread.id, prompt: [{type: "text", text}]});
         }
 
-        expect(turnStartSpy).toHaveBeenCalledTimes(2);
-        for (const [params] of turnStartSpy.mock.calls) {
-            expect(params).toMatchObject({threadId: thread.id, serviceTier});
-        }
+        const promptTurns = turnStartSpy.mock.calls.map(([params]) => params).filter(params => params.threadId === thread.id);
+        expect(promptTurns).toHaveLength(2);
+        expect(promptTurns).toEqual([
+            expect.objectContaining({serviceTier}),
+            expect.objectContaining({serviceTier}),
+        ]);
     });
 });
