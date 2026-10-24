@@ -90,32 +90,55 @@ function parsePricingSection(
     heading: string,
     requestedModels: ReadonlyMap<string, readonly string[]>,
 ): Map<string, TierPricing> {
-    const headingText = `### ${heading}`;
-    const start = markdown.indexOf(headingText);
-    if (start < 0) return new Map();
-    const nextHeading = markdown.indexOf("\n### ", start + headingText.length);
-    const section = markdown.slice(start, nextHeading < 0 ? undefined : nextHeading);
     const result = new Map<string, TierPricing>();
+    const ambiguous = new Set<string>();
+    let inSection = false;
+    let headers: string[] | null = null;
 
-    for (const line of section.split(/\r?\n/)) {
-        if (!line.startsWith("|")) continue;
+    for (const line of markdown.split(/\r?\n/)) {
+        if (line.startsWith("### ")) {
+            inSection = line.trim() === `### ${heading}`;
+            headers = null;
+            continue;
+        }
+        if (!inSection || !line.startsWith("|")) continue;
         const cells = line.split("|").slice(1, -1).map(cell => cell.trim());
-        if (cells.length < 9 || cells[0] === "Model" || cells[0]?.startsWith("---")) continue;
-
+        if (cells[0]?.toLowerCase() === "model") {
+            headers = cells.map(cell => cell.toLowerCase().replace(/\s+/g, " "));
+            continue;
+        }
+        if (headers === null || cells.length !== headers.length || cells[0]?.startsWith("---")) continue;
+        const column = (name: string): string | undefined => {
+            const index = headers!.indexOf(name);
+            return index < 0 || headers!.lastIndexOf(name) !== index ? undefined : cells[index];
+        };
         const documentedModel = cells[0]?.replace(/\s+\([^)]*\)\s*$/, "");
         if (documentedModel === undefined) continue;
         const matchingModelIds = requestedModels.get(documentedModel);
         if (matchingModelIds === undefined) continue;
 
-        const shortContext = parseTokenRates(cells[1], cells[2], cells[4]);
+        // Column positions changed when output moved and cache-write durations were added.
+        // Unknown or ambiguous headers must never produce a plausible but incorrect price.
+        const shortContext = parseTokenRates(
+            column("short context input"), column("short context cached input"), column("short context output"),
+        );
         if (shortContext === null) continue;
-        const longContext = parseTokenRates(cells[5], cells[6], cells[8]);
+        const longContext = parseTokenRates(
+            column("long context input"), column("long context cached input"), column("long context output"),
+        );
         const pricing: TierPricing = {
             shortContext,
             ...(longContext === null ? {} : {longContext}),
         };
         for (const modelId of matchingModelIds) {
-            result.set(modelId, pricing);
+            if (ambiguous.has(modelId)) continue;
+            const existing = result.get(modelId);
+            if (existing && JSON.stringify(existing) !== JSON.stringify(pricing)) {
+                result.delete(modelId);
+                ambiguous.add(modelId);
+            } else {
+                result.set(modelId, pricing);
+            }
         }
     }
     return result;
@@ -134,7 +157,7 @@ function parseTokenRates(
 }
 
 function parseUsdRate(value: string | undefined): number | null {
-    if (value === undefined || value === "-") return null;
+    if (value === undefined || !/^\$?(?:\d[\d,]*)(?:\.\d+)?$/.test(value)) return null;
     const amount = Number(value.replace(/[$,]/g, ""));
     return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
