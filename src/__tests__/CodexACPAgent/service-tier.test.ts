@@ -31,7 +31,7 @@ describe.each(["new", "resume", "load", "fork"] as const)("Service tier after se
 
         const request = {sessionId: thread.id, cwd: "/workspace", mcpServers: []};
         switch (operation) {
-            case "new": await agent.newSession(request); break;
+            case "new": await agent.newSession({cwd: request.cwd, mcpServers: request.mcpServers}); break;
             case "resume": await agent.resumeSession(request); break;
             case "load": await agent.loadSession(request); break;
             case "fork": await agent.forkSession({...request, sessionId: "source-session"}); break;

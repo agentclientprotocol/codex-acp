@@ -12,7 +12,7 @@ describeIntegration("integration: configured service tier", () => {
         await stopAll(agent, mock);
     });
 
-    it("sends a configured non-Fast tier to the model on consecutive turns with Fast disabled", async () => {
+    it.each(["new", "resume", "load"])("preserves a configured non-Fast tier on consecutive turns after session/%s", async (operation) => {
         mock = await startMockResponsesServer();
         agent = await createSpawnedAgentFixture(async () => {}, {
             CODEX_CONFIG: JSON.stringify({
@@ -24,6 +24,14 @@ describeIntegration("integration: configured service tier", () => {
         });
         await connectAndLogin(agent, mock.baseUrl);
         const {sessionId} = await agent.createSession();
+        if (operation !== "new") {
+            // Reopen before the first prompt, while Codex has no persisted rollout.
+            await agent.connection.request(`session/${operation}`, {
+                sessionId,
+                cwd: agent.workspaceDir,
+                mcpServers: [],
+            });
+        }
         // The first prompt may also generate a session title.
         mock.enqueue(textResponse("ok"), textResponse("ok"), textResponse("ok"));
 

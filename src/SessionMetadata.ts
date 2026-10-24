@@ -8,6 +8,7 @@ export type SessionMetadata = {
     models: Model[],
     collaborationMode: ModeKind,
     modelProvider?: string | null,
+    /** Omitted when Codex cannot report the tier; null explicitly clears it. */
     currentServiceTier?: string | null,
     threadStatus?: ThreadStatus,
     additionalDirectories: string[],

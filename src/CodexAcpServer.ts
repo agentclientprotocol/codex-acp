@@ -1202,7 +1202,9 @@ export class CodexAcpServer {
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             mcpServers: requestedMcpServers,
-            currentServiceTier: sessionMetadata.currentServiceTier ?? null,
+            currentServiceTier: sessionMetadata.currentServiceTier === undefined
+                ? this.sessions.get(sessionId)?.currentServiceTier ?? null
+                : sessionMetadata.currentServiceTier,
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             clientCapabilities: this.capabilities,
@@ -3260,7 +3262,9 @@ export class CodexAcpServer {
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             mcpServers: requestedMcpServers,
-            currentServiceTier: sessionMetadata.currentServiceTier ?? null,
+            currentServiceTier: sessionMetadata.currentServiceTier === undefined
+                ? this.sessions.get(sessionId)?.currentServiceTier ?? null
+                : sessionMetadata.currentServiceTier,
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             clientCapabilities: this.capabilities,
