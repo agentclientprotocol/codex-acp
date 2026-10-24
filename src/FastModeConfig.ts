@@ -13,9 +13,14 @@ export function modelSupportsFast(model: Model | undefined): boolean {
     return model?.additionalSpeedTiers?.includes("fast") ?? false;
 }
 
+export function isFastServiceTier(serviceTier: string | null): boolean {
+    // Codex reports Fast as "priority"; older versions use the "fast" alias.
+    return serviceTier === "fast" || serviceTier === "priority";
+}
+
 export function resolveServiceTier(serviceTier: string | null, currentModelSupportsFast: boolean): string | null {
     // The Fast toggle must not discard other tiers selected in Codex config, such as Ultrafast.
-    return serviceTier === "fast" && !currentModelSupportsFast ? null : serviceTier;
+    return isFastServiceTier(serviceTier) && !currentModelSupportsFast ? null : serviceTier;
 }
 
 export function clientSupportsBooleanConfigOptions(clientCapabilities?: acp.ClientCapabilities | null): boolean {

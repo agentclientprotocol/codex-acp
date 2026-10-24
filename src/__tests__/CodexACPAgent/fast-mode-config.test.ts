@@ -99,11 +99,14 @@ describe("Fast mode session config", () => {
         expect(response.configOptions).toContainEqual(createFastModeConfigOption(false));
     });
 
-    it("initializes Fast mode as On when the app-server session tier is fast", async () => {
-        const {response, codexAcpAgent} = await createSession("fast");
+    it.each(["fast", "priority"])("keeps Fast mode enabled when the app-server tier is %s", async (tier) => {
+        const {response, codexAcpAgent, fixture} = await createSession(tier);
+        const turnStartSpy = mockPromptTurn(fixture, "session-id");
 
         expect(response.configOptions).toContainEqual(createFastModeConfigOption(true));
-        expect(codexAcpAgent.getSessionState("session-id").currentServiceTier).toBe("fast");
+        expect(codexAcpAgent.getSessionState("session-id").currentServiceTier).toBe(tier);
+        await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "test"}]});
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({serviceTier: tier}));
     });
 
     it("omits Fast mode config options for JetBrains 2026.1 IntelliJ clients", async () => {
@@ -280,8 +283,8 @@ describe("Fast mode session config", () => {
         expect(slowResponse.configOptions?.some(o => o.id === FAST_MODE_CONFIG_ID)).toBe(false);
     });
 
-    it("keeps Fast mode selected across model switches but stops applying it for non-fast models", async () => {
-        const {codexAcpAgent, codexAcpClient, fixture} = await createSession("fast");
+    it.each(["fast", "priority"])("keeps Fast tier %s selected across model switches but stops applying it for non-fast models", async (tier) => {
+        const {codexAcpAgent, codexAcpClient, fixture} = await createSession(tier);
         const slowModel = createTestModel({id: "slow-model"});
         vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue([slowModel]);
         const turnStartSpy = mockPromptTurn(fixture, "session-id");
@@ -292,7 +295,7 @@ describe("Fast mode session config", () => {
         });
 
         const sessionState = codexAcpAgent.getSessionState("session-id");
-        expect(sessionState.currentServiceTier).toBe("fast");
+        expect(sessionState.currentServiceTier).toBe(tier);
         expect(sessionState.currentModelSupportsFast).toBe(false);
 
         await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "test"}]});

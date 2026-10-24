@@ -148,6 +148,7 @@ import {
     FAST_MODE_CONFIG_ID,
     FAST_MODE_OFF,
     FAST_MODE_ON,
+    isFastServiceTier,
     modelSupportsFast,
     resolveServiceTier,
 } from "./FastModeConfig";
@@ -2987,7 +2988,7 @@ export class CodexAcpServer {
         }
       if (sessionState.currentModelSupportsFast) {
         configOptions.push(createFastModeConfigOption(
-          sessionState.currentServiceTier === "fast",
+          isFastServiceTier(sessionState.currentServiceTier),
           this.booleanConfigOptionsSupported,
         ));
       }
