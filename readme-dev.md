@@ -6,7 +6,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
 - `OPENAI_API_KEY` - fallback API key used when the API-key auth method is selected.
 - `CODEX_PATH` - run a specific Codex executable instead of the bundled package dependency.
-- `CODEX_CONFIG` - JSON object merged into the Codex session config. `hooks` move to App Server startup (`-c hooks=...`) for AIR review; Codex rejects malformed hooks at startup and `initialize` reports its error.
+- `CODEX_CONFIG` - JSON object merged into the Codex session config. `hooks` (for AIR review) and `thread_unload_delay_secs` move to App Server startup (`-c key=...`), since App Server reads them only from its own config; Codex rejects malformed values at startup and `initialize` reports its error.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, or `agent-full-access`.
