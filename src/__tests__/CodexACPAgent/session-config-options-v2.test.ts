@@ -147,7 +147,7 @@ describe('Session config options over ACP v2', () => {
             value: AgentMode.ReadOnly.id,
         });
 
-        expect(sessionState.fastModeEnabled).toBe(true);
+        expect(sessionState.currentServiceTier).toBe("fast");
         expect(sessionState.agentMode).toBe(AgentMode.ReadOnly);
         await expect(dump({fastModeResponse, modeResponse}))
             .toMatchFileSnapshot('data/session-config-options-v2-set.json');
@@ -170,7 +170,7 @@ describe('Session config options over ACP v2', () => {
             value: true,
         })).rejects.toMatchObject({code: -32602});
         expect(sessionState.agentMode).toBe(AgentMode.DEFAULT_AGENT_MODE);
-        expect(sessionState.fastModeEnabled).toBe(false);
+        expect(sessionState.currentServiceTier).toBeNull();
     });
 
     it('does not register session/set_mode on v2', async () => {
