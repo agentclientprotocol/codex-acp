@@ -49,7 +49,7 @@ describe('_session/steering', () => {
         vi.clearAllMocks();
     });
 
-    it.each([undefined, {steering: {idleBehavior: "promptRequired"}}])('reports injected when the input joins the active turn (metadata: %j)', async (_meta) => {
+    it.each([null, undefined, {steering: {idleBehavior: "promptRequired"}}])('reports injected when the input joins the active turn (metadata: %j)', async (_meta) => {
         const {mockFixture, sessionState, turnCompleted} = startActiveTurn();
         const turnSteerSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnSteer")
             .mockResolvedValue({turnId: "turn-id"});
@@ -266,18 +266,7 @@ describe('_session/steering', () => {
         })).rejects.toThrow(RequestError);
     });
 
-    it('rejects an unsupported idle behavior', async () => {
-        const mockFixture = createCodexMockTestFixture();
-
-        await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
-            sessionId: "session-id",
-            prompt: [{type: "text", text: "follow-up"}],
-            _meta: {steering: {idleBehavior: "startDetachedTurn"}},
-        })).rejects.toThrow("unsupported steering idleBehavior");
-    });
-
     it.each([
-        null,
         [],
         false,
         "invalid",
@@ -285,6 +274,7 @@ describe('_session/steering', () => {
         {steering: []},
         {steering: "invalid"},
         {steering: {idleBehavior: null}},
+        {steering: {idleBehavior: "startDetachedTurn"}},
     ])('rejects malformed steering metadata without starting or injecting a turn (%j)', async (_meta) => {
         const mockFixture = createCodexMockTestFixture();
         const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart");

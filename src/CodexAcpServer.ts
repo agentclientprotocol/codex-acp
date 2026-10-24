@@ -2803,7 +2803,8 @@ export class CodexAcpServer {
             throw RequestError.invalidParams();
         }
         const meta = params["_meta"];
-        if (meta !== undefined && !isRecord(meta)) {
+        // The ACP type allows `_meta: null`; treat it like an absent `_meta`.
+        if (meta !== undefined && meta !== null && !isRecord(meta)) {
             throw RequestError.invalidParams(undefined, "steering _meta must be an object");
         }
         const steering = meta?.["steering"];
