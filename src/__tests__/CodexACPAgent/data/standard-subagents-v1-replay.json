@@ -29,5 +29,16 @@
       "messageId": "second-reply",
       "sessionUpdate": "agent_message_chunk"
     }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "stopReason": "end_turn",
+        "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
   }
 ]

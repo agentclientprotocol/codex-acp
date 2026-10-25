@@ -454,8 +454,10 @@ describe.each([1, 2] as const)("ACP v%s standard child sessions", version => {
         await h.request(version === 1 ? "session/load" : "session/resume", {
             sessionId, cwd, mcpServers: [], ...(version === 2 ? {replayFrom: {type: "start"}} : {}),
         });
+        const boundary = childUpdates(h).length;
         await snapshot(h, `standard-subagents-v${version}-replay`);
-        expect(childUpdates(h).some(({update}) => update.sessionUpdate === "subagent_update" && "state" in update)).toBe(false);
+        expect(childUpdates(h).slice(boundary).some(({update}) =>
+            update.sessionUpdate === "state_update" || (update.sessionUpdate === "subagent_update" && "state" in update))).toBe(false);
     });
 
     it("deduplicates replay overlap and publishes only the latest live work snapshot after the response", async () => {
@@ -498,7 +500,7 @@ describe.each([1, 2] as const)("ACP v%s standard child sessions", version => {
         const fork = await h.request("session/fork", {sessionId, cwd, mcpServers: []});
         await load(fork.sessionId);
         await snapshot(h, `standard-subagents-v${version}-fork`);
-        const roster = childUpdates(h).filter(({update}) => update.sessionUpdate === "subagent_update");
+        const roster = childUpdates(h).filter(({update}) => update.sessionUpdate === "subagent_update" && "capabilities" in update);
         expect(roster.map(({sessionId}) => sessionId)).toEqual([sessionId, "fork"]);
     });
 
@@ -566,7 +568,9 @@ describe.each([1, 2] as const)("ACP v%s standard child sessions", version => {
         await vi.waitFor(() => expect(h.wireMessages.slice(start).some(childStateFrame)).toBe(true));
         await flush(h);
         const frames = h.wireMessages.slice(start);
-        expect(frames.findIndex(childStateFrame)).toBeGreaterThan(frames.findIndex(Array.isArray));
+        const boundary = frames.findIndex(Array.isArray);
+        expect(boundary).toBeGreaterThanOrEqual(0);
+        expect(frames.slice(boundary + 1).some(childStateFrame)).toBe(true);
         expect(childUpdates(h).filter(({update}) => hasText(update, "Live across batch"))).toHaveLength(1);
     });
 

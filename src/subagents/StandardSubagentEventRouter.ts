@@ -1,6 +1,7 @@
 import type {ServerNotification} from "../app-server";
 import type {StateUpdate} from "@agentclientprotocol/sdk/experimental/v2/unstable";
-import type {Thread, ThreadItem} from "../app-server/v2";
+import type {SessionConfigOption} from "@agentclientprotocol/sdk/unstable";
+import type {Thread, ThreadItem, Turn} from "../app-server/v2";
 import {ACPSessionConnection} from "../ACPSessionConnection";
 import {AcpV2ForegroundState} from "../AcpV2ForegroundState";
 import {CodexPlanStream} from "../CodexPlanStream";
@@ -36,6 +37,8 @@ type Child = SubagentAssociation & {
     closedRequestTurns: Set<string>;
     endedTurns: Set<string>;
     live: boolean;
+    configuration?: {options: SessionConfigOption[]; published: string | undefined};
+    configurationRequest?: object;
 };
 type Pending = {
     parentThreadId?: string;
@@ -56,6 +59,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     private retired = false;
     private snapshotting = false;
     private readonly snapshots = new Map<string, {child: Child; state: StateUpdate}>();
+    private readonly configurationSnapshots = new Set<Child>();
     private interactionObserver?: (event: ServerNotification, sessionId: string) => Promise<void>;
 
     constructor(
@@ -66,7 +70,11 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         private readonly capabilities = ClientCapabilities.DEFAULT,
         private deferLive = false,
         private readonly ready: Promise<void> = Promise.resolve(),
-        private readonly runningTurnId: (threadId: string) => string | undefined = () => undefined,
+        private readonly runtime: {
+            runningTurnId(threadId: string): string | undefined;
+            readConfiguration?(threadId: string, requireLoaded: boolean): Promise<SessionConfigOption[] | undefined>;
+            enqueuePublication(publish: () => Promise<void>): Promise<void>;
+        } = {runningTurnId: () => undefined, enqueuePublication: publish => publish()},
     ) {
         this.deferredLive = new PendingNotificationBuffer(rootSessionId);
     }
@@ -132,6 +140,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                         child.title = title;
                         await this.session.update({sessionUpdate: "subagent_update", sessionId: child.sessionId, title}, child.parentSessionId);
                     }
+                    void this.refreshConfiguration(child, true);
                 } else {
                     this.pendingFor(item.agentThreadId).path = normalizeAgentPath(item.agentPath);
                 }
@@ -171,6 +180,10 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                     this.beginForegroundTurn(child, child.turnId);
                     await child.foreground.start();
                 }
+                void this.refreshConfiguration(child, true);
+                return true;
+            case "thread/settings/updated":
+                void this.refreshConfiguration(child, false);
                 return true;
             case "thread/name/updated": {
                 const title = normalizeSessionTitle(notification.params.threadName);
@@ -192,19 +205,14 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                 return true;
             case "turn/completed": {
                 const turn = notification.params.turn;
-                if (turn.status === "inProgress") return true;
+                const state = turnEndState(turn);
+                if (state === undefined) return true;
                 this.endWorkRequests(child, turn.id);
                 child.endedTurns.add(turn.id);
                 if (child.turnId !== null && child.turnId !== turn.id) return true;
                 child.turnId = null;
                 if (child.foregroundTurnId !== null && child.foregroundTurnId !== turn.id) return true;
-                await child.foreground.update(toV2IdleState(
-                    {stopReason: turn.status === "interrupted" ? "cancelled" : "end_turn"},
-                    turn.status === "failed" ? {
-                        code: -32603,
-                        message: turn.error ? readableServiceErrorMessage(turn.error.message) : "Subagent work failed",
-                    } : undefined,
-                ));
+                await child.foreground.update(state);
                 child.foregroundTurnId = null;
                 this.onChildWorkEnded(child.sessionId);
                 return true;
@@ -310,6 +318,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         if (existing) {
             existing.live ||= live;
             await this.ensureAnnounced(existing);
+            if (live) void this.refreshConfiguration(existing, true);
             return existing.sessionId;
         }
         const association = this.associations.register(this.rootSessionId, parentSessionId, threadId);
@@ -342,6 +351,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         };
         this.children.set(threadId, child);
         await this.ensureAnnounced(child);
+        if (live) void this.refreshConfiguration(child, true);
         return child.sessionId;
     }
 
@@ -372,7 +382,10 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
 
     async publishReplaySnapshots(): Promise<void> {
         try {
-            while (this.snapshots.size > 0) {
+            for (const child of this.children.values()) {
+                if (child.live) void this.refreshConfiguration(child, true);
+            }
+            while (this.snapshots.size > 0 || this.configurationSnapshots.size > 0) {
                 for (const {child} of [...this.snapshots.values()]) {
                     await child.foreground.serializePublication(async () => {
                         const snapshot = this.snapshots.get(child.threadId);
@@ -382,6 +395,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                         await this.session.updateSubagentState(child.sessionId, child.parentSessionId, snapshot.state);
                     });
                 }
+                for (const child of [...this.configurationSnapshots]) await this.publishConfiguration(child, true);
             }
         } finally {
             this.snapshotting = false;
@@ -392,8 +406,46 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         this.deferLive = true;
         this.announced.clear();
         for (const child of this.children.values()) {
+            delete child.configuration;
+            delete child.configurationRequest;
             void child.foreground.snapshot().catch(error => logger.error("Failed to snapshot child work", error));
         }
+        this.configurationSnapshots.clear();
+    }
+
+    /** Optional reads run in the background; publication rejoins the setup/notification queue. */
+    private async refreshConfiguration(child: Child, requireLoaded: boolean): Promise<void> {
+        if (!this.runtime.readConfiguration || this.retired) return;
+        const request = {};
+        child.configurationRequest = request;
+        try {
+            const options = await this.runtime.readConfiguration(child.threadId, requireLoaded);
+            if (options === undefined) return;
+            const publish = async () => {
+                if (this.retired || child.configurationRequest !== request) return;
+                child.configuration ??= {options, published: undefined};
+                child.configuration.options = options;
+                this.configurationSnapshots.add(child);
+                if (!this.deferLive && !this.snapshotting) await this.publishConfiguration(child);
+            };
+            await this.runtime.enqueuePublication(publish);
+        } catch (error) {
+            logger.log(`Configuration unavailable for subagent ${child.threadId}`, {error: String(error)});
+        }
+    }
+
+    private publishConfiguration(child: Child, replayFlush = false): Promise<void> {
+        return child.foreground.serializePublication(async () => {
+            if (this.deferLive || (this.snapshotting && !replayFlush)) return;
+            this.configurationSnapshots.delete(child);
+            const configuration = child.configuration;
+            if (!configuration || this.retired) return;
+            const signature = JSON.stringify(configuration.options);
+            if (signature === configuration.published) return;
+            await this.ensureAnnounced(child);
+            await this.session.update({sessionUpdate: "config_option_update", configOptions: configuration.options}, child.sessionId);
+            configuration.published = signature;
+        });
     }
 
     async withUserAction<T>(sessionId: string, itemId: string | undefined, request: () => Promise<T>, turnId?: string | null): Promise<T> {
@@ -412,7 +464,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         const signal = this.retired || obsolete ? AbortSignal.abort() : work
             ? AbortSignal.any([child.requests.signal, work.controller.signal]) : child.requests.signal;
         const foreground = !this.retired && !obsolete && typeof turnId === "string"
-            && (this.runningTurnId(child.threadId) ?? child.turnId) === turnId;
+            && (this.runtime.runningTurnId(child.threadId) ?? child.turnId) === turnId;
         if (foreground) this.beginForegroundTurn(child, turnId);
         try {
             return await runSubagentInteraction({
@@ -441,7 +493,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     }
 
     private isCurrentForeground(child: Child, turnId: string): boolean {
-        const current = this.runningTurnId(child.threadId);
+        const current = this.runtime.runningTurnId(child.threadId);
         return current === undefined || current === turnId;
     }
 
@@ -472,6 +524,9 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     }
 
     private async unknown(child: Child): Promise<void> {
+        delete child.configuration;
+        delete child.configurationRequest;
+        this.configurationSnapshots.delete(child);
         child.requests.abort();
         child.requests = new AbortController();
         for (const work of child.workRequests.values()) work.controller.abort();
@@ -548,6 +603,15 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         this.replayedItems.set(threadId, items);
     }
 
+    /** A recorded outcome is history, never a source of current work or mutation authority. */
+    async replayTurnOutcome(threadId: string, turn: Turn): Promise<void> {
+        const child = this.children.get(threadId);
+        const state = turnEndState(turn);
+        if (!child || state === undefined || this.retired) return;
+        await this.ensureAnnounced(child);
+        await this.session.updateSubagentState(child.sessionId, child.parentSessionId, state);
+    }
+
     childSessionIds(): string[] { return [...this.children.values()].map(child => child.sessionId); }
     isNativeSubagentThread(threadId: string): boolean { return this.children.has(threadId); }
     shouldIgnore(): boolean { return false; }
@@ -583,4 +647,20 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     }
     legacyCollaborationStarted(item: ThreadItem & {type: "collabAgentToolCall"}) { return CollabAgentReporter.started(item); }
     legacyCollaborationCompleted(item: ThreadItem & {type: "collabAgentToolCall"}) { return CollabAgentReporter.completed(item); }
+}
+
+function turnEndState(turn: Turn): StateUpdate | undefined {
+    switch (turn.status) {
+        case "inProgress":
+            return undefined;
+        case "completed":
+            return toV2IdleState({stopReason: "end_turn"});
+        case "interrupted":
+            return toV2IdleState({stopReason: "cancelled"});
+        case "failed":
+            return toV2IdleState({stopReason: "end_turn"}, {
+                code: -32603,
+                message: turn.error ? readableServiceErrorMessage(turn.error.message) : "Subagent work failed",
+            });
+    }
 }

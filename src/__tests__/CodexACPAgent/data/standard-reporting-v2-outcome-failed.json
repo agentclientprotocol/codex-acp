@@ -1,0 +1,10 @@
+[
+  {
+    "error": {
+      "code": -32603,
+      "message": "Recorded failure"
+    },
+    "stopReason": "error",
+    "state": "idle"
+  }
+]

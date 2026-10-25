@@ -102,6 +102,14 @@ describeIntegration("integration: standard subagent sessions", () => {
                 expect(updates.some(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === "subagent_update")).toBe(true);
             }, {timeout: 15_000});
             const childId = updates.find(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === "subagent_update")!.update.sessionId;
+            const childConfiguration = (entry: typeof updates[number]) =>
+                entry.sessionId === childId && entry.update.sessionUpdate === "config_option_update";
+            await vi.waitFor(() => expect(updates.some(childConfiguration), stderr).toBe(true));
+            for (const entry of updates.filter(childConfiguration)) {
+                for (const option of entry.update.configOptions) {
+                    if (option.type === "select") expect(option.options.map((value: {value: string}) => value.value)).toEqual([option.currentValue]);
+                }
+            }
             const state = (entry: typeof updates[number]) => version === 1
                 ? entry.update.sessionUpdate === "subagent_update" && entry.update.sessionId === childId ? entry.update.state : undefined
                 : entry.sessionId === childId && entry.update.sessionUpdate === "state_update" ? entry.update : undefined;
@@ -125,6 +133,7 @@ describeIntegration("integration: standard subagent sessions", () => {
             const replayStart = updates.length;
             await load(sessionId);
             await vi.waitFor(() => expect(updates.slice(replayStart).some(entry => state(entry)?.state === "running")).toBe(true));
+            await vi.waitFor(() => expect(updates.slice(replayStart).some(childConfiguration)).toBe(true));
             const boundary = updates.length;
             if (ending === "complete") {
                 const fork = await request("session/fork", {sessionId, cwd, mcpServers: []});

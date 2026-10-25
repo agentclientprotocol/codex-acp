@@ -48,6 +48,7 @@ import type {
     SkillsListResponse,
     SandboxPolicy,
     Thread,
+    Turn,
     ThreadGoal,
     ThreadGoalStatus,
     ThreadResumeParams,
@@ -84,7 +85,7 @@ import {
 } from "./GatewayModelDiscovery";
 import {findSupportedEffort} from "./ModelConfigOption";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
-export type SubagentHistoryItem = {item: ThreadItem; completed: boolean; turnId?: string};
+export type SubagentHistoryEntry = {item: ThreadItem; completed: boolean; turnId?: string} | {turn: Turn};
 
 /**
  * The slice of `thread/resume` the session layer consumes, plus whether Codex
@@ -830,14 +831,13 @@ export class CodexAcpClient {
     /** A standard child is one conversation, not one synthetic session per delegation. */
     async readSessionItems(sessionId: string): Promise<{
         thread: Thread;
-        items: AsyncIterable<SubagentHistoryItem[]>;
+        items: AsyncIterable<SubagentHistoryEntry[]>;
     }> {
         const metadata = await this.codexClient.threadRead({threadId: sessionId});
         if (metadata.thread.historyMode === "legacy") {
             return {thread: metadata.thread, items: legacyHistoryItems(this.codexClient, sessionId)};
         }
-        const entries = this.codexClient.threadItemEntryPages(sessionId);
-        return {thread: metadata.thread, items: completedHistoryItems(entries)};
+        return {thread: metadata.thread, items: paginatedHistoryItems(this.codexClient, sessionId)};
     }
 
     restoreSubagentSubscription(rootSessionId: string, parentThreadId: string, thread: Thread): Promise<Thread | null> {
@@ -1812,17 +1812,29 @@ async function* oneItemPage<T>(items: T[]): AsyncGenerator<T[]> {
     if (items.length > 0) yield items;
 }
 
-async function* completedHistoryItems(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGenerator<SubagentHistoryItem[]> {
-    for await (const page of pages) {
+async function* paginatedHistoryItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<SubagentHistoryEntry[]> {
+    let lastTurn: Turn | undefined;
+    try {
+        for await (const turns of client.threadTurnPages({threadId, limit: 1, sortDirection: "desc", itemsView: "notLoaded"})) {
+            lastTurn = turns[0];
+            break;
+        }
+    } catch (error) {
+        logger.log(`Recorded outcome unavailable for subagent ${threadId}`, {error: String(error)});
+    }
+    for await (const page of client.threadItemEntryPages(threadId)) {
         yield page.map(({item, turnId, completedAtMs}) => ({
             item, turnId, completed: "status" in item ? item.status !== "inProgress" : completedAtMs !== null,
         }));
     }
+    if (lastTurn) yield [{turn: lastTurn}];
 }
 
-async function* legacyHistoryItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<SubagentHistoryItem[]> {
+async function* legacyHistoryItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<SubagentHistoryEntry[]> {
     const {thread} = await client.threadRead({threadId, includeTurns: true});
     yield thread.turns.flatMap(turn => turn.items.map(item => ({
         item, turnId: turn.id, completed: "status" in item ? item.status !== "inProgress" : turn.status !== "inProgress",
     })));
+    const lastTurn = thread.turns.at(-1);
+    if (lastTurn) yield [{turn: lastTurn}];
 }

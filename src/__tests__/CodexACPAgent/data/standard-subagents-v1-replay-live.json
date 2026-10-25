@@ -20,6 +20,17 @@
     }
   },
   {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "stopReason": "end_turn",
+        "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
     "response": "replay complete"
   },
   {

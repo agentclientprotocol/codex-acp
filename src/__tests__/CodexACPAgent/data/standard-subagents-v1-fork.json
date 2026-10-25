@@ -9,11 +9,33 @@
     }
   },
   {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "stopReason": "end_turn",
+        "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
     "sessionId": "fork",
     "update": {
       "sessionId": "fork:subagent:worker",
       "title": "Worker",
       "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "fork",
+    "update": {
+      "sessionId": "fork:subagent:worker",
+      "state": {
+        "stopReason": "end_turn",
+        "state": "idle"
+      },
       "sessionUpdate": "subagent_update"
     }
   }

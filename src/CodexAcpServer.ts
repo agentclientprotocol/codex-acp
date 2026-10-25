@@ -15,7 +15,7 @@ import {
     OPENAI_PROVIDER_ID,
     type SessionMetadata,
     type SessionMetadataWithThread,
-    type SubagentHistoryItem,
+    type SubagentHistoryEntry,
     type UrlElicitationRequester
 } from "./CodexAcpClient";
 import {
@@ -175,6 +175,7 @@ import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
 import {StandardSubagentEventRouter} from "./subagents/StandardSubagentEventRouter";
 import {SubagentAssociations} from "./subagents/SubagentAssociations";
 import {SubagentInteractionHandlers} from "./subagents/SubagentInteractionHandlers";
+import {subagentConfigOptions} from "./subagents/SubagentConfigOptions";
 import type {SubagentEventRouter} from "./subagents/SubagentEventRouter";
 import {isRootAgentPath, nameFromAgentPath} from "./subagents/CodexAgentPath";
 import {listCodexHooks, trustCodexHooks, type CodexHookIdentity} from "./CodexHookTrust";
@@ -652,10 +653,25 @@ export class CodexAcpServer {
         const router = this.usesStandardSubagents()
             ? new StandardSubagentEventRouter(sessionId, session, this.subagentAssociations, release, this.capabilities, replay,
                 this.sessions.get(sessionId)?.subagentTransition,
-                threadId => this.codexAcpClient.appServerClient.runningTurnId(threadId))
+                {
+                    runningTurnId: threadId => this.codexAcpClient.appServerClient.runningTurnId(threadId),
+                    readConfiguration: (threadId, requireLoaded) => this.readSubagentConfiguration(threadId, requireLoaded),
+                    enqueuePublication: publish => this.codexAcpClient.enqueueSessionTransition(sessionId, publish),
+                })
             : new CodexSubagentEventRouter(sessionId, this.supportsNativeSubagents(), session, release);
         if (router instanceof StandardSubagentEventRouter) this.getSubagentInteractionHandlers(router, sessionId);
         return router;
+    }
+
+    private async readSubagentConfiguration(threadId: string, requireLoaded: boolean): Promise<acp.SessionConfigOption[] | undefined> {
+        const appServer = this.codexAcpClient.appServerClient;
+        const cached = appServer.getThreadSettings(threadId);
+        if (!requireLoaded && cached) return subagentConfigOptions(cached);
+        const {thread} = await appServer.threadRead({threadId});
+        if (!thread || thread.id !== threadId || thread.status.type === "notLoaded") return undefined;
+        const options = subagentConfigOptions(appServer.getThreadSettings(threadId)
+            ?? {model: thread.model, effort: thread.reasoningEffort});
+        return options.length > 0 ? options : undefined;
     }
 
     private getSubagentInteractionHandlers(router: StandardSubagentEventRouter, rootSessionId: string): SubagentInteractionHandlers {
@@ -3669,7 +3685,7 @@ export class CodexAcpServer {
 
     private async streamStandardThreadHistory(
         sessionId: string,
-        itemPages: AsyncIterable<SubagentHistoryItem[]>,
+        itemPages: AsyncIterable<SubagentHistoryEntry[]>,
         sessionState: SessionState,
         ancestry: Set<string>,
         isOpen: () => boolean,
@@ -3706,8 +3722,13 @@ export class CodexAcpServer {
         };
         const unresolved: Array<ThreadItem & {type: "subAgentActivity"}> = [];
         for await (const items of itemPages) {
-            for (const {item, completed, turnId} of items) {
+            for (const entry of items) {
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
+                if ("turn" in entry) {
+                    if (threadId !== sessionState.sessionId) await router.replayTurnOutcome(threadId, entry.turn);
+                    continue;
+                }
+                const {item, completed, turnId} = entry;
                 // Native child input comes from agents, not ordinary client user messages.
                 if (threadId !== sessionState.sessionId && item.type === "userMessage") continue;
                 if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") {
@@ -5540,7 +5561,7 @@ async function* itemsOfEntries(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGe
     }
 }
 
-async function* standardHistoryItems(pages: AsyncIterable<ThreadItem[]>): AsyncGenerator<SubagentHistoryItem[]> {
+async function* standardHistoryItems(pages: AsyncIterable<ThreadItem[]>): AsyncGenerator<SubagentHistoryEntry[]> {
     for await (const page of pages) {
         yield page.map(item => ({item, completed: !("status" in item) || item.status !== "inProgress"}));
     }

@@ -1,0 +1,92 @@
+[
+  {
+    "configOptions": [
+      {
+        "currentValue": "child-special",
+        "options": [
+          {
+            "value": "child-special",
+            "name": "child-special",
+            "description": null
+          }
+        ],
+        "type": "select",
+        "configId": "model",
+        "name": "Model",
+        "description": "Model Codex uses for the session",
+        "category": "model"
+      },
+      {
+        "currentValue": "high",
+        "options": [
+          {
+            "value": "high",
+            "name": "High",
+            "description": "Current reasoning effort"
+          }
+        ],
+        "type": "select",
+        "configId": "reasoning_effort",
+        "name": "Reasoning effort",
+        "description": "How much reasoning effort the model should use",
+        "category": "thought_level"
+      }
+    ],
+    "sessionUpdate": "config_option_update"
+  },
+  {
+    "configOptions": [
+      {
+        "currentValue": "child-next",
+        "options": [
+          {
+            "value": "child-next",
+            "name": "child-next",
+            "description": null
+          }
+        ],
+        "type": "select",
+        "configId": "model",
+        "name": "Model",
+        "description": "Model Codex uses for the session",
+        "category": "model"
+      },
+      {
+        "currentValue": "low",
+        "options": [
+          {
+            "value": "low",
+            "name": "Low",
+            "description": "Current reasoning effort"
+          }
+        ],
+        "type": "select",
+        "configId": "reasoning_effort",
+        "name": "Reasoning effort",
+        "description": "How much reasoning effort the model should use",
+        "category": "thought_level"
+      }
+    ],
+    "sessionUpdate": "config_option_update"
+  },
+  {
+    "configOptions": [
+      {
+        "currentValue": "child-final",
+        "options": [
+          {
+            "value": "child-final",
+            "name": "child-final",
+            "description": null
+          }
+        ],
+        "type": "select",
+        "configId": "model",
+        "name": "Model",
+        "description": "Model Codex uses for the session",
+        "category": "model"
+      }
+    ],
+    "sessionUpdate": "config_option_update"
+  }
+]

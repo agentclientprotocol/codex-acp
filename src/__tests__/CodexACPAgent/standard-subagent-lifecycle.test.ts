@@ -112,7 +112,10 @@ describe.each([1, 2] as const)("ACP v%s standard child lifecycle boundaries", ve
         await connect({onRequestPermission: async request => ({outcome: {outcome: "selected", optionId: request.options[0]!.optionId}})});
         const spawn = format === "collab" ? collab("spawnAgent") : (activity().params as {item: ThreadItem}).item;
         const resumes = history(h, [spawn], [message("Retained answer")]);
+        const release = vi.spyOn(h.agent, "afterSessionSetupResponse");
         await load();
+        await vi.waitFor(() => expect(release).toHaveBeenCalled());
+        await release.mock.results[0]!.value;
         expect(hasText(h, "Retained answer")).toBe(true);
         expect(resumes).toEqual([sessionId, worker]);
         await vi.waitFor(() => expect(state()).toBe("idle"));
@@ -160,10 +163,12 @@ describe.each([1, 2] as const)("ACP v%s standard child lifecycle boundaries", ve
             parentThreadId: owner === "not-loaded" ? sessionId : owner, loaded: owner !== "not-loaded",
         });
         await load();
+        const boundary = h.scopedUpdates.length;
         expect(hasText(h, "Historical only")).toBe(true);
         expect(resumes).toEqual([sessionId]);
         await flush(h);
-        expect(state()).toBeUndefined();
+        expect(state()).toBe("idle");
+        expect(h.scopedUpdates.slice(boundary).filter(entry => entry.sessionId === childId)).toEqual([]);
         await dump("historical-only");
     });
 
@@ -173,7 +178,7 @@ describe.each([1, 2] as const)("ACP v%s standard child lifecycle boundaries", ve
         await load();
         await flush(h);
         expect(resumes).toEqual([sessionId]);
-        expect(state()).toBeUndefined();
+        expect(state()).toBe("idle");
         h.emit(itemStarted(collab("sendInput")));
         h.emit(onThread(turnStarted("child-active")));
         h.emit(onThread(agentMessageDelta("Awake", "child-active", "awake-message")));
