@@ -1,5 +1,65 @@
 [
   {
+    "modelId": "gpt-6.1-sol[low]",
+    "name": "6.1 Sol (low)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). low effort."
+  },
+  {
+    "modelId": "gpt-6.1-sol[medium]",
+    "name": "6.1 Sol (medium)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). medium effort."
+  },
+  {
+    "modelId": "gpt-6.1-sol[high]",
+    "name": "6.1 Sol (high)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). high effort."
+  },
+  {
+    "modelId": "gpt-6.1-sol[xhigh]",
+    "name": "6.1 Sol (xhigh)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). xhigh effort."
+  },
+  {
+    "modelId": "gpt-6.1-sol[max]",
+    "name": "6.1 Sol (max)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). max effort."
+  },
+  {
+    "modelId": "gpt-6.1-sol[ultra]",
+    "name": "6.1 Sol (ultra)",
+    "description": "Sol from the live app-server model catalog (2026-10-03). ultra effort."
+  },
+  {
+    "modelId": "gpt-6-astra[low]",
+    "name": "6 Astra (low)",
+    "description": "Astra from the app-server model catalog. low effort."
+  },
+  {
+    "modelId": "gpt-6-astra[medium]",
+    "name": "6 Astra (medium)",
+    "description": "Astra from the app-server model catalog. medium effort."
+  },
+  {
+    "modelId": "gpt-6-astra[high]",
+    "name": "6 Astra (high)",
+    "description": "Astra from the app-server model catalog. high effort."
+  },
+  {
+    "modelId": "gpt-6-astra[xhigh]",
+    "name": "6 Astra (xhigh)",
+    "description": "Astra from the app-server model catalog. xhigh effort."
+  },
+  {
+    "modelId": "gpt-6-astra[max]",
+    "name": "6 Astra (max)",
+    "description": "Astra from the app-server model catalog. max effort."
+  },
+  {
+    "modelId": "gpt-6-astra[ultra]",
+    "name": "6 Astra (ultra)",
+    "description": "Astra from the app-server model catalog. ultra effort."
+  },
+  {
     "modelId": "gpt-5.2[medium]",
     "name": "5.2 (medium)",
     "description": "Allowed by id. Default effort."
