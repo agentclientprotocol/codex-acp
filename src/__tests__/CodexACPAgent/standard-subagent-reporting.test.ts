@@ -9,7 +9,7 @@ import {expectConformingV2SessionUpdates} from "./v2-session-update-guard";
 const worker = "worker";
 const childId = `${sessionId}:subagent:${worker}`;
 const spawn = {type: "subAgentActivity" as const, id: "spawn", kind: "started" as const,
-    agentThreadId: worker, agentPath: "/root/worker"};
+    agentThreadId: worker, agentPath: "/root/worker", model: null, reasoningEffort: null};
 
 function settings(model: string, effort: ReasoningEffort | null): ThreadSettings {
     return {

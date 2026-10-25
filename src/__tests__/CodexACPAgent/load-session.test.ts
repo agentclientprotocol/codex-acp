@@ -150,6 +150,7 @@ describe("CodexACPAgent - loadSession", () => {
             name: null,
             turns: [{
                 id: `turn-${id}`,
+                rootTurnId: null,
                 itemsView: "full",
                 status: "completed",
                 error: null,
@@ -162,6 +163,8 @@ describe("CodexACPAgent - loadSession", () => {
         const root = makeThread("root-history", [
             {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: "activity-child-1",
                 kind: "started",
                 agentThreadId: "child-history",
@@ -169,6 +172,8 @@ describe("CodexACPAgent - loadSession", () => {
             },
             {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: "activity-child-1-terminal",
                 kind: "interrupted",
                 agentThreadId: "child-history",
@@ -176,6 +181,8 @@ describe("CodexACPAgent - loadSession", () => {
             },
             {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: "activity-child-2",
                 kind: "started",
                 agentThreadId: "child-history",
@@ -183,6 +190,8 @@ describe("CodexACPAgent - loadSession", () => {
             },
             {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: "activity-child-2-terminal",
                 kind: "interrupted",
                 agentThreadId: "child-history",
@@ -190,6 +199,8 @@ describe("CodexACPAgent - loadSession", () => {
             },
             {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: "activity-orphan",
                 kind: "started",
                 agentThreadId: "orphan-history",
@@ -225,6 +236,7 @@ describe("CodexACPAgent - loadSession", () => {
         const firstChildTurn = child.turns[0]!;
         child.turns.push({
             id: "turn-child-history-2",
+            rootTurnId: firstChildTurn.rootTurnId,
             itemsView: firstChildTurn.itemsView,
             status: firstChildTurn.status,
             error: firstChildTurn.error,
@@ -308,6 +320,7 @@ describe("CodexACPAgent - loadSession", () => {
         appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
         const turn = (id: string, items: Thread["turns"][number]["items"]): Thread["turns"][number] => ({
             id,
+            rootTurnId: null,
             itemsView: "full",
             status: "completed",
             error: null,
@@ -348,6 +361,8 @@ describe("CodexACPAgent - loadSession", () => {
         });
         const activity = (id: string, kind: "started" | "interacted" | "completed") => ({
             type: "subAgentActivity" as const,
+            model: null,
+            reasoningEffort: null,
             id,
             kind,
             agentThreadId: "child-history",
@@ -513,6 +528,7 @@ describe("CodexACPAgent - loadSession", () => {
             turns: [
                 {
                     id: "turn-1",
+                    rootTurnId: null,
                     itemsView: "full",
                     status: "completed",
                     error: null,
@@ -618,6 +634,8 @@ describe("CodexACPAgent - loadSession", () => {
                         },
                         {
                             type: "subAgentActivity",
+                            model: null,
+                            reasoningEffort: null,
                             id: "item-subagent-1",
                             kind: "started",
                             agentThreadId: "thread-child-1",

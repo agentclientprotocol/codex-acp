@@ -92,6 +92,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          check-latest: true
       - name: Configure sandboxing
         timeout-minutes: 15
         run: |
@@ -155,6 +156,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          check-latest: true
           registry-url: "https://registry.npmjs.org"
       - run: npm ci
       # prepublishOnly builds the bundle.
@@ -211,6 +213,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          check-latest: true
           registry-url: "https://registry.npmjs.org"
       # Ahead of the version bump, so this still validates the committed lockfile.
       - run: npm ci

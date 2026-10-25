@@ -115,6 +115,15 @@ Command replies, review results, and terminal/retrying errors retain their exist
 failure channels. Clients advertising session compaction support continue to receive the dedicated
 compaction lifecycle instead of the legacy completion advisory.
 
+### Unsupported skills
+
+The adapter disables Codex skills whose output ACP clients cannot show, and leaves them out of the skill commands and
+`/skills`. The list is in `src/UnsupportedSkills.ts`. Today it holds Codex's bundled Visualize skill: it ends a reply
+with a content reference that only the OpenAI apps render, so ACP clients show raw `visualize{...}` text.
+
+The adapter matches skills by name, so it needs no `skills/list` request when a session starts. The cost: a skill from
+another plugin with the same qualified name, such as a `visualize` skill in some other plugin named `visualize`, is
+disabled too.
 
 ### App-server recovery
 

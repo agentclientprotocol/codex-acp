@@ -22,7 +22,11 @@ httpOrigin: string | null, serverInfo: McpServerInfo | null,
 /**
  * Capabilities advertised by the initialized MCP server; null when unavailable.
  */
-serverCapabilities: JsonValue | null, tools: { [key in string]?: Tool },
+serverCapabilities: JsonValue | null,
+/**
+ * Opaque `_meta` from the first page of the corresponding MCP tool catalog. Null when unavailable.
+ */
+toolListMeta: JsonValue | null, tools: { [key in string]?: Tool },
 /**
  * Tool discovery failed and no catalog was returned.
  * Null when a catalog is returned, including cached or empty catalogs.

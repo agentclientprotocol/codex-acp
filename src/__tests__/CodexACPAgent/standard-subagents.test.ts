@@ -25,7 +25,8 @@ function onThread(notification: ServerNotification, threadId: string): ServerNot
 }
 
 function activity(id = child, path = "/root/worker", kind: "started" | "completed" | "interacted" = "started"): ServerNotification {
-    return itemStarted({type: "subAgentActivity", id: `activity-${id}-${kind}`, kind, agentThreadId: id, agentPath: path});
+    return itemStarted({type: "subAgentActivity", model: null, reasoningEffort: null,
+        id: `activity-${id}-${kind}`, kind, agentThreadId: id, agentPath: path});
 }
 
 async function flush(harness: PromptSession): Promise<void> {
@@ -309,7 +310,8 @@ describe.each([1, 2] as const)("ACP v%s standard child sessions", version => {
             // Replay waits for title generation too; finish that unrelated mocked turn.
             await vi.waitFor(() => expect(h.appServer["pendingTurnCompletionResolvers"].get(titleThreadId)?.has("title-turn")).toBe(true));
             h.emit(onThread(turnCompleted("title-turn"), titleThreadId));
-            history(h, [{type: "subAgentActivity", id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}],
+            history(h, [{type: "subAgentActivity", model: null, reasoningEffort: null,
+                id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}],
                 [[commandExecutionItem("child-command")]]);
             await h.request(version === 1 ? "session/load" : "session/resume", {
                 sessionId, cwd, mcpServers: [], ...(version === 2 ? {replayFrom: {type: "start"}} : {}),
@@ -445,8 +447,10 @@ describe.each([1, 2] as const)("ACP v%s standard child sessions", version => {
     it("replays stable child identities and leaves historical work unconfirmed", async () => {
         const h = await connect();
         const rootItems: ThreadItem[] = [
-            {type: "subAgentActivity", id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"},
-            {type: "subAgentActivity", id: "completed", kind: "completed", agentThreadId: child, agentPath: "/root/worker"},
+            {type: "subAgentActivity", model: null, reasoningEffort: null,
+                id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"},
+            {type: "subAgentActivity", model: null, reasoningEffort: null,
+                id: "completed", kind: "completed", agentThreadId: child, agentPath: "/root/worker"},
         ];
         const reply: ThreadItem = {type: "agentMessage", id: "persisted-reply", text: "Historical result", phase: null,
             memoryCitation: null, delivery: null, questions: null};
@@ -462,7 +466,8 @@ describe.each([1, 2] as const)("ACP v%s standard child sessions", version => {
 
     it("deduplicates replay overlap and publishes only the latest live work snapshot after the response", async () => {
         const h = await connect();
-        const rootItems: ThreadItem[] = [{type: "subAgentActivity", id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}];
+        const rootItems: ThreadItem[] = [{type: "subAgentActivity", model: null, reasoningEffort: null,
+            id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}];
         const reply: ThreadItem = {type: "agentMessage", id: "persisted-reply", text: "Historical result", phase: null,
             memoryCitation: null, delivery: null, questions: null};
         history(h, rootItems, [[reply]], () => {
@@ -488,7 +493,8 @@ describe.each([1, 2] as const)("ACP v%s standard child sessions", version => {
 
     it("remaps copied child identities when a fork's history is loaded", async () => {
         const h = await connect();
-        const rootItems: ThreadItem[] = [{type: "subAgentActivity", id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}];
+        const rootItems: ThreadItem[] = [{type: "subAgentActivity", model: null, reasoningEffort: null,
+            id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}];
         history(h, rootItems, [[]]);
         h.setCodexResponse("thread/fork", async () => ({
             ...codexResponse("thread/start") as object, thread: {...createThread(), id: "fork", sessionId: "fork", forkedFromId: sessionId},
@@ -553,7 +559,8 @@ describe.each([1, 2] as const)("ACP v%s standard child sessions", version => {
         h.emit(onThread(turnStarted("child-first"), child));
         await flush(h);
         let reads = 0;
-        history(h, [{type: "subAgentActivity", id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}],
+        history(h, [{type: "subAgentActivity", model: null, reasoningEffort: null,
+            id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}],
             [[]], () => {
                 if (++reads === 1) {
                     h.emit(onThread(agentMessageDelta("Live across batch", "child-first", "batch-message"), child));
@@ -579,7 +586,8 @@ describe.each([1, 2] as const)("ACP v%s standard child sessions", version => {
         let release!: () => void;
         const held = new Promise<void>(resolve => { release = resolve; });
         let reads = 0;
-        history(h, [{type: "subAgentActivity", id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}], [[]], async () => {
+        history(h, [{type: "subAgentActivity", model: null, reasoningEffort: null,
+            id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}], [[]], async () => {
             reads++;
             if (reads === 1) await held;
         });
@@ -608,7 +616,8 @@ describe.each([1, 2] as const)("ACP v%s standard child sessions", version => {
         let release!: () => void;
         const held = new Promise<void>(resolve => { release = resolve; });
         let reads = 0;
-        history(h, [{type: "subAgentActivity", id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}], [[]], async () => {
+        history(h, [{type: "subAgentActivity", model: null, reasoningEffort: null,
+            id: "started", kind: "started", agentThreadId: child, agentPath: "/root/worker"}], [[]], async () => {
             reads++;
             await held;
         });

@@ -15,7 +15,8 @@ function onThread(event: ServerNotification, threadId = worker): ServerNotificat
 }
 
 function activity(): ServerNotification {
-    return itemStarted({type: "subAgentActivity", id: "spawn", kind: "started", agentThreadId: worker, agentPath: "/root/worker"});
+    return itemStarted({type: "subAgentActivity", model: null, reasoningEffort: null,
+        id: "spawn", kind: "started", agentThreadId: worker, agentPath: "/root/worker"});
 }
 
 function collab(tool: "spawnAgent" | "sendInput"): Extract<ThreadItem, {type: "collabAgentToolCall"}> {

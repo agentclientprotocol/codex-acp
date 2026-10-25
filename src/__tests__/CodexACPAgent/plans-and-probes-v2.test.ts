@@ -27,7 +27,7 @@ const availableCommandsUpdate: acp.SessionUpdate = {
 };
 
 function createTurn(status: Turn["status"]): Turn {
-    return {id: turnId, items: [], itemsView: "full", status, error: null, startedAt: null, completedAt: null, durationMs: null};
+    return {id: turnId, rootTurnId: null, items: [], itemsView: "full", status, error: null, startedAt: null, completedAt: null, durationMs: null};
 }
 
 /**

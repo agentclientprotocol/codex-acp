@@ -156,7 +156,7 @@ describe('agent-initiated Codex turns over ACP v2', () => {
         client.emit(turnStarted("turn-2"));
         await settle();
         client.emit({method: "turn/completed", params: {threadId: sessionId, turn: {
-            id: "turn-2", items: [], itemsView: "notLoaded", status: "interrupted",
+            id: "turn-2", rootTurnId: null, items: [], itemsView: "notLoaded", status: "interrupted",
             error: null, startedAt: null, completedAt: null, durationMs: null,
         }}});
         await settle();

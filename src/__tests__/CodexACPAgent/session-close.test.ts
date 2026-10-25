@@ -564,6 +564,7 @@ function createTurnStartResponse(turnId: string): TurnStartResponse {
         turn: {
             id: turnId,
             items: [],
+            rootTurnId: null,
             itemsView: "notLoaded",
             status: "inProgress",
             error: null,
@@ -578,6 +579,7 @@ function createCompletedTurn(turnId: string): TurnStartResponse["turn"] {
     return {
         id: turnId,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded",
         status: "completed",
         error: null,

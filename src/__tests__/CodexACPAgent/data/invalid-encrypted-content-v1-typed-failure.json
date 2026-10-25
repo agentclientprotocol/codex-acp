@@ -1,0 +1,26 @@
+{
+  "result": {
+    "stopReason": "end_turn",
+    "usage": null,
+    "_meta": {
+      "quota": {
+        "token_count": null,
+        "model_usage": []
+      },
+      "jetbrains": {
+        "air": {
+          "version": 1,
+          "sessionFailure": {
+            "id": "turn-id:error",
+            "revision": 1,
+            "category": "request",
+            "severity": "error",
+            "title": "The current provider can't read this thread's earlier reasoning, which another provider or account encrypted. This happens after the provider changes in a thread. Switch back to the previous provider or start a new thread.",
+            "actions": []
+          }
+        }
+      }
+    }
+  },
+  "updates": []
+}

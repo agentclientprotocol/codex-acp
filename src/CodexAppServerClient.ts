@@ -367,6 +367,7 @@ export class CodexAppServerClient {
                 threadId: error.threadId,
                 turn: {
                     id: error.turnId,
+                    rootTurnId: null,
                     items: [],
                     itemsView: "notLoaded",
                     status: "failed",
@@ -952,6 +953,7 @@ export class CodexAppServerClient {
             threadId,
             turn: {
                 id: turnId,
+                rootTurnId: null,
                 items: [],
                 itemsView: "notLoaded",
                 status: "interrupted",

@@ -6,6 +6,14 @@
         "features": {
           "cwd_relative_turn_diffs": false
         },
+        "skills": {
+          "config": [
+            {
+              "name": "visualize:visualize",
+              "enabled": false
+            }
+          ]
+        },
         "projects": {
           "/workspace": {
             "trust_level": "trusted"
