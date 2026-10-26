@@ -1812,14 +1812,28 @@ async function* legacySubagentItems(client: CodexAppServerClient, threadId: stri
     const {thread} = await client.threadRead({threadId, includeTurns: true});
     if (thread.id !== threadId) throw new Error("Subagent history names a different thread");
     yield thread.turns.flatMap(turn => turn.items.map(item => ({
-        item, turnId: turn.id, completed: "status" in item ? item.status !== "inProgress" : turn.status !== "inProgress",
+        item, turnId: turn.id, completed: recordedItemCompleted(item, turn.status !== "inProgress"),
     })));
 }
 
 async function* paginatedSubagentItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<RecordedSubagentItem[]> {
     for await (const page of client.threadItemEntryPages(threadId)) {
         yield page.map(({item, turnId, completedAtMs}) => ({
-            item, turnId, completed: "status" in item ? item.status !== "inProgress" : completedAtMs !== null,
+            item, turnId, completed: recordedItemCompleted(item, completedAtMs !== null),
         }));
+    }
+}
+
+function recordedItemCompleted(item: ThreadItem, completed: boolean): boolean {
+    switch (item.type) {
+        case "commandExecution":
+        case "fileChange":
+        case "mcpToolCall":
+        case "dynamicToolCall":
+        case "collabAgentToolCall":
+            return item.status !== "inProgress";
+        default:
+            // Open-ended provider strings (for example image generation status) are not completion flags.
+            return completed;
     }
 }

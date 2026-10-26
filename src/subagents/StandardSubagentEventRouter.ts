@@ -498,8 +498,6 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         child.toolCalls.restore(item, completed, turnId);
         if (item.type === "commandExecution") child.streams.commands.restore(item);
         if (item.type === "agentMessage") child.streams.agentMessagePhases.set(item.id, item.phase);
-        if (item.type === "imageView" && !completed) child.streams.emittedImageViewItems.add(item.id);
-        if (item.type === "imageGeneration" && !completed) child.streams.activeImageGenerationItems.add(item.id);
         const items = this.replayedItems.get(threadId) ?? new Map<string, boolean>();
         items.set(item.id, completed);
         this.replayedItems.set(threadId, items);

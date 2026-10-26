@@ -218,7 +218,7 @@ import type {SessionIndexTitleState} from "./SessionIndexTitles";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
 import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdate} from "./CodexSessionCompactions";
-import {CodexSessionToolCalls, PLAIN_TOOL_CALL_ITEM_TYPES} from "./CodexSessionToolCalls";
+import {CodexSessionToolCalls} from "./CodexSessionToolCalls";
 import {
     type AgentFileChangeReport,
     type AgentFileChangeReportRequest,
@@ -3747,7 +3747,7 @@ export class CodexAcpServer {
                 }
                 if (threadId !== state.sessionId) {
                     // Agent-owned input is not an ordinary human message. Incomplete text has no safe delta cursor.
-                    if (item.type === "userMessage" || (!completed && !PLAIN_TOOL_CALL_ITEM_TYPES.has(item.type))) {
+                    if (item.type === "userMessage" || (!completed && !supportsPartialHistory(item))) {
                         gaps.add(threadId);
                         continue;
                     }
@@ -5575,6 +5575,18 @@ async function* itemsOfEntries(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGe
 async function* standardHistoryItems(pages: AsyncIterable<ThreadItem[]>): AsyncGenerator<RecordedSubagentItem[]> {
     for await (const page of pages) {
         yield page.map(item => ({item, completed: !("status" in item) || item.status !== "inProgress"}));
+    }
+}
+
+function supportsPartialHistory(item: ThreadItem): boolean {
+    switch (item.type) {
+        case "commandExecution":
+        case "fileChange":
+        case "mcpToolCall":
+        case "dynamicToolCall":
+            return true;
+        default:
+            return false;
     }
 }
 
