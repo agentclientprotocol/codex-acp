@@ -91,6 +91,7 @@ import {
 import type {ModeKind} from "./app-server/ModeKind";
 import {
     createModelConfigOption,
+    createSubagentModelConfigOption,
     createReasoningEffortConfigOption,
     findSupportedEffort,
     formatModelDisplayName,
@@ -170,7 +171,7 @@ import {
     clientSupportsSubagents,
     type SubagentAwareSessionCapabilities,
 } from "./subagents/AcpSubagents";
-import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
+import {CodexSubagentEventRouter, type SubagentModels} from "./subagents/CodexSubagentEventRouter";
 import {nameFromAgentPath} from "./subagents/CodexAgentPath";
 import {listCodexHooks, trustCodexHooks, type CodexHookIdentity} from "./CodexHookTrust";
 import type {HooksListEntry} from "./app-server/v2/HooksListEntry";
@@ -1213,6 +1214,7 @@ export class CodexAcpServer {
                 clientSupportsSubagents(this.clientCapabilities),
                 new ACPSessionConnection(this.connection, sessionId),
                 childSessionId => this.reportingConnection.reports.releaseOpen(childSessionId),
+                () => this.subagentModels(sessionState),
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
@@ -3122,6 +3124,19 @@ export class CodexAcpServer {
         await new ACPSessionConnection(this.connection, sessionState.sessionId).update(update);
     }
 
+    /** The models of a root session, for the configuration of its native subagent sessions. */
+    private subagentModels(sessionState: SessionState): SubagentModels {
+        if (!this.isSessionConfigEnabled()) return {currentModel: null, availableModels: []};
+        let currentModel: string | null = null;
+        try {
+            currentModel = ModelId.fromString(sessionState.currentModelId).model;
+        }
+        catch {
+            // A session without a known model has no model to give its subagents.
+        }
+        return {currentModel, availableModels: sessionState.availableModels};
+    }
+
     private findCurrentModel(models: Model[], currentModelId: string): Model | undefined {
         const modelId = ModelId.fromString(currentModelId);
         return models.find(m => m.id === modelId.model);
@@ -3271,6 +3286,7 @@ export class CodexAcpServer {
                 clientSupportsSubagents(this.clientCapabilities),
                 new ACPSessionConnection(this.connection, sessionId),
                 childSessionId => this.reportingConnection.reports.releaseOpen(childSessionId),
+                () => this.subagentModels(sessionState),
             ),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
@@ -3353,6 +3369,7 @@ export class CodexAcpServer {
                 new Set([sessionId]),
                 new Set(),
                 isOpen,
+                this.subagentModels(sessionState).currentModel ?? undefined,
             );
             return;
         }
@@ -3402,9 +3419,20 @@ export class CodexAcpServer {
         ancestry: Set<string>,
         unreadableChildren: Set<string>,
         isOpen: () => boolean,
+        parentModel: string | undefined,
     ): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
-        const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean}>();
+        const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean; model?: string}>();
+        const requestedModels = new Map<string, string>();
+        // Sends the model of a replayed child after its announcement, as the live session does.
+        const reportModel = async (childSessionId: string, model: string | undefined) => {
+            if (!model) return;
+            const models = this.subagentModels(sessionState);
+            await session.update({
+                sessionUpdate: "config_option_update",
+                configOptions: [createSubagentModelConfigOption(models.availableModels, models.currentModel, model)],
+            }, childSessionId);
+        };
         // v2 only (this path also serves v1's native replay, unchanged there).
         const startedReplayMessages = new Set<string>();
         for await (const items of itemPages) {
@@ -3436,6 +3464,10 @@ export class CodexAcpServer {
                         // An interaction that started no child turn is not a new generation.
                         if (activityKind === "interacted" && !childItems) continue;
                         const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
+                        const model = item.model
+                            || previous?.model
+                            || requestedModels.get(item.agentThreadId)
+                            || parentModel;
                         await session.update({
                             sessionUpdate: "subagent_spawned",
                             subagentSessionId: childSessionId,
@@ -3443,7 +3475,13 @@ export class CodexAcpServer {
                             task: `Delegated task for ${name}`,
                             capabilities: {},
                         });
-                        announced.set(item.agentThreadId, {generation, sessionId: childSessionId, terminal: false});
+                        announced.set(item.agentThreadId, {
+                            generation,
+                            sessionId: childSessionId,
+                            terminal: false,
+                            ...(model ? {model} : {}),
+                        });
+                        await reportModel(childSessionId, model);
                         if (childItems) {
                             const commandIds = new Set<string>();
                             try {
@@ -3454,6 +3492,7 @@ export class CodexAcpServer {
                                     new Set([...ancestry, item.agentThreadId]),
                                     unreadableChildren,
                                     isOpen,
+                                    model,
                                 );
                             }
                             catch (error) {
@@ -3477,6 +3516,7 @@ export class CodexAcpServer {
                         const child = announced.get(item.agentThreadId);
                         if (!child) {
                             const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
+                            const model = item.model || requestedModels.get(item.agentThreadId) || parentModel;
                             await session.update({
                                 sessionUpdate: "subagent_spawned",
                                 subagentSessionId: item.agentThreadId,
@@ -3488,7 +3528,9 @@ export class CodexAcpServer {
                                 generation: 1,
                                 sessionId: item.agentThreadId,
                                 terminal: false,
+                                ...(model ? {model} : {}),
                             });
+                            await reportModel(item.agentThreadId, model);
                             continue;
                         }
                         if (child.terminal) continue;
@@ -3502,7 +3544,12 @@ export class CodexAcpServer {
                     continue;
                 }
                 // The activity items above replay the lifecycle of a spawn. A control call is a tool call, as in the live session.
-                if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") continue;
+                if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") {
+                    if (item.model) {
+                        for (const childThreadId of item.receiverThreadIds) requestedModels.set(childThreadId, item.model);
+                    }
+                    continue;
+                }
                 for (const update of await this.createHistoryUpdates(item, sessionState)) {
                     if (this.protocolVersion === 2) {
                         await this.sendReplayMessageStart(session, update, startedReplayMessages);

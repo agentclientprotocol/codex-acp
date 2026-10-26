@@ -421,6 +421,7 @@ describe("subagents", () => {
     it("air: gets the child session before the child output, and the child state on the parent", () => {
         expect(timeline("air", "native-subagent-session")).toEqual([
             "session-1 subagent_spawned child-thread",
+            "child-thread config_option_update",
             "child-thread tool_call child-cmd",
             "child-thread tool_call_update child-cmd",
             "child-thread tool_call_update child-cmd",
@@ -434,7 +435,9 @@ describe("subagents", () => {
     it("air: gets a nested child on its immediate parent", () => {
         expect(timeline("air", "nested-subagent-session")).toEqual([
             "session-1 subagent_spawned child-thread",
+            "child-thread config_option_update",
             "child-thread subagent_spawned grandchild-thread",
+            "grandchild-thread config_option_update",
             "grandchild-thread tool_call grandchild-cmd",
             "grandchild-thread tool_call_update grandchild-cmd",
             "grandchild-thread agent_message_chunk",
@@ -446,6 +449,7 @@ describe("subagents", () => {
     it("air: gets no child update after the child ends", () => {
         expect(timeline("air", "late-subagent-update")).toEqual([
             "session-1 subagent_spawned child-thread",
+            "child-thread config_option_update",
             "child-thread tool_call child-cmd",
             "session-1 subagent_state_update child-thread",
         ]);

@@ -1,0 +1,35 @@
+[
+  {
+    "sessionId": "root",
+    "update": {
+      "sessionUpdate": "subagent_spawned",
+      "subagentSessionId": "child-1",
+      "name": "Reviewer",
+      "task": "Review the diff",
+      "capabilities": {}
+    }
+  },
+  {
+    "sessionId": "child-1",
+    "update": {
+      "sessionUpdate": "config_option_update",
+      "configOptions": [
+        {
+          "id": "model",
+          "name": "Model",
+          "description": "Model Codex uses for the subagent",
+          "category": "model",
+          "type": "select",
+          "currentValue": "gpt-5.2-codex",
+          "options": [
+            {
+              "value": "gpt-5.2-codex",
+              "name": "5.2 Codex",
+              "description": "gpt-5.2-codex model"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]
