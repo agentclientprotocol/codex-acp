@@ -19,22 +19,34 @@ function shouldAbortBatch(error: unknown): boolean {
     return data !== null && typeof data === "object" && "reason" in data && data.reason === "serverShuttingDown";
 }
 
+/** Native reads in flight at once. A thread/read of an unknown ID walks the stored history (about 60 ms at 10k
+ *  sessions), so reads run concurrently; the bound keeps a large batch from flooding the app-server. */
+const READ_CONCURRENCY = 8;
+
+/** The metadata of one ID; undefined for an unreadable or absent record. */
+async function readOne(client: CodexAppServerClient, codexHome: string | null, sessionId: string): Promise<SessionIndexThread | undefined> {
+    try {
+        const {thread} = await client.threadRead({threadId: sessionId, includeTurns: false});
+        // UUID parsing can normalize the ID. Opaque ACP IDs must still match exactly.
+        if (thread.id !== sessionId) return undefined;
+        return {thread, archived: thread.path !== null && isArchivedRolloutPath(thread.path, codexHome)};
+    } catch (error) {
+        if (client.connectionLoss.lost || shouldAbortBatch(error)) throw error;
+        return undefined;
+    }
+}
+
 export async function readSessionBatchMetadata(
     client: CodexAppServerClient,
     codexHome: string | null,
     sessionIds: string[],
 ): Promise<SessionIndexThread[]> {
     const entries: SessionIndexThread[] = [];
-    for (const sessionId of sessionIds) {
-        try {
-            const {thread} = await client.threadRead({threadId: sessionId, includeTurns: false});
-            // UUID parsing can normalize the ID. Opaque ACP IDs must still match exactly.
-            if (thread.id !== sessionId) continue;
-            entries.push({thread, archived: thread.path !== null && isArchivedRolloutPath(thread.path, codexHome)});
-        } catch (error) {
-            if (client.connectionLoss.lost || shouldAbortBatch(error)) throw error;
-            // Unreadable or absent records contribute no row.
-        }
+    for (let start = 0; start < sessionIds.length; start += READ_CONCURRENCY) {
+        const chunk = sessionIds.slice(start, start + READ_CONCURRENCY);
+        const reads = chunk.map(sessionId => readOne(client, codexHome, sessionId));
+        const found = await Promise.all(reads);
+        entries.push(...found.filter(entry => entry !== undefined));
     }
     return entries;
 }

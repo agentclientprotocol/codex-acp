@@ -1434,6 +1434,34 @@ describe("_session/batch_get", () => {
         expect(await agent.sessionIndex.batchGet({sessionIds: ["known"]})).toEqual({sessions: []});
     });
 
+    it("reads at most 8 ids at a time and keeps request order when reads finish out of order", async () => {
+        const {agent, read} = await setup();
+        const ids = Array.from({length: 30}, (_, index) => `id-${index}`);
+        let inFlight = 0;
+        let maxInFlight = 0;
+        read.mockImplementation(async ({threadId}) => {
+            maxInFlight = Math.max(maxInFlight, ++inFlight);
+            // Later ids finish first.
+            await new Promise(resolve => setTimeout(resolve, 30 - Number(threadId.slice(3))));
+            inFlight--;
+            if (Number(threadId.slice(3)) % 3 === 0) throw new Error(`no rollout found for thread id ${threadId}`);
+            return {thread: createThread({id: threadId})} as any;
+        });
+        const result = await agent.sessionIndex.batchGet({sessionIds: ids});
+        expect(result.sessions.map(row => row.sessionId)).toEqual(ids.filter((_, index) => index % 3 !== 0));
+        expect(maxInFlight).toBe(8);
+        expect(read).toHaveBeenCalledTimes(30);
+    });
+
+    it("stops starting reads after a connection failure", async () => {
+        const {agent, read} = await setup();
+        const error = Object.assign(new Error("Connection is inactive"), {code: -32096});
+        read.mockRejectedValue(error);
+        await expect(agent.sessionIndex.batchGet({sessionIds: Array.from({length: 30}, (_, index) => `id-${index}`)}))
+            .rejects.toBe(error);
+        expect(read).toHaveBeenCalledTimes(8);
+    });
+
     it.each([
         Object.assign(new Error("Pending response rejected since connection got disposed"), {code: -32097}),
         Object.assign(new Error("Connection is inactive"), {code: -32096}),

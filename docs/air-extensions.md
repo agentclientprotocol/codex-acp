@@ -1197,10 +1197,11 @@ A thread that is not loaded here has no `state`. A change of `state` is a row ch
 members outside the recent list page. Check for `sessionBatchGet` in
 `initialize.result._meta.jetbrains.air.capabilities` before calling it.
 
-The params object contains only `sessionIds`: an array of 0–100 distinct,
-non-empty strings. IDs match exactly, without trimming or case normalization.
-Malformed params, duplicates, more than 100 IDs, or extra fields return
-`Invalid params` (`-32602`). Archived sessions and sessions in other projects
+The params object contains only `sessionIds`: an array of distinct, non-empty
+strings. IDs match exactly, without trimming or case normalization. Malformed
+params, duplicates or extra fields return `Invalid params` (`-32602`). The
+adapter sets no limit on the number of IDs; the client chooses the batch size
+for the latency it accepts. Archived sessions and sessions in other projects
 or worktrees are eligible; the client applies display filters.
 
 ```json
@@ -1244,13 +1245,15 @@ an empty or partial result.
 
 Rows use the same builder as an unscoped `session/list`, including archive,
 worktree and activity metadata. Codex selects the stored copy. The adapter calls
-`thread/read` with `includeTurns: false` for each ID without loading or resuming
-sessions, paging through `thread/list`, or requesting turn history. A batch read
-does not subscribe to changes or expand an existing subscription's scope.
+`thread/read` with `includeTurns: false` for each ID, at most 8 at a time,
+without loading or resuming sessions, paging through `thread/list`, or
+requesting turn history. A batch read does not subscribe to changes or expand
+an existing subscription's scope.
 
 Codex 0.164 can internally fall back to recursive filesystem discovery for
 unknown or unindexed IDs and read legacy rollout metadata, so lookup latency can
-depend on total stored history. Native legacy `thread/read` can also return a
+depend on total stored history: about 60 ms per unknown ID at 10k sessions and
+120 ms at 30k. Native legacy `thread/read` can also return a
 creation-based `updatedAt` where `thread/list` reports the stored update time;
 exact timestamp equality is not guaranteed.
 

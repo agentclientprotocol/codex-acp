@@ -103,7 +103,7 @@ export type SessionBatchGetResponse = {
 };
 
 export const sessionBatchGetParamsParser = z.strictObject({
-    sessionIds: z.array(z.string().refine(id => id.trim().length > 0, "sessionIds must be non-empty")).max(100)
+    sessionIds: z.array(z.string().refine(id => id.trim().length > 0, "sessionIds must be non-empty"))
         .refine(ids => new Set(ids).size === ids.length, "sessionIds must be distinct"),
 });
 

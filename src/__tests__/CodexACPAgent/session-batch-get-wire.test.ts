@@ -59,11 +59,10 @@ describe.each([1, 2] as const)("_session/batch_get over ACP v%i", version => {
         }
     });
 
-    it("rejects malformed, extra, duplicate, blank and oversized input without store work", async () => {
+    it("rejects malformed, extra, duplicate and blank input without store work", async () => {
         const {request, backend} = await connect(version, ["sessionIndex"]);
         const invalid = [undefined, null, [], "ids", {}, {sessionIds: null}, {sessionIds: "a"},
             {sessionIds: [1]}, {sessionIds: [""]}, {sessionIds: [" \n\t"]}, {sessionIds: ["a", "a"]},
-            {sessionIds: Array.from({length: 101}, (_, index) => `id-${index}`)},
             ...["cwd", "archived", "includeWorktrees", "limit", "cursor"].map(key => ({sessionIds: [], [key]: null})),
         ];
         for (const params of invalid) {
@@ -83,9 +82,9 @@ describe.each([1, 2] as const)("_session/batch_get over ACP v%i", version => {
         expect(backend).toHaveBeenCalledExactlyOnceWith("thread/read", {threadId: "known", includeTurns: false});
     });
 
-    it("accepts 100 distinct exact strings without trimming or normalization", async () => {
+    it("accepts more than 100 distinct exact strings without trimming or normalization", async () => {
         const {request, backend} = await connect(version, ["sessionIndex"]);
-        const ids = ["id", "ID", " id ", ...Array.from({length: 97}, (_, index) => `id-${index}`)];
+        const ids = ["id", "ID", " id ", ...Array.from({length: 247}, (_, index) => `id-${index}`)];
         const result = await request(SESSION_BATCH_GET_METHOD, {sessionIds: ids});
         expect(result).toEqual({sessions: []});
         expect(backend.mock.calls.filter(([method]: [string]) => method === "thread/read").map(([, params]: [unknown, any]) => params.threadId)).toEqual(ids);
