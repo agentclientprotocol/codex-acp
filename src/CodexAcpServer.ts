@@ -3428,10 +3428,15 @@ export class CodexAcpServer {
         const reportModel = async (childSessionId: string, model: string | undefined) => {
             const models = this.subagentModels(sessionState);
             if (!model || !models) return;
-            await session.update({
-                sessionUpdate: "config_option_update",
-                configOptions: [createSubagentModelConfigOption(models.availableModels, models.currentModel, model)],
-            }, childSessionId);
+            try {
+                await session.update({
+                    sessionUpdate: "config_option_update",
+                    configOptions: [createSubagentModelConfigOption(models.availableModels, models.currentModel, model)],
+                }, childSessionId);
+            }
+            catch (error) {
+                logger.error(`Failed to report the model of subagent session ${childSessionId}`, error);
+            }
         };
         // v2 only (this path also serves v1's native replay, unchanged there).
         const startedReplayMessages = new Set<string>();
