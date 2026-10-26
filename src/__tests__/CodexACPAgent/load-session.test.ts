@@ -455,7 +455,7 @@ describe("CodexACPAgent - loadSession", () => {
         ]);
     });
 
-    it("replays the model of a child only when the history names it", async () => {
+    it("replays the model of a child only when its activity names it", async () => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
@@ -529,12 +529,12 @@ describe("CodexACPAgent - loadSession", () => {
         });
         const root = makeThread("root-history", [
             turn("root-turn-1", [
+                spawn("resolved", null),
+                started("resolved", model.id),
+                started("unknown", "custom-model"),
+                // A spawn request does not name the model: a role config can override it.
                 spawn("requested", model.id),
                 started("requested", null),
-                started("resolved", "custom-model"),
-                // Only the current model of the root could name the model of this child.
-                spawn("inherited", null),
-                started("inherited", null),
             ]),
         ]);
         appServer.threadResume = vi.fn().mockResolvedValue({
@@ -568,11 +568,11 @@ describe("CodexACPAgent - loadSession", () => {
                 ? `${sessionId} subagent_spawned ${update.subagentSessionId}`
                 : `${sessionId} model ${update.configOptions[0].currentValue} "${update.configOptions[0].options[0].name}"`);
         expect(updates).toEqual([
-            "root-history subagent_spawned requested",
-            `requested model ${model.id} "${model.id}"`,
             "root-history subagent_spawned resolved",
-            `resolved model custom-model "custom-model"`,
-            "root-history subagent_spawned inherited",
+            `resolved model ${model.id} "${model.id}"`,
+            "root-history subagent_spawned unknown",
+            `unknown model custom-model "custom-model"`,
+            "root-history subagent_spawned requested",
         ]);
     });
 

@@ -119,23 +119,6 @@ function settings(model: string): ServerNotification {
     return {method: "thread/settings/updated", params: {threadId: "child-1", threadSettings: {model} as never}};
 }
 
-function rootTurn(status: "completed" | "inProgress"): ServerNotification {
-    const turn = {
-        id: "root-turn",
-        items: [],
-        rootTurnId: null,
-        itemsView: "notLoaded" as const,
-        status,
-        error: null,
-        startedAt: null,
-        completedAt: null,
-        durationMs: null,
-    };
-    return status === "completed"
-        ? {method: "turn/completed", params: {threadId: "root", turn}}
-        : {method: "turn/started", params: {threadId: "root", turn}};
-}
-
 function threadStarted(threadId: string, model: string): ServerNotification {
     return {method: "thread/started", params: {thread: {id: threadId, model} as never}};
 }
@@ -155,24 +138,22 @@ describe('the model of a native subagent session', () => {
         expectConformingV2SessionUpdates();
     });
 
-    it('reports the requested model on the child session right after the announcement', async () => {
+    it('reports the resolved activity model on the child session right after the announcement', async () => {
         const {router, sent} = v1Router();
 
-        await router.handle(spawn("gpt-5.2-codex"));
-        await router.handle(activity(null));
+        await feed(router, spawn("gpt-5.5"), activity("gpt-5.2-codex"));
 
         expect(sent.map(({sessionId, update}) => `${sessionId} ${update["sessionUpdate"]}`)).toEqual([
             "root subagent_spawned",
             "child-1 config_option_update",
         ]);
-        await expect(JSON.stringify(sent, null, 2)).toMatchFileSnapshot('data/subagent-model-requested.json');
+        await expect(JSON.stringify(sent, null, 2)).toMatchFileSnapshot('data/subagent-model-activity.json');
     });
 
     it('uses the value and the name of the same model in the parent model option', async () => {
         const {router, sent} = v1Router();
 
-        await router.handle(spawn("gpt-5.2-codex"));
-        await router.handle(activity(null));
+        await feed(router, spawn(null), activity("gpt-5.2-codex"));
 
         const parentOption = createModelConfigOption([...MODELS.availableModels], MODELS.currentModel!);
         const parentEntry = ((parentOption as {options: Array<{value: string}>}).options)
@@ -182,20 +163,21 @@ describe('the model of a native subagent session', () => {
         expect(childOption["options"]).toEqual([parentEntry]);
     });
 
-    it('reports the model of the parent for a spawn that requests no model', async () => {
+    it.each([
+        {requested: "gpt-5.2-codex"},
+        {requested: null},
+    ])('guesses no model from the spawn request or the parent ($requested)', async ({requested}) => {
         const {router, sent} = v1Router();
 
-        await router.handle(spawn(null));
-        await router.handle(activity(null));
+        await feed(router, spawn(requested), activity(null));
 
-        await expect(JSON.stringify(sent, null, 2)).toMatchFileSnapshot('data/subagent-model-inherited.json');
+        expect(sent.map(({update}) => update["sessionUpdate"])).toEqual(["subagent_spawned"]);
     });
 
-    it('prefers the model that Codex resolved for the child, and keeps an unknown model id as it is', async () => {
+    it('keeps an unknown model id as it is', async () => {
         const {router, sent} = v1Router();
 
-        await router.handle(spawn("gpt-5.2-codex"));
-        await router.handle(activity("custom-model"));
+        await feed(router, spawn(null), activity("custom-model"));
 
         expect(modelOptionOf(sent[1]!.update)).toMatchObject({
             currentValue: "custom-model",
@@ -206,97 +188,64 @@ describe('the model of a native subagent session', () => {
     it('reports the model again on the new session of a reopened child', async () => {
         const {router, sent} = v1Router();
 
-        await router.handle(spawn("gpt-5.2-codex"));
-        await router.handle(activity(null));
-        await router.handle(childTurn("first-turn", "completed"));
-        await router.handle(childTurn("followup-turn", "inProgress"));
+        await feed(
+            router,
+            spawn(null),
+            activity("gpt-5.2-codex"),
+            childTurn("first-turn", "completed"),
+            childTurn("followup-turn", "inProgress"),
+        );
 
         await expect(JSON.stringify(sent, null, 2)).toMatchFileSnapshot('data/subagent-model-reopen.json');
+    });
+
+    it('reports the thread model on a reopened child that ended before its announcement', async () => {
+        const {router, sent} = v1Router();
+
+        await feed(
+            router,
+            spawn(null),
+            threadStarted("child-1", "gpt-5.2-codex"),
+            // The child ends before Codex reports its activity, so it is not announced.
+            childTurn("first-turn", "completed"),
+            childTurn("followup-turn", "inProgress"),
+        );
+
+        expect(modelReports(sent)).toEqual(['child-1:generation:2 gpt-5.2-codex "5.2 Codex"']);
     });
 
     it('reports a new snapshot when the settings of the child thread change its model', async () => {
         const {router, sent} = v1Router();
 
-        await router.handle(spawn(null));
-        await router.handle(activity(null));
-        const settings = (model: string): ServerNotification => ({
-            method: "thread/settings/updated",
-            params: {threadId: "child-1", threadSettings: {model} as never},
-        });
-        await router.handle(settings("gpt-5.5"));
-        await router.handle(settings("gpt-5.2-codex"));
+        await feed(router, spawn(null), activity("gpt-5.5"), settings("gpt-5.5"), settings("gpt-5.2-codex"));
 
-        expect(sent.map(({sessionId, update}) => [sessionId, update["sessionUpdate"]])).toEqual([
-            ["root", "subagent_spawned"],
-            ["child-1", "config_option_update"],
-            ["child-1", "config_option_update"],
-        ]);
-        expect(modelOptionOf(sent[2]!.update)["currentValue"]).toBe("gpt-5.2-codex");
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.5 "5.5"', 'child-1 gpt-5.2-codex "5.2 Codex"']);
     });
 
-    it('sends no configuration when the model of the child is not known', async () => {
-        const {router, sent} = v1Router({currentModel: null, availableModels: []});
-
-        await router.handle(spawn(null));
-        await router.handle(activity(null));
-
-        expect(sent.map(({update}) => update["sessionUpdate"])).toEqual(["subagent_spawned"]);
-    });
-
-    it('renders the child configuration in the ACP v2 shape', async () => {
-        const {router, sent} = v2Router();
-
-        await router.handle(spawn("gpt-5.2-codex"));
-        await router.handle(activity(null));
-
-        await expect(JSON.stringify(sent, null, 2)).toMatchFileSnapshot('data/subagent-model-v2.json');
-    });
-
-    it('keeps the model of the parent at the spawn when the root model changes before a reopen', async () => {
-        const models = {...MODELS};
-        const {router, sent} = v1Router(models);
-
-        await router.handle(spawn(null));
-        // The child ends before Codex reports its activity, so it is not announced.
-        await router.handle(childTurn("first-turn", "completed"));
-        models.currentModel = "gpt-5.2-codex";
-        await router.handle(childTurn("followup-turn", "inProgress"));
-
-        expect(modelReports(sent)).toEqual(['child-1:generation:2 gpt-5.5 "5.5"']);
-    });
-
-    it('keeps the model of the parent at the spawn when the root model changes before the announcement', async () => {
-        const models = {...MODELS};
-        const {router, sent} = v1Router(models);
-
-        await router.handle(spawn(null));
-        models.currentModel = "gpt-5.2-codex";
-        await router.handle(activity(null));
-
-        expect(modelReports(sent)).toEqual(['child-1 gpt-5.5 "5.5"']);
-    });
-
-    it('gives a nested child that requests no model the model of its parent child', async () => {
+    it('reports for a nested child only the model that Codex states for it', async () => {
         const {router, sent} = v1Router();
 
-        await router.handle(spawn("gpt-5.2-codex"));
-        await router.handle(activity(null));
-        await router.handle(spawn(null, "grandchild-1", "child-1"));
-        await router.handle(activity(null, "grandchild-1", "/root/reviewer/helper"));
+        await feed(
+            router,
+            spawn(null),
+            activity("gpt-5.2-codex"),
+            spawn(null, "grandchild-1", "child-1"),
+            activity(null, "grandchild-1", "/root/reviewer/helper"),
+        );
 
-        expect(modelReports(sent)).toEqual([
-            'child-1 gpt-5.2-codex "5.2 Codex"',
-            'grandchild-1 gpt-5.2-codex "5.2 Codex"',
-        ]);
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.2-codex "5.2 Codex"']);
     });
 
     it('sends no configuration to a client that gets no session configuration', async () => {
         const {router, sent} = v1Router(null);
 
-        await router.handle(spawn("gpt-5.2-codex"));
-        await router.handle(threadStarted("child-1", "gpt-5.5"));
-        await router.handle(activity("custom-model"));
-        await router.handle(threadStarted("child-1", "gpt-5.2-codex"));
+        await feed(
+            router,
+            spawn("gpt-5.2-codex"),
+            threadStarted("child-1", "gpt-5.5"),
+            activity("custom-model"),
+            settings("gpt-5.2-codex"),
+        );
 
         expect(sent.map(({update}) => update["sessionUpdate"])).toEqual(["subagent_spawned"]);
     });
@@ -304,9 +253,7 @@ describe('the model of a native subagent session', () => {
     it('sends nothing to a client without native subagent sessions', async () => {
         const {router, sent} = v1Router(MODELS, false);
 
-        await router.handle(spawn("gpt-5.2-codex"));
-        await router.handle(activity(null));
-        await router.handle(threadStarted("child-1", "gpt-5.5"));
+        await feed(router, spawn("gpt-5.2-codex"), activity("gpt-5.2-codex"), threadStarted("child-1", "gpt-5.5"));
 
         expect(sent).toEqual([]);
     });
@@ -344,7 +291,7 @@ describe('the model of a native subagent session', () => {
     it('announces a pending child with the model of a settings change, and reports it once', async () => {
         const {router, sent} = v1Router();
 
-        await feed(router, spawn("gpt-5.5"), settings("gpt-5.2-codex"), activity(null));
+        await feed(router, spawn(null), settings("gpt-5.2-codex"), activity("gpt-5.5"));
 
         expect(modelReports(sent)).toEqual(['child-1 gpt-5.2-codex "5.2 Codex"']);
     });
@@ -357,24 +304,11 @@ describe('the model of a native subagent session', () => {
         expect(modelReports(sent)).toEqual(['child-1 gpt-5.2-codex "5.2 Codex"', 'child-1 gpt-5.5 "5.5"']);
     });
 
-    it('inherits the root model of the running turn, not a model that the client set during the turn', async () => {
-        const models = {...MODELS};
-        const {router, sent} = v1Router(models);
-
-        await feed(router, rootTurn("inProgress"));
-        models.currentModel = "gpt-5.2-codex";
-        await feed(router, spawn(null), activity(null), rootTurn("completed"));
-        await feed(router, rootTurn("inProgress"), spawn(null, "child-2"), activity(null, "child-2", "/root/second"));
-
-        expect(modelReports(sent)).toEqual(['child-1 gpt-5.5 "5.5"', 'child-2 gpt-5.2-codex "5.2 Codex"']);
-    });
-
     it('sends no new snapshot when another spelling of the model gives the same option value', async () => {
         const {router, sent} = v1Router();
 
-        await router.handle(spawn("codex-fast"));
-        await router.handle(activity(null));
-        await router.handle(threadStarted("child-1", "gpt-5.2-codex-fast"));
+        await feed(router, spawn(null), activity("codex-fast"), threadStarted("child-1", "gpt-5.2-codex-fast"),
+            settings("gpt-5.2-codex-fast"));
 
         expect(modelReports(sent)).toEqual(['child-1 codex-fast "5.2 Codex Fast"']);
     });
@@ -382,8 +316,7 @@ describe('the model of a native subagent session', () => {
     it('keeps the full model id when the parent session has no model option', async () => {
         const {router, sent} = v1Router({currentModel: "gpt-5.5", availableModels: []});
 
-        await router.handle(spawn(null));
-        await router.handle(activity(null));
+        await feed(router, spawn(null), activity("gpt-5.5"));
 
         expect(modelReports(sent)).toEqual(['child-1 gpt-5.5 "gpt-5.5"']);
     });
@@ -406,10 +339,17 @@ describe('the model of a native subagent session', () => {
             () => MODELS,
         );
 
-        await router.handle(spawn("gpt-5.2-codex"));
-        await router.handle(activity(null));
+        await feed(router, spawn(null), activity("gpt-5.2-codex"));
 
         expect(sent).toEqual(["subagent_spawned"]);
         expect(await router.waitForMaterializedSession("child-1")).toBe("child-1");
+    });
+
+    it('renders the child configuration in the ACP v2 shape', async () => {
+        const {router, sent} = v2Router();
+
+        await feed(router, spawn(null), activity("gpt-5.2-codex"));
+
+        await expect(JSON.stringify(sent, null, 2)).toMatchFileSnapshot('data/subagent-model-v2.json');
     });
 });

@@ -3132,7 +3132,7 @@ export class CodexAcpServer {
             currentModel = ModelId.fromString(sessionState.currentModelId).model;
         }
         catch {
-            // A session without a known model has no model to give its subagents.
+            // A session without a known model gives no current entry to match.
         }
         return {currentModel, availableModels: sessionState.availableModels};
     }
@@ -3421,10 +3421,8 @@ export class CodexAcpServer {
     ): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
         const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean; model?: string}>();
-        const requestedModels = new Map<string, string>();
         // Sends the model of a replayed child after its announcement, as the live session does. Replay sends only
-        // a model that the history names for the child: the current model of the parent can differ from the
-        // model at the spawn, so a child without one gets no model option.
+        // the resolved model that the activity items name for the child, so an older record gets no model option.
         const reportModel = async (childSessionId: string, model: string | undefined) => {
             const models = this.subagentModels(sessionState);
             if (!model || !models) return;
@@ -3469,7 +3467,7 @@ export class CodexAcpServer {
                         // An interaction that started no child turn is not a new generation.
                         if (activityKind === "interacted" && !childItems) continue;
                         const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
-                        const model = item.model || previous?.model || requestedModels.get(item.agentThreadId);
+                        const model = item.model || previous?.model;
                         await session.update({
                             sessionUpdate: "subagent_spawned",
                             subagentSessionId: childSessionId,
@@ -3517,7 +3515,7 @@ export class CodexAcpServer {
                         const child = announced.get(item.agentThreadId);
                         if (!child) {
                             const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
-                            const model = item.model || requestedModels.get(item.agentThreadId);
+                            const model = item.model ?? undefined;
                             await session.update({
                                 sessionUpdate: "subagent_spawned",
                                 subagentSessionId: item.agentThreadId,
@@ -3545,12 +3543,7 @@ export class CodexAcpServer {
                     continue;
                 }
                 // The activity items above replay the lifecycle of a spawn. A control call is a tool call, as in the live session.
-                if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") {
-                    if (item.model) {
-                        for (const childThreadId of item.receiverThreadIds) requestedModels.set(childThreadId, item.model);
-                    }
-                    continue;
-                }
+                if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") continue;
                 for (const update of await this.createHistoryUpdates(item, sessionState)) {
                     if (this.protocolVersion === 2) {
                         await this.sendReplayMessageStart(session, update, startedReplayMessages);

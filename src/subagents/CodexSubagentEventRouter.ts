@@ -39,10 +39,11 @@ type EndedSpawn = {
 };
 
 /**
- * Where the adapter learned the model of a child. A source of a higher rank wins: a settings change is a real
- * change of the model, and at the creation the activity item names the resolved model.
+ * Where Codex stated the model of a child. The adapter reports only these models and never guesses one from the
+ * spawn request or the parent. A source of a higher rank wins: at the creation the activity item names the resolved
+ * model, and a settings change is a real change of the model.
  */
-const MODEL_SOURCE_RANK = {inherited: 0, requested: 1, threadStarted: 2, activity: 3, settings: 4} as const;
+const MODEL_SOURCE_RANK = {threadStarted: 0, activity: 1, settings: 2} as const;
 
 type ChildModel = {
     model: string;
@@ -57,7 +58,7 @@ function preferredModel(current: ChildModel | undefined, next: ChildModel | unde
     return MODEL_SOURCE_RANK[next.source] >= MODEL_SOURCE_RANK[current.source] ? next : current;
 }
 
-/** The models of the root session, which a child that does not request a model inherits. */
+/** The models of the root session, which give the value and the name of a child model. */
 export type SubagentModels = {
     /** The base model id of the root session, or `null` when it is not known. */
     currentModel: string | null;
@@ -83,8 +84,6 @@ export class CodexSubagentEventRouter {
     private readonly activeLegacyActivities = new Set<string>();
     /** Models that Codex reported for threads before their spawn. The root turn end clears them. */
     private readonly earlyThreadModels = new Map<string, ChildModel>();
-    /** The root model when the current root turn started, or `undefined` outside a root turn. */
-    private rootTurnModel: string | null | undefined = undefined;
 
     /**
      * @param onChildSessionEnded runs when a native child session ends, so that the owner can release
@@ -114,20 +113,13 @@ export class CodexSubagentEventRouter {
             });
         }
         if (notification.method === "turn/started") {
-            // The running turn keeps its model when the client changes the session model.
-            if (notification.params.threadId === this.rootSessionId) {
-                this.rootTurnModel = this.rootModels()?.currentModel ?? null;
-            }
             const childTurn = this.isKnownChild(notification.params.threadId);
             // A follow-up can start a new turn of an ended child with no collaboration item that reports it.
             if (childTurn) await this.reopen(notification.params.threadId);
             return childTurn;
         }
         if (notification.method === "turn/completed") {
-            if (notification.params.threadId === this.rootSessionId) {
-                this.rootTurnModel = undefined;
-                this.earlyThreadModels.clear();
-            }
+            if (notification.params.threadId === this.rootSessionId) this.earlyThreadModels.clear();
             const childTurn = this.isKnownChild(notification.params.threadId);
             const state = terminalStateFromTurn(notification.params.turn.status);
             if (!state) return childTurn;
@@ -208,8 +200,7 @@ export class CodexSubagentEventRouter {
                     representedSpawn = true;
                     continue;
                 }
-                // The model is settled at the spawn, so a later change of the parent model does not change it.
-                const model = preferredModel(this.spawnModel(item.model, parentThreadId), this.takeEarlyModel(childSessionId));
+                const model = this.takeEarlyModel(childSessionId);
                 this.pendingSpawns.set(childSessionId, {
                     parentThreadId,
                     parentSessionId,
@@ -397,7 +388,7 @@ export class CodexSubagentEventRouter {
         const parentSessionId = pending?.parentSessionId ?? inferredParent.sessionId;
         const task = pending?.task ?? `Delegated task for ${name}`;
         const model = preferredModel(
-            pending ? pending.model : preferredModel(this.spawnModel(null, parentThreadId), this.takeEarlyModel(childSessionId)),
+            pending ? pending.model : this.takeEarlyModel(childSessionId),
             resolvedModel ? {model: resolvedModel, source: "activity"} : undefined,
         );
         await this.session.update({
@@ -538,21 +529,6 @@ export class CodexSubagentEventRouter {
         const model = this.earlyThreadModels.get(threadId);
         this.earlyThreadModels.delete(threadId);
         return model;
-    }
-
-    /** The model that a spawn requested, else the model of its parent. */
-    private spawnModel(requested: string | null, parentThreadId: string): ChildModel | undefined {
-        if (requested) return {model: requested, source: "requested"};
-        const inherited = this.inheritedModel(parentThreadId);
-        return inherited ? {model: inherited, source: "inherited"} : undefined;
-    }
-
-    /** A child that requests no model runs with the model of its parent. */
-    private inheritedModel(parentThreadId: string): string | undefined {
-        const parent = this.children.get(parentThreadId);
-        if (parent) return parent.model?.model;
-        const rootModel = this.rootTurnModel !== undefined ? this.rootTurnModel : this.rootModels()?.currentModel;
-        return rootModel ?? undefined;
     }
 
     /** The value of the model option for a model, which can differ from the model string that Codex reports. */

@@ -239,10 +239,10 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
     });
 
     it.each([
-        {requestedModel: "gpt-5", expected: [{sessionId: childId, value: "gpt-5", name: "5"}]},
-        // Only the current model of the root could name the model of this child, so replay sends no model.
-        {requestedModel: null, expected: []},
-    ])('replays the model of a child only when the history names it ($requestedModel)', async ({requestedModel, expected}) => {
+        {activityModel: "gpt-5", expected: [{sessionId: childId, value: "gpt-5", name: "5"}]},
+        // The spawn request names a model, but a role config can override it, so replay sends no model.
+        {activityModel: null, expected: []},
+    ])('replays the model of a child only when its activity names it ($activityModel)', async ({activityModel, expected}) => {
         const root: Thread["turns"] = [{
             ...rootTurns[0]!,
             items: [
@@ -254,11 +254,12 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
                     senderThreadId: rootId,
                     receiverThreadIds: [childId],
                     prompt: "Research",
-                    model: requestedModel,
+                    model: "gpt-5",
                     reasoningEffort: null,
                     agentsStates: {},
                 },
-                ...rootTurns[0]!.items,
+                {...rootTurns[0]!.items[0]!, model: activityModel} as Thread["turns"][number]["items"][number],
+                ...rootTurns[0]!.items.slice(1),
             ],
         }];
         const {connection, updates} = await connectV2Client({
