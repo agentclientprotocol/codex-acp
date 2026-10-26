@@ -9,10 +9,10 @@ import type {UpdateSessionEvent} from "./ACPSessionConnection";
  * found and failed out.
  */
 export class CodexSessionToolCalls {
-    private readonly open = new Map<string, {hasTerminal: boolean}>();
+    private readonly open = new Map<string, {hasTerminal: boolean; turnId?: string}>();
 
-    start(itemId: string, hasTerminal: boolean): void {
-        this.open.set(itemId, {hasTerminal});
+    start(itemId: string, hasTerminal: boolean, turnId?: string): void {
+        this.open.set(itemId, {hasTerminal, ...(turnId !== undefined ? {turnId} : {})});
     }
 
     complete(itemId: string): void {
@@ -25,9 +25,10 @@ export class CodexSessionToolCalls {
     }
 
     /** Fails every still-open tool call and ends its terminal, if it had one. */
-    finishOutstanding(): UpdateSessionEvent[] {
+    finishOutstanding(turnId?: string): UpdateSessionEvent[] {
         const updates: UpdateSessionEvent[] = [];
-        for (const [itemId, {hasTerminal}] of this.open) {
+        for (const [itemId, {hasTerminal, turnId: owner}] of this.open) {
+            if (turnId !== undefined && owner !== undefined && owner !== turnId) continue;
             updates.push({
                 sessionUpdate: "tool_call_update",
                 toolCallId: itemId,
@@ -38,8 +39,8 @@ export class CodexSessionToolCalls {
                     },
                 } : {}),
             });
+            this.open.delete(itemId);
         }
-        this.open.clear();
         return updates;
     }
 }

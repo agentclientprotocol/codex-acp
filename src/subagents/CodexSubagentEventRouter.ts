@@ -45,15 +45,15 @@ type EndedSpawn = {
  */
 const MODEL_SOURCE_RANK = {threadStarted: 0, activity: 1, settings: 2} as const;
 
-type ChildModel = {
+export type ChildModel = {
     model: string;
     source: keyof typeof MODEL_SOURCE_RANK;
 };
 
 /** A report of a lower rank does not replace the model, so a `thread/started` of a resume keeps the activity model. */
-function preferredModel(current: ChildModel | undefined, next: ChildModel): ChildModel;
-function preferredModel(current: ChildModel | undefined, next: ChildModel | undefined): ChildModel | undefined;
-function preferredModel(current: ChildModel | undefined, next: ChildModel | undefined): ChildModel | undefined {
+export function preferredModel(current: ChildModel | undefined, next: ChildModel): ChildModel;
+export function preferredModel(current: ChildModel | undefined, next: ChildModel | undefined): ChildModel | undefined;
+export function preferredModel(current: ChildModel | undefined, next: ChildModel | undefined): ChildModel | undefined {
     if (!current || !next) return current ?? next;
     return MODEL_SOURCE_RANK[next.source] >= MODEL_SOURCE_RANK[current.source] ? next : current;
 }

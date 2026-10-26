@@ -827,6 +827,12 @@ export class CodexAcpClient {
         return null;
     }
 
+    restoreSubagentSubscription(rootSessionId: string, parentThreadId: string, thread: Thread): Promise<Thread | null> {
+        return this.subagents.restoreChild(rootSessionId, parentThreadId, thread);
+    }
+
+    isSubagentThread(threadId: string): boolean { return this.subagents.isChildThread(threadId); }
+
     async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>): Promise<SessionMetadata> {
         const instructions = await this.resolveSessionInstructions(request, undefined, true);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
@@ -1236,6 +1242,8 @@ export class CodexAcpClient {
         supportsSubagents: boolean,
         observeInteraction: (result: ServerNotification) => void | Promise<void>,
         waitForChildSession: (childThreadId: string) => Promise<string | null>,
+        withUserAction?: import("./subagents/CodexSubagentSubscriptions").SubagentInteraction,
+        observeWorkEnd?: (event: ServerNotification) => void,
     ) {
         const dispatch = (event: ServerNotification) => {
             this.enqueueSessionNotification(sessionId, () => eventHandler(event));
@@ -1254,6 +1262,23 @@ export class CodexAcpClient {
             elicitationHandler,
             waitForRootNotifications: () => this.waitForSessionNotifications(sessionId),
             waitForChildSession,
+            ...(withUserAction ? {withUserAction} : {}),
+            ...(observeWorkEnd ? {observeWorkEnd} : {}),
+        });
+    }
+
+    redispatchSessionNotifications(sessionId: string, notifications: ServerNotification[], after?: () => Promise<void>): void {
+        this.subagents.redispatch(sessionId, notifications);
+        if (after) this.enqueueSessionNotification(sessionId, after);
+    }
+
+    /** Completion includes async publication, not just invoking its callback. */
+    enqueueSessionTransition(sessionId: string, operation: () => void | Promise<void>): Promise<void> {
+        return new Promise((resolve, reject) => {
+            this.enqueueSessionNotification(sessionId, async () => {
+                try { await operation(); resolve(); }
+                catch (error) { reject(error); }
+            });
         });
     }
 
