@@ -456,6 +456,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
             false,
             new ACPSessionConnection({notify: vi.fn(), request: vi.fn()} as AcpClientConnection, sessionId),
             () => {},
+            () => ({currentModel: null, availableModels: []}),
         ),
         asyncTasks: new CodexBackgroundTerminalTasks(
             false,

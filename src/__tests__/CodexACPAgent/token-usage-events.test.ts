@@ -702,6 +702,7 @@ describe('Token Usage Events', () => {
                 true,
                 new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
                 () => {},
+                () => ({currentModel: null, availableModels: []}),
             );
             mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
                 turn: { id: 'turn-id', items: [], status: 'inProgress', error: null },

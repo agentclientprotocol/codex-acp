@@ -212,7 +212,7 @@ schema alone:
   channel. The same `_meta` v1 attaches to `PromptResponse` is copied onto the v2 idle update.
 - Custom session updates are renamed on v2: `subagent_spawned`/`subagent_state_update` become a
   single `_subagent_update` (gated on the AIR `nativeSubagentSessions` capability; this contract is
-  retained until the adapter migrates to the standard subagent model), and
+  retained independently of standard subagent sessions), and
   `async_task_spawned`/`async_task_state_update` become `_async_task_spawned`/`_async_task_state_update`
   (gated on the AIR `asyncTasks` capability). Payload shapes are unchanged.
 - Foreground state is independent of prompt acceptance. `running` can precede the user-message
@@ -241,6 +241,38 @@ schema alone:
   rows, `session_info_update`s and `_session/list/changes` carry the same `_meta`.
 - Other AIR `_meta` keys (goal, message phase, mode kind, permission presentation) go only to AIR
   clients, as on v1. Every v2 permission request still gets its prompt `title` and `description`.
+
+#### Live standard subagent sessions
+
+Non-AIR v1 clients opt in with `clientCapabilities.subagents: {}`. Non-AIR v2 clients use
+standard `subagent_update` associations automatically. AIR keeps its existing opt-in, updates,
+and generation-based identities; clients do not receive both contracts.
+
+A standard child keeps one opaque conversation ID across assignments and parent handler changes.
+Its ancestors are announced before its output, tool updates, or interactions. Permissions and
+elicitation use the child's ID and survive parent replay; actual work endings withdraw obsolete
+requests locally, even if the client returns a late answer. Child tools, terminals, plans, titles,
+and observed model options stay separate from the parent.
+
+Capabilities are empty: direct child prompting, loading, configuration, cancellation, and other
+client mutations are not enabled. Parent cancellation interrupts observed live descendants.
+An observed work ending reports `idle`; loss of observability reports `unknown`, not a fabricated
+failure or a permanently closed conversation.
+
+Replay follows both recorded spawn formats and replays available child transcripts once per conversation,
+including nested children, using legacy or paginated history. Announcements and all selected history
+precede the response. Completed snapshots reconcile tool and rendering state before duplicate live
+payloads are suppressed; live bookkeeping still runs. In-progress commands retain classification without
+resetting streamed output. Incomplete text has no safe delta cursor; it and other records without a safe
+partial representation are omitted rather than replayed over newer content. Agent-owned input is not
+rendered as human input. Missing, omitted, or incomplete child history produces a parent advisory;
+an empty transcript alone does not invent a gap.
+
+Historical work-state outcomes remain deferred. Replayed content alone confirms neither current work
+nor controls. Rejoining a loaded child still requires current provider parentage; copied fork history
+can be displayed but cannot acquire the original runtime's subscriptions.
+After replay, current child work/model snapshots follow the actual response write, including whole
+JSON-RPC batches. Parent setup operations serialize without waiting on each other's batch delivery.
 
 #### Models of a `providers/set` gateway
 

@@ -1,0 +1,13 @@
+[
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "content": {
+        "text": "Saved child answer",
+        "type": "text"
+      },
+      "messageId": "saved",
+      "sessionUpdate": "agent_message_chunk"
+    }
+  }
+]

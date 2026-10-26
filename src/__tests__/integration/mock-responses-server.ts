@@ -2,9 +2,10 @@ import http from "node:http";
 import type {AddressInfo} from "node:net";
 
 type MockErrorResponse = {status: number; body: unknown};
+type ResponseHandler = (request: unknown) => string | undefined | Promise<string | undefined>;
 
 /**
- * Local stand-in for the OpenAI Responses API. Each `POST /v1/responses` from Codex gets the next queued reply;
+ * Local stand-in for the OpenAI Responses API. By default, each `POST /v1/responses` gets the next queued reply;
  * a tool-call turn needs two: the call, then the answer after Codex sends the tool output.
  */
 export interface MockResponsesServer {
@@ -12,12 +13,14 @@ export interface MockResponsesServer {
     readonly baseUrl: string;
     /** Bodies of every request Codex sent, in order; shows what Codex passed back to the model. */
     readonly requests: unknown[];
-    /** Requests with no queued reply (answered 400/404): Codex did something the test didn't script. */
+    /** Requests with no scripted reply (answered 400/404): Codex did something the test didn't script. */
     readonly unexpectedRequests: number;
     /** Queues replies built with `textResponse`, `execCommandResponse` or `applyPatchResponse`. */
     enqueue(...responses: string[]): void;
     /** Keeps returning the HTTP error across runtime retries, until cleared with null. */
     setErrorResponse(response: MockErrorResponse | null): void;
+    /** Overrides queued replies; return undefined to flag an unexpected request. */
+    setResponseHandler(handler: ResponseHandler): void;
     close(): Promise<void>;
 }
 
@@ -33,6 +36,7 @@ function parseBody(body: string): unknown {
 export async function startMockResponsesServer(): Promise<MockResponsesServer> {
     const queue: string[] = [];
     let errorResponse: MockErrorResponse | null = null;
+    let responseHandler: ResponseHandler | undefined;
     const requests: unknown[] = [];
     let unexpectedRequests = 0;
     let requestCount = 0;
@@ -40,11 +44,22 @@ export async function startMockResponsesServer(): Promise<MockResponsesServer> {
     const server = http.createServer((req, res) => {
         let body = "";
         req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
+        req.on("end", async () => {
             requestCount++;
-            requests.push(parseBody(body));
+            const parsed = parseBody(body);
+            requests.push(parsed);
             const isResponsesCall = req.method === "POST" && (req.url ?? "").split("?")[0]!.endsWith("/responses");
-            const next = isResponsesCall ? errorResponse ?? queue.shift() : undefined;
+            let next: string | MockErrorResponse | undefined;
+            try {
+                next = isResponsesCall ? errorResponse ?? (responseHandler ? await responseHandler(parsed) : queue.shift()) : undefined;
+            } catch (error) {
+                console.error("Mock Responses API handler failed", error);
+                if (res.destroyed) return;
+                res.writeHead(500);
+                res.end("mock: response handler failed");
+                return;
+            }
+            if (res.destroyed) return;
             if (next === undefined) {
                 unexpectedRequests++;
                 res.writeHead(isResponsesCall ? 400 : 404);
@@ -76,6 +91,7 @@ export async function startMockResponsesServer(): Promise<MockResponsesServer> {
             queue.push(...responses);
         },
         setErrorResponse: response => { errorResponse = response; },
+        setResponseHandler: handler => { responseHandler = handler; },
         close: async () => {
             server.closeAllConnections();
             await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -121,8 +137,14 @@ export function textResponse(...chunks: string[]): string {
 
 /** The model calls the shell tool `exec_command` with `args` (e.g. `{cmd: "echo hi"}`). */
 export function execCommandResponse(callId: string, args: object): string {
+    return functionCallResponse(callId, "exec_command", args);
+}
+
+/** The model calls a named function, optionally within a tool namespace. */
+export function functionCallResponse(callId: string, name: string, args: object, namespace?: string): string {
     return wrap(nextId(), [
-        {type: "response.output_item.done", output_index: 0, item: {type: "function_call", id: `fc_${callId}`, call_id: callId, name: "exec_command", arguments: JSON.stringify(args)}},
+        {type: "response.output_item.done", output_index: 0, item: {type: "function_call", id: `fc_${callId}`, call_id: callId, name,
+            ...(namespace ? {namespace} : {}), arguments: JSON.stringify(args)}},
     ]);
 }
 

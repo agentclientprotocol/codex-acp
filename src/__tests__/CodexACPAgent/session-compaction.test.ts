@@ -443,6 +443,7 @@ async function createFixture(clientCapabilities: acp.ClientCapabilities = compac
             true,
             new ACPSessionConnection(fixture.getAcpConnection(), sessionId),
             () => {},
+            () => ({currentModel: null, availableModels: []}),
         );
     }
     vi.spyOn(agent, "getSessionState").mockReturnValue(sessionState);

@@ -1,0 +1,83 @@
+[
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "terminalId": "command",
+      "command": "sleep 12",
+      "cwd": "/workspace",
+      "sessionUpdate": "terminal_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "toolCallId": "command",
+      "title": "sleep 12",
+      "kind": "execute",
+      "status": "completed",
+      "content": [
+        {
+          "terminalId": "command",
+          "type": "terminal"
+        }
+      ],
+      "rawInput": {
+        "command": "sleep 12",
+        "cwd": "/workspace"
+      },
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "terminalId": "command",
+      "output": {
+        "data": "UmVjb3JkZWQgb3V0cHV0"
+      },
+      "exitStatus": {
+        "exitCode": 0,
+        "signal": null
+      },
+      "sessionUpdate": "terminal_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "saved",
+      "content": [],
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "saved",
+      "content": {
+        "text": "Saved answer",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "new",
+      "content": {
+        "text": "New answer",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "stopReason": "end_turn",
+      "state": "idle",
+      "sessionUpdate": "state_update"
+    }
+  }
+]

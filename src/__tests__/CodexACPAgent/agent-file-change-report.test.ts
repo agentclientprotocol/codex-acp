@@ -167,6 +167,7 @@ async function setupNativeSubagentPrompt(): Promise<{
         true,
         new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId),
         () => {},
+        () => ({currentModel: null, availableModels: []}),
     );
     vi.spyOn(fixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
     vi.spyOn(fixture.getCodexAppServerClient(), "turnStart")
