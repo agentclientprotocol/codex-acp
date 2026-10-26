@@ -15,10 +15,14 @@ const MODELS: SubagentModels = {
     availableModels: [
         createTestModel({id: "gpt-5.5", displayName: "gpt-5.5"}),
         createTestModel({id: "gpt-5.2-codex", model: "gpt-5.2-codex", displayName: "gpt-5.2-codex", isDefault: false}),
+        createTestModel({id: "codex-fast", model: "gpt-5.2-codex-fast", displayName: "gpt-5.2-codex-fast", isDefault: false}),
     ],
 };
 
-function v1Router(models: SubagentModels = MODELS): {router: CodexSubagentEventRouter; sent: SentUpdate[]} {
+function v1Router(
+    models: SubagentModels | null = MODELS,
+    supported = true,
+): {router: CodexSubagentEventRouter; sent: SentUpdate[]} {
     const sent: SentUpdate[] = [];
     const connection = {
         notify: vi.fn(async (_method: string, params: unknown) => {
@@ -27,7 +31,7 @@ function v1Router(models: SubagentModels = MODELS): {router: CodexSubagentEventR
         request: vi.fn(),
     } as unknown as AcpClientConnection;
     const session = new ACPSessionConnection(connection, "root");
-    return {router: new CodexSubagentEventRouter("root", true, session, () => {}, () => models), sent};
+    return {router: new CodexSubagentEventRouter("root", supported, session, () => {}, () => models), sent};
 }
 
 function v2Router(): {router: CodexSubagentEventRouter; sent: SentUpdate[]} {
@@ -45,31 +49,31 @@ function v2Router(): {router: CodexSubagentEventRouter; sent: SentUpdate[]} {
     return {router: new CodexSubagentEventRouter("root", true, session, () => {}, () => MODELS), sent};
 }
 
-function spawn(model: string | null): ServerNotification {
+function spawn(model: string | null, child = "child-1", sender = "root"): ServerNotification {
     const item: ThreadItem = {
         type: "collabAgentToolCall",
-        id: "spawn-1",
+        id: `spawn-${child}`,
         tool: "spawnAgent",
         status: "inProgress",
-        senderThreadId: "root",
-        receiverThreadIds: ["child-1"],
+        senderThreadId: sender,
+        receiverThreadIds: [child],
         prompt: "Review the diff",
         model,
         reasoningEffort: null,
-        agentsStates: {"child-1": {status: "running", message: null}},
+        agentsStates: {[child]: {status: "running", message: null}},
     };
     return {method: "item/started", params: {threadId: "root", turnId: "turn-1", startedAtMs: 0, item}};
 }
 
-function activity(model: string | null): ServerNotification {
+function activity(model: string | null, child = "child-1", path = "/root/reviewer"): ServerNotification {
     const item: ThreadItem = {
         type: "subAgentActivity",
         model,
         reasoningEffort: null,
-        id: "activity-started",
+        id: `activity-${child}`,
         kind: "started",
-        agentThreadId: "child-1",
-        agentPath: "/root/reviewer",
+        agentThreadId: child,
+        agentPath: path,
     };
     return {method: "item/started", params: {threadId: "root", turnId: "turn-1", startedAtMs: 0, item}};
 }
@@ -93,6 +97,20 @@ function childTurn(id: string, status: "completed" | "inProgress"): ServerNotifi
 
 function modelOptionOf(update: Record<string, unknown>): Record<string, unknown> {
     return (update["configOptions"] as Array<Record<string, unknown>>)[0]!;
+}
+
+function threadStarted(threadId: string, model: string): ServerNotification {
+    return {method: "thread/started", params: {thread: {id: threadId, model} as never}};
+}
+
+/** The model updates as `session value "name"`. */
+function modelReports(sent: SentUpdate[]): string[] {
+    return sent
+        .filter(({update}) => update["sessionUpdate"] === "config_option_update")
+        .map(({sessionId, update}) => {
+            const option = modelOptionOf(update) as {currentValue: string; options: Array<{name: string}>};
+            return `${sessionId} ${option.currentValue} "${option.options[0]!.name}"`;
+        });
 }
 
 describe('the model of a native subagent session', () => {
@@ -195,5 +213,122 @@ describe('the model of a native subagent session', () => {
         await router.handle(activity(null));
 
         await expect(JSON.stringify(sent, null, 2)).toMatchFileSnapshot('data/subagent-model-v2.json');
+    });
+
+    it('keeps the model of the parent at the spawn when the root model changes before a reopen', async () => {
+        const models = {...MODELS};
+        const {router, sent} = v1Router(models);
+
+        await router.handle(spawn(null));
+        // The child ends before Codex reports its activity, so it is not announced.
+        await router.handle(childTurn("first-turn", "completed"));
+        models.currentModel = "gpt-5.2-codex";
+        await router.handle(childTurn("followup-turn", "inProgress"));
+
+        expect(modelReports(sent)).toEqual(['child-1:generation:2 gpt-5.5 "5.5"']);
+    });
+
+    it('keeps the model of the parent at the spawn when the root model changes before the announcement', async () => {
+        const models = {...MODELS};
+        const {router, sent} = v1Router(models);
+
+        await router.handle(spawn(null));
+        models.currentModel = "gpt-5.2-codex";
+        await router.handle(activity(null));
+
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.5 "5.5"']);
+    });
+
+    it('gives a nested child that requests no model the model of its parent child', async () => {
+        const {router, sent} = v1Router();
+
+        await router.handle(spawn("gpt-5.2-codex"));
+        await router.handle(activity(null));
+        await router.handle(spawn(null, "grandchild-1", "child-1"));
+        await router.handle(activity(null, "grandchild-1", "/root/reviewer/helper"));
+
+        expect(modelReports(sent)).toEqual([
+            'child-1 gpt-5.2-codex "5.2 Codex"',
+            'grandchild-1 gpt-5.2-codex "5.2 Codex"',
+        ]);
+    });
+
+    it('sends no configuration to a client that gets no session configuration', async () => {
+        const {router, sent} = v1Router(null);
+
+        await router.handle(spawn("gpt-5.2-codex"));
+        await router.handle(threadStarted("child-1", "gpt-5.5"));
+        await router.handle(activity("custom-model"));
+        await router.handle(threadStarted("child-1", "gpt-5.2-codex"));
+
+        expect(sent.map(({update}) => update["sessionUpdate"])).toEqual(["subagent_spawned"]);
+    });
+
+    it('sends nothing to a client without native subagent sessions', async () => {
+        const {router, sent} = v1Router(MODELS, false);
+
+        await router.handle(spawn("gpt-5.2-codex"));
+        await router.handle(activity(null));
+        await router.handle(threadStarted("child-1", "gpt-5.5"));
+
+        expect(sent).toEqual([]);
+    });
+
+    it('takes the model from thread/started, before and after the announcement', async () => {
+        const {router, sent} = v1Router();
+
+        await router.handle(spawn(null));
+        await router.handle(threadStarted("child-1", "gpt-5.2-codex"));
+        await router.handle(activity(null));
+        await router.handle(threadStarted("child-1", "gpt-5.5"));
+
+        expect(modelReports(sent)).toEqual([
+            'child-1 gpt-5.2-codex "5.2 Codex"',
+            'child-1 gpt-5.5 "5.5"',
+        ]);
+    });
+
+    it('sends no new snapshot when another spelling of the model gives the same option value', async () => {
+        const {router, sent} = v1Router();
+
+        await router.handle(spawn("codex-fast"));
+        await router.handle(activity(null));
+        await router.handle(threadStarted("child-1", "gpt-5.2-codex-fast"));
+
+        expect(modelReports(sent)).toEqual(['child-1 codex-fast "5.2 Codex Fast"']);
+    });
+
+    it('keeps the full model id when the parent session has no model option', async () => {
+        const {router, sent} = v1Router({currentModel: "gpt-5.5", availableModels: []});
+
+        await router.handle(spawn(null));
+        await router.handle(activity(null));
+
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.5 "gpt-5.5"']);
+    });
+
+    it('announces the child when the model report fails', async () => {
+        const sent: string[] = [];
+        const connection = {
+            notify: vi.fn(async (_method: string, params: unknown) => {
+                const update = (params as SentUpdate).update;
+                if (update["sessionUpdate"] === "config_option_update") throw new Error("connection closed");
+                sent.push(String(update["sessionUpdate"]));
+            }),
+            request: vi.fn(),
+        } as unknown as AcpClientConnection;
+        const router = new CodexSubagentEventRouter(
+            "root",
+            true,
+            new ACPSessionConnection(connection, "root"),
+            () => {},
+            () => MODELS,
+        );
+
+        await router.handle(spawn("gpt-5.2-codex"));
+        await router.handle(activity(null));
+
+        expect(sent).toEqual(["subagent_spawned"]);
+        expect(await router.waitForMaterializedSession("child-1")).toBe("child-1");
     });
 });

@@ -27,7 +27,10 @@ type PendingSubagent = {
     parentThreadId: string;
     parentSessionId: string;
     task: string;
-    /** The model that the spawn requested, or the model of the child thread when Codex reported it. */
+    /**
+     * The model of the child thread when Codex reported it, else the model that the spawn requested, else the model
+     * of the parent at the spawn.
+     */
     model?: string;
     buffered: PendingNotificationBuffer;
 };
@@ -67,14 +70,15 @@ export class CodexSubagentEventRouter {
     /**
      * @param onChildSessionEnded runs when a native child session ends, so that the owner can release
      *   the state that it keeps per child session.
-     * @param rootModels gives the models of the root session when a child needs them.
+     * @param rootModels gives the models of the root session when a child needs them, or `null` when the client
+     *   gets no session configuration.
      */
     constructor(
         private readonly rootSessionId: string,
         private readonly supported: boolean,
         private readonly session: ACPSessionConnection,
         private readonly onChildSessionEnded: (sessionId: string) => void,
-        private readonly rootModels: () => SubagentModels,
+        private readonly rootModels: () => SubagentModels | null,
     ) {}
 
     async handle(notification: ServerNotification): Promise<boolean> {
@@ -171,11 +175,13 @@ export class CodexSubagentEventRouter {
                     representedSpawn = true;
                     continue;
                 }
+                // A spawn without a model runs with the model that its parent has now, not at the announcement.
+                const model = item.model || this.inheritedModel(parentThreadId);
                 this.pendingSpawns.set(childSessionId, {
                     parentThreadId,
                     parentSessionId,
                     task: item.prompt?.trim() || "Delegated task",
-                    ...(item.model ? {model: item.model} : {}),
+                    ...(model ? {model} : {}),
                     buffered: new PendingNotificationBuffer(childSessionId),
                 });
                 representedSpawn = true;
@@ -376,10 +382,10 @@ export class CodexSubagentEventRouter {
             generation: 1,
         });
         this.pendingSpawns.delete(childSessionId);
-        await this.reportModel(childSessionId, model);
         // A loop, not push(...): a spread of a large buffer exceeds the argument limit and throws.
         for (const notification of pending?.buffered.take() ?? []) this.replayQueue.push(notification);
         this.resolveMaterialization(childSessionId, childSessionId);
+        await this.reportModel(childSessionId, model);
     }
 
     private finishPending(childSessionId: string): void {
@@ -423,14 +429,13 @@ export class CodexSubagentEventRouter {
             const pending = this.terminalPendingSpawns.get(childThreadId);
             if (!pending) return;
             const parentSessionId = this.children.get(pending.parentThreadId)?.sessionId ?? this.rootSessionId;
-            const model = pending.model ?? this.inheritedModel(pending.parentThreadId);
             const reopened: NativeSubagent = {
                 parentThreadId: pending.parentThreadId,
                 parentSessionId,
                 sessionId: `${childThreadId}:generation:2`,
                 name: fallbackName(childThreadId),
                 task: pending.task,
-                ...(model ? {model} : {}),
+                ...(pending.model ? {model: pending.model} : {}),
                 generation: 2,
             };
             await this.session.update({
@@ -486,29 +491,43 @@ export class CodexSubagentEventRouter {
             return;
         }
         const child = this.children.get(threadId);
-        if (!child || child.model === model) return;
+        if (!child) return;
+        const changed = !child.model || this.modelValue(child.model) !== this.modelValue(model);
         child.model = model;
-        if (child.terminalState === undefined) await this.reportModel(child.sessionId, model);
+        if (changed && child.terminalState === undefined) await this.reportModel(child.sessionId, model);
     }
 
     /** A child that requests no model runs with the model of its parent. */
     private inheritedModel(parentThreadId: string): string | undefined {
         const parent = this.children.get(parentThreadId);
         if (parent) return parent.model;
-        return this.rootModels().currentModel ?? undefined;
+        return this.rootModels()?.currentModel ?? undefined;
+    }
+
+    /** The value of the model option for a model, which can differ from the model string that Codex reports. */
+    private modelValue(model: string): string {
+        const models = this.rootModels();
+        const option = createSubagentModelConfigOption(models?.availableModels ?? [], models?.currentModel ?? null, model);
+        return String(option.currentValue);
     }
 
     /**
      * Sends the configuration of a child session after its announcement. The client may not change it, so the
      * model option offers only the current model. A child whose model is not known gets no configuration.
+     * The report is optional, so its failure does not stop the child lifecycle.
      */
     private async reportModel(childSessionId: string, model: string | undefined): Promise<void> {
-        if (!model) return;
         const models = this.rootModels();
-        await this.session.update({
-            sessionUpdate: "config_option_update",
-            configOptions: [createSubagentModelConfigOption(models.availableModels, models.currentModel, model)],
-        }, childSessionId);
+        if (!model || !models) return;
+        try {
+            await this.session.update({
+                sessionUpdate: "config_option_update",
+                configOptions: [createSubagentModelConfigOption(models.availableModels, models.currentModel, model)],
+            }, childSessionId);
+        }
+        catch (error) {
+            logger.error(`Failed to report the model of subagent session ${childSessionId}`, error);
+        }
     }
 
     private resolveMaterialization(childThreadId: string, sessionId: string | null): void {

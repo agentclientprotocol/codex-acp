@@ -111,7 +111,8 @@ export function createSubagentModelConfigOption(
     parentBaseModelId: string | null,
     model: string,
 ): SessionConfigOption {
-    const parentOptions = modelOptions(availableModels, parentBaseModelId);
+    // Without models the parent session has no model option, so there is nothing to match.
+    const parentOptions = availableModels.length > 0 ? modelOptions(availableModels, parentBaseModelId) : [];
     // Codex can name a model by its `model` slug instead of its id.
     const id = availableModels.find(candidate => candidate.id === model)?.id
         ?? availableModels.find(candidate => candidate.model === model)?.id

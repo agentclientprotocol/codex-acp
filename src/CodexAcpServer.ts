@@ -3125,8 +3125,8 @@ export class CodexAcpServer {
     }
 
     /** The models of a root session, for the configuration of its native subagent sessions. */
-    private subagentModels(sessionState: SessionState): SubagentModels {
-        if (!this.isSessionConfigEnabled()) return {currentModel: null, availableModels: []};
+    private subagentModels(sessionState: SessionState): SubagentModels | null {
+        if (!this.isSessionConfigEnabled()) return null;
         let currentModel: string | null = null;
         try {
             currentModel = ModelId.fromString(sessionState.currentModelId).model;
@@ -3426,8 +3426,8 @@ export class CodexAcpServer {
         // a model that the history names for the child: the current model of the parent can differ from the
         // model at the spawn, so a child without one gets no model option.
         const reportModel = async (childSessionId: string, model: string | undefined) => {
-            if (!model) return;
             const models = this.subagentModels(sessionState);
+            if (!model || !models) return;
             await session.update({
                 sessionUpdate: "config_option_update",
                 configOptions: [createSubagentModelConfigOption(models.availableModels, models.currentModel, model)],
