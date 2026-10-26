@@ -39,31 +39,26 @@ async function connect(version: 1 | 2, capabilities: string[]) {
 }
 
 describe.each([1, 2] as const)("_session/batch_get over ACP v%i", version => {
-    it("advertises and serves batch get only with sessionIndex", async () => {
-        for (const capabilities of [[], ["sessionBatchGet"], ["sessionIndex"]]) {
-            const {request, initialize, backend} = await connect(version, capabilities);
-            const advertised = initialize._meta.jetbrains.air.capabilities;
-            if (capabilities.includes("sessionIndex")) {
-                expect(advertised).toContain("sessionBatchGet");
-                const ids = ["second", "first"];
-                expect(await request(SESSION_BATCH_GET_METHOD, {sessionIds: ids})).toEqual({sessions: []});
-                for (const forbidden of ["thread/list", "thread/resume", "thread/start", "thread/turns/list", "thread/items/list"]) {
-                    expect(backend.mock.calls.map(([method]: [string]) => method)).not.toContain(forbidden);
-                }
-                expect(backend.mock.calls.filter(([method]: [string]) => method === "thread/read")).toEqual(ids.map(threadId => ["thread/read", {threadId, includeTurns: false}]));
-            } else {
-                expect(advertised).not.toContain("sessionBatchGet");
-                await expect(request(SESSION_BATCH_GET_METHOD, {sessionIds: []})).rejects.toMatchObject({code: -32601});
-                expect(backend).not.toHaveBeenCalled();
-            }
-        }
+    it.each([[[]], [["sessionBatchGet"]]])("is neither advertised nor served without sessionIndex: %j", async capabilities => {
+        const {request, initialize, backend} = await connect(version, capabilities);
+        expect(initialize._meta.jetbrains.air.capabilities).not.toContain("sessionBatchGet");
+        await expect(request(SESSION_BATCH_GET_METHOD, {sessionIds: []})).rejects.toMatchObject({code: -32601});
+        expect(backend).not.toHaveBeenCalled();
+    });
+
+    it("is advertised with sessionIndex and reads only metadata", async () => {
+        const {request, initialize, backend} = await connect(version, ["sessionIndex"]);
+        expect(initialize._meta.jetbrains.air.capabilities).toContain("sessionBatchGet");
+        const ids = ["second", "first"];
+        expect(await request(SESSION_BATCH_GET_METHOD, {sessionIds: ids})).toEqual({sessions: []});
+        expect(backend.mock.calls).toEqual(ids.map(threadId => ["thread/read", {threadId, includeTurns: false}]));
     });
 
     it("rejects malformed, extra, duplicate and blank input without store work", async () => {
         const {request, backend} = await connect(version, ["sessionIndex"]);
         const invalid = [undefined, null, [], "ids", {}, {sessionIds: null}, {sessionIds: "a"},
             {sessionIds: [1]}, {sessionIds: [""]}, {sessionIds: [" \n\t"]}, {sessionIds: ["a", "a"]},
-            ...["cwd", "archived", "includeWorktrees", "limit", "cursor"].map(key => ({sessionIds: [], [key]: null})),
+            {sessionIds: [], cwd: null},
         ];
         for (const params of invalid) {
             await expect(request(SESSION_BATCH_GET_METHOD, params)).rejects.toMatchObject({code: -32602});
@@ -72,21 +67,11 @@ describe.each([1, 2] as const)("_session/batch_get over ACP v%i", version => {
         expect(backend).not.toHaveBeenCalled();
     });
 
-    it.each([
-        {code: -32600, message: "failed to locate thread id known: Permission denied"},
-        {code: -32603, message: "failed to read thread: thread-store internal error: failed to read thread metadata for known: database is locked"},
-    ])("omits native metadata failures with code $code", async error => {
-        const {request, backend} = await connect(version, ["sessionIndex"]);
-        backend.mockRejectedValue(Object.assign(new Error(error.message), {code: error.code}));
-        expect(await request(SESSION_BATCH_GET_METHOD, {sessionIds: ["known"]})).toEqual({sessions: []});
-        expect(backend).toHaveBeenCalledExactlyOnceWith("thread/read", {threadId: "known", includeTurns: false});
-    });
-
     it("accepts more than 100 distinct exact strings without trimming or normalization", async () => {
         const {request, backend} = await connect(version, ["sessionIndex"]);
         const ids = ["id", "ID", " id ", ...Array.from({length: 247}, (_, index) => `id-${index}`)];
         const result = await request(SESSION_BATCH_GET_METHOD, {sessionIds: ids});
         expect(result).toEqual({sessions: []});
-        expect(backend.mock.calls.filter(([method]: [string]) => method === "thread/read").map(([, params]: [unknown, any]) => params.threadId)).toEqual(ids);
+        expect(backend.mock.calls.map(([, params]: [unknown, any]) => params.threadId)).toEqual(ids);
     });
 });

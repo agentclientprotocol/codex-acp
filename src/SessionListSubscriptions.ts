@@ -26,8 +26,8 @@ import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadReadParams, ThreadReadResponse} from "./app-server/v2";
 import {CodexHomeWatcher, type CodexHomeWatcherListener} from "./CodexHomeWatcher";
 import {logger} from "./Logger";
-import {sessionIndexRowForkedFrom, sessionIndexRowSignature} from "./SessionIndex";
-import {isArchivedRolloutPath, isMissingThreadError} from "./SessionIndexMutations";
+import {sessionIndexRowForkedFrom, sessionIndexRowSignature, threadEntry} from "./SessionIndex";
+import {isMissingThreadError} from "./SessionIndexMutations";
 import {SessionNameLog} from "./SessionNameLog";
 
 /** The most subscriptions of one connection. */
@@ -845,7 +845,7 @@ export class SessionListSubscriptions {
             return null;
         }
         if (!isListedThread(thread)) return null;
-        return {thread, archived: thread.path !== null && isArchivedRolloutPath(thread.path, this.deps.codexHome())};
+        return threadEntry(thread, this.deps.codexHome());
     }
 
     /** The groups whose scope has the cwd. The worktrees of a group are resolved again every 10 s at most. */

@@ -15,6 +15,7 @@ import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadStatus, Turn} from "./app-server/v2";
 import {AIR_META_KEY, JETBRAINS_META_KEY, withAirMeta} from "./AirExtension";
 import {listedSessionTitle} from "./SessionTitle";
+import {isArchivedRolloutPath} from "./SessionIndexMutations";
 import {logger} from "./Logger";
 
 export const AIR_SESSION_INDEX_KEY = "sessionIndex";
@@ -88,6 +89,11 @@ export interface SessionIndexThread {
     archived: boolean;
 }
 
+/** The entry of a `thread/read` result: Codex reports archive state only through the rollout path. */
+export function threadEntry(thread: Thread, codexHome: string | null): SessionIndexThread {
+    return {thread, archived: thread.path !== null && isArchivedRolloutPath(thread.path, codexHome)};
+}
+
 export type SessionActivityState = "running" | "idle" | "requires_action" | "reviewing" | "error";
 
 export interface SessionActivity {
@@ -103,7 +109,7 @@ export type SessionBatchGetResponse = {
 };
 
 export const sessionBatchGetParamsParser = z.strictObject({
-    sessionIds: z.array(z.string().refine(id => id.trim().length > 0, "sessionIds must be non-empty"))
+    sessionIds: z.array(z.string().refine(id => id.trim().length > 0, "sessionIds must not be blank"))
         .refine(ids => new Set(ids).size === ids.length, "sessionIds must be distinct"),
 });
 

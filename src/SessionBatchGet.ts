@@ -3,8 +3,7 @@ import {ErrorCodes} from "vscode-jsonrpc/node";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import {isConnectionDeathError} from "./app-server-recovery/AppServerRecovery";
 import {isAppServerUnavailableError} from "./app-server-recovery/AppServerExit";
-import {isArchivedRolloutPath} from "./SessionIndexMutations";
-import type {SessionIndexThread} from "./SessionIndex";
+import {threadEntry, type SessionIndexThread} from "./SessionIndex";
 
 function rpcError(error: unknown): {code?: unknown; data?: unknown} {
     return error !== null && typeof error === "object" ? error : {};
@@ -19,20 +18,20 @@ function shouldAbortBatch(error: unknown): boolean {
     return data !== null && typeof data === "object" && "reason" in data && data.reason === "serverShuttingDown";
 }
 
-/** Native reads in flight at once. A thread/read of an unknown ID walks the stored history (about 60 ms at 10k
- *  sessions), so reads run concurrently; the bound keeps a large batch from flooding the app-server. */
+/** Native reads in flight at once. A thread/read of an unknown ID can walk the stored history, so reads run
+ *  concurrently; the bound keeps a large batch from flooding the app-server. */
 const READ_CONCURRENCY = 8;
 
-/** The metadata of one ID; undefined for an unreadable or absent record. */
-async function readOne(client: CodexAppServerClient, codexHome: string | null, sessionId: string): Promise<SessionIndexThread | undefined> {
+/** The metadata of one ID; null for an unreadable or absent record. */
+async function readOne(client: CodexAppServerClient, codexHome: string | null, sessionId: string): Promise<SessionIndexThread | null> {
     try {
         const {thread} = await client.threadRead({threadId: sessionId, includeTurns: false});
         // UUID parsing can normalize the ID. Opaque ACP IDs must still match exactly.
-        if (thread.id !== sessionId) return undefined;
-        return {thread, archived: thread.path !== null && isArchivedRolloutPath(thread.path, codexHome)};
+        if (thread.id !== sessionId) return null;
+        return threadEntry(thread, codexHome);
     } catch (error) {
         if (client.connectionLoss.lost || shouldAbortBatch(error)) throw error;
-        return undefined;
+        return null;
     }
 }
 
@@ -46,7 +45,7 @@ export async function readSessionBatchMetadata(
         const chunk = sessionIds.slice(start, start + READ_CONCURRENCY);
         const reads = chunk.map(sessionId => readOne(client, codexHome, sessionId));
         const found = await Promise.all(reads);
-        entries.push(...found.filter(entry => entry !== undefined));
+        entries.push(...found.filter(entry => entry !== null));
     }
     return entries;
 }
