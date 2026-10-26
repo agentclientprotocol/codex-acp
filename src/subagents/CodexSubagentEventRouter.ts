@@ -46,8 +46,6 @@ export type SubagentModels = {
     availableModels: ReadonlyArray<Model>;
 };
 
-const NO_MODELS: SubagentModels = {currentModel: null, availableModels: []};
-
 export type ClosingChildSession = {
     threadId: string;
     sessionId: string;
@@ -76,7 +74,7 @@ export class CodexSubagentEventRouter {
         private readonly supported: boolean,
         private readonly session: ACPSessionConnection,
         private readonly onChildSessionEnded: (sessionId: string) => void,
-        private readonly rootModels: () => SubagentModels = () => NO_MODELS,
+        private readonly rootModels: () => SubagentModels,
     ) {}
 
     async handle(notification: ServerNotification): Promise<boolean> {
