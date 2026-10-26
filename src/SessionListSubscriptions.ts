@@ -11,9 +11,10 @@
  * - The thread notifications of this adapter's app-server. Each names a thread, which is read with
  *   `thread/read` right away.
  * - Any Codex process: a write of the state DB WAL, seen by {@link CodexHomeWatcher}. After a quiet time, one
- *   `thread/list` per archive state, by `updated_at` and without cwd, reads the threads that changed since
- *   the newest one seen before. A rename moves no `updated_at`, so the renames of the session name log are
- *   read with `thread/read`, and so are the threads whose rollout moved in or out of `archived_sessions`.
+ *   `thread/list` of the unarchived threads, by `updated_at` and without cwd, reads the threads that changed
+ *   since the newest one seen before. An archived thread does not run, so it is not listed. A rename moves no
+ *   `updated_at`, so the renames of the session name log are read with `thread/read`, and so are the threads
+ *   whose rollout moved in or out of `archived_sessions`, as an archive or unarchive does.
  *
  * A thread is sent at most once a second; one flush sends one notification per subscription.
  */
@@ -110,7 +111,7 @@ interface Group {
     subscriptions: Set<Subscription>;
     /** The row last sent or computed for each thread of the scope that the group has seen. */
     rows: Map<string, GroupRow>;
-    /** Resolves when the group is ready: when the first marks are read. Never rejects. */
+    /** Resolves when the group is ready: when the first mark is read. Never rejects. */
     ready: Promise<void>;
     /** When {@link scope} was resolved. */
     scopeResolvedAt: number;
@@ -149,16 +150,16 @@ export class SessionListSubscriptions {
 
     private watcher: {stop(): void} | null = null;
     private nameLog: SessionNameLog | null = null;
-    /** The newest `updatedAt` that a scan saw, per archive state; `null` before the first scan. */
-    private marks: {unarchived: number, archived: number} | null = null;
-    private marksReady: Promise<void> | null = null;
-    /** When the watching started, in the seconds of `updatedAt`: the mark of a scan without marks. */
+    /** The newest `updatedAt` of an unarchived thread that a scan saw; `null` before the first scan. */
+    private mark: number | null = null;
+    private markReady: Promise<void> | null = null;
+    /** When the watching started, in the seconds of `updatedAt`: the mark of a scan without a mark. */
     private watchingSince = 0;
     /** Counts WAL changes: one that came after a scan stopped at its page limit asks for a scan from the top. */
     private stateChanges = 0;
-    /** Where a scan that stopped at its page limit goes on, per archive state. */
-    private resumes: Record<"unarchived" | "archived", {cursor: string, cutoff: number, newest: number, changesAtStart: number} | null> = {unarchived: null, archived: null};
-    /** Moves on when the watching stops, so that a scan that was running then does not set the marks again. */
+    /** Where a scan that stopped at its page limit goes on. */
+    private resume: {cursor: string, cutoff: number, newest: number, changesAtStart: number} | null = null;
+    /** Moves on when the watching stops, so that a scan that was running then does not set the mark again. */
     private watchGeneration = 0;
 
     /** Threads to read with `thread/read` in the next flush. */
@@ -197,7 +198,7 @@ export class SessionListSubscriptions {
     }
 
     /**
-     * Starts a subscription of an absolute cwd. It reads no rows: it resolves once the marks of the scans are
+     * Starts a subscription of an absolute cwd. It reads no rows: it resolves once the mark of the scan is
      * read, and the first change of each thread after that goes out in full.
      *
      * @throws RequestError `invalidParams` with `data.reason: "too_many_subscriptions"` beyond
@@ -232,7 +233,7 @@ export class SessionListSubscriptions {
         this.subscriptions.set(subscription.id, subscription);
         group.subscriptions.add(subscription);
         this.startWatching();
-        await Promise.all([group.ready, this.marksReady]);
+        await Promise.all([group.ready, this.markReady]);
         subscription.startedSecond = startedSecond;
         // Ready once the answer to `subscribe` is out, which happens before any timer; the next flush sends
         // what was held meanwhile.
@@ -462,10 +463,10 @@ export class SessionListSubscriptions {
     }
 
     private startWatching(): void {
-        if (this.marksReady === null) {
+        if (this.markReady === null) {
             this.watchingSince = Math.floor(this.now() / 1000);
-            // Sets the marks; when it fails, the next scan reads from when the watching started.
-            this.marksReady = this.withReader(async (reader) => {
+            // Sets the mark; when it fails, the next scan reads from when the watching started.
+            this.markReady = this.withReader(async (reader) => {
                 await this.scan(reader, true);
             });
         }
@@ -491,9 +492,9 @@ export class SessionListSubscriptions {
         this.watcher?.stop();
         this.watcher = null;
         this.nameLog = null;
-        this.marks = null;
-        this.resumes = {unarchived: null, archived: null};
-        this.marksReady = null;
+        this.mark = null;
+        this.resume = null;
+        this.markReady = null;
         this.watchGeneration++;
         if (this.timer !== null) clearTimeout(this.timer);
         this.timer = null;
@@ -522,10 +523,10 @@ export class SessionListSubscriptions {
 
     /**
      * Makes a new group ready. It reads no rows: a subscription gets the first row of each thread that changes after
-     * it started in full, and compares only the later ones. It waits for the marks, so a change after them is scanned.
+     * it started in full, and compares only the later ones. It waits for the mark, so a change after it is scanned.
      */
     private async makeReady(group: Group): Promise<void> {
-        await this.marksReady;
+        await this.markReady;
     }
 
     private async flush(): Promise<void> {
@@ -550,8 +551,8 @@ export class SessionListSubscriptions {
         const appServerGeneration = this.appServerGeneration;
         this.readEpoch = ++this.epoch;
 
-        // A scan before the first marks would only set them: it waits for them instead.
-        if (scan) await this.marksReady;
+        // A scan before the first mark would only set it: it waits for it instead.
+        if (scan) await this.markReady;
         const found = new Map<string, ThreadEntry>();
         const scanned = new Set<string>();
         // Threads that a scan found but the second between changes held back: still found by a scan.
@@ -752,83 +753,73 @@ export class SessionListSubscriptions {
     }
 
     /**
-     * The threads updated since the last scan, unarchived and archived, newest first, and moves the marks on.
-     * Threads of the second of the mark are read again: `updatedAt` has seconds, so one of them can have changed
-     * after the last scan. The first scan only sets the marks.
+     * The unarchived threads updated since the last scan, newest first, and moves the mark on. Threads of the second
+     * of the mark are read again: `updatedAt` has seconds, so one of them can have changed after the last scan. The
+     * first scan only sets the mark. Archived threads are not scanned: they do not run, and an archive or unarchive
+     * moves the rollout, which the watch of `archived_sessions` reports.
+     *
+     * @param first the read of the first mark: one page, whose newest thread is the mark.
      */
-    /** @param first the read of the first marks: one page of each archive state, whose newest thread is the mark. */
     private async scan(reader: SessionListReader, first = false): Promise<ThreadEntry[]> {
         const generation = this.watchGeneration;
         // A change after this, while a scan stopped at its page limit goes on, asks for a scan from the top.
         const changesAtStart = this.stateChanges;
-        const marks = this.marks;
-        // Both reads settle before a failure counts, so a retry never runs beside a read still out.
-        const settled = await Promise.allSettled(([false, true] as const).map(async (archived) => {
-            const key: "archived" | "unarchived" = archived ? "archived" : "unarchived";
-            const resume = this.resumes[key];
-            // A scan that stopped at its page limit goes on where it stopped, down to the mark it had then.
-            // Without marks yet, as when their first read failed, the threads updated since the watching started.
-            const mark: number = resume?.cutoff ?? (marks === null ? this.watchingSince : marks[key]);
-            const entries: ThreadEntry[] = [];
-            let newest = resume?.newest ?? (marks === null ? 0 : mark);
-            let cursor: string | null = resume?.cursor ?? null;
-            let stoppedAt: string | null = null;
-            for (let page = 0; page < SCAN_MAX_PAGES; page++) {
-                const response: ThreadListResponse = await reader.threadList({
-                    cursor,
-                    limit: page === 0 && resume === null ? SCAN_FIRST_PAGE : SCAN_NEXT_PAGE,
-                    sortKey: "updated_at",
-                    archived,
-                    sourceKinds: [],
-                    modelProviders: [],
-                    useStateDbOnly: true,
-                });
-                let reachedMark = false;
-                for (const thread of response.data) {
-                    if (thread.updatedAt < mark) {
-                        // Without marks, the newest thread is the mark, older than the watching or not.
-                        if (marks === null) newest = Math.max(newest, thread.updatedAt);
-                        reachedMark = true;
-                        break;
-                    }
-                    entries.push({thread, archived});
-                    newest = Math.max(newest, thread.updatedAt);
+        const marked = this.mark;
+        const resume = this.resume;
+        // A scan that stopped at its page limit goes on where it stopped, down to the mark it had then.
+        // Without a mark yet, as when its first read failed, the threads updated since the watching started.
+        const mark: number = resume?.cutoff ?? marked ?? this.watchingSince;
+        const entries: ThreadEntry[] = [];
+        let newest = resume?.newest ?? marked ?? 0;
+        let cursor: string | null = resume?.cursor ?? null;
+        let stoppedAt: string | null = null;
+        for (let page = 0; page < SCAN_MAX_PAGES; page++) {
+            const response: ThreadListResponse = await reader.threadList({
+                cursor,
+                limit: page === 0 && resume === null ? SCAN_FIRST_PAGE : SCAN_NEXT_PAGE,
+                sortKey: "updated_at",
+                archived: false,
+                sourceKinds: [],
+                modelProviders: [],
+                useStateDbOnly: true,
+            });
+            let reachedMark = false;
+            for (const thread of response.data) {
+                if (thread.updatedAt < mark) {
+                    // Without a mark, the newest thread is the mark, older than the watching or not.
+                    if (marked === null) newest = Math.max(newest, thread.updatedAt);
+                    reachedMark = true;
+                    break;
                 }
-                cursor = response.nextCursor;
-                if (first || reachedMark || cursor === null) break;
-                if (page === SCAN_MAX_PAGES - 1) {
-                    logger.log("The session list scan goes on later from its page limit", {archived, pages: SCAN_MAX_PAGES});
-                    stoppedAt = cursor;
-                }
+                entries.push({thread, archived: false});
+                newest = Math.max(newest, thread.updatedAt);
             }
-            return {key, mark, newest, stoppedAt, entries, resumed: resume?.changesAtStart ?? null};
-        }));
-        const failed = settled.find((side): side is PromiseRejectedResult => side.status === "rejected");
-        if (failed !== undefined) throw failed.reason;
-        const sides = settled.map(side => (side as Exclude<typeof side, PromiseRejectedResult>).value);
-        // The last subscription ended meanwhile and reset the marks: this scan must not set them again.
-        if (generation !== this.watchGeneration) return [];
-        // The first marks are no later than the watching started: a change during the start is read by the next scan.
-        if (first) for (const side of sides) side.newest = Math.min(side.newest, this.watchingSince);
-        const next = {unarchived: 0, archived: 0};
-        let goOn = false;
-        for (const side of sides) {
-            if (side.stoppedAt !== null) {
-                // The mark moves on only once the scan reached it: the rest goes on in the next scan.
-                this.resumes[side.key] = {cursor: side.stoppedAt, cutoff: side.mark, newest: side.newest, changesAtStart: side.resumed ?? changesAtStart};
-                next[side.key] = side.mark;
-                goOn = true;
-            } else {
-                // A scan that went on from a page limit read no threads changed meanwhile: when there were any,
-                // the next one starts from the top.
-                if (side.resumed !== null && this.stateChanges > side.resumed) goOn = true;
-                this.resumes[side.key] = null;
-                next[side.key] = side.newest;
+            cursor = response.nextCursor;
+            if (first || reachedMark || cursor === null) break;
+            if (page === SCAN_MAX_PAGES - 1) {
+                logger.log("The session list scan goes on later from its page limit", {pages: SCAN_MAX_PAGES});
+                stoppedAt = cursor;
             }
         }
-        this.marks = next;
+        // The last subscription ended meanwhile and reset the mark: this scan must not set it again.
+        if (generation !== this.watchGeneration) return [];
+        // The first mark is no later than the watching started: a change during the start is read by the next scan.
+        if (first) newest = Math.min(newest, this.watchingSince);
+        let goOn = false;
+        if (stoppedAt !== null) {
+            // The mark moves on only once the scan reached it: the rest goes on in the next scan.
+            this.resume = {cursor: stoppedAt, cutoff: mark, newest, changesAtStart: resume?.changesAtStart ?? changesAtStart};
+            this.mark = mark;
+            goOn = true;
+        } else {
+            // A scan that went on from a page limit read no threads changed meanwhile: when there were any,
+            // the next one starts from the top.
+            if (resume !== null && this.stateChanges > resume.changesAtStart) goOn = true;
+            this.resume = null;
+            this.mark = newest;
+        }
         if (goOn) this.requestScan();
-        return sides.flatMap(side => side.entries);
+        return entries;
     }
 
     /** A thread by id, `"missing"` when Codex has none, `null` when the list does not show it or the read failed. */
