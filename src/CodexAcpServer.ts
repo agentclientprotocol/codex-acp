@@ -15,7 +15,7 @@ import {
     OPENAI_PROVIDER_ID,
     type SessionMetadata,
     type SessionMetadataWithThread,
-    type RecordedSubagentItem,
+    type RecordedSubagentEntry,
     type UrlElicitationRequester
 } from "./CodexAcpClient";
 import {
@@ -3702,7 +3702,7 @@ export class CodexAcpServer {
 
     /** Recorded conversation data is independent of verified runtime ownership and current work. */
     private async streamStandardHistory(
-        sessionId: string, pages: AsyncIterable<RecordedSubagentItem[]>, state: SessionState, isOpen: () => boolean,
+        sessionId: string, pages: AsyncIterable<RecordedSubagentEntry[]>, state: SessionState, isOpen: () => boolean,
         threadId = sessionId, ancestry = new Set([threadId]), replayed = new Set<string>(), gaps = new Set<string>(),
     ): Promise<void> {
         const router = state.subagents;
@@ -3744,8 +3744,14 @@ export class CodexAcpServer {
         };
         let unresolved: Array<ThreadItem & {type: "subAgentActivity"}> = [];
         for await (const items of pages) {
-            for (const {item, completed, turnId} of items) {
+            for (const entry of items) {
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
+                if ("turn" in entry) {
+                    if (entry.turn === null) gaps.add(threadId);
+                    else if (threadId !== state.sessionId) await router.replayTurnOutcome(threadId, entry.turn);
+                    continue;
+                }
+                const {item, completed, turnId} = entry;
                 if (item.type === "subAgentActivity") {
                     if (isRootAgentPath(item.agentPath)) continue;
                     if (ancestry.has(item.agentThreadId)) { gaps.add(item.agentThreadId); continue; }
@@ -5586,7 +5592,7 @@ async function* itemsOfEntries(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGe
     }
 }
 
-async function* standardHistoryItems(pages: AsyncIterable<ThreadItem[]>): AsyncGenerator<RecordedSubagentItem[]> {
+async function* standardHistoryItems(pages: AsyncIterable<ThreadItem[]>): AsyncGenerator<RecordedSubagentEntry[]> {
     for await (const page of pages) {
         yield page.map(item => ({item, completed: !("status" in item) || item.status !== "inProgress"}));
     }

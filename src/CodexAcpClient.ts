@@ -54,6 +54,7 @@ import type {
     ThreadSourceKind,
     ThreadItem,
     ThreadItemEntry,
+    Turn,
     TurnCompletedNotification,
     TurnSteerResponse,
     UserInput,
@@ -85,7 +86,8 @@ import {
 import {findSupportedEffort} from "./ModelConfigOption";
 import {disableUnsupportedSkills, withoutUnsupportedSkills} from "./UnsupportedSkills";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
-export type RecordedSubagentItem = {item: ThreadItem; completed: boolean; turnId?: string};
+/** A null turn marks unavailable outcome metadata, not a failed turn. */
+export type RecordedSubagentEntry = {item: ThreadItem; completed: boolean; turnId?: string} | {turn: Turn | null};
 
 /**
  * The slice of `thread/resume` the session layer consumes, plus whether Codex
@@ -828,8 +830,8 @@ export class CodexAcpClient {
         return null;
     }
 
-    /** Lazy item reads let the caller restore verified live delivery before reading snapshots. */
-    async readSubagentHistory(threadId: string): Promise<{thread: Thread; items: AsyncIterable<RecordedSubagentItem[]>}> {
+    /** Lazy history reads let the caller restore verified live delivery before reading snapshots. */
+    async readSubagentHistory(threadId: string): Promise<{thread: Thread; items: AsyncIterable<RecordedSubagentEntry[]>}> {
         const {thread} = await this.codexClient.threadRead({threadId});
         if (thread.id !== threadId) throw new Error("Subagent history metadata names a different thread");
         return {
@@ -1808,19 +1810,28 @@ async function* oneItemPage<T>(items: T[]): AsyncGenerator<T[]> {
     if (items.length > 0) yield items;
 }
 
-async function* legacySubagentItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<RecordedSubagentItem[]> {
+async function* legacySubagentItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<RecordedSubagentEntry[]> {
     const {thread} = await client.threadRead({threadId, includeTurns: true});
     if (thread.id !== threadId) throw new Error("Subagent history names a different thread");
     yield thread.turns.flatMap(turn => turn.items.map(item => ({
         item, turnId: turn.id, completed: recordedItemCompleted(item, turn.status !== "inProgress"),
     })));
+    const turn = thread.turns.at(-1);
+    if (turn) yield [{turn}];
 }
 
-async function* paginatedSubagentItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<RecordedSubagentItem[]> {
+async function* paginatedSubagentItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<RecordedSubagentEntry[]> {
     for await (const page of client.threadItemEntryPages(threadId)) {
         yield page.map(({item, turnId, completedAtMs}) => ({
             item, turnId, completed: recordedItemCompleted(item, completedAtMs !== null),
         }));
+    }
+    try {
+        const {data} = await client.threadTurnsList({threadId, limit: 1, sortDirection: "desc", itemsView: "notLoaded"});
+        if (data[0]) yield [{turn: data[0]}];
+    } catch (error) {
+        logger.error(`Failed to read recorded outcome for subagent ${threadId}`, error);
+        yield [{turn: null}];
     }
 }
 

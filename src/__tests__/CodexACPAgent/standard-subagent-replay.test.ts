@@ -145,7 +145,7 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
         expect(gap()).toEqual([]);
     });
 
-    it("reads paginated child items in order without requesting legacy turns or work outcomes", async () => {
+    it("retains ordered paginated items without legacy turns when the outcome is unavailable", async () => {
         await connect();
         const {reads} = history(h, {[sessionId]: {items: [spawn()]}, [worker]: {items: [], paginated: true}});
         const entries = [message("first-page", "First page"), message("last-page", "Last page")].map(item =>
@@ -155,12 +155,12 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
             if (sortDirection === "desc") return {data: [entries[1]], nextCursor: null, backwardsCursor: null};
             return {data: cursor ? [entries[1]] : [entries[0]], nextCursor: cursor ? null : "second", backwardsCursor: null};
         });
-        const outcomeRead = vi.fn(async () => { throw new Error("Outcomes are not part of this slice"); });
+        const outcomeRead = vi.fn(async () => { throw new Error("Outcome metadata unavailable"); });
         h.setCodexResponse("thread/turns/list", outcomeRead);
         await load();
         await flush(h);
         expect(reads.some(read => read.id === worker && read.includeTurns)).toBe(false);
-        expect(outcomeRead).not.toHaveBeenCalled();
+        expect(outcomeRead).toHaveBeenCalledExactlyOnceWith({threadId: worker, limit: 1, sortDirection: "desc", itemsView: "notLoaded"});
         const ids = childUpdates().flatMap(entry => entry.update.sessionUpdate === "agent_message_chunk" ? [entry.update.messageId] : []);
         expect(ids).toEqual(["first-page", "last-page"]);
     });

@@ -276,9 +276,13 @@ partial representation are omitted rather than replayed over newer content. Agen
 rendered as human input. Missing, omitted, or incomplete child history produces a parent advisory;
 an empty transcript alone does not invent a gap.
 
-Historical work-state outcomes remain deferred. Replayed content alone confirms neither current work
-nor controls. Rejoining a loaded child still requires current provider parentage; copied fork history
-can be displayed but cannot acquire the original runtime's subscriptions.
+Replay reports the latest recorded child turn's known success, cancellation, or failure as historical
+`idle` before the response. A missing or still-running turn invents no outcome. Legacy history reuses
+its turn data; paginated history reads the latest turn summary separately, retaining available text
+and reporting a gap if that summary is unavailable. Recorded outcomes do not enter the live foreground
+cache, withdraw current interactions, confirm runtime ownership, or grant controls.
+Rejoining a loaded child still requires current provider parentage; copied fork history can be displayed
+but cannot acquire the original runtime's subscriptions.
 After replay, current child work/configuration snapshots follow the actual response write, including whole
 JSON-RPC batches. Parent setup operations serialize without waiting on each other's batch delivery.
 

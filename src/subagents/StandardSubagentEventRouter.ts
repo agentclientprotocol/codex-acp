@@ -1,6 +1,6 @@
 import type {ReasoningEffort, ServerNotification} from "../app-server";
 import type {StateUpdate} from "@agentclientprotocol/sdk/experimental/v2/unstable";
-import type {Thread, ThreadItem} from "../app-server/v2";
+import type {Thread, ThreadItem, Turn} from "../app-server/v2";
 import {ACPSessionConnection} from "../ACPSessionConnection";
 import {AcpV2ForegroundState} from "../AcpV2ForegroundState";
 import {CodexPlanStream} from "../CodexPlanStream";
@@ -218,17 +218,14 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                 return true;
             case "turn/completed": {
                 const turn = notification.params.turn;
-                if (turn.status === "inProgress" || child.endedTurns.has(turn.id)) return true;
+                const state = turnEndState(turn);
+                if (state === undefined || child.endedTurns.has(turn.id)) return true;
                 this.endWorkRequests(child, turn.id);
                 child.endedTurns.add(turn.id);
                 if (child.turnId !== null && child.turnId !== turn.id) return true;
                 child.turnId = null;
                 if (child.foregroundTurnId !== null && child.foregroundTurnId !== turn.id) return true;
-                await child.foreground.update(toV2IdleState(
-                    {stopReason: turn.status === "interrupted" ? "cancelled" : "end_turn"},
-                    turn.status === "failed" ? {code: -32603,
-                        message: turn.error ? readableServiceErrorMessage(turn.error.message) : "Subagent work failed"} : undefined,
-                ));
+                await child.foreground.update(state);
                 child.foregroundTurnId = null;
                 this.onChildWorkEnded(child.sessionId);
                 return true;
@@ -586,6 +583,17 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
             await child.foreground.start();
         }
     }
+
+    /** Historical state bypasses the current foreground cache and grants no runtime ownership. */
+    async replayTurnOutcome(threadId: string, turn: Turn): Promise<void> {
+        const child = this.children.get(threadId);
+        const state = turnEndState(turn);
+        if (!child || state === undefined || this.retired) return;
+        await this.ensureAnnounced(child);
+        if (this.retired) return;
+        await this.session.updateSubagentState(child.sessionId, child.parentSessionId, state);
+    }
+
     childSessionIds(): string[] { return [...this.children.values()].map(child => child.sessionId); }
     isNativeSubagentThread(threadId: string): boolean { return this.children.has(threadId); }
     shouldIgnore(): boolean { return false; }
@@ -621,4 +629,20 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     }
     legacyCollaborationStarted(item: ThreadItem & {type: "collabAgentToolCall"}) { return CollabAgentReporter.started(item); }
     legacyCollaborationCompleted(item: ThreadItem & {type: "collabAgentToolCall"}) { return CollabAgentReporter.completed(item); }
+}
+
+function turnEndState(turn: Turn): StateUpdate | undefined {
+    switch (turn.status) {
+        case "inProgress":
+            return undefined;
+        case "completed":
+            return toV2IdleState({stopReason: "end_turn"});
+        case "interrupted":
+            return toV2IdleState({stopReason: "cancelled"});
+        case "failed":
+            return toV2IdleState({stopReason: "end_turn"}, {
+                code: -32603,
+                message: turn.error ? readableServiceErrorMessage(turn.error.message) : "Subagent work failed",
+            });
+    }
 }

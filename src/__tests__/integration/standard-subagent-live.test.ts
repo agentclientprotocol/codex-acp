@@ -160,11 +160,15 @@ describeIntegration("integration: live standard subagents", () => {
                 expect(updates.some(entry => state(entry)?.state === "idle")).toBe(true);
             }, {timeout: 15_000});
             if (ending === "complete" || ending === "terminal") {
+                // A cold attachment has no cached live ending to mistake for a replayed outcome.
+                if (ending === "complete") await request("session/close", {sessionId});
                 const replayStart = updates.length;
                 await load(sessionId);
                 await vi.waitFor(() => expect(updates.slice(replayStart).some(entry => entry.sessionId === childId
                     && entry.update.sessionUpdate === "agent_message_chunk"
                     && entry.update.content.text.includes("CHILD_RESULT")), stderr).toBe(true));
+                await vi.waitFor(() => expect(updates.slice(replayStart).some(entry =>
+                    state(entry)?.state === "idle" && state(entry)?.stopReason === "end_turn"), stderr).toBe(true));
             }
             expect(updates.some(entry => ["subagent_spawned", "subagent_state_update", "_subagent_update"].includes(entry.update.sessionUpdate))).toBe(false);
             expect(mock.unexpectedRequests).toBe(0);
