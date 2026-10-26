@@ -1,0 +1,15 @@
+{
+  "unavailable": {
+    "status": 503,
+    "body": "{\"error\":\"Scripted outage\"}"
+  },
+  "unmatched": {
+    "status": 404,
+    "body": "mock: unexpected request #2"
+  },
+  "selected": {
+    "status": 200,
+    "body": "Selected reply"
+  },
+  "unexpectedRequests": 1
+}
