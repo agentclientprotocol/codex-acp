@@ -3369,7 +3369,6 @@ export class CodexAcpServer {
                 new Set([sessionId]),
                 new Set(),
                 isOpen,
-                this.subagentModels(sessionState).currentModel ?? undefined,
             );
             return;
         }
@@ -3419,12 +3418,13 @@ export class CodexAcpServer {
         ancestry: Set<string>,
         unreadableChildren: Set<string>,
         isOpen: () => boolean,
-        parentModel: string | undefined,
     ): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
         const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean; model?: string}>();
         const requestedModels = new Map<string, string>();
-        // Sends the model of a replayed child after its announcement, as the live session does.
+        // Sends the model of a replayed child after its announcement, as the live session does. Replay sends only
+        // a model that the history names for the child: the current model of the parent can differ from the
+        // model at the spawn, so a child without one gets no model option.
         const reportModel = async (childSessionId: string, model: string | undefined) => {
             if (!model) return;
             const models = this.subagentModels(sessionState);
@@ -3464,10 +3464,7 @@ export class CodexAcpServer {
                         // An interaction that started no child turn is not a new generation.
                         if (activityKind === "interacted" && !childItems) continue;
                         const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
-                        const model = item.model
-                            || previous?.model
-                            || requestedModels.get(item.agentThreadId)
-                            || parentModel;
+                        const model = item.model || previous?.model || requestedModels.get(item.agentThreadId);
                         await session.update({
                             sessionUpdate: "subagent_spawned",
                             subagentSessionId: childSessionId,
@@ -3492,7 +3489,6 @@ export class CodexAcpServer {
                                     new Set([...ancestry, item.agentThreadId]),
                                     unreadableChildren,
                                     isOpen,
-                                    model,
                                 );
                             }
                             catch (error) {
@@ -3516,7 +3512,7 @@ export class CodexAcpServer {
                         const child = announced.get(item.agentThreadId);
                         if (!child) {
                             const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
-                            const model = item.model || requestedModels.get(item.agentThreadId) || parentModel;
+                            const model = item.model || requestedModels.get(item.agentThreadId);
                             await session.update({
                                 sessionUpdate: "subagent_spawned",
                                 subagentSessionId: item.agentThreadId,
