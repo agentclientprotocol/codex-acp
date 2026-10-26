@@ -566,12 +566,12 @@ describe("CodexACPAgent - loadSession", () => {
                     && update.configOptions.length === 1))
             .map(({sessionId, update}) => update.sessionUpdate === "subagent_spawned"
                 ? `${sessionId} subagent_spawned ${update.subagentSessionId}`
-                : `${sessionId} model ${update.configOptions[0].currentValue}`);
+                : `${sessionId} model ${update.configOptions[0].currentValue} "${update.configOptions[0].options[0].name}"`);
         expect(updates).toEqual([
             "root-history subagent_spawned requested",
-            `requested model ${model.id}`,
+            `requested model ${model.id} "${model.id}"`,
             "root-history subagent_spawned resolved",
-            "resolved model custom-model",
+            `resolved model custom-model "custom-model"`,
             "root-history subagent_spawned inherited",
         ]);
     });

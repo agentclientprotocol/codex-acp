@@ -238,6 +238,50 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
         expect(agentMessages).toContain("Investigating the flaky test.");
     });
 
+    it.each([
+        {requestedModel: "gpt-5", expected: [{sessionId: childId, value: "gpt-5", name: "5"}]},
+        // Only the current model of the root could name the model of this child, so replay sends no model.
+        {requestedModel: null, expected: []},
+    ])('replays the model of a child only when the history names it ($requestedModel)', async ({requestedModel, expected}) => {
+        const root: Thread["turns"] = [{
+            ...rootTurns[0]!,
+            items: [
+                {
+                    type: "collabAgentToolCall",
+                    id: "spawn-1",
+                    tool: "spawnAgent",
+                    status: "completed",
+                    senderThreadId: rootId,
+                    receiverThreadIds: [childId],
+                    prompt: "Research",
+                    model: requestedModel,
+                    reasoningEffort: null,
+                    agentsStates: {},
+                },
+                ...rootTurns[0]!.items,
+            ],
+        }];
+        const {connection, updates} = await connectV2Client({
+            _meta: {jetbrains: {air: {version: 1, capabilities: [AIR_NATIVE_SUBAGENT_SESSIONS_KEY]}}},
+        }, {root, child: childTurns});
+        closeClient = () => connection.close();
+
+        await connection.agent.request(acpV2.methods.agent.session.resume, {
+            sessionId: rootId,
+            cwd,
+            replayFrom: {type: "start"},
+        });
+
+        const childModels = updates
+            .filter(({sessionId, update}) => sessionId === childId && update.sessionUpdate === "config_option_update")
+            .map(({sessionId, update}) => {
+                const option = (update as {configOptions: Array<{currentValue: string; options: Array<{name: string}>}>})
+                    .configOptions[0]!;
+                return {sessionId, value: option.currentValue, name: option.options[0]!.name};
+            });
+        expect(childModels).toEqual(expected);
+    });
+
     it('replays a follow-up turn of a finished child as a new generation', async () => {
         const turn = (id: string, items: Thread["turns"][number]["items"]): Thread["turns"][number] => ({
             id,
