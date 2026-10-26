@@ -86,13 +86,14 @@ export class SessionIndexService {
     constructor(private readonly host: SessionIndexHost, subscriptionTimings?: SessionListSubscriptionTimings) {
         this.activity = new SessionIndexActivity(threadId => host.session(threadId) !== undefined);
         this.titles = new SessionIndexTitles(host, this.writes);
-        // `thread/list` gives no fork parent: a row gets it once the rollout is read, a subscription with a change.
-        this.forkOrigins = new SessionForkOrigins({onFound: (threadIds) => this.subscriptions.threadsChanged(threadIds)});
+        const reader = () => {
+            const appServer = host.client().appServerClient;
+            return appServer.connectionLoss.lost ? null : appServer;
+        };
+        // `thread/list` gives no fork parent: a row gets it once `thread/read` gave it, a subscription with a change.
+        this.forkOrigins = new SessionForkOrigins({reader, onFound: (threadIds) => this.subscriptions.threadsChanged(threadIds)});
         this.subscriptions = new SessionListSubscriptions({
-            reader: () => {
-                const appServer = host.client().appServerClient;
-                return appServer.connectionLoss.lost ? null : appServer;
-            },
+            reader,
             codexHome: () => host.client().getHomePath(),
             rows: async (entries) => await this.rows(entries),
             // The canonical path too outside a Git checkout, where linkedWorktreeCwds gives the cwd alone.
@@ -171,7 +172,8 @@ export class SessionIndexService {
         const entries = await this.host.runWithProcessCheck(() => readSessionBatchMetadata(
             client.appServerClient, client.getHomePath(), sessionIds,
         ));
-        return {sessions: await this.rows(entries, true)};
+        // `thread/read` gives the fork parent, so the rows need no background read for it.
+        return {sessions: await this.rows(entries.map(entry => ({...entry, read: true as const})), true)};
     }
 
     /**
@@ -348,6 +350,7 @@ export class SessionIndexService {
         const inAgentWorktree = (cwd: string): boolean =>
             !(skipUncCwds && isUncPath(cwd)) && this.codexWorktrees.isCodexWorktreeCwd(cwd);
         return entries.map(entry => {
+            if (entry.read) this.forkOrigins.readElsewhere(entry.thread);
             const forkedFromId = this.forkOrigins.originOf(entry.thread);
             const thread = forkedFromId === entry.thread.forkedFromId ? entry.thread : {...entry.thread, forkedFromId};
             const activity = this.activity.activityOf(thread);
