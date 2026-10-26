@@ -36,12 +36,11 @@ import type {
 import {toTokenCount} from "./TokenCount";
 import { stripShellPrefix } from "./CommandUtils";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
-import {CommandReporter, commandUsesTerminal} from "./tool-calls/reporters/CommandReporter";
+import {commandUsesTerminal} from "./tool-calls/reporters/CommandReporter";
 import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
 import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
 import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
-import {FuzzySearchReporter} from "./tool-calls/reporters/FuzzySearchReporter";
-import {GuardianReporter} from "./tool-calls/reporters/GuardianReporter";
+import {CodexItemStreamState} from "./CodexItemStreamState";
 import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationReporter";
 import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
 import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
@@ -219,17 +218,11 @@ export class CodexEventHandler {
     private failure: RequestError | null = null;
     private terminalTurnError: {turnId: string; error: ErrorNotification["error"]} | null = null;
     private completedPlan: CompletedPlan | null = null;
-    private readonly activeImageGenerationItems = new Set<string>();
-    private readonly emittedImageViewItems = new Set<string>();
     private readonly session: ACPSessionConnection;
     private readonly renderer: AcpToolCallRenderer;
-    private readonly commands = new CommandReporter();
-    private readonly fuzzySearches = new FuzzySearchReporter();
-    private readonly guardianReviews = new GuardianReporter();
+    private readonly itemStreams = new CodexItemStreamState();
     private readonly plans: CodexPlanStream;
     private disposed = false;
-    private readonly seenReasoningDeltaItemIds = new Set<string>();
-    private readonly agentMessagePhases = new Map<string, string | null>();
     private readonly turnDiffs = new Map<string, string>();
     private readonly oversizedTurnDiffs = new Set<string>();
     /** Latest diff of each subagent turn, keyed by child thread and turn; `null` marks an oversized diff. */
@@ -657,7 +650,7 @@ export class CodexEventHandler {
                 });
             case "item/commandExecution/outputDelta":
                 this.completeRetryIncidentOnTurnProgress();
-                return this.renderer.render(this.commands.outputDelta(notification.params.itemId, notification.params.delta));
+                return this.renderer.render(this.itemStreams.commands.outputDelta(notification.params.itemId, notification.params.delta));
             case "item/mcpToolCall/progress":
                 this.completeRetryIncidentOnTurnProgress();
                 // AIR does not show MCP progress.
@@ -681,9 +674,9 @@ export class CodexEventHandler {
             case "deprecationNotice":
                 return this.createDeprecationNoticeEvent(notification.params);
             case "item/autoApprovalReview/started":
-                return this.renderer.render(this.guardianReviews.started(notification.params));
+                return this.renderer.render(this.itemStreams.guardianReviews.started(notification.params));
             case "item/autoApprovalReview/completed":
-                return this.renderer.render(this.guardianReviews.completed(notification.params));
+                return this.renderer.render(this.itemStreams.guardianReviews.completed(notification.params));
             case "thread/compacted":
                 return this.supportsCompaction
                     ? this.sessionState.compactions.completeLegacy(
@@ -702,15 +695,15 @@ export class CodexEventHandler {
             case "model/rerouted":
                 return this.createModelReroutedEvent(notification.params);
             case "fuzzyFileSearch/sessionUpdated":
-                return this.renderer.render(this.fuzzySearches.updated(notification.params));
+                return this.renderer.render(this.itemStreams.fuzzySearches.updated(notification.params));
             case "fuzzyFileSearch/sessionCompleted":
-                return this.renderer.render(this.fuzzySearches.completed(notification.params));
+                return this.renderer.render(this.itemStreams.fuzzySearches.completed(notification.params));
             case "thread/goal/updated":
                 return this.createThreadGoalUpdatedEvent(notification.params);
             case "thread/goal/cleared":
                 return this.createThreadGoalClearedEvent(notification.params);
             case "item/commandExecution/terminalInteraction":
-                return this.renderer.render(this.commands.terminalInput(
+                return this.renderer.render(this.itemStreams.commands.terminalInput(
                     notification.params.itemId,
                     notification.params.stdin,
                 ));
@@ -788,7 +781,7 @@ export class CodexEventHandler {
     }
 
     private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
-        const phase = this.agentMessagePhases.get(event.itemId) ?? null;
+        const phase = this.itemStreams.agentMessagePhases.get(event.itemId) ?? null;
         const meta = createMessagePhaseMeta(phase, this.sessionState.clientCapabilities.airClient);
         return createAgentTextMessageChunk(event.delta, event.itemId, meta);
     }
@@ -860,12 +853,12 @@ export class CodexEventHandler {
     private createReasoningDeltaEvent(
         event: ReasoningSummaryTextDeltaNotification | ReasoningTextDeltaNotification
     ): UpdateSessionEvent {
-        this.seenReasoningDeltaItemIds.add(event.itemId);
+        this.itemStreams.seenReasoningDeltaItemIds.add(event.itemId);
         return this.createAgentThoughtEvent(event.delta, event.itemId);
     }
 
     private createReasoningSectionBreakEvent(event: ReasoningSummaryPartAddedNotification): UpdateSessionEvent {
-        this.seenReasoningDeltaItemIds.add(event.itemId);
+        this.itemStreams.seenReasoningDeltaItemIds.add(event.itemId);
         return this.createAgentThoughtEvent("\n\n", event.itemId);
     }
 
@@ -881,7 +874,7 @@ export class CodexEventHandler {
                     this.sessionState.clientCapabilities.diffPatchFormat,
                 ));
             case "commandExecution":
-                return this.renderer.render(this.commands.started(event.item));
+                return this.renderer.render(this.itemStreams.commands.started(event.item));
             case "mcpToolCall":
                 return this.renderer.render(McpToolReporter.started(event.item));
             case "dynamicToolCall":
@@ -889,10 +882,10 @@ export class CodexEventHandler {
             case "webSearch":
                 return this.renderer.render(WebSearchReporter.started(event.item));
             case "imageView":
-                this.emittedImageViewItems.add(event.item.id);
+                this.itemStreams.emittedImageViewItems.add(event.item.id);
                 return this.renderer.render(ImageViewReporter.viewed(event.item));
             case "imageGeneration":
-                this.activeImageGenerationItems.add(event.item.id);
+                this.itemStreams.activeImageGenerationItems.add(event.item.id);
                 return this.renderer.render(ImageGenerationReporter.started(event.item));
             case "collabAgentToolCall":
                 return this.renderer.render(this.subagents.legacyCollaborationStarted(event.item));
@@ -929,18 +922,18 @@ export class CodexEventHandler {
             case "mcpToolCall":
                 return this.renderer.render(McpToolReporter.completed(event.item));
             case "commandExecution":
-                return this.renderer.render(this.commands.completed(event.item, true));
+                return this.renderer.render(this.itemStreams.commands.completed(event.item, true));
             case "imageView":
-                if (this.emittedImageViewItems.delete(event.item.id)) {
+                if (this.itemStreams.emittedImageViewItems.delete(event.item.id)) {
                     return null;
                 }
                 return this.renderer.render(ImageViewReporter.viewed(event.item));
             case "imageGeneration":
-                return this.renderer.render(this.activeImageGenerationItems.delete(event.item.id)
+                return this.renderer.render(this.itemStreams.activeImageGenerationItems.delete(event.item.id)
                     ? ImageGenerationReporter.completed(event.item)
                     : ImageGenerationReporter.whole(event.item));
             case "reasoning":
-                if (this.seenReasoningDeltaItemIds.delete(event.item.id)) {
+                if (this.itemStreams.seenReasoningDeltaItemIds.delete(event.item.id)) {
                     return null;
                 }
                 return this.createCompletedReasoningEvent(event.item);
@@ -975,7 +968,7 @@ export class CodexEventHandler {
     }
 
     private rememberAgentMessagePhase(item: ThreadItem & { type: "agentMessage" }): void {
-        this.agentMessagePhases.set(item.id, item.phase);
+        this.itemStreams.agentMessagePhases.set(item.id, item.phase);
     }
 
     private createCompletedReasoningEvent(item: ThreadItem & { type: "reasoning" }): UpdateSessionEvent | null {
