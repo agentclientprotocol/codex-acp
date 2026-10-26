@@ -49,20 +49,28 @@ function v2Router(): {router: CodexSubagentEventRouter; sent: SentUpdate[]} {
     return {router: new CodexSubagentEventRouter("root", true, session, () => {}, () => MODELS), sent};
 }
 
-function spawn(model: string | null, child = "child-1", sender = "root"): ServerNotification {
+function spawn(
+    model: string | null,
+    child = "child-1",
+    sender = "root",
+    receivers = [child],
+    method: "item/started" | "item/completed" = "item/started",
+): ServerNotification {
     const item: ThreadItem = {
         type: "collabAgentToolCall",
         id: `spawn-${child}`,
         tool: "spawnAgent",
-        status: "inProgress",
+        status: method === "item/started" ? "inProgress" : "completed",
         senderThreadId: sender,
-        receiverThreadIds: [child],
+        receiverThreadIds: receivers,
         prompt: "Review the diff",
         model,
         reasoningEffort: null,
-        agentsStates: {[child]: {status: "running", message: null}},
+        agentsStates: Object.fromEntries(receivers.map(id => [id, {status: "running" as const, message: null}])),
     };
-    return {method: "item/started", params: {threadId: "root", turnId: "turn-1", startedAtMs: 0, item}};
+    return method === "item/started"
+        ? {method, params: {threadId: "root", turnId: "turn-1", startedAtMs: 0, item}}
+        : {method, params: {threadId: "root", turnId: "turn-1", completedAtMs: 0, item}};
 }
 
 function activity(model: string | null, child = "child-1", path = "/root/reviewer"): ServerNotification {
@@ -97,6 +105,35 @@ function childTurn(id: string, status: "completed" | "inProgress"): ServerNotifi
 
 function modelOptionOf(update: Record<string, unknown>): Record<string, unknown> {
     return (update["configOptions"] as Array<Record<string, unknown>>)[0]!;
+}
+
+/** Handles the notifications in order, with the child updates that the router buffered, as the event handler does. */
+async function feed(router: CodexSubagentEventRouter, ...notifications: ServerNotification[]): Promise<void> {
+    for (const notification of notifications) {
+        await router.handle(notification);
+        for (const buffered of router.takeBufferedNotifications()) await router.handle(buffered);
+    }
+}
+
+function settings(model: string): ServerNotification {
+    return {method: "thread/settings/updated", params: {threadId: "child-1", threadSettings: {model} as never}};
+}
+
+function rootTurn(status: "completed" | "inProgress"): ServerNotification {
+    const turn = {
+        id: "root-turn",
+        items: [],
+        rootTurnId: null,
+        itemsView: "notLoaded" as const,
+        status,
+        error: null,
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+    };
+    return status === "completed"
+        ? {method: "turn/completed", params: {threadId: "root", turn}}
+        : {method: "turn/started", params: {threadId: "root", turn}};
 }
 
 function threadStarted(threadId: string, model: string): ServerNotification {
@@ -274,18 +311,62 @@ describe('the model of a native subagent session', () => {
         expect(sent).toEqual([]);
     });
 
-    it('takes the model from thread/started, before and after the announcement', async () => {
+    it('takes the model from thread/started when the activity names none', async () => {
         const {router, sent} = v1Router();
 
-        await router.handle(spawn(null));
-        await router.handle(threadStarted("child-1", "gpt-5.2-codex"));
-        await router.handle(activity(null));
-        await router.handle(threadStarted("child-1", "gpt-5.5"));
+        await feed(router, spawn(null), threadStarted("child-1", "gpt-5.2-codex"), activity(null));
 
-        expect(modelReports(sent)).toEqual([
-            'child-1 gpt-5.2-codex "5.2 Codex"',
-            'child-1 gpt-5.5 "5.5"',
-        ]);
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.2-codex "5.2 Codex"']);
+    });
+
+    it('keeps the activity model when a later thread/started reports another model', async () => {
+        const {router, sent} = v1Router();
+
+        await feed(router, spawn(null), activity("gpt-5.2-codex"), threadStarted("child-1", "gpt-5.5"));
+
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.2-codex "5.2 Codex"']);
+    });
+
+    it('takes a model from thread/started that arrives before the spawn names its child', async () => {
+        const {router, sent} = v1Router();
+
+        await feed(
+            router,
+            spawn(null, "child-1", "root", []),
+            threadStarted("child-1", "gpt-5.2-codex"),
+            spawn(null, "child-1", "root", ["child-1"], "item/completed"),
+            activity(null),
+        );
+
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.2-codex "5.2 Codex"']);
+    });
+
+    it('announces a pending child with the model of a settings change, and reports it once', async () => {
+        const {router, sent} = v1Router();
+
+        await feed(router, spawn("gpt-5.5"), settings("gpt-5.2-codex"), activity(null));
+
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.2-codex "5.2 Codex"']);
+    });
+
+    it('reports a settings change after the announcement over the activity model', async () => {
+        const {router, sent} = v1Router();
+
+        await feed(router, spawn(null), activity("gpt-5.2-codex"), settings("gpt-5.5"));
+
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.2-codex "5.2 Codex"', 'child-1 gpt-5.5 "5.5"']);
+    });
+
+    it('inherits the root model of the running turn, not a model that the client set during the turn', async () => {
+        const models = {...MODELS};
+        const {router, sent} = v1Router(models);
+
+        await feed(router, rootTurn("inProgress"));
+        models.currentModel = "gpt-5.2-codex";
+        await feed(router, spawn(null), activity(null), rootTurn("completed"));
+        await feed(router, rootTurn("inProgress"), spawn(null, "child-2"), activity(null, "child-2", "/root/second"));
+
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.5 "5.5"', 'child-2 gpt-5.2-codex "5.2 Codex"']);
     });
 
     it('sends no new snapshot when another spelling of the model gives the same option value', async () => {

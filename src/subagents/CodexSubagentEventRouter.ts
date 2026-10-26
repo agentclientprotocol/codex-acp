@@ -18,7 +18,7 @@ type NativeSubagent = {
     task: string;
     path?: string;
     /** The model of the child, or `undefined` when the adapter does not know it. */
-    model?: string;
+    model?: ChildModel;
     generation: number;
     terminalState?: SubagentState;
 };
@@ -27,11 +27,7 @@ type PendingSubagent = {
     parentThreadId: string;
     parentSessionId: string;
     task: string;
-    /**
-     * The model of the child thread when Codex reported it, else the model that the spawn requested, else the model
-     * of the parent at the spawn.
-     */
-    model?: string;
+    model?: ChildModel;
     buffered: PendingNotificationBuffer;
 };
 
@@ -39,8 +35,27 @@ type PendingSubagent = {
 type EndedSpawn = {
     parentThreadId: string;
     task: string;
-    model?: string;
+    model?: ChildModel;
 };
+
+/**
+ * Where the adapter learned the model of a child. A source of a higher rank wins: a settings change is a real
+ * change of the model, and at the creation the activity item names the resolved model.
+ */
+const MODEL_SOURCE_RANK = {inherited: 0, requested: 1, threadStarted: 2, activity: 3, settings: 4} as const;
+
+type ChildModel = {
+    model: string;
+    source: keyof typeof MODEL_SOURCE_RANK;
+};
+
+/** A report of a lower rank does not replace the model, so a `thread/started` of a resume keeps the activity model. */
+function preferredModel(current: ChildModel | undefined, next: ChildModel): ChildModel;
+function preferredModel(current: ChildModel | undefined, next: ChildModel | undefined): ChildModel | undefined;
+function preferredModel(current: ChildModel | undefined, next: ChildModel | undefined): ChildModel | undefined {
+    if (!current || !next) return current ?? next;
+    return MODEL_SOURCE_RANK[next.source] >= MODEL_SOURCE_RANK[current.source] ? next : current;
+}
 
 /** The models of the root session, which a child that does not request a model inherits. */
 export type SubagentModels = {
@@ -66,6 +81,10 @@ export class CodexSubagentEventRouter {
     private readonly materializationWaiters = new Map<string, Set<(sessionId: string | null) => void>>();
     private readonly replayQueue: ServerNotification[] = [];
     private readonly activeLegacyActivities = new Set<string>();
+    /** Models that Codex reported for threads before their spawn. The root turn end clears them. */
+    private readonly earlyThreadModels = new Map<string, ChildModel>();
+    /** The root model when the current root turn started, or `undefined` outside a root turn. */
+    private rootTurnModel: string | null | undefined = undefined;
 
     /**
      * @param onChildSessionEnded runs when a native child session ends, so that the owner can release
@@ -84,16 +103,31 @@ export class CodexSubagentEventRouter {
     async handle(notification: ServerNotification): Promise<boolean> {
         if (notification.method === "thread/started") {
             const thread = notification.params.thread;
-            if (thread.model) await this.applyThreadModel(thread.id, thread.model);
+            if (thread.model) await this.applyThreadModel(thread.id, {model: thread.model, source: "threadStarted"});
             return false;
         }
+        if (notification.method === "thread/settings/updated") {
+            // Read before the buffering below, so that a pending child announces with this model.
+            await this.applyThreadModel(notification.params.threadId, {
+                model: notification.params.threadSettings.model,
+                source: "settings",
+            });
+        }
         if (notification.method === "turn/started") {
+            // The running turn keeps its model when the client changes the session model.
+            if (notification.params.threadId === this.rootSessionId) {
+                this.rootTurnModel = this.rootModels()?.currentModel ?? null;
+            }
             const childTurn = this.isKnownChild(notification.params.threadId);
             // A follow-up can start a new turn of an ended child with no collaboration item that reports it.
             if (childTurn) await this.reopen(notification.params.threadId);
             return childTurn;
         }
         if (notification.method === "turn/completed") {
+            if (notification.params.threadId === this.rootSessionId) {
+                this.rootTurnModel = undefined;
+                this.earlyThreadModels.clear();
+            }
             const childTurn = this.isKnownChild(notification.params.threadId);
             const state = terminalStateFromTurn(notification.params.turn.status);
             if (!state) return childTurn;
@@ -115,10 +149,6 @@ export class CodexSubagentEventRouter {
             this.pendingSpawns.get(notificationThreadId)!.buffered.push(notification);
             return true;
         }
-        if (notification.method === "thread/settings/updated") {
-            await this.applyThreadModel(notification.params.threadId, notification.params.threadSettings.model);
-            return false;
-        }
         if (notification.method !== "item/started" && notification.method !== "item/completed") {
             return false;
         }
@@ -133,7 +163,10 @@ export class CodexSubagentEventRouter {
             // Codex reports the root participant through the same activity item
             // shape as children. It is the parent conversation, not a subagent.
             if (isRootAgentPath(item.agentPath)) return true;
-            if (this.terminalPendingSpawns.has(item.agentThreadId)) return true;
+            if (this.terminalPendingSpawns.has(item.agentThreadId)) {
+                if (item.model) await this.applyThreadModel(item.agentThreadId, {model: item.model, source: "activity"});
+                return true;
+            }
             let hasNativeRepresentation = this.children.has(item.agentThreadId);
             if (!hasNativeRepresentation) {
                 await this.materialize(item.agentThreadId, item.agentPath, item.model);
@@ -175,8 +208,8 @@ export class CodexSubagentEventRouter {
                     representedSpawn = true;
                     continue;
                 }
-                // A spawn without a model runs with the model that its parent has now, not at the announcement.
-                const model = item.model || this.inheritedModel(parentThreadId);
+                // The model is settled at the spawn, so a later change of the parent model does not change it.
+                const model = preferredModel(this.spawnModel(item.model, parentThreadId), this.takeEarlyModel(childSessionId));
                 this.pendingSpawns.set(childSessionId, {
                     parentThreadId,
                     parentSessionId,
@@ -363,7 +396,10 @@ export class CodexSubagentEventRouter {
         const parentThreadId = pending?.parentThreadId ?? inferredParent.threadId;
         const parentSessionId = pending?.parentSessionId ?? inferredParent.sessionId;
         const task = pending?.task ?? `Delegated task for ${name}`;
-        const model = resolvedModel || pending?.model || this.inheritedModel(parentThreadId);
+        const model = preferredModel(
+            pending ? pending.model : preferredModel(this.spawnModel(null, parentThreadId), this.takeEarlyModel(childSessionId)),
+            resolvedModel ? {model: resolvedModel, source: "activity"} : undefined,
+        );
         await this.session.update({
             sessionUpdate: "subagent_spawned",
             subagentSessionId: childSessionId,
@@ -385,7 +421,7 @@ export class CodexSubagentEventRouter {
         // A loop, not push(...): a spread of a large buffer exceeds the argument limit and throws.
         for (const notification of pending?.buffered.take() ?? []) this.replayQueue.push(notification);
         this.resolveMaterialization(childSessionId, childSessionId);
-        await this.reportModel(childSessionId, model);
+        await this.reportModel(childSessionId, model?.model);
     }
 
     private finishPending(childSessionId: string): void {
@@ -447,7 +483,7 @@ export class CodexSubagentEventRouter {
             }, parentSessionId);
             this.children.set(childThreadId, reopened);
             this.terminalPendingSpawns.delete(childThreadId);
-            await this.reportModel(reopened.sessionId, reopened.model);
+            await this.reportModel(reopened.sessionId, reopened.model?.model);
             return;
         }
         if (!child.terminalState) return;
@@ -474,34 +510,49 @@ export class CodexSubagentEventRouter {
             child.terminalState = previousState;
             throw error;
         }
-        await this.reportModel(child.sessionId, child.model);
+        await this.reportModel(child.sessionId, child.model?.model);
     }
 
-    /** Takes the model that Codex reports for a child thread. It replaces a requested or inherited model. */
-    private async applyThreadModel(threadId: string, model: string): Promise<void> {
-        if (threadId === this.rootSessionId) return;
-        const pending = this.pendingSpawns.get(threadId);
+    /** Takes a model that Codex reports for a child thread, when its source does not rank below the known one. */
+    private async applyThreadModel(threadId: string, model: ChildModel): Promise<void> {
+        if (!this.supported || threadId === this.rootSessionId) return;
+        const pending = this.pendingSpawns.get(threadId) ?? this.terminalPendingSpawns.get(threadId);
         if (pending) {
-            pending.model = model;
-            return;
-        }
-        const ended = this.terminalPendingSpawns.get(threadId);
-        if (ended) {
-            ended.model = model;
+            pending.model = preferredModel(pending.model, model);
             return;
         }
         const child = this.children.get(threadId);
-        if (!child) return;
-        const changed = !child.model || this.modelValue(child.model) !== this.modelValue(model);
-        child.model = model;
-        if (changed && child.terminalState === undefined) await this.reportModel(child.sessionId, model);
+        if (!child) {
+            // A spawn can name its child only when it completes, after the child thread started.
+            this.earlyThreadModels.set(threadId, preferredModel(this.earlyThreadModels.get(threadId), model));
+            return;
+        }
+        const previous = child.model;
+        child.model = preferredModel(previous, model);
+        if (child.model === previous || child.terminalState !== undefined) return;
+        if (previous && this.modelValue(previous.model) === this.modelValue(model.model)) return;
+        await this.reportModel(child.sessionId, model.model);
+    }
+
+    private takeEarlyModel(threadId: string): ChildModel | undefined {
+        const model = this.earlyThreadModels.get(threadId);
+        this.earlyThreadModels.delete(threadId);
+        return model;
+    }
+
+    /** The model that a spawn requested, else the model of its parent. */
+    private spawnModel(requested: string | null, parentThreadId: string): ChildModel | undefined {
+        if (requested) return {model: requested, source: "requested"};
+        const inherited = this.inheritedModel(parentThreadId);
+        return inherited ? {model: inherited, source: "inherited"} : undefined;
     }
 
     /** A child that requests no model runs with the model of its parent. */
     private inheritedModel(parentThreadId: string): string | undefined {
         const parent = this.children.get(parentThreadId);
-        if (parent) return parent.model;
-        return this.rootModels()?.currentModel ?? undefined;
+        if (parent) return parent.model?.model;
+        const rootModel = this.rootTurnModel !== undefined ? this.rootTurnModel : this.rootModels()?.currentModel;
+        return rootModel ?? undefined;
     }
 
     /** The value of the model option for a model, which can differ from the model string that Codex reports. */
