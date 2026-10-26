@@ -358,7 +358,11 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
 
     async announceHistory(threadId: string, path: string): Promise<string | null> {
         if (threadId === this.rootSessionId) return null;
-        if (await this.restoreKnown(threadId)) return this.children.get(threadId)!.sessionId;
+        if (await this.restoreKnown(threadId)) {
+            const child = this.children.get(threadId)!;
+            child.path ??= normalizeAgentPath(path);
+            return child.sessionId;
+        }
         const parent = this.parentFor({path: normalizeAgentPath(path), notifications: new PendingNotificationBuffer(threadId)});
         return parent === undefined ? null : this.announce(threadId, parent, path);
     }

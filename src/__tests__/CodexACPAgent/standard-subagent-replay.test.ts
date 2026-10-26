@@ -133,6 +133,25 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
         expect(gap()).toHaveLength(1);
     });
 
+    it.each([false, true])("enriches an existing pathless parent before replaying a newly recorded descendant (cold: %s)", async cold => {
+        await connect();
+        h.emit(itemStarted(spawn(sessionId, "coordinator")));
+        await flush(h);
+        if (cold) await h.request("session/close", {sessionId});
+        history(h, {
+            [sessionId]: {items: [activity("coordinator", "/root/coordinator")]},
+            coordinator: {items: [activity(worker, "/root/coordinator/worker")]},
+            [worker]: {items: [message("new-descendant", "Newly recovered descendant")]},
+        });
+        await load();
+        await flush(h);
+        expect(text("Newly recovered descendant")).toBe(true);
+        const coordinatorId = `${sessionId}:subagent:coordinator`;
+        expect(h.scopedUpdates.some(entry => entry.sessionId === coordinatorId
+            && entry.update.sessionUpdate === "subagent_update" && entry.update.sessionId === childId)).toBe(true);
+        expect(gap()).toEqual([]);
+    });
+
     it("resolves recoverable multi-level ancestry recorded in reverse order", async () => {
         await connect();
         history(h, {
@@ -142,6 +161,21 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
         await load();
         await flush(h);
         expect(text("Deep answer")).toBe(true);
+        expect(gap()).toEqual([]);
+    });
+
+    it("does not replace an already observed parent path with an older spawn record", async () => {
+        await connect();
+        h.emit(itemStarted(activity("coordinator", "/root/current")));
+        await flush(h);
+        history(h, {
+            [sessionId]: {items: [activity("coordinator", "/root/older")]},
+            coordinator: {items: [activity(worker, "/root/current/worker")]},
+            [worker]: {items: [message("retained-path", "Retained parent path")]},
+        });
+        await load();
+        await flush(h);
+        expect(text("Retained parent path")).toBe(true);
         expect(gap()).toEqual([]);
     });
 
