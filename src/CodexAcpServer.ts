@@ -181,6 +181,7 @@ import {StandardSubagentEventRouter} from "./subagents/StandardSubagentEventRout
 import {SubagentAssociations} from "./subagents/SubagentAssociations";
 import {SubagentInteractionHandlers} from "./subagents/SubagentInteractionHandlers";
 import type {SubagentEventRouter} from "./subagents/SubagentEventRouter";
+import {subagentConfigurationOptions, type ObservedSubagentConfiguration} from "./subagents/SubagentConfiguration";
 import {listCodexHooks, trustCodexHooks, type CodexHookIdentity} from "./CodexHookTrust";
 import type {HooksListEntry} from "./app-server/v2/HooksListEntry";
 import {
@@ -657,10 +658,19 @@ export class CodexAcpServer {
         const router = this.usesStandardSubagents()
             ? new StandardSubagentEventRouter(sessionId, session, this.subagentAssociations, release, this.capabilities, replay,
                 this.sessions.get(sessionId)?.subagentTransition,
-                id => this.codexAcpClient.appServerClient.runningTurnId(id), models)
+                id => this.codexAcpClient.appServerClient.runningTurnId(id), models, {
+                    read: (id, parent) => this.readSubagentConfiguration(id, parent),
+                    enqueuePublication: publish => this.codexAcpClient.enqueueSessionTransition(sessionId, publish),
+                })
             : new CodexSubagentEventRouter(sessionId, this.supportsNativeSubagents(), session, release, models);
         if (router instanceof StandardSubagentEventRouter) this.getSubagentInteractionHandlers(router, sessionId);
         return router;
+    }
+
+    private async readSubagentConfiguration(threadId: string, parentThreadId: string): Promise<ObservedSubagentConfiguration | null> {
+        const {thread} = await this.codexAcpClient.appServerClient.threadRead({threadId});
+        if (!thread || thread.id !== threadId || thread.parentThreadId !== parentThreadId || thread.status.type === "notLoaded") return null;
+        return {model: thread.model, effort: thread.reasoningEffort};
     }
 
     private getSubagentInteractionHandlers(router: StandardSubagentEventRouter, rootSessionId: string): SubagentInteractionHandlers {
@@ -3724,7 +3734,11 @@ export class CodexAcpServer {
         const replayActivity = async (item: ThreadItem & {type: "subAgentActivity"}): Promise<boolean> => {
             const childId = await router.announceHistory(item.agentThreadId, item.agentPath);
             if (childId === null) return false;
-            await reportSubagentModel(session, childId, this.subagentModels(state), item.model || undefined);
+            const configOptions = subagentConfigurationOptions(this.subagentModels(state), {model: item.model, effort: item.reasoningEffort});
+            if (configOptions.length > 0) {
+                try { await session.update({sessionUpdate: "config_option_update", configOptions}, childId); }
+                catch (error) { logger.error(`Failed to replay child configuration ${item.agentThreadId}`, error); }
+            }
             await replayChild(item.agentThreadId, childId);
             return true;
         };

@@ -18,6 +18,7 @@ describeIntegration("integration: live standard subagents", () => {
         const mock = await startMockResponsesServer();
         let delegated = false;
         let childRequested = false;
+        let childEffort: string | undefined;
         let releaseChild!: () => void;
         const held = new Promise<void>(resolve => { releaseChild = resolve; });
         mock.setResponseHandler(async request => {
@@ -25,6 +26,7 @@ describeIntegration("integration: live standard subagents", () => {
             const name = metadata ? (JSON.parse(metadata) as {agent_name?: string}).agent_name : undefined;
             if (!childRequested && name === "/root/worker") {
                 childRequested = true;
+                childEffort = (request as {reasoning?: {effort?: string}}).reasoning?.effort;
                 await held;
                 if (ending === "terminal") {
                     const script = "console.log('STREAM_BEFORE');const t=setInterval(()=>{if(require('fs').existsSync('release-child')){console.log('STREAM_AFTER');clearInterval(t)}},25)";
@@ -97,8 +99,14 @@ describeIntegration("integration: live standard subagents", () => {
                 : entry.sessionId === childId && entry.update.sessionUpdate === "state_update" ? entry.update : undefined;
             const configuration = (entry: typeof updates[number]) =>
                 entry.sessionId === childId && entry.update.sessionUpdate === "config_option_update";
+            const effortReported = (entries: typeof updates) => entries.some(entry => configuration(entry)
+                && entry.update.configOptions.some((option: {category?: string; currentValue: string; options: Array<{value: string}>}) =>
+                    option.category === "thought_level" && option.currentValue === childEffort
+                    && option.options.length === 1 && option.options[0]?.value === childEffort));
             await vi.waitFor(() => expect(updates.some(entry => state(entry)?.state === "running")).toBe(true));
             await vi.waitFor(() => expect(updates.some(configuration)).toBe(true));
+            expect(childEffort).toBeDefined();
+            await vi.waitFor(() => expect(effortReported(updates)).toBe(true));
             await prompt;
             const load = (id: string) => request(version === 1 ? "session/load" : "session/resume", {
                 sessionId: id, cwd, mcpServers: [], ...(version === 2 ? {replayFrom: {type: "start"}} : {}),
@@ -107,6 +115,7 @@ describeIntegration("integration: live standard subagents", () => {
             await load(sessionId);
             await vi.waitFor(() => expect(updates.slice(before).some(entry => state(entry)?.state === "running")).toBe(true));
             await vi.waitFor(() => expect(updates.slice(before).some(configuration)).toBe(true));
+            await vi.waitFor(() => expect(effortReported(updates.slice(before))).toBe(true));
             if (ending === "complete") {
                 const fork = await request("session/fork", {sessionId, cwd, mcpServers: []});
                 await load(fork.sessionId);

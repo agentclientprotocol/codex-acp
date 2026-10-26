@@ -1,4 +1,4 @@
-import type {ServerNotification} from "../app-server";
+import type {ReasoningEffort, ServerNotification} from "../app-server";
 import type {StateUpdate} from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import type {Thread, ThreadItem} from "../app-server/v2";
 import {ACPSessionConnection} from "../ACPSessionConnection";
@@ -14,8 +14,9 @@ import {CollabAgentReporter} from "../tool-calls/reporters/CollabAgentReporter";
 import {SubagentActivityReporter} from "../tool-calls/reporters/SubagentActivityReporter";
 import type {SubagentState} from "./AcpSubagents";
 import {
-    preferredModel, reportSubagentModel, type ChildModel, type ClosingChildSession, type SubagentModels,
+    MODEL_SOURCE_RANK, preferredModel, type ChildModel, type ClosingChildSession, type SubagentModels,
 } from "./CodexSubagentEventRouter";
+import {subagentConfigurationOptions, type ObservedSubagentConfiguration} from "./SubagentConfiguration";
 import {isRootAgentPath, nameFromAgentPath, normalizeAgentPath} from "./CodexAgentPath";
 import {PendingNotificationBuffer} from "./PendingNotificationBuffer";
 import {SubagentAssociations, type SubagentAssociation} from "./SubagentAssociations";
@@ -44,6 +45,11 @@ type Pending = {
     description?: string;
     notifications: PendingNotificationBuffer;
 };
+type Configuration = {
+    model?: ChildModel;
+    effort?: {value: ReasoningEffort | null; source: ChildModel["source"]};
+    published?: string;
+};
 
 /** Work ends; the reusable child conversation and its restrictions remain. */
 export class StandardSubagentEventRouter implements SubagentEventRouter {
@@ -55,8 +61,9 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     private readonly announced = new Set<string>();
     private readonly replayedItems = new Map<string, Map<string, boolean>>();
     private readonly completedItems = new Map<string, Set<string>>();
-    private readonly models = new Map<string, ChildModel>();
-    private readonly pendingModels = new Set<string>();
+    private readonly configurations = new Map<string, Configuration>();
+    private readonly pendingConfigurations = new Set<string>();
+    private readonly configurationRequests = new Map<string, object>();
     private readonly spawnsInFlight = new Set<string>();
     private readonly appliedSettings = new WeakSet<object>();
     private retired = false;
@@ -74,6 +81,10 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         private readonly ready: Promise<void> = Promise.resolve(),
         private readonly runningTurnId: (threadId: string) => string | undefined = () => undefined,
         private readonly rootModels: () => SubagentModels | null = () => null,
+        private readonly configurationRuntime?: {
+            read(threadId: string, parentThreadId: string): Promise<ObservedSubagentConfiguration | null>;
+            enqueuePublication(publish: () => Promise<void>): Promise<void>;
+        },
     ) {
         this.deferredLive = new PendingNotificationBuffer(rootSessionId);
     }
@@ -85,7 +96,8 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         if (this.retired) return false;
         if (notification.method === "thread/settings/updated" && !this.appliedSettings.has(notification.params)) {
             this.appliedSettings.add(notification.params);
-            await this.observeModel(threadId, notification.params.threadSettings.model, "settings");
+            const settings = notification.params.threadSettings;
+            await this.observeConfiguration(threadId, {model: settings.model, effort: settings.effort}, "settings");
         }
         if (this.deferLive) { this.deferredLive.push(notification); return false; }
         const child = this.children.get(threadId);
@@ -105,9 +117,11 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     async handle(notification: ServerNotification): Promise<boolean> {
         if (notification.method === "thread/started") {
             const thread = notification.params.thread;
-            if (thread.parentThreadId === this.rootSessionId || this.children.has(thread.parentThreadId ?? "")
-                || this.children.has(thread.id) || this.spawnsInFlight.size > 0) {
-                await this.observeModel(thread.id, thread.model, "threadStarted");
+            const child = this.children.get(thread.id);
+            const parent = this.children.get(thread.parentThreadId ?? "");
+            if (thread.parentThreadId === this.rootSessionId || parent?.live || child?.live
+                || (!child && this.spawnsInFlight.size > 0)) {
+                await this.observeConfiguration(thread.id, {model: thread.model, effort: thread.reasoningEffort}, "threadStarted");
             }
             return false;
         }
@@ -142,14 +156,14 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                         await this.session.update({sessionUpdate: "subagent_update", sessionId: child.sessionId, title}, child.parentSessionId);
                     }
                 } else this.pendingFor(item.agentThreadId).path = normalizeAgentPath(item.agentPath);
-                await this.observeModel(item.agentThreadId, item.model, "activity");
+                await this.observeConfiguration(item.agentThreadId, {model: item.model, effort: item.reasoningEffort}, "activity");
                 await this.materializePending();
                 return true;
             }
         }
         if (threadId === this.rootSessionId && notification.method === "turn/completed") {
             this.spawnsInFlight.clear();
-            for (const id of this.models.keys()) if (!this.children.has(id)) this.models.delete(id);
+            for (const id of this.configurations.keys()) if (!this.children.has(id)) this.configurations.delete(id);
         }
         const child = this.children.get(threadId);
         if (!child) return false;
@@ -180,6 +194,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                     this.beginForegroundTurn(child, child.turnId);
                     await child.foreground.start();
                 }
+                void this.refreshConfiguration(child);
                 return true;
             case "thread/settings/updated":
                 return true;
@@ -311,9 +326,9 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
             ...(child.title !== undefined ? {title: child.title} : {}),
             ...(child.description !== undefined ? {description: child.description} : {})}, child.parentSessionId);
         this.announced.add(child.threadId);
-        if (this.models.has(child.threadId)) {
-            this.pendingModels.add(child.threadId);
-            if (!this.deferLive && !this.snapshotting) await this.publishModel(child);
+        if (this.configurations.has(child.threadId)) {
+            this.pendingConfigurations.add(child.threadId);
+            if (!this.deferLive && !this.snapshotting) await this.publishConfiguration(child);
         }
     }
 
@@ -340,6 +355,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         };
         this.children.set(threadId, child);
         await this.ensureAnnounced(child);
+        if (live) void this.refreshConfiguration(child);
         return child.sessionId;
     }
 
@@ -350,22 +366,58 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         return parent === undefined ? null : this.announce(threadId, parent, path);
     }
 
-    private async observeModel(threadId: string, model: string | null, source: ChildModel["source"]): Promise<void> {
-        if (!model || this.retired) return;
-        const previous = this.models.get(threadId);
-        const next = preferredModel(previous, {model, source});
-        this.models.set(threadId, next);
-        if (next.model === previous?.model) return;
+    private async observeConfiguration(threadId: string, observed: ObservedSubagentConfiguration, source: ChildModel["source"]): Promise<void> {
+        const previous = this.configurations.get(threadId);
+        if (this.retired || (!previous && !observed.model && observed.effort === null && source !== "settings")) return;
+        this.configurationRequests.delete(threadId);
+        const next: Configuration = {...previous};
+        if (observed.model) next.model = preferredModel(previous?.model, {model: observed.model, source});
+        const changedModel = next.model?.model !== previous?.model?.model;
+        // A new model cannot retain the old model's effort; null removes an unset or unavailable effort.
+        if (changedModel || !previous?.effort || MODEL_SOURCE_RANK[source] >= MODEL_SOURCE_RANK[previous.effort.source]) {
+            next.effort = {value: observed.effort, source};
+        }
+        this.configurations.set(threadId, next);
         const child = this.children.get(threadId);
         if (!child) return;
-        this.pendingModels.add(threadId);
-        if (!this.deferLive && !this.snapshotting) await this.publishModel(child);
+        this.pendingConfigurations.add(threadId);
+        if (!this.deferLive && !this.snapshotting) await this.publishConfiguration(child);
     }
 
-    private async publishModel(child: Child): Promise<void> {
-        this.pendingModels.delete(child.threadId);
+    private async publishConfiguration(child: Child): Promise<void> {
+        this.pendingConfigurations.delete(child.threadId);
         await this.ensureAnnounced(child);
-        await reportSubagentModel(this.session, child.sessionId, this.rootModels(), this.models.get(child.threadId)?.model);
+        const configuration = this.configurations.get(child.threadId);
+        if (!configuration || this.retired) return;
+        const options = subagentConfigurationOptions(this.rootModels(), {
+            model: configuration.model?.model ?? null, effort: configuration.effort?.value ?? null,
+        });
+        const signature = JSON.stringify(options);
+        if (signature === configuration.published || (options.length === 0 && configuration.published === undefined)) return;
+        try {
+            await this.session.update({sessionUpdate: "config_option_update", configOptions: options}, child.sessionId);
+            configuration.published = signature;
+        } catch (error) { logger.error(`Failed to report subagent configuration ${child.threadId}`, error); }
+    }
+
+    /** Optional reads stay off the notification lane; only publication rejoins it. */
+    private async refreshConfiguration(child: Child): Promise<void> {
+        const runtime = this.configurationRuntime;
+        const parent = this.parentThreadId(child.threadId);
+        if (!runtime || parent === undefined || this.retired) return;
+        const request = {};
+        this.configurationRequests.set(child.threadId, request);
+        try {
+            const observed = await runtime.read(child.threadId, parent);
+            if (observed === null) return;
+            await runtime.enqueuePublication(async () => {
+                if (this.retired || this.configurationRequests.get(child.threadId) !== request) return;
+                await this.observeConfiguration(child.threadId, observed, "threadStarted");
+            });
+        } catch (error) { logger.log(`Configuration unavailable for subagent ${child.threadId}`, {error: String(error)}); }
+        finally {
+            if (this.configurationRequests.get(child.threadId) === request) this.configurationRequests.delete(child.threadId);
+        }
     }
 
     releaseReplay(): ServerNotification[] {
@@ -376,7 +428,8 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
 
     async publishReplaySnapshots(): Promise<void> {
         try {
-            while (this.snapshots.size > 0 || this.pendingModels.size > 0) {
+            for (const child of this.children.values()) if (child.live) void this.refreshConfiguration(child);
+            while (this.snapshots.size > 0 || this.pendingConfigurations.size > 0) {
                 for (const {child} of [...this.snapshots.values()]) {
                     await child.foreground.serializePublication(async () => {
                         const snapshot = this.snapshots.get(child.threadId);
@@ -386,10 +439,10 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                         await this.session.updateSubagentState(child.sessionId, child.parentSessionId, snapshot.state);
                     });
                 }
-                for (const id of [...this.pendingModels]) {
+                for (const id of [...this.pendingConfigurations]) {
                     const child = this.children.get(id);
-                    if (child && !this.retired) await this.publishModel(child);
-                    else this.pendingModels.delete(id);
+                    if (child && !this.retired) await this.publishConfiguration(child);
+                    else this.pendingConfigurations.delete(id);
                 }
             }
         } finally { this.snapshotting = false; }
@@ -398,6 +451,9 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     pauseForSetup(): void {
         this.deferLive = true;
         this.announced.clear();
+        this.configurations.clear();
+        this.pendingConfigurations.clear();
+        this.configurationRequests.clear();
         for (const child of this.children.values()) {
             void child.foreground.snapshot().catch(error => logger.error("Failed to snapshot child work", error));
         }
@@ -458,8 +514,9 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         }
     }
     private async unknown(child: Child): Promise<void> {
-        this.models.delete(child.threadId);
-        this.pendingModels.delete(child.threadId);
+        this.configurations.delete(child.threadId);
+        this.pendingConfigurations.delete(child.threadId);
+        this.configurationRequests.delete(child.threadId);
         child.requests.abort();
         child.requests = new AbortController();
         for (const work of child.workRequests.values()) work.controller.abort();
@@ -518,7 +575,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         const child = this.children.get(thread.id);
         if (!child || this.retired) return;
         child.live = true;
-        await this.observeModel(thread.id, thread.model, "threadStarted");
+        await this.observeConfiguration(thread.id, {model: thread.model, effort: thread.reasoningEffort}, "threadStarted");
         if (thread.status.type === "idle") {
             child.turnId = null;
             child.foregroundTurnId = null;

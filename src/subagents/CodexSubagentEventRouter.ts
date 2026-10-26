@@ -43,7 +43,7 @@ type EndedSpawn = {
  * spawn request or the parent. A source of a higher rank wins: at the creation the activity item names the resolved
  * model, and a settings change is a real change of the model.
  */
-const MODEL_SOURCE_RANK = {threadStarted: 0, activity: 1, settings: 2} as const;
+export const MODEL_SOURCE_RANK = {threadStarted: 0, activity: 1, settings: 2} as const;
 
 export type ChildModel = {
     model: string;

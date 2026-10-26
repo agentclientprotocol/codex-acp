@@ -252,12 +252,20 @@ A standard child keeps one opaque conversation ID across assignments and parent 
 Its ancestors are announced before its output, tool updates, or interactions. Permissions and
 elicitation use the child's ID and survive parent replay; actual work endings withdraw obsolete
 requests locally, even if the client returns a late answer. Child tools, terminals, plans, titles,
-and observed model options stay separate from the parent.
+and observed configuration stay separate from the parent.
 
 Capabilities are empty: direct child prompting, loading, configuration, cancellation, and other
 client mutations are not enabled. Parent cancellation interrupts observed live descendants.
 An observed work ending reports `idle`; loss of observability reports `unknown`, not a fabricated
 failure or a permanently closed conversation.
+
+Child `config_option_update` notifications contain complete reported snapshots. Observed model and
+reasoning effort use singleton selects, including changes between assignments. Unknown or unset values
+are omitted; no values are inferred from the parent or requested spawn arguments. These reports do not
+enable configuration changes, even to the current value. Replayed configuration is historical, not
+confirmed current. Reattachment drops cached confirmation and refreshes loaded children after the
+response. Optional reads do not block child delivery; newer observations or attachment changes discard
+stale results.
 
 Replay follows both recorded spawn formats and replays available child transcripts once per conversation,
 including nested children, using legacy or paginated history. Announcements and all selected history
@@ -271,7 +279,7 @@ an empty transcript alone does not invent a gap.
 Historical work-state outcomes remain deferred. Replayed content alone confirms neither current work
 nor controls. Rejoining a loaded child still requires current provider parentage; copied fork history
 can be displayed but cannot acquire the original runtime's subscriptions.
-After replay, current child work/model snapshots follow the actual response write, including whole
+After replay, current child work/configuration snapshots follow the actual response write, including whole
 JSON-RPC batches. Parent setup operations serialize without waiting on each other's batch delivery.
 
 #### Models of a `providers/set` gateway
