@@ -18,6 +18,16 @@
     }
   },
   {
+    "sessionId": "thread-1:subagent:coordinator",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "capabilities": {
+        "cancel": {}
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "state": "running",

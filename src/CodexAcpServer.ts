@@ -719,6 +719,8 @@ export class CodexAcpServer {
     }
 
     captureSessionSetup(sessionId: string): () => void {
+        const router = this.sessions.get(sessionId)?.subagents;
+        if (router instanceof StandardSubagentEventRouter) router.suspendCancellation();
         const generation = this.getSessionGeneration(sessionId);
         const check = () => {
             this.assertInstructionsReady(sessionId);
@@ -5513,6 +5515,15 @@ export class CodexAcpServer {
     }
 
     async cancel(params: acp.CancelNotification): Promise<void> {
+        const child = this.subagentAssociations.get(params.sessionId);
+        if (child && this.usesStandardSubagents()) {
+            const router = this.sessions.get(child.rootSessionId)?.subagents;
+            if (router instanceof StandardSubagentEventRouter) {
+                await router.cancelChild(params.sessionId, (threadId, turnId) =>
+                    this.codexAcpClient.turnInterrupt({threadId, turnId}));
+            }
+            return;
+        }
         if (this.isRestrictedChild(params.sessionId)) return;
         this.activePrompts.get(params.sessionId)?.requestClientCancel();
         const sessionState = this.sessions.get(params.sessionId);

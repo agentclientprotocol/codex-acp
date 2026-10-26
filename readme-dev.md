@@ -254,10 +254,19 @@ elicitation use the child's ID and survive parent replay; actual work endings wi
 requests locally, even if the client returns a late answer. Child tools, terminals, plans, titles,
 and observed configuration stay separate from the parent.
 
-Capabilities are empty: direct child prompting, loading, configuration, cancellation, and other
-client mutations are not enabled. Parent cancellation interrupts observed live descendants.
+Only cancellation is advertised, and only while an owned, observable child's current turn can be
+identified. Send `session/cancel` with its opaque ACP child ID to interrupt that work and observed
+owned descendant work, not its parent or siblings. Raw provider IDs cannot bypass the restriction.
+Prompting, loading, configuration changes, closing, and other child mutations remain disabled.
+Parent cancellation still interrupts observed live descendants.
 An observed work ending reports `idle`; loss of observability reports `unknown`, not a fabricated
 failure or a permanently closed conversation.
+
+Cancellation withdraws affected permission/elicitation requests, but an interrupt acknowledgement
+does not fabricate a cancelled outcome. Actual provider completion reports the ending; the same
+conversation may receive later work. Idle or unobservable children have no cancel capability.
+Reattachment suspends child controls until the latest successful response is actually written,
+including complete JSON-RPC batches; historical or copied child records never grant control.
 
 Child `config_option_update` notifications contain complete reported snapshots. Observed model and
 reasoning effort use singleton selects, including changes between assignments. Unknown or unset values

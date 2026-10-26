@@ -9,6 +9,16 @@
     }
   },
   {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "capabilities": {
+        "cancel": {}
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "state": "running",
@@ -40,6 +50,16 @@
       "state": {
         "stopReason": "end_turn",
         "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "capabilities": {
+        "cancel": null
       },
       "sessionUpdate": "subagent_update"
     }

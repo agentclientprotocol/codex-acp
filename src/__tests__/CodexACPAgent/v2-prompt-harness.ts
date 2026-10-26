@@ -123,7 +123,7 @@ export type PromptSession = {
     /** Sends any other agent-bound request (e.g. `session/set_config_option`) on the same connection. */
     request(method: string, params: unknown, signal?: AbortSignal): Promise<any>;
     /** Sends `session/cancel` (a notification, not a request) for this session. */
-    cancel(): Promise<void>;
+    cancel(targetSessionId?: string): Promise<void>;
     /** Resolves when the n-th internal prompt run (including its background turn) has finished. */
     promptRunFinished(index?: number): Promise<void>;
     /**
@@ -223,7 +223,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         }))};
     let connection: {close(): void};
     let request: (method: string, params: unknown, signal?: AbortSignal) => Promise<any>;
-    let notifyCancel: () => Promise<void>;
+    let notifyCancel: (targetSessionId: string) => Promise<void>;
     let requestBatch: PromptSession["requestBatch"] = async () => { throw new Error("Batches require ACP v2"); };
     if (protocolVersion === 2) {
         const v2Connection = acpV2.client({name: "test-client"})
@@ -265,7 +265,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             params as acpV2.PromptRequest,
             signal ? {cancellationSignal: signal} : undefined,
         );
-        notifyCancel = () => v2Connection.agent.notify(acpV2.methods.agent.session.cancel, {sessionId});
+        notifyCancel = targetSessionId => v2Connection.agent.notify(acpV2.methods.agent.session.cancel, {sessionId: targetSessionId});
     } else {
         const v1Connection = acp.client({name: "test-client"})
             .onNotification(acp.methods.client.session.update, (ctx) => onUpdate(ctx.params.update, ctx.params.sessionId))
@@ -294,7 +294,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             params as acp.PromptRequest,
             signal ? {cancellationSignal: signal} : undefined,
         );
-        notifyCancel = () => v1Connection.agent.notify(acp.methods.agent.session.cancel, {sessionId});
+        notifyCancel = targetSessionId => v1Connection.agent.notify(acp.methods.agent.session.cancel, {sessionId: targetSessionId});
     }
     const promptSpy = vi.spyOn(agent!, "prompt");
     // V1 sends initial commands asynchronously; v2 includes them in the setup response.
@@ -341,7 +341,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         emit,
         sendPrompt,
         request,
-        cancel: () => notifyCancel(),
+        cancel: (targetSessionId = sessionId) => notifyCancel(targetSessionId),
         promptRunFinished: async (index = 0) => {
             await vi.waitFor(() => expect(promptSpy.mock.results.length).toBeGreaterThan(index));
             await promptSpy.mock.results[index]!.value.catch(() => {});

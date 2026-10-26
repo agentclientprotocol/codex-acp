@@ -98,6 +98,8 @@ function createRouter(
         const state = setups.get(sessionId) ?? {tail: Promise.resolve(), publication: Promise.resolve(), epoch: 0, pending: 0};
         setups.set(sessionId, state);
         state.pending++;
+        // A newer queued setup already invalidates the previous attempt's child controls.
+        const epoch = ++state.epoch;
         const finish = () => {
             if (--state.pending === 0 && setups.get(sessionId) === state) setups.delete(sessionId);
         };
@@ -106,6 +108,7 @@ function createRouter(
         const response = new Promise<T>((done, failed) => { resolve = done; reject = failed; });
         state.tail = state.tail.catch(() => {}).then(async () => {
             let registered = false;
+            let succeeded = false;
             try {
                 for (;;) {
                     const publication = state.publication;
@@ -114,13 +117,15 @@ function createRouter(
                 }
                 if (signal.aborted) throw new acp.RequestError(-32800, "Session setup was cancelled");
                 assertCurrent();
-                const epoch = ++state.epoch;
                 responses.afterWrite(requestId, () => {
-                    if (epoch === state.epoch) state.publication = agent.afterSessionSetupResponse(sessionId);
+                    if (epoch === state.epoch && succeeded) state.publication = agent.afterSessionSetupResponse(sessionId);
                     void state.publication.then(finish, finish);
                 });
                 registered = true;
-                resolve(await operation());
+                const result = await operation();
+                if (signal.aborted) throw new acp.RequestError(-32800, "Session setup was cancelled");
+                succeeded = true;
+                resolve(result);
             } catch (error) {
                 reject(error);
                 if (!registered) finish();

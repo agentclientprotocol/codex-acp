@@ -40,7 +40,7 @@ export type SubagentAwareSessionCapabilities = SessionCapabilities & {
 
 export type StandardSubagentUpdate = Omit<acpV2.SubagentUpdate, "capabilities"> & {
     sessionUpdate: "subagent_update";
-    capabilities?: Record<string, never>;
+    capabilities?: Pick<acpV2.SubagentSessionCapabilities, "cancel">;
 };
 
 export function subagentProtocol(

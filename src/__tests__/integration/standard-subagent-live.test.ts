@@ -13,7 +13,7 @@ import {functionCallResponse, startMockResponsesServer, textResponse} from "./mo
 
 describeIntegration("integration: live standard subagents", () => {
     it.each(([1, 2] as const).flatMap(version =>
-        (["complete", "cancel", "close", "terminal"] as const).map(ending => ({version, ending})),
+        (["complete", "cancel", "child-cancel", "close", "terminal"] as const).map(ending => ({version, ending})),
     ))("keeps live child delivery and ownership through ACP v$version reattachment ($ending)", async ({version, ending}) => {
         const mock = await startMockResponsesServer();
         let delegated = false;
@@ -103,8 +103,12 @@ describeIntegration("integration: live standard subagents", () => {
                 && entry.update.configOptions.some((option: {category?: string; currentValue: string; options: Array<{value: string}>}) =>
                     option.category === "thought_level" && option.currentValue === childEffort
                     && option.options.length === 1 && option.options[0]?.value === childEffort));
+            const cancelGranted = (entries: typeof updates) => entries.some(entry =>
+                entry.update.sessionUpdate === "subagent_update" && entry.update.sessionId === childId
+                && entry.update.capabilities?.cancel != null);
             await vi.waitFor(() => expect(updates.some(entry => state(entry)?.state === "running")).toBe(true));
             await vi.waitFor(() => expect(updates.some(configuration)).toBe(true));
+            await vi.waitFor(() => expect(cancelGranted(updates)).toBe(true));
             expect(childEffort).toBeDefined();
             await vi.waitFor(() => expect(effortReported(updates)).toBe(true));
             await prompt;
@@ -116,6 +120,7 @@ describeIntegration("integration: live standard subagents", () => {
             await vi.waitFor(() => expect(updates.slice(before).some(entry => state(entry)?.state === "running")).toBe(true));
             await vi.waitFor(() => expect(updates.slice(before).some(configuration)).toBe(true));
             await vi.waitFor(() => expect(effortReported(updates.slice(before))).toBe(true));
+            await vi.waitFor(() => expect(cancelGranted(updates.slice(before))).toBe(true));
             if (ending === "complete") {
                 const fork = await request("session/fork", {sessionId, cwd, mcpServers: []});
                 await load(fork.sessionId);
@@ -141,6 +146,12 @@ describeIntegration("integration: live standard subagents", () => {
                         ? entry.update.sessionUpdate === "terminal_update" && entry.update.exitStatus?.exitCode === 0
                         : entry.update._meta?.terminal_exit?.exit_code === 0)).toBe(true);
                 }, {timeout: 15_000});
+            } else if (ending === "child-cancel") {
+                const boundary = updates.length;
+                await context.notify("session/cancel", {sessionId: childId});
+                await vi.waitFor(() => expect(updates.slice(boundary).some(entry =>
+                    state(entry)?.state === "idle" && state(entry)?.stopReason === "cancelled"), stderr).toBe(true), {timeout: 15_000});
+                await request("session/prompt", {sessionId, prompt: [{type: "text", text: "Continue independently"}]});
             } else {
                 const boundary = updates.length;
                 if (ending === "cancel") await context.notify("session/cancel", {sessionId});

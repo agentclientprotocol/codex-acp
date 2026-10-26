@@ -83,7 +83,8 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         h.emit(onWorker(agentMessageDelta("Second answer", "next-turn", "second")));
         h.emit(onWorker(turnCompleted("next-turn")));
         await snapshot("identity");
-        expect(childUpdates().filter(entry => entry.update.sessionUpdate === "subagent_update" && "capabilities" in entry.update)).toHaveLength(1);
+        expect(childUpdates().filter(entry => entry.update.sessionUpdate === "subagent_update"
+            && entry.update.capabilities != null && Object.keys(entry.update.capabilities).length === 0)).toHaveLength(1);
         expect(childUpdates().some(entry => entry.update.sessionUpdate === "user_message_chunk")).toBe(false);
     });
 

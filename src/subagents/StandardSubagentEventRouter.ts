@@ -38,6 +38,8 @@ type Child = SubagentAssociation & {
     closedRequestTurns: Set<string>;
     endedTurns: Set<string>;
     live: boolean;
+    cancelAdvertised: boolean;
+    cancellingTurn?: string;
 };
 type Pending = {
     parentThreadId?: string;
@@ -66,7 +68,12 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     private readonly configurationRequests = new Map<string, object>();
     private readonly spawnsInFlight = new Set<string>();
     private readonly appliedSettings = new WeakSet<object>();
+    // Receipt-time facts fence cancellation while presentation is backpressured.
+    private readonly unobservable = new Set<string>();
+    private readonly receivedTurnEnds = new Map<string, Set<string>>();
     private retired = false;
+    private attachment = 0;
+    private cancellationReady = true;
     private snapshotting = false;
     private readonly snapshots = new Map<string, {child: Child; state: StateUpdate}>();
     private interactionObserver?: (event: ServerNotification, sessionId: string) => Promise<void>;
@@ -171,6 +178,11 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         if (this.retired) return true;
         await this.interactionObserver?.(notification, child.sessionId);
         child.live = true;
+        try { return await this.handleChild(notification, child, threadId); }
+        finally { await this.publishCancellation(child); }
+    }
+
+    private async handleChild(notification: ServerNotification, child: Child, threadId: string): Promise<boolean> {
         const params = notification.params as {itemId?: string; item?: {id: string}};
         const itemId = params.itemId ?? params.item?.id;
         const replayed = itemId === undefined ? undefined : this.replayedItems.get(threadId)?.get(itemId);
@@ -349,9 +361,11 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
             }, "unknown"),
             toolCalls: new CodexSessionToolCalls(), streams: new CodexItemStreamState(),
             requests: new AbortController(), workRequests: new Map(), closedRequestTurns: new Set(), endedTurns: new Set(), live,
+            cancelAdvertised: false,
         };
         this.children.set(threadId, child);
         await this.ensureAnnounced(child);
+        if (live) await this.publishCancellation(child);
         if (live) void this.refreshConfiguration(child);
         return child.sessionId;
     }
@@ -424,6 +438,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     releaseReplay(): ServerNotification[] {
         this.snapshotting = this.deferLive;
         this.deferLive = false;
+        this.cancellationReady = true;
         return this.deferredLive.take();
     }
 
@@ -446,16 +461,20 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                     else this.pendingConfigurations.delete(id);
                 }
             }
+            for (const child of this.children.values()) await this.publishCancellation(child, true);
         } finally { this.snapshotting = false; }
     }
 
     pauseForSetup(): void {
         this.deferLive = true;
+        this.suspendCancellation();
+        this.attachment++;
         this.announced.clear();
         this.configurations.clear();
         this.pendingConfigurations.clear();
         this.configurationRequests.clear();
         for (const child of this.children.values()) {
+            child.cancelAdvertised = false;
             void child.foreground.snapshot().catch(error => logger.error("Failed to snapshot child work", error));
         }
     }
@@ -463,17 +482,18 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     async withUserAction<T>(sessionId: string, itemId: string | undefined, request: () => Promise<T>, turnId?: string | null): Promise<T> {
         const child = [...this.children.values()].find(child => child.sessionId === sessionId);
         if (!child) return request();
-        child.live = true;
         await this.ensureAnnounced(child);
         const work = typeof turnId === "string" ? child.workRequests.get(turnId) ?? {controller: new AbortController(), count: 0} : undefined;
         if (work && typeof turnId === "string") { child.workRequests.set(turnId, work); work.count++; }
         const obsolete = typeof turnId === "string" && (child.closedRequestTurns.has(turnId) || child.endedTurns.has(turnId));
+        if (!obsolete && !this.retired) child.live = true;
         const signal = this.retired || obsolete ? AbortSignal.abort() : work
             ? AbortSignal.any([child.requests.signal, work.controller.signal]) : child.requests.signal;
         const currentTurn = this.runningTurnId(child.threadId) ?? child.turnId ?? child.foregroundTurnId;
         const foreground = !this.retired && !obsolete && typeof turnId === "string"
             && (currentTurn === null || currentTurn === turnId);
         if (foreground) this.beginForegroundTurn(child, turnId);
+        await this.publishCancellation(child);
         try {
             return await runSubagentInteraction({sessionId, signal,
                 nextToolCallId: server => this.associations.nextToolCallId(sessionId, server),
@@ -495,7 +515,19 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         return current === undefined || current === turnId;
     }
     observeWorkEnd(notification: ServerNotification): void {
+        if (notification.method === "turn/started" || notification.method === "thread/status/changed" && notification.params.status.type !== "notLoaded") {
+            this.unobservable.delete(notification.params.threadId);
+        }
+        if (!this.retired && (notification.method === "thread/closed" || notification.method === "thread/archived"
+            || notification.method === "thread/status/changed" && notification.params.status.type === "notLoaded")) {
+            this.unobservable.add(notification.params.threadId);
+            const child = this.children.get(notification.params.threadId);
+            if (child) child.live = false;
+        }
         if (!this.retired && notification.method === "turn/completed" && notification.params.turn.status !== "inProgress") {
+            const turns = this.receivedTurnEnds.get(notification.params.threadId) ?? new Set<string>();
+            turns.add(notification.params.turn.id);
+            this.receivedTurnEnds.set(notification.params.threadId, turns);
             this.closeWorkRequests(notification.params.threadId, notification.params.turn.id);
         }
     }
@@ -506,15 +538,71 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         this.endWorkRequests(child, turnId);
     }
     cancelInteractions(): void {
-        for (const child of this.children.values()) {
-            if (child.turnId !== null) child.closedRequestTurns.add(child.turnId);
-            child.requests.abort();
-            child.requests = new AbortController();
-            for (const [turnId, work] of child.workRequests) { child.closedRequestTurns.add(turnId); work.controller.abort(); }
-            child.workRequests.clear();
+        for (const child of this.children.values()) this.cancelChildInteractions(child);
+    }
+
+    private cancelChildInteractions(child: Child): void {
+        if (child.turnId !== null) child.closedRequestTurns.add(child.turnId);
+        child.requests.abort();
+        child.requests = new AbortController();
+        for (const [turnId, work] of child.workRequests) { child.closedRequestTurns.add(turnId); work.controller.abort(); }
+        child.workRequests.clear();
+    }
+
+    private currentTurn(child: Child): string | null {
+        if (this.retired || !child.live || this.unobservable.has(child.threadId)) return null;
+        const native = this.runningTurnId(child.threadId);
+        const turn = native ?? child.turnId ?? child.foregroundTurnId;
+        return turn === null || child.endedTurns.has(turn)
+            || this.receivedTurnEnds.get(child.threadId)?.has(turn) ? null : turn;
+    }
+
+    private async publishCancellation(child: Child, replayFlush = false): Promise<void> {
+        if (this.deferLive || this.snapshotting && !replayFlush) return;
+        const attachment = this.attachment;
+        await this.ensureAnnounced(child);
+        if (!this.announced.has(child.threadId)) return;
+        for (;;) {
+            const available = this.cancellationReady && this.currentTurn(child) !== null;
+            if (available === child.cancelAdvertised) return;
+            await this.session.update({sessionUpdate: "subagent_update", sessionId: child.sessionId,
+                capabilities: {cancel: available ? {} : null}}, child.parentSessionId);
+            if (attachment !== this.attachment) return;
+            child.cancelAdvertised = available;
         }
     }
+
+    /** Cancel only the addressed live conversation and its owned descendant work. */
+    async cancelChild(sessionId: string, interrupt: (threadId: string, turnId: string) => Promise<void>): Promise<void> {
+        const child = [...this.children.values()].find(child => child.sessionId === sessionId);
+        if (!child || !this.cancellationReady || this.deferLive || !child.cancelAdvertised || this.currentTurn(child) === null) return;
+        const selected = new Set([sessionId]);
+        let previousSize: number;
+        do {
+            previousSize = selected.size;
+            for (const descendant of this.children.values()) {
+                if (selected.has(descendant.parentSessionId)) selected.add(descendant.sessionId);
+            }
+        } while (selected.size !== previousSize);
+        const targets = [...this.children.values()].filter(target => selected.has(target.sessionId))
+            .map(target => ({child: target, turnId: this.currentTurn(target)}));
+        await Promise.all(targets.map(async ({child: target, turnId}) => {
+            if (turnId === null || target.cancellingTurn === turnId) return;
+            target.cancellingTurn = turnId;
+            this.cancelChildInteractions(target);
+            this.closeWorkRequests(target.threadId, turnId);
+            try { await interrupt(target.threadId, turnId); }
+            catch (error) { logger.error(`Failed to interrupt child ${target.threadId}`, error); }
+            finally {
+                if (target.cancellingTurn === turnId) delete target.cancellingTurn;
+            }
+        }));
+    }
+
+    suspendCancellation(): void { this.cancellationReady = false; }
+
     private async unknown(child: Child): Promise<void> {
+        child.live = false;
         this.configurations.delete(child.threadId);
         this.pendingConfigurations.delete(child.threadId);
         this.configurationRequests.delete(child.threadId);
@@ -525,6 +613,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         await child.foreground.update({state: "unknown"});
         child.turnId = null;
         child.foregroundTurnId = null;
+        await this.publishCancellation(child);
     }
     async finishOutstanding(state: SubagentState): Promise<void> {
         if (state !== "disconnected") return;
@@ -586,6 +675,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
             if (child.turnId !== null) this.beginForegroundTurn(child, child.turnId);
             await child.foreground.start();
         }
+        await this.publishCancellation(child);
     }
 
     /** Historical state bypasses the current foreground cache and grants no runtime ownership. */
