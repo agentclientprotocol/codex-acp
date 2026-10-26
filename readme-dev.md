@@ -262,10 +262,11 @@ failure or a permanently closed conversation.
 Replay follows both recorded spawn formats and replays available child transcripts once per conversation,
 including nested children, using legacy or paginated history. Announcements and all selected history
 precede the response. Completed snapshots reconcile tool and rendering state before duplicate live
-payloads are suppressed; live bookkeeping still runs. In-progress tools retain classification without
-resetting streamed output. Incomplete text has no safe delta cursor and is omitted rather than replayed
-over newer buffered content. Agent-owned input is not rendered as human input. Missing, omitted, or
-incomplete child history produces a parent advisory; an empty transcript alone does not invent a gap.
+payloads are suppressed; live bookkeeping still runs. In-progress commands retain classification without
+resetting streamed output. Incomplete text has no safe delta cursor; it and other records without a safe
+partial representation are omitted rather than replayed over newer content. Agent-owned input is not
+rendered as human input. Missing, omitted, or incomplete child history produces a parent advisory;
+an empty transcript alone does not invent a gap.
 
 Historical work-state outcomes remain deferred. Replayed content alone confirms neither current work
 nor controls. Rejoining a loaded child still requires current provider parentage; copied fork history
