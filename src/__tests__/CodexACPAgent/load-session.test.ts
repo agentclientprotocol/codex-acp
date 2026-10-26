@@ -518,12 +518,16 @@ describe("CodexACPAgent - loadSession", () => {
             reasoningEffort: null,
             agentsStates: {},
         });
-        const started = (childThreadId: string, resolvedModel: string | null) => ({
+        const started = (
+            childThreadId: string,
+            resolvedModel: string | null,
+            kind: "started" | "interacted" | "completed" = "started",
+        ) => ({
             type: "subAgentActivity" as const,
             model: resolvedModel,
             reasoningEffort: null,
-            id: `started-${childThreadId}`,
-            kind: "started" as const,
+            id: `${kind}-${childThreadId}`,
+            kind,
             agentThreadId: childThreadId,
             agentPath: `/root/${childThreadId}`,
         });
@@ -535,7 +539,10 @@ describe("CodexACPAgent - loadSession", () => {
                 // A spawn request does not name the model: a role config can override it.
                 spawn("requested", model.id),
                 started("requested", null),
+                started("resolved", null, "completed"),
             ]),
+            // Codex names the model only at the creation, so the follow-up generation reuses it.
+            turn("root-turn-2", [started("resolved", null, "interacted")]),
         ]);
         appServer.threadResume = vi.fn().mockResolvedValue({
             thread: root,
@@ -548,7 +555,7 @@ describe("CodexACPAgent - loadSession", () => {
         });
         appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread: root});
         appServer.threadRead = vi.fn().mockImplementation(({threadId}: {threadId: string}) =>
-            Promise.resolve({thread: makeThread(threadId, [turn(`${threadId}-turn`, [])])}));
+            Promise.resolve({thread: makeThread(threadId, [turn(`${threadId}-turn-1`, []), turn(`${threadId}-turn-2`, [])])}));
 
         await agent.initialize({
             protocolVersion: 1,
@@ -573,6 +580,8 @@ describe("CodexACPAgent - loadSession", () => {
             "root-history subagent_spawned unknown",
             `unknown model custom-model "custom-model"`,
             "root-history subagent_spawned requested",
+            "root-history subagent_spawned resolved:generation:2",
+            `resolved:generation:2 model ${model.id} "${model.id}"`,
         ]);
     });
 

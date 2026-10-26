@@ -91,7 +91,6 @@ import {
 import type {ModeKind} from "./app-server/ModeKind";
 import {
     createModelConfigOption,
-    createSubagentModelConfigOption,
     createReasoningEffortConfigOption,
     findSupportedEffort,
     formatModelDisplayName,
@@ -171,7 +170,11 @@ import {
     clientSupportsSubagents,
     type SubagentAwareSessionCapabilities,
 } from "./subagents/AcpSubagents";
-import {CodexSubagentEventRouter, type SubagentModels} from "./subagents/CodexSubagentEventRouter";
+import {
+    CodexSubagentEventRouter,
+    reportSubagentModel,
+    type SubagentModels,
+} from "./subagents/CodexSubagentEventRouter";
 import {nameFromAgentPath} from "./subagents/CodexAgentPath";
 import {listCodexHooks, trustCodexHooks, type CodexHookIdentity} from "./CodexHookTrust";
 import type {HooksListEntry} from "./app-server/v2/HooksListEntry";
@@ -3423,19 +3426,8 @@ export class CodexAcpServer {
         const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean; model?: string}>();
         // Sends the model of a replayed child after its announcement, as the live session does. Replay sends only
         // the resolved model that the activity items name for the child, so an older record gets no model option.
-        const reportModel = async (childSessionId: string, model: string | undefined) => {
-            const models = this.subagentModels(sessionState);
-            if (!model || !models) return;
-            try {
-                await session.update({
-                    sessionUpdate: "config_option_update",
-                    configOptions: [createSubagentModelConfigOption(models.availableModels, models.currentModel, model)],
-                }, childSessionId);
-            }
-            catch (error) {
-                logger.error(`Failed to report the model of subagent session ${childSessionId}`, error);
-            }
-        };
+        const reportModel = (childSessionId: string, model: string | undefined) =>
+            reportSubagentModel(session, childSessionId, this.subagentModels(sessionState), model);
         // v2 only (this path also serves v1's native replay, unchanged there).
         const startedReplayMessages = new Set<string>();
         for await (const items of itemPages) {
@@ -3515,7 +3507,7 @@ export class CodexAcpServer {
                         const child = announced.get(item.agentThreadId);
                         if (!child) {
                             const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
-                            const model = item.model ?? undefined;
+                            const model = item.model || undefined;
                             await session.update({
                                 sessionUpdate: "subagent_spawned",
                                 subagentSessionId: item.agentThreadId,

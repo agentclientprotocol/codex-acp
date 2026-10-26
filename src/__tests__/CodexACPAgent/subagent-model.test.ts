@@ -115,12 +115,32 @@ async function feed(router: CodexSubagentEventRouter, ...notifications: ServerNo
     }
 }
 
-function settings(model: string): ServerNotification {
-    return {method: "thread/settings/updated", params: {threadId: "child-1", threadSettings: {model} as never}};
+function settings(model: string, child = "child-1"): ServerNotification {
+    return {method: "thread/settings/updated", params: {threadId: child, threadSettings: {model} as never}};
 }
 
-function threadStarted(threadId: string, model: string): ServerNotification {
-    return {method: "thread/started", params: {thread: {id: threadId, model} as never}};
+function threadStarted(threadId: string, model: string, parentThreadId: string | null = null): ServerNotification {
+    return {method: "thread/started", params: {thread: {id: threadId, model, parentThreadId} as never}};
+}
+
+function rootTurnCompleted(): ServerNotification {
+    return {
+        method: "turn/completed",
+        params: {
+            threadId: "root",
+            turn: {
+                id: "root-turn",
+                items: [],
+                rootTurnId: null,
+                itemsView: "notLoaded",
+                status: "completed",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+            },
+        },
+    };
 }
 
 /** The model updates as `session value "name"`. */
@@ -343,6 +363,92 @@ describe('the model of a native subagent session', () => {
 
         expect(sent).toEqual(["subagent_spawned"]);
         expect(await router.waitForMaterializedSession("child-1")).toBe("child-1");
+    });
+
+    it('announces a pending child with the last of two buffered settings changes, and reports it once', async () => {
+        const {router, sent} = v1Router();
+
+        await feed(router, spawn(null), settings("gpt-5.2-codex"), settings("codex-fast"), activity("gpt-5.5"));
+
+        expect(modelReports(sent)).toEqual(['child-1 codex-fast "5.2 Codex Fast"']);
+    });
+
+    it('keeps no early model of a thread that is not of this root', async () => {
+        const {router, sent} = v1Router();
+
+        // No spawn of this root is in flight, and the thread names another parent.
+        await feed(
+            router,
+            threadStarted("child-1", "gpt-5.2-codex", "other-root"),
+            spawn(null, "child-1", "root", ["child-1"], "item/completed"),
+            activity(null),
+        );
+
+        expect(modelReports(sent)).toEqual([]);
+    });
+
+    it('takes an early model of a thread that names this root as its parent', async () => {
+        const {router, sent} = v1Router();
+
+        await feed(
+            router,
+            threadStarted("child-1", "gpt-5.2-codex", "root"),
+            spawn(null, "child-1", "root", ["child-1"], "item/completed"),
+            activity(null),
+        );
+
+        expect(modelReports(sent)).toEqual(['child-1 gpt-5.2-codex "5.2 Codex"']);
+    });
+
+    it('drops the early models when the root turn ends', async () => {
+        const {router, sent} = v1Router();
+
+        await feed(
+            router,
+            spawn(null, "child-1", "root", []),
+            threadStarted("child-1", "gpt-5.2-codex"),
+            rootTurnCompleted(),
+            spawn(null, "child-1", "root", ["child-1"], "item/completed"),
+            activity(null),
+        );
+
+        expect(modelReports(sent)).toEqual([]);
+    });
+
+    it.each([
+        {announcement: "first"},
+        {announcement: "reopen"},
+    ])('sends no model to a child that ends while the router announces it ($announcement)', async ({announcement}) => {
+        const sent: string[] = [];
+        let spawned = 0;
+        let router: CodexSubagentEventRouter | undefined;
+        const endOn = announcement === "first" ? 1 : 2;
+        const connection = {
+            notify: vi.fn(async (_method: string, params: unknown) => {
+                const update = (params as SentUpdate).update;
+                sent.push(String(update["sessionUpdate"]));
+                // A prompt wait timeout can end the children in this gap.
+                if (update["sessionUpdate"] === "subagent_spawned" && ++spawned === endOn) {
+                    await router!.finishOutstanding("failed");
+                }
+            }),
+            request: vi.fn(),
+        } as unknown as AcpClientConnection;
+        router = new CodexSubagentEventRouter(
+            "root",
+            true,
+            new ACPSessionConnection(connection, "root"),
+            () => {},
+            () => MODELS,
+        );
+
+        await feed(router, spawn(null), activity("gpt-5.2-codex"));
+        if (announcement === "reopen") {
+            sent.length = 0;
+            await feed(router, childTurn("first-turn", "completed"), childTurn("followup-turn", "inProgress"));
+        }
+
+        expect(sent).not.toContain("config_option_update");
     });
 
     it('renders the child configuration in the ACP v2 shape', async () => {
