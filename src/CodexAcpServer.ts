@@ -15,6 +15,7 @@ import {
     OPENAI_PROVIDER_ID,
     type SessionMetadata,
     type SessionMetadataWithThread,
+    type RecordedSubagentItem,
     type UrlElicitationRequester
 } from "./CodexAcpClient";
 import {
@@ -217,7 +218,7 @@ import type {SessionIndexTitleState} from "./SessionIndexTitles";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
 import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdate} from "./CodexSessionCompactions";
-import {CodexSessionToolCalls} from "./CodexSessionToolCalls";
+import {CodexSessionToolCalls, PLAIN_TOOL_CALL_ITEM_TYPES} from "./CodexSessionToolCalls";
 import {
     type AgentFileChangeReport,
     type AgentFileChangeReportRequest,
@@ -3496,7 +3497,7 @@ export class CodexAcpServer {
             isOpen,
         );
         if (this.usesStandardSubagents()) {
-            await this.streamStandardAssociations(sessionId, itemPages, sessionState, isOpen);
+            await this.streamStandardHistory(sessionId, standardHistoryItems(itemPages), sessionState, isOpen);
             return;
         }
         if (this.supportsNativeSubagents()) {
@@ -3689,50 +3690,70 @@ export class CodexAcpServer {
         }
     }
 
-    /** Association-only replay: child transcripts and recorded outcomes are a separate slice. */
-    private async streamStandardAssociations(
-        sessionId: string, pages: AsyncIterable<ThreadItem[]>, state: SessionState, isOpen: () => boolean,
+    /** Recorded conversation data is independent of verified runtime ownership and current work. */
+    private async streamStandardHistory(
+        sessionId: string, pages: AsyncIterable<RecordedSubagentItem[]>, state: SessionState, isOpen: () => boolean,
+        threadId = sessionId, ancestry = new Set([threadId]), replayed = new Set<string>(), gaps = new Set<string>(),
     ): Promise<void> {
         const router = state.subagents;
         if (!(router instanceof StandardSubagentEventRouter)) return;
         const session = new ACPSessionConnection(this.connection, sessionId);
         const started = new Set<string>();
-        const restored = new Set<string>();
-        const restore = async (threadId: string, childId: string | null) => {
-            if (childId === null || restored.has(threadId)) return;
-            restored.add(threadId);
+        const replayChild = async (childThreadId: string, childId: string | null) => {
+            if (childId === null || replayed.has(childThreadId)) return;
+            if (ancestry.has(childThreadId)) { gaps.add(childThreadId); return; }
+            replayed.add(childThreadId);
             try {
-                const metadata = await this.codexAcpClient.appServerClient.threadRead({threadId});
+                const history = await this.codexAcpClient.readSubagentHistory(childThreadId);
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
-                const parent = router.parentThreadId(threadId);
+                const parent = router.parentThreadId(childThreadId);
                 if (parent !== undefined) {
-                    const runtime = await this.codexAcpClient.restoreSubagentSubscription(sessionId, parent, metadata.thread);
-                    if (runtime) await router.restoreRuntime(runtime, this.codexAcpClient.appServerClient.runningTurnId(threadId));
+                    try {
+                        const runtime = await this.codexAcpClient.restoreSubagentSubscription(state.sessionId, parent, history.thread);
+                        if (runtime) await router.restoreRuntime(runtime, this.codexAcpClient.appServerClient.runningTurnId(childThreadId));
+                    } catch (error) { logger.error(`Failed to restore subagent ${childThreadId}`, error); }
                 }
+                await this.streamStandardHistory(childId, history.items, state, isOpen, childThreadId,
+                    new Set([...ancestry, childThreadId]), replayed, gaps);
             } catch (error) {
                 if (error instanceof SessionClosedDuringLoadError) throw error;
-                logger.error(`Failed to restore subagent ${threadId}`, error);
+                gaps.add(childThreadId);
+                logger.error(`Failed to replay subagent ${childThreadId}`, error);
             }
         };
-        const unresolved: Array<ThreadItem & {type: "subAgentActivity"}> = [];
+        const replayActivity = async (item: ThreadItem & {type: "subAgentActivity"}): Promise<boolean> => {
+            const childId = await router.announceHistory(item.agentThreadId, item.agentPath);
+            if (childId === null) return false;
+            await reportSubagentModel(session, childId, this.subagentModels(state), item.model || undefined);
+            await replayChild(item.agentThreadId, childId);
+            return true;
+        };
+        let unresolved: Array<ThreadItem & {type: "subAgentActivity"}> = [];
         for await (const items of pages) {
-            for (const item of items) {
+            for (const {item, completed, turnId} of items) {
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
                 if (item.type === "subAgentActivity") {
-                    if (isRootAgentPath(item.agentPath) || item.agentThreadId === sessionId) continue;
-                    const childId = await router.announceHistory(item.agentThreadId, item.agentPath);
-                    if (childId === null) unresolved.push(item);
-                    else {
-                        await reportSubagentModel(session, childId, this.subagentModels(state), item.model || undefined);
-                        await restore(item.agentThreadId, childId);
-                    }
+                    if (isRootAgentPath(item.agentPath)) continue;
+                    if (ancestry.has(item.agentThreadId)) { gaps.add(item.agentThreadId); continue; }
+                    if (!await replayActivity(item)) unresolved.push(item);
                     continue;
                 }
                 if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") {
-                    if (item.senderThreadId === sessionId) for (const child of item.receiverThreadIds) {
-                        if (child.trim() && child !== sessionId) await restore(child, await router.announce(child, sessionId, undefined, item.prompt ?? undefined));
+                    if (item.senderThreadId === threadId) for (const child of item.receiverThreadIds) {
+                        if (!child.trim() || ancestry.has(child)) { gaps.add(child); continue; }
+                        await replayChild(child, await router.announce(child, sessionId, undefined, item.prompt ?? undefined));
                     }
                     continue;
+                }
+                if (threadId !== state.sessionId) {
+                    // Agent-owned input is not an ordinary human message. Incomplete text has no safe delta cursor.
+                    if (item.type === "userMessage" || (!completed && !PLAIN_TOOL_CALL_ITEM_TYPES.has(item.type))) {
+                        gaps.add(threadId);
+                        continue;
+                    }
+                    if (!completed) gaps.add(threadId);
+                    if (!await router.reconcileHistoryItem(threadId, item, completed, turnId)) { gaps.add(threadId); continue; }
+                    if (!isOpen()) throw new SessionClosedDuringLoadError();
                 }
                 for (const update of await this.createHistoryUpdates(item, state)) {
                     if (this.protocolVersion === 2) await this.sendReplayMessageStart(session, update, started);
@@ -3740,11 +3761,16 @@ export class CodexAcpServer {
                 }
             }
         }
-        for (const item of unresolved) await restore(item.agentThreadId, await router.announceHistory(item.agentThreadId, item.agentPath));
+        while (unresolved.length > 0) {
+            const pending: typeof unresolved = [];
+            for (const item of unresolved) if (!await replayActivity(item)) pending.push(item);
+            if (pending.length === unresolved.length) { for (const item of pending) gaps.add(item.agentThreadId); break; }
+            unresolved = pending;
+        }
         if (!isOpen()) throw new SessionClosedDuringLoadError();
-        if (restored.size > 0) {
+        if (threadId === state.sessionId && gaps.size > 0) {
             const update = {sessionUpdate: "agent_thought_chunk" as const, messageId: `${sessionId}:subagent-history-gap`,
-                content: {type: "text" as const, text: "Recorded child transcripts are not included in this replay."}};
+                content: {type: "text" as const, text: "Some recorded child history is unavailable or incomplete."}};
             if (this.protocolVersion === 2) await this.sendReplayMessageStart(session, update, started);
             await session.update(update);
         }
@@ -5543,6 +5569,12 @@ async function* withoutReviewerPrompts(pages: AsyncIterable<ThreadItemEntry[]>):
 async function* itemsOfEntries(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGenerator<ThreadItem[]> {
     for await (const page of pages) {
         yield page.map(entry => entry.item);
+    }
+}
+
+async function* standardHistoryItems(pages: AsyncIterable<ThreadItem[]>): AsyncGenerator<RecordedSubagentItem[]> {
+    for await (const page of pages) {
+        yield page.map(item => ({item, completed: !("status" in item) || item.status !== "inProgress"}));
     }
 }
 

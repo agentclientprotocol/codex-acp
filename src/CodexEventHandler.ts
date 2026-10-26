@@ -41,6 +41,7 @@ import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
 import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
 import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
 import {CodexItemStreamState} from "./CodexItemStreamState";
+import {PLAIN_TOOL_CALL_ITEM_TYPES} from "./CodexSessionToolCalls";
 import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationReporter";
 import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
 import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
@@ -179,22 +180,6 @@ const STRUCTURED_CODEX_ERROR_CATEGORIES: Partial<Record<StructuredCodexErrorKind
     responseTooManyFailedAttempts: "transport_lost",
     activeTurnNotSteerable: "provider_error",
 } satisfies Record<StructuredCodexErrorKind, CodexFailureKind>;
-
-/**
- * Item types that render as a plain `tool_call`/`tool_call_update` and have no outstanding-item
- * tracker of their own (`contextCompaction` has `CodexSessionCompactions`; `collabAgentToolCall`/
- * `subAgentActivity` have `CodexSubagentEventRouter`). Used to track which open items a provider
- * restart's close-out needs to fail.
- */
-const PLAIN_TOOL_CALL_ITEM_TYPES = new Set<ThreadItem["type"]>([
-    "fileChange",
-    "commandExecution",
-    "mcpToolCall",
-    "dynamicToolCall",
-    "webSearch",
-    "imageView",
-    "imageGeneration",
-]);
 
 /** Prompt failures whose text the client has already received as an agent message. */
 const failuresShownAsMessages = new WeakSet<RequestError>();

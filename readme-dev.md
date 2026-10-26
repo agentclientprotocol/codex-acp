@@ -259,9 +259,17 @@ client mutations are not enabled. Parent cancellation interrupts observed live d
 An observed work ending reports `idle`; loss of observability reports `unknown`, not a fabricated
 failure or a permanently closed conversation.
 
-Replay currently restores recoverable associations, not recursive child transcripts or historical
-work outcomes. A parent advisory makes that gap visible. Rejoining a loaded child requires current
-provider parentage; copied fork history alone cannot acquire the original runtime's subscriptions.
+Replay follows both recorded spawn formats and replays available child transcripts once per conversation,
+including nested children, using legacy or paginated history. Announcements and all selected history
+precede the response. Completed snapshots reconcile tool and rendering state before duplicate live
+payloads are suppressed; live bookkeeping still runs. In-progress tools retain classification without
+resetting streamed output. Incomplete text has no safe delta cursor and is omitted rather than replayed
+over newer buffered content. Agent-owned input is not rendered as human input. Missing, omitted, or
+incomplete child history produces a parent advisory; an empty transcript alone does not invent a gap.
+
+Historical work-state outcomes remain deferred. Replayed content alone confirms neither current work
+nor controls. Rejoining a loaded child still requires current provider parentage; copied fork history
+can be displayed but cannot acquire the original runtime's subscriptions.
 After replay, current child work/model snapshots follow the actual response write, including whole
 JSON-RPC batches. Parent setup operations serialize without waiting on each other's batch delivery.
 

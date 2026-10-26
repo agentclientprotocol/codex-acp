@@ -1,4 +1,11 @@
 import type {UpdateSessionEvent} from "./ACPSessionConnection";
+import type {ThreadItem} from "./app-server/v2";
+import {commandUsesTerminal} from "./tool-calls/reporters/CommandReporter";
+
+/** Item types tracked as ordinary tool calls, without a separate lifecycle tracker. */
+export const PLAIN_TOOL_CALL_ITEM_TYPES = new Set<ThreadItem["type"]>([
+    "fileChange", "commandExecution", "mcpToolCall", "dynamicToolCall", "webSearch", "imageView", "imageGeneration",
+]);
 
 /**
  * Tracks tool-call items that reported `item/started` but not yet `item/completed`, for the item
@@ -17,6 +24,12 @@ export class CodexSessionToolCalls {
 
     complete(itemId: string): void {
         this.open.delete(itemId);
+    }
+
+    restore(item: ThreadItem, completed: boolean, turnId?: string): void {
+        if (!PLAIN_TOOL_CALL_ITEM_TYPES.has(item.type)) return;
+        if (completed) this.complete(item.id);
+        else if (!this.open.has(item.id)) this.start(item.id, item.type === "commandExecution" && commandUsesTerminal(item), turnId);
     }
 
     /** Drops all tracked entries without emitting anything, e.g. when their turn ends. */

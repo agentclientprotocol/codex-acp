@@ -53,6 +53,8 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     private readonly deferredLive: PendingNotificationBuffer;
     private readonly legacyActivities = new Set<string>();
     private readonly announced = new Set<string>();
+    private readonly replayedItems = new Map<string, Map<string, boolean>>();
+    private readonly completedItems = new Map<string, Set<string>>();
     private readonly models = new Map<string, ChildModel>();
     private readonly pendingModels = new Set<string>();
     private readonly spawnsInFlight = new Set<string>();
@@ -155,10 +157,13 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         if (this.retired) return true;
         await this.interactionObserver?.(notification, child.sessionId);
         child.live = true;
+        const params = notification.params as {itemId?: string; item?: {id: string}};
+        const itemId = params.itemId ?? params.item?.id;
+        const replayed = itemId === undefined ? undefined : this.replayedItems.get(threadId)?.get(itemId);
         const progressTurnId = (notification.params as {turnId?: string}).turnId;
         const progress = notification.method === "item/agentMessage/delta" || notification.method === "item/plan/delta"
             || notification.method === "item/reasoning/textDelta" || notification.method === "item/reasoning/summaryTextDelta";
-        if (progressTurnId !== undefined && progress && !child.endedTurns.has(progressTurnId)
+        if (replayed !== true && progressTurnId !== undefined && progress && !child.endedTurns.has(progressTurnId)
             && (child.turnId === null || child.turnId === progressTurnId)) {
             child.turnId ??= progressTurnId;
             if (this.isCurrentForeground(child, progressTurnId)) {
@@ -220,15 +225,23 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                 }
                 return true;
             case "item/started":
+                if (replayed === true) return true;
                 if (notification.params.item.type === "userMessage") return true;
                 if (child.turnId !== null && child.foregroundTurnId === notification.params.turnId) {
                     await child.foreground.startItem(notification.params.item.id);
                 }
                 if (notification.params.item.type === "plan") return true;
+                if (replayed === false) return true;
                 break;
             case "item/completed": {
                 if (child.foregroundTurnId === notification.params.turnId) await child.foreground.completeItem(notification.params.item.id);
                 const item = notification.params.item;
+                this.rememberCompletedItem(threadId, item.id);
+                if (replayed === true) {
+                    child.toolCalls.complete(item.id);
+                    if (item.type === "commandExecution") child.streams.commands.restore(item);
+                    return true;
+                }
                 if (item.type === "userMessage") return true;
                 if (item.type === "plan") {
                     const plans = new CodexPlanStream(this.session.forSession(child.sessionId), this.capabilities);
@@ -241,7 +254,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
             case "item/plan/delta":
                 return true;
         }
-        return false;
+        return replayed === true;
     }
 
     private pendingFor(threadId: string): Pending {
@@ -476,6 +489,33 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         const parentId = this.children.get(threadId)?.parentSessionId;
         return parentId === this.rootSessionId ? parentId : parentId === undefined ? undefined : this.associations.get(parentId)?.threadId;
     }
+
+    /** Reconcile bookkeeping before suppressing duplicate presentation; history does not start work. */
+    async reconcileHistoryItem(threadId: string, item: ThreadItem, completed: boolean, turnId?: string): Promise<boolean> {
+        const child = this.children.get(threadId);
+        if (!child || this.retired) return false;
+        if (!completed && (this.completedItems.get(threadId)?.has(item.id) || (turnId !== undefined && child.endedTurns.has(turnId)))) return false;
+        child.toolCalls.restore(item, completed, turnId);
+        if (item.type === "commandExecution") child.streams.commands.restore(item);
+        if (item.type === "agentMessage") child.streams.agentMessagePhases.set(item.id, item.phase);
+        if (item.type === "imageView" && !completed) child.streams.emittedImageViewItems.add(item.id);
+        if (item.type === "imageGeneration" && !completed) child.streams.activeImageGenerationItems.add(item.id);
+        const items = this.replayedItems.get(threadId) ?? new Map<string, boolean>();
+        items.set(item.id, completed);
+        this.replayedItems.set(threadId, items);
+        if (completed) {
+            this.rememberCompletedItem(threadId, item.id);
+            await child.foreground.completeItem(item.id);
+        }
+        return true;
+    }
+
+    private rememberCompletedItem(threadId: string, itemId: string): void {
+        const items = this.completedItems.get(threadId) ?? new Set<string>();
+        items.add(itemId);
+        this.completedItems.set(threadId, items);
+    }
+
     async restoreRuntime(thread: Thread, turnId: string | undefined): Promise<void> {
         const child = this.children.get(thread.id);
         if (!child || this.retired) return;

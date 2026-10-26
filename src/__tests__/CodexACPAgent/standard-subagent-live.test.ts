@@ -348,7 +348,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(options).toEqual(["latest-settings"]);
     });
 
-    it("replays associations and parent history without claiming complete child history", async () => {
+    it("replays parent history and empty child associations without inventing a gap or current runtime", async () => {
         await connect();
         const item: ThreadItem = {type: "agentMessage", id: "parent-answer", text: "Parent history", phase: null,
             memoryCitation: null, delivery: null, questions: null};
@@ -358,7 +358,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(h.scopedUpdates.some(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === "agent_message_chunk"
             && entry.update.messageId === "parent-answer")).toBe(true);
         expect(h.scopedUpdates.some(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === "agent_thought_chunk"
-            && entry.update.messageId === `${sessionId}:subagent-history-gap`)).toBe(true);
+            && entry.update.messageId === `${sessionId}:subagent-history-gap`)).toBe(false);
         expect(childUpdates().filter(entry => entry.sessionId === childId)).toEqual([]);
     });
 
