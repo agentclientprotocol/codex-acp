@@ -89,8 +89,25 @@ export interface SessionIndexThread {
     archived: boolean;
 }
 
-/** The entry of a `thread/read` result: Codex reports archive state only through the rollout path. */
-export function threadEntry(thread: Thread, codexHome: string | null): SessionIndexThread {
+/** The sources that `thread/list` lists without `sourceKinds`: the CLI and the IDE extensions, as AIR. */
+export function isInteractiveSource(thread: Thread): boolean {
+    return thread.source === "cli" || thread.source === "vscode";
+}
+
+/**
+ * Whether `thread/list` lists a thread that `thread/read` returned: one that is not ephemeral, from an
+ * interactive source, with a first user message, which is its `preview`.
+ */
+export function isListedThread(thread: Thread): boolean {
+    return !thread.ephemeral && isInteractiveSource(thread) && thread.preview !== "" && thread.path !== null;
+}
+
+/**
+ * The entry of a `thread/read` result, or null when `session/list` would not show the thread. Codex reports the
+ * archive state only through the rollout path.
+ */
+export function listedThreadEntry(thread: Thread, codexHome: string | null): SessionIndexThread | null {
+    if (!isListedThread(thread)) return null;
     return {thread, archived: thread.path !== null && isArchivedRolloutPath(thread.path, codexHome)};
 }
 

@@ -43,7 +43,7 @@ function createThread(overrides: Partial<Thread> = {}): Thread {
         updatedAt: 200,
         recencyAt: 300,
         status: {type: "notLoaded"},
-        path: null,
+        path: "/codex/sessions/rollout.jsonl",
         cwd: "/repo/project",
         cliVersion: "0.0.0",
         section: null,
@@ -1395,6 +1395,20 @@ describe("_session/batch_get", () => {
         expect(batch.sessions).toEqual(list.sessions);
         expect(batch.sessions[0]!.additionalDirectories).toEqual([root]);
         expect((batch.sessions[0]!._meta as any).jetbrains.air).toMatchObject({state: "idle", lastTurnEndedAt: "1970-01-01T00:08:20.000Z"});
+    });
+
+    it.each([
+        {ephemeral: true},
+        {source: "exec"},
+        {source: {subAgent: "review"}},
+        {preview: ""},
+        {path: null},
+    ] as Partial<Thread>[])("omits a thread that session/list does not show: %j", async hidden => {
+        const {agent, read} = await setup();
+        const listed = createThread({id: "listed"});
+        read.mockImplementation(async ({threadId}) => ({thread: threadId === "hidden" ? createThread({id: "hidden", ...hidden}) : listed}));
+        const result = await agent.sessionIndex.batchGet({sessionIds: ["hidden", listed.id]});
+        expect(result.sessions.map(row => row.sessionId)).toEqual([listed.id]);
     });
 
     it("does no store or process work for empty input", async () => {

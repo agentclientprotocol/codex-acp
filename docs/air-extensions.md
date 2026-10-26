@@ -1233,7 +1233,10 @@ or worktrees are eligible; the client applies display filters.
 
 The example IDs stand for Codex thread IDs. `sessions` contains full
 `session/list` rows in relative request order. Absent, unreadable and
-ID-mismatched records are omitted. Merge returned rows with the recent page by
+ID-mismatched records are omitted, and so are threads that `session/list` does
+not show: ephemeral threads, threads from a source other than the CLI or an IDE
+extension (such as `exec` or a subagent), threads without a first user message
+and threads without a stored rollout. Merge returned rows with the recent page by
 `sessionId`; an omitted ID need not remove its pinned or folder reference.
 
 `{ "sessionIds": [] }` returns `{ "sessions": [] }` without reading the store.

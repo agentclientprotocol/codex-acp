@@ -26,7 +26,7 @@ import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadReadParams, ThreadReadResponse} from "./app-server/v2";
 import {CodexHomeWatcher, type CodexHomeWatcherListener} from "./CodexHomeWatcher";
 import {logger} from "./Logger";
-import {sessionIndexRowForkedFrom, sessionIndexRowSignature, threadEntry} from "./SessionIndex";
+import {isInteractiveSource, listedThreadEntry, sessionIndexRowForkedFrom, sessionIndexRowSignature} from "./SessionIndex";
 import {isMissingThreadError} from "./SessionIndexMutations";
 import {SessionNameLog} from "./SessionNameLog";
 
@@ -844,8 +844,7 @@ export class SessionListSubscriptions {
             this.ignore(threadId);
             return null;
         }
-        if (!isListedThread(thread)) return null;
-        return threadEntry(thread, this.deps.codexHome());
+        return listedThreadEntry(thread, this.deps.codexHome());
     }
 
     /** The groups whose scope has the cwd. The worktrees of a group are resolved again every 10 s at most. */
@@ -872,19 +871,6 @@ export class SessionListSubscriptions {
         }
         return {groups: [...this.groups.values()].filter(group => group.scope.has(cwd)), deferred};
     }
-}
-
-/** The sources that `thread/list` lists without `sourceKinds`: the CLI and the IDE extensions, as AIR. */
-function isInteractiveSource(thread: Thread): boolean {
-    return thread.source === "cli" || thread.source === "vscode";
-}
-
-/**
- * Whether `thread/list` lists a thread that `thread/read` returned: one that is not ephemeral, from an
- * interactive source, with a first user message, which is its `preview`.
- */
-export function isListedThread(thread: Thread): boolean {
-    return !thread.ephemeral && isInteractiveSource(thread) && thread.preview !== "" && thread.path !== null;
 }
 
 function batchOf(batches: Map<Subscription, SessionListChanges>, subscription: Subscription): SessionListChanges {

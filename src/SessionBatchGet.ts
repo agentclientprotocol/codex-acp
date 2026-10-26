@@ -3,7 +3,7 @@ import {ErrorCodes} from "vscode-jsonrpc/node";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import {isConnectionDeathError} from "./app-server-recovery/AppServerRecovery";
 import {isAppServerUnavailableError} from "./app-server-recovery/AppServerExit";
-import {threadEntry, type SessionIndexThread} from "./SessionIndex";
+import {listedThreadEntry, type SessionIndexThread} from "./SessionIndex";
 
 function rpcError(error: unknown): {code?: unknown; data?: unknown} {
     return error !== null && typeof error === "object" ? error : {};
@@ -22,13 +22,13 @@ function shouldAbortBatch(error: unknown): boolean {
  *  concurrently; the bound keeps a large batch from flooding the app-server. */
 const READ_CONCURRENCY = 8;
 
-/** The metadata of one ID; null for an unreadable or absent record. */
+/** The metadata of one ID; null for an unreadable or absent record, or one that `session/list` does not show. */
 async function readOne(client: CodexAppServerClient, codexHome: string | null, sessionId: string): Promise<SessionIndexThread | null> {
     try {
         const {thread} = await client.threadRead({threadId: sessionId, includeTurns: false});
         // UUID parsing can normalize the ID. Opaque ACP IDs must still match exactly.
         if (thread.id !== sessionId) return null;
-        return threadEntry(thread, codexHome);
+        return listedThreadEntry(thread, codexHome);
     } catch (error) {
         if (client.connectionLoss.lost || shouldAbortBatch(error)) throw error;
         return null;
