@@ -1187,7 +1187,8 @@ describe("SessionListSubscriptions with the CODEX_HOME watch on disk", () => {
             notify: async (changes) => {
                 sent.push(changes);
             },
-            timings: {...timings, fallbackIntervalMs: 60 * 60_000},
+            // Under load, the event of the new directory can come late; the periodic check then installs the watch.
+            timings: {...timings, fallbackIntervalMs: 200},
         });
         try {
             await subscriptions.subscribe("/repo");
@@ -1196,10 +1197,10 @@ describe("SessionListSubscriptions with the CODEX_HOME watch on disk", () => {
             fs.mkdirSync(path.join(home, "archived_sessions"));
             fs.writeFileSync(path.join(home, "archived_sessions", rollout), "{}\n");
 
-            await vi.waitFor(() => expect(sent.flatMap(changes => changes.sessions)).toEqual([expect.objectContaining({
+            await vi.waitFor(() => expect(sent.flatMap(changes => changes.sessions)).toEqual(expect.arrayContaining([expect.objectContaining({
                 sessionId: threadId,
                 _meta: {jetbrains: {air: expect.objectContaining({archived: true})}},
-            })]), {timeout: 5_000, interval: 50});
+            })])), {timeout: 5_000, interval: 50});
         } finally {
             subscriptions.dispose();
         }

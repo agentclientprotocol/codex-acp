@@ -70,11 +70,14 @@ export class SessionForkOrigins {
 
     /**
      * Another part of the adapter read the thread with `thread/read`. A fork parent there is the answer and replaces a
-     * `null` one. A `null` parent counts as a read of the thread as it is now.
+     * `null` one; a parent found this way is reported, as a background read reports it. A `null` parent counts as a
+     * read of the thread as it is now.
      */
     readElsewhere(thread: Thread): void {
         if (thread.forkedFromId) {
+            const found = typeof this.origins.get(thread.id) !== "string";
             this.remember(thread.id, thread.forkedFromId);
+            if (found && !this.disposed) this.deps.onFound([thread.id]);
             return;
         }
         const pending = this.pending.get(thread.id);
@@ -128,7 +131,8 @@ export class SessionForkOrigins {
     /** Reads the fork parent of a thread with `thread/read`; true when it is a fork. */
     private async read(thread: Thread): Promise<boolean> {
         // A thread listed again while it was read waits for that read, which may have answered meanwhile.
-        if (typeof this.origins.get(thread.id) === "string") return false;
+        const known = this.origins.get(thread.id);
+        if (typeof known === "string" || (known !== undefined && known.updatedAt >= thread.updatedAt)) return false;
         // Without an app-server, the thread is read when it is listed next.
         const reader = this.deps.reader();
         if (reader === null) return false;

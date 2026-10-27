@@ -120,6 +120,45 @@ describe("SessionForkOrigins", () => {
         origins.dispose();
     });
 
+    it("reports a fork parent that a thread/read made elsewhere finds while the background read waits", async () => {
+        let release: () => void = () => {};
+        const threadRead = vi.fn(async ({threadId}: ThreadReadParams) => {
+            await new Promise<void>(resolve => { release = resolve; });
+            return {thread: thread(threadId, {forkedFromId: PARENT})} as ThreadReadResponse;
+        });
+        const onFound = vi.fn();
+        const origins = new SessionForkOrigins({reader: () => ({threadRead}), onFound});
+
+        origins.originOf(thread("fork"));
+        await vi.waitFor(() => expect(threadRead).toHaveBeenCalledTimes(1));
+        origins.readElsewhere(thread("fork", {forkedFromId: PARENT}));
+        expect(onFound).toHaveBeenCalledExactlyOnceWith(["fork"]);
+
+        release();
+        await settled(origins);
+        expect(onFound).toHaveBeenCalledTimes(1);
+        expect(origins.originOf(thread("fork"))).toBe(PARENT);
+        origins.dispose();
+    });
+
+    it("does not read an unchanged thread again when it is listed again while its read runs", async () => {
+        let release: () => void = () => {};
+        const threadRead = vi.fn(async ({threadId}: ThreadReadParams) => {
+            await new Promise<void>(resolve => { release = resolve; });
+            return {thread: thread(threadId)} as ThreadReadResponse;
+        });
+        const origins = new SessionForkOrigins({reader: () => ({threadRead}), onFound: vi.fn()});
+
+        origins.originOf(thread("plain"));
+        await vi.waitFor(() => expect(threadRead).toHaveBeenCalledTimes(1));
+        origins.originOf(thread("plain"));
+        release();
+        await settled(origins);
+
+        expect(threadRead).toHaveBeenCalledTimes(1);
+        origins.dispose();
+    });
+
     it("reads at most 8 threads at a time", async () => {
         let running = 0;
         let most = 0;
