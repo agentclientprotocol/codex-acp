@@ -74,6 +74,22 @@ describe("CodexHomeWatcher", () => {
         expect(archiveMoved.mock.calls.every(([id]) => id === threadId)).toBe(true);
     }, 10_000);
 
+    it("reports the thread of a compressed rollout that moves into archived_sessions", async () => {
+        const archive = path.join(home, ARCHIVED_SESSIONS_DIR);
+        fs.mkdirSync(archive);
+        const {archiveMoved} = createWatcher(home);
+        const threadId = "01a0637c-5b99-7242-9064-04545d605fe0";
+        const rollout = path.join(archive, `rollout-2026-10-08T13-21-48-${threadId}.jsonl.zst`);
+
+        let present = false;
+        await vi.waitFor(() => {
+            if (present) fs.rmSync(rollout);
+            else fs.writeFileSync(rollout, "zst");
+            present = !present;
+            expect(archiveMoved).toHaveBeenCalledWith(threadId);
+        }, {timeout: 5_000, interval: 100});
+    }, 10_000);
+
     it("reports an append to the session name log, which a rename writes", async () => {
         const log = path.join(home, "session_index.jsonl");
         fs.writeFileSync(log, "");

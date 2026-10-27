@@ -25,8 +25,11 @@ import {SESSION_NAME_LOG_FILE} from "./SessionNameLog";
 export const ARCHIVED_SESSIONS_DIR = "archived_sessions";
 
 const STATE_DB_WAL_PATTERN = /^state_\d+\.sqlite-wal$/;
-/** The thread id at the end of a rollout file name: `rollout-<time>-<uuid>.jsonl`. */
-const ROLLOUT_THREAD_ID_PATTERN = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+/**
+ * The thread id at the end of a rollout file name: `rollout-<time>-<uuid>.jsonl`, or `.jsonl.zst` for the
+ * rollout that Codex compresses when it archives the thread.
+ */
+const ROLLOUT_THREAD_ID_PATTERN = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(?:\.zst)?$/i;
 /** The most threads that one new watch of `archived_sessions` reports from its listing. */
 const MAX_ARCHIVE_RECONCILED = 256;
 
