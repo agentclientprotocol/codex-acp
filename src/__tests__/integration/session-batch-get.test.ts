@@ -52,11 +52,14 @@ describeIntegration("integration: session batch metadata", () => {
             expect(recent.sessions).toHaveLength(50);
             expect(recent.sessions.map(row => row.sessionId)).not.toContain(old);
             fixture.clearCodexConnectionDump();
-            const result = await index.batchGet({sessionIds: [archived, corrupt, old, absent, "not-a-uuid"]});
+            const requested = [archived, corrupt, old, absent, "not-a-uuid"];
+            const result = await index.batchGet({sessionIds: requested});
             expect(result.sessions.map(row => row.sessionId)).toEqual([archived, old]);
             expect(result.sessions[1]!.title).toBe("Selected current copy");
-            const requests = fixture.getCodexConnectionEvents([]).filter(event => event.eventType === "request");
-            expect(requests).toEqual([archived, corrupt, old, absent, "not-a-uuid"].map(threadId => ({
+            // The list above reads the fork parents of its rows in the background; those reads are of other threads.
+            const requests = fixture.getCodexConnectionEvents([]).filter(event =>
+                event.eventType === "request" && requested.includes((event.params as {threadId?: string}).threadId ?? ""));
+            expect(requests).toEqual(requested.map(threadId => ({
                 eventType: "request", method: "thread/read", params: {threadId, includeTurns: false},
             })));
             const all = await index.list({_meta: {jetbrains: {air: {list: {limit: 100, archived: "all"}}}}});
