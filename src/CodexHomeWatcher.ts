@@ -9,7 +9,9 @@
  *
  * Codex moves the rollout of an archived thread into `<CODEX_HOME>/archived_sessions/` and back on unarchive,
  * without moving the `updated_at` of the thread. A non-recursive watch of that directory reports the id of each
- * rollout that appears or goes there. A rename does not move `updated_at` either; it appends to
+ * rollout that appears or goes there. The watcher keeps the thread ids of the rollouts there, from a directory
+ * listing and the events. When it starts to watch the directory after it appeared or came back, it lists the
+ * directory again and reports each thread whose rollout came or went meanwhile. A rename does not move `updated_at` either; it appends to
  * `<CODEX_HOME>/session_index.jsonl`, whose writes count as a change of the state as well.
  *
  * The watcher only reports; the caller debounces and reads.
@@ -23,8 +25,13 @@ import {SESSION_NAME_LOG_FILE} from "./SessionNameLog";
 export const ARCHIVED_SESSIONS_DIR = "archived_sessions";
 
 const STATE_DB_WAL_PATTERN = /^state_\d+\.sqlite-wal$/;
-/** The thread id at the end of a rollout file name: `rollout-<time>-<uuid>.jsonl`. */
-const ROLLOUT_THREAD_ID_PATTERN = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+/**
+ * The thread id at the end of a rollout file name: `rollout-<time>-<uuid>.jsonl`, or `.jsonl.zst` for the
+ * rollout that Codex compresses when it archives the thread.
+ */
+const ROLLOUT_THREAD_ID_PATTERN = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(?:\.zst)?$/i;
+/** The most threads that one new watch of `archived_sessions` reports from its listing. */
+const MAX_ARCHIVE_RECONCILED = 256;
 
 export interface CodexHomeWatcherListener {
     /** A state DB WAL was written, appeared or went. */
@@ -43,6 +50,8 @@ interface WalWatch {
 export class CodexHomeWatcher {
     private homeWatcher: fs.FSWatcher | null = null;
     private archiveWatcher: fs.FSWatcher | null = null;
+    /** The thread ids of the rollouts in `archived_sessions`, as last listed or reported. */
+    private archived: Set<string>;
     private nameLogWatcher: fs.FSWatcher | null = null;
     private readonly walWatchers = new Map<string, WalWatch>();
     private fallbackTimer: ReturnType<typeof setInterval> | null = null;
@@ -60,6 +69,8 @@ export class CodexHomeWatcher {
         fallbackIntervalMs: number,
     ) {
         this.walSnapshot = readWalSnapshot(home);
+        // What is archived when the watching starts is no change.
+        this.archived = listArchivedThreadIds(path.join(home, ARCHIVED_SESSIONS_DIR));
         this.refreshWalWatchers();
         this.watchHome();
         this.watchArchive();
@@ -122,8 +133,13 @@ export class CodexHomeWatcher {
         if (!fs.existsSync(dir)) return;
         try {
             const watcher = fs.watch(dir, {persistent: false}, (_event, filename) => {
-                const threadId = filename === null ? null : ROLLOUT_THREAD_ID_PATTERN.exec(filename.toString())?.[1];
-                if (threadId && !this.stopped) this.listener.archiveMoved(threadId.toLowerCase());
+                if (filename === null || this.stopped) return;
+                const name = filename.toString();
+                const threadId = rolloutThreadId(name);
+                if (threadId === null) return;
+                if (fs.existsSync(path.join(dir, name))) this.archived.add(threadId);
+                else this.archived.delete(threadId);
+                this.listener.archiveMoved(threadId);
             });
             watcher.on("error", () => {
                 watcher.close();
@@ -132,6 +148,29 @@ export class CodexHomeWatcher {
             this.archiveWatcher = watcher;
         } catch (error) {
             logger.log("Cannot watch archived_sessions", {dir, error: String(error)});
+            return;
+        }
+        this.reconcileArchive(dir);
+    }
+
+    /**
+     * Lists `archived_sessions` once its watch runs and reports each thread whose rollout came or went without an
+     * event: before the watch, as when another process creates the directory and moves a rollout into it at once.
+     */
+    private reconcileArchive(dir: string): void {
+        const listed = listArchivedThreadIds(dir);
+        const moved = [...listed].filter(threadId => !this.archived.has(threadId));
+        for (const threadId of this.archived) {
+            if (!listed.has(threadId)) moved.push(threadId);
+        }
+        this.archived = listed;
+        if (moved.length > MAX_ARCHIVE_RECONCILED) {
+            // The next session list shows the others.
+            logger.log("archived_sessions changed unwatched; reporting the first threads only", {moved: moved.length});
+        }
+        for (const threadId of moved.slice(0, MAX_ARCHIVE_RECONCILED)) {
+            if (this.stopped) return;
+            this.listener.archiveMoved(threadId);
         }
     }
 
@@ -242,6 +281,26 @@ function fileIdentityOf(file: string): string | null {
     } catch {
         return null;
     }
+}
+
+function rolloutThreadId(name: string): string | null {
+    return ROLLOUT_THREAD_ID_PATTERN.exec(name)?.[1]?.toLowerCase() ?? null;
+}
+
+/** The thread ids of the rollouts in a directory, by their file names; none when it is missing. */
+function listArchivedThreadIds(dir: string): Set<string> {
+    const threadIds = new Set<string>();
+    let names: string[];
+    try {
+        names = fs.readdirSync(dir);
+    } catch {
+        return threadIds;
+    }
+    for (const name of names) {
+        const threadId = rolloutThreadId(name);
+        if (threadId !== null) threadIds.add(threadId);
+    }
+    return threadIds;
 }
 
 function listWalFiles(home: string): string[] {

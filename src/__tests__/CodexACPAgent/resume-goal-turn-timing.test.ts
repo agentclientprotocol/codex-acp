@@ -158,6 +158,7 @@ describe('baseline tracker installed before thread/resume, so an auto-started go
         closeClient = () => client.connection.close();
         const replayedTurn: Thread["turns"][number] = {
             id: "replayed-turn",
+            rootTurnId: null,
             itemsView: "full",
             status: "completed",
             error: null,

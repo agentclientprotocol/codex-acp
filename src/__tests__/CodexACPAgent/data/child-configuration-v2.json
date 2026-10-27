@@ -1,0 +1,92 @@
+[
+  {
+    "configOptions": [
+      {
+        "currentValue": "child-alpha",
+        "options": [
+          {
+            "value": "child-alpha",
+            "name": "child-alpha",
+            "description": null
+          }
+        ],
+        "type": "select",
+        "configId": "model",
+        "name": "Model",
+        "description": "Model Codex uses for the subagent",
+        "category": "model"
+      },
+      {
+        "currentValue": "high",
+        "options": [
+          {
+            "value": "high",
+            "name": "High",
+            "description": "Current reasoning effort"
+          }
+        ],
+        "type": "select",
+        "configId": "reasoning_effort",
+        "name": "Reasoning effort",
+        "description": "How much reasoning effort the model should use",
+        "category": "thought_level"
+      }
+    ],
+    "sessionUpdate": "config_option_update"
+  },
+  {
+    "configOptions": [
+      {
+        "currentValue": "child-beta",
+        "options": [
+          {
+            "value": "child-beta",
+            "name": "child-beta",
+            "description": null
+          }
+        ],
+        "type": "select",
+        "configId": "model",
+        "name": "Model",
+        "description": "Model Codex uses for the subagent",
+        "category": "model"
+      },
+      {
+        "currentValue": "low",
+        "options": [
+          {
+            "value": "low",
+            "name": "Low",
+            "description": "Current reasoning effort"
+          }
+        ],
+        "type": "select",
+        "configId": "reasoning_effort",
+        "name": "Reasoning effort",
+        "description": "How much reasoning effort the model should use",
+        "category": "thought_level"
+      }
+    ],
+    "sessionUpdate": "config_option_update"
+  },
+  {
+    "configOptions": [
+      {
+        "currentValue": "child-beta",
+        "options": [
+          {
+            "value": "child-beta",
+            "name": "child-beta",
+            "description": null
+          }
+        ],
+        "type": "select",
+        "configId": "model",
+        "name": "Model",
+        "description": "Model Codex uses for the subagent",
+        "category": "model"
+      }
+    ],
+    "sessionUpdate": "config_option_update"
+  }
+]

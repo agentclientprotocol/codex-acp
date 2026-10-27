@@ -456,6 +456,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
             false,
             new ACPSessionConnection({notify: vi.fn(), request: vi.fn()} as AcpClientConnection, sessionId),
             () => {},
+            () => ({currentModel: null, availableModels: []}),
         ),
         asyncTasks: new CodexBackgroundTerminalTasks(
             false,
@@ -523,6 +524,7 @@ export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string)
         turn: {
             id: "turn-id",
             items: [],
+            rootTurnId: null,
             itemsView: "notLoaded",
             status: "inProgress",
             error: null,
@@ -536,6 +538,7 @@ export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string)
         turn: {
             id: "turn-id",
             items: [],
+            rootTurnId: null,
             itemsView: "notLoaded",
             status: "completed",
             error: null,

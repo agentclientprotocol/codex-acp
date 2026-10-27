@@ -16,6 +16,7 @@ function server(runtimeStatus: McpServerStatus["runtimeStatus"], name = serverNa
         httpOrigin: null,
         serverInfo: null,
         serverCapabilities: null,
+        toolListMeta: null,
         tools: {},
         toolsError: null,
         resources: [],

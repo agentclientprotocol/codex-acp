@@ -225,7 +225,7 @@ function turnCompleted(status: "completed" | "failed" | "interrupted"): Extract<
 
 function turn(status: Turn["status"]): Turn {
     return {
-        id: turnId, items: [], itemsView: "full", status,
+        id: turnId, rootTurnId: null, items: [], itemsView: "full", status,
         error: status === "failed" ? {
             message: "Compaction service failed.", codexErrorInfo: "serverOverloaded", additionalDetails: null, misalignment: null,
         } : null,

@@ -1,0 +1,19 @@
+{
+  "fast": {
+    "status": 200,
+    "body": "Fast reply"
+  },
+  "slow": {
+    "status": 200,
+    "body": "Slow reply"
+  },
+  "requests": [
+    {
+      "kind": "slow"
+    },
+    {
+      "kind": "fast"
+    }
+  ],
+  "unexpectedRequests": 0
+}

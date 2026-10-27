@@ -1,0 +1,35 @@
+{
+  "replies": [
+    {
+      "status": 200,
+      "body": "First queued reply"
+    },
+    {
+      "status": 429,
+      "body": "{\"error\":\"Scripted rate limit\"}"
+    },
+    {
+      "status": 200,
+      "body": "Second queued reply"
+    },
+    {
+      "status": 400,
+      "body": "mock: unexpected request #4"
+    }
+  ],
+  "requests": [
+    {
+      "kind": "first"
+    },
+    {
+      "kind": "limited"
+    },
+    {
+      "kind": "second"
+    },
+    {
+      "kind": "unscripted"
+    }
+  ],
+  "unexpectedRequests": 1
+}

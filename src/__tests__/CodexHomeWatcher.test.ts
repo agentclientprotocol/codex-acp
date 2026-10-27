@@ -74,6 +74,22 @@ describe("CodexHomeWatcher", () => {
         expect(archiveMoved.mock.calls.every(([id]) => id === threadId)).toBe(true);
     }, 10_000);
 
+    it("reports the thread of a compressed rollout that moves into archived_sessions", async () => {
+        const archive = path.join(home, ARCHIVED_SESSIONS_DIR);
+        fs.mkdirSync(archive);
+        const {archiveMoved} = createWatcher(home);
+        const threadId = "01a0637c-5b99-7242-9064-04545d605fe0";
+        const rollout = path.join(archive, `rollout-2026-10-08T13-21-48-${threadId}.jsonl.zst`);
+
+        let present = false;
+        await vi.waitFor(() => {
+            if (present) fs.rmSync(rollout);
+            else fs.writeFileSync(rollout, "zst");
+            present = !present;
+            expect(archiveMoved).toHaveBeenCalledWith(threadId);
+        }, {timeout: 5_000, interval: 100});
+    }, 10_000);
+
     it("reports an append to the session name log, which a rename writes", async () => {
         const log = path.join(home, "session_index.jsonl");
         fs.writeFileSync(log, "");
@@ -97,6 +113,40 @@ describe("CodexHomeWatcher", () => {
             expect(archiveMoved).toHaveBeenCalledWith(threadId);
         }, {timeout: 5_000, interval: 100});
     }, 10_000);
+
+    it("reports a rollout that another process moved into archived_sessions before the watch of it started", async () => {
+        const {archiveMoved} = createWatcher(home);
+        const threadId = "01a0637c-5b99-7242-9064-04545d605fdd";
+        // Codex creates the directory and moves the first rollout in one go: the event of the directory comes later.
+        fs.mkdirSync(path.join(home, ARCHIVED_SESSIONS_DIR));
+        fs.writeFileSync(path.join(home, ARCHIVED_SESSIONS_DIR, `rollout-2026-10-08T13-21-48-${threadId}.jsonl`), "{}\n");
+
+        await vi.waitFor(() => expect(archiveMoved).toHaveBeenCalledWith(threadId), {timeout: 5_000, interval: 50});
+        expect(archiveMoved.mock.calls.every(([id]) => id === threadId)).toBe(true);
+    }, 10_000);
+
+    it("reports a rollout moved into archived_sessions when the 30 s check starts the watch", async () => {
+        // The watch of CODEX_HOME reports nothing: only the check finds the directory.
+        const realWatch = fs.watch.bind(fs) as unknown as (target: fs.PathLike, options: fs.WatchOptions, listener: () => void) => fs.FSWatcher;
+        vi.spyOn(fs, "watch").mockImplementation(((target: fs.PathLike, options: fs.WatchOptions, listener: () => void) =>
+            realWatch(target, options, target === home ? () => {} : listener)) as unknown as typeof fs.watch);
+        const {archiveMoved} = createWatcher(home, 50);
+        const threadId = "01a0637c-5b99-7242-9064-04545d605fde";
+        fs.mkdirSync(path.join(home, ARCHIVED_SESSIONS_DIR));
+        fs.writeFileSync(path.join(home, ARCHIVED_SESSIONS_DIR, `rollout-2026-10-08T13-21-48-${threadId}.jsonl`), "{}\n");
+
+        await vi.waitFor(() => expect(archiveMoved).toHaveBeenCalledWith(threadId), {timeout: 5_000, interval: 50});
+        expect(archiveMoved).toHaveBeenCalledTimes(1);
+    }, 10_000);
+
+    it("reports no rollout that was in archived_sessions when the watching started", () => {
+        fs.mkdirSync(path.join(home, ARCHIVED_SESSIONS_DIR));
+        fs.writeFileSync(path.join(home, ARCHIVED_SESSIONS_DIR, "rollout-2026-10-08T13-21-48-01a0637c-5b99-7242-9064-04545d605fdf.jsonl"), "{}\n");
+
+        const {archiveMoved} = createWatcher(home);
+
+        expect(archiveMoved).not.toHaveBeenCalled();
+    });
 
     it("closes every watch and the fallback check when stopped", () => {
         fs.writeFileSync(path.join(home, "state_5.sqlite-wal"), "a");

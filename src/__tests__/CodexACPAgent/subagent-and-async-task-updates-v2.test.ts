@@ -29,7 +29,7 @@ describe('subagent and async task updates on ACP v2', () => {
 
     it('renders the subagent lifecycle as `_subagent_update` when native subagents are enabled', async () => {
         const {session, updates} = v2Session("root");
-        const router = new CodexSubagentEventRouter("root", true, session, () => {});
+        const router = new CodexSubagentEventRouter("root", true, session, () => {}, () => ({currentModel: null, availableModels: []}));
 
         await router.handle({
             method: "item/started",
@@ -39,6 +39,8 @@ describe('subagent and async task updates on ACP v2', () => {
                 startedAtMs: 0,
                 item: {
                     type: "subAgentActivity",
+                    model: null,
+                    reasoningEffort: null,
                     id: "activity-started",
                     kind: "started",
                     agentThreadId: "child-1",
@@ -54,6 +56,8 @@ describe('subagent and async task updates on ACP v2', () => {
                 completedAtMs: 0,
                 item: {
                     type: "subAgentActivity",
+                    model: null,
+                    reasoningEffort: null,
                     id: "activity-interrupted",
                     kind: "interrupted",
                     agentThreadId: "child-1",
@@ -80,7 +84,7 @@ describe('subagent and async task updates on ACP v2', () => {
 
     it('renders a follow-up turn of a finished subagent as a new `_subagent_update` generation', async () => {
         const {session, updates} = v2Session("root");
-        const router = new CodexSubagentEventRouter("root", true, session, () => {});
+        const router = new CodexSubagentEventRouter("root", true, session, () => {}, () => ({currentModel: null, availableModels: []}));
         const childTurn = (id: string, status: "completed" | "inProgress") => router.handle({
             method: status === "completed" ? "turn/completed" : "turn/started",
             params: {
@@ -88,6 +92,7 @@ describe('subagent and async task updates on ACP v2', () => {
                 turn: {
                     id,
                     items: [],
+                    rootTurnId: null,
                     itemsView: "notLoaded",
                     status,
                     error: null,
@@ -106,6 +111,8 @@ describe('subagent and async task updates on ACP v2', () => {
                 startedAtMs: 0,
                 item: {
                     type: "subAgentActivity",
+                    model: null,
+                    reasoningEffort: null,
                     id: "activity-started",
                     kind: "started",
                     agentThreadId: "child-1",
@@ -139,7 +146,7 @@ describe('subagent and async task updates on ACP v2', () => {
 
     it('never emits `_subagent_update` (or `subagent_spawned`) when native subagents are disabled', async () => {
         const {session, updates} = v2Session("root");
-        const router = new CodexSubagentEventRouter("root", false, session, () => {});
+        const router = new CodexSubagentEventRouter("root", false, session, () => {}, () => ({currentModel: null, availableModels: []}));
 
         const handled = await router.handle({
             method: "item/started",
@@ -149,6 +156,8 @@ describe('subagent and async task updates on ACP v2', () => {
                 startedAtMs: 0,
                 item: {
                     type: "subAgentActivity",
+                    model: null,
+                    reasoningEffort: null,
                     id: "activity-started",
                     kind: "started",
                     agentThreadId: "child-1",

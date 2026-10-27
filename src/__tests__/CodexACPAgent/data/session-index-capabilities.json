@@ -11,6 +11,7 @@
     "planContentDelta",
     "codexHooks",
     "sessionIndex",
+    "sessionBatchGet",
     "sessionArchive",
     "sessionRename",
     "sessionListSubscribe",

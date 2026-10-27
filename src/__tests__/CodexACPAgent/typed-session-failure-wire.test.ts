@@ -701,6 +701,7 @@ function createTurn(status: "inProgress" | "completed") {
     return {
         id: "turn-id",
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded" as const,
         status,
         error: null,

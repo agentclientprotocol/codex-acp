@@ -376,6 +376,7 @@ function turn(
     return {
         id,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded" as const,
         status,
         error: turnError,

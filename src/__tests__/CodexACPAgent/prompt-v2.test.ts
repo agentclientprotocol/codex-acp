@@ -184,6 +184,31 @@ describe('session/prompt over ACP v2', () => {
         await expect(dump(results)).toMatchFileSnapshot('data/prompt-v2-turn-error-after-insertion.json');
     });
 
+    it('explains encrypted content from another provider instead of the raw gateway error', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+
+        const start = client.transcript.length;
+        const messageId = await insertPrompt(client, 0);
+        client.emit(turnError("badRequest", JSON.stringify({
+            error: {
+                message: "Provider returned error",
+                code: 400,
+                metadata: {
+                    raw: JSON.stringify({error: {message: "The encrypted content for item rs_1 could not be verified.", code: "invalid_encrypted_content"}}),
+                    provider_name: "Azure",
+                    provider_error_code: "invalid_encrypted_content",
+                },
+            },
+        })));
+        client.emit(turnFinished("failed"));
+        await client.promptRunFinished();
+        await settle();
+
+        await expect(dump(stableTranscript(client.transcript.slice(start), messageId)))
+            .toMatchFileSnapshot('data/prompt-v2-invalid-encrypted-content.json');
+    });
+
     it('puts a typed terminal failure on the idle _meta, not in a session update', async () => {
         const client = await connectSession(2, {clientCapabilities: typedFailureCapabilities});
         closeClient = () => client.connection.close();

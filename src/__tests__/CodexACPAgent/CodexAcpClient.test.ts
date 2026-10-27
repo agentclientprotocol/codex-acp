@@ -1471,6 +1471,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         return {
             id,
             items: [],
+            rootTurnId: null,
             itemsView: "notLoaded" as const,
             status,
             error: null,
@@ -1858,6 +1859,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: {
                 id: "turn-id",
                 items: [],
+                rootTurnId: null,
                 itemsView: "notLoaded",
                 status: "completed",
                 error: null,
@@ -1988,6 +1990,42 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             .at(-1);
         const airSkill = airUpdate?.args[0].update.availableCommands.find((command: acp.AvailableCommand) => command.name === "$build");
         expect(airSkill?._meta).toEqual({jetbrains: {air: {version: 1, skillPath: "/workspace/.agents/skills/build/SKILL.md"}}});
+    });
+
+    it('does not offer the Visualize skill, whose output ACP clients cannot render', async () => {
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const skill = (name: string, pluginId: string | null) => ({
+            name,
+            description: name,
+            path: `/workspace/.agents/skills/${name}/SKILL.md`,
+            scope: "user" as const,
+            enabled: true,
+            pluginId,
+        });
+        vi.spyOn(mockFixture.getCodexAppServerClient(), "listSkills").mockResolvedValue({
+            data: [{
+                cwd: "/workspace",
+                skills: [skill("visualize:visualize", "visualize@openai-bundled"), skill("build", null)],
+                errors: [],
+            }],
+        });
+        const sessionState = createTestSessionState({sessionId: "session-id", cwd: "/workspace"});
+        vi.spyOn(codexAcpAgent, "getSessionState").mockReturnValue(sessionState);
+
+        // @ts-expect-error - exercising private helper
+        await codexAcpAgent.availableCommands.publish(sessionState);
+        await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "/skills"}]});
+
+        const events = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0].update);
+        const commands = events.find(update => update.sessionUpdate === "available_commands_update")
+            ?.availableCommands.map((command: acp.AvailableCommand) => command.name);
+        expect(commands).toContain("$build");
+        expect(commands).not.toContain("$visualize:visualize");
+        const skillsList = events.find(update => update.sessionUpdate === "agent_message_chunk")?.content.text;
+        expect(skillsList).toBe("Available skills:\n- build: build");
     });
 
     it('publishes the commands again after a turn only when the skills changed', async () => {
@@ -3991,6 +4029,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     serverInfo: null,
                     serverCapabilities: null,
                     toolsError: null,
+                    toolListMeta: null,
                     tools: {listFiles: {name: "listFiles", inputSchema: {type: "object"}}},
                     resources: [{name: "workspace", uri: "file:///workspace"}],
                     resourceTemplates: [],
@@ -4004,6 +4043,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     serverInfo: null,
                     serverCapabilities: null,
                     toolsError: null,
+                    toolListMeta: null,
                     tools: {},
                     resources: [],
                     resourceTemplates: [],
@@ -4125,6 +4165,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: {
                 id: "turn-id",
                 items: [],
+                rootTurnId: null,
                 itemsView: "notLoaded",
                 status: "inProgress",
                 error: null,
@@ -4138,6 +4179,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: {
                 id: "turn-id",
                 items: [],
+                rootTurnId: null,
                 itemsView: "notLoaded",
                 status: "completed",
                 error: null,
@@ -4159,6 +4201,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: {
                 id: turnId,
                 items: [],
+                rootTurnId: null,
                 itemsView: "notLoaded",
                 status: "inProgress",
                 error: null,
@@ -4175,6 +4218,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             turn: {
                 id: "review-turn-id",
                 items: [],
+                rootTurnId: null,
                 itemsView: "notLoaded",
                 status,
                 error: null,
