@@ -11,12 +11,17 @@ describe("renderFileCitations", () => {
             ':codex-file-citation{path="C:\\repo\\report.xlsx"}',
             ':codex-file-citation{path="docs/my notes (v2).md:12"}',
             ':codex-file-citation{path="a[1].md"}',
+            ':codex-file-citation{path="C:\\repo\\_build\\a.md"}',
+            ':codex-file-citation{path="C:\\My Docs\\(1)\\a.md"}',
         ].join("\n"), cwd)).toBe([
             "[src/app.ts](/repo/src/app.ts)",
             "[/abs/a.txt](/abs/a.txt)",
-            "[C:\\\\repo\\\\report.xlsx](C:\\repo\\report.xlsx)",
+            "[C:\\repo\\report.xlsx](C:\\repo\\report.xlsx)",
             "[docs/my notes (v2).md:12](</repo/docs/my notes (v2).md:12>)",
             "[a\\[1\\].md](/repo/a[1].md)",
+            // A backslash before punctuation is escaped, so it is not read as an escape.
+            "[C:\\repo\\\\_build\\a.md](C:\\repo\\\\_build\\a.md)",
+            "[C:\\My Docs\\\\(1)\\a.md](<C:\\My Docs\\\\(1)\\a.md>)",
         ].join("\n"));
     });
 
@@ -33,6 +38,17 @@ describe("renderFileCitations", () => {
             "Ratio 3:4 and :codex-file without a body",
         ]) {
             expect(renderFileCitations(text, cwd)).toBe(text);
+        }
+    });
+
+    it("matches attributes in linear time", () => {
+        for (const text of [
+            `:codex-file-citation{path=${"!a=".repeat(5000)}"}`,
+            `:codex-file-citation{path=a${" ".repeat(5000)}!}`,
+        ]) {
+            const started = performance.now();
+            expect(renderFileCitations(text, cwd)).toBe(text);
+            expect(performance.now() - started).toBeLessThan(1000);
         }
     });
 

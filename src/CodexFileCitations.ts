@@ -5,8 +5,16 @@
 import path from "node:path";
 
 const PREFIX = ":codex-file-citation{";
-const DIRECTIVE = /^:codex-file-citation\{(?:\s*[A-Za-z][\w-]*=(?:"[^"\n]*"|[^\s"}]+))*\s*\}/;
-const ATTRIBUTE = /([A-Za-z][\w-]*)=(?:"([^"\n]*)"|([^\s"}]+))/g;
+const ATTRIBUTE_SOURCE = String.raw`([A-Za-z][\w-]*)=(?:"([^"\n]*)"|([^\s"}]+))`;
+// Attributes are separated by whitespace, so an unquoted value can only end in one place.
+// Without it the pattern backtracks exponentially on input like `a=!a=!a=`.
+const DIRECTIVE = new RegExp(String.raw`^:codex-file-citation\{\s*(?:${ATTRIBUTE_SOURCE}(?:\s+${ATTRIBUTE_SOURCE})*)?\s*\}`);
+const ATTRIBUTE = new RegExp(ATTRIBUTE_SOURCE, "g");
+// CommonMark reads a backslash before ASCII punctuation as an escape, so such a backslash is escaped too.
+const ESCAPING_BACKSLASH = String.raw`\\(?=[!-/:-@[-\`{-~])`;
+const LABEL_SPECIAL = new RegExp(String.raw`[[\]]|${ESCAPING_BACKSLASH}`, "g");
+const DESTINATION_SPECIAL = new RegExp(ESCAPING_BACKSLASH, "g");
+const ANGLE_DESTINATION_SPECIAL = new RegExp(String.raw`[<>]|${ESCAPING_BACKSLASH}`, "g");
 // An unfinished directive longer than this is passed through as plain text.
 const MAX_PENDING_LENGTH = 4096;
 
@@ -114,9 +122,9 @@ function markdownFileLink(citedPath: string, cwd: string): string {
     const destination = path.isAbsolute(citedPath) || /^(?:[A-Za-z]:[\\/]|[A-Za-z][\w+.-]*:\/\/)/.test(citedPath)
         ? citedPath
         : path.join(cwd, citedPath);
-    const label = citedPath.replace(/[\\[\]]/g, "\\$&");
+    const label = citedPath.replace(LABEL_SPECIAL, "\\$&");
     const target = /[\s()<>]/.test(destination)
-        ? `<${destination.replace(/[<>]/g, "\\$&")}>`
-        : destination;
+        ? `<${destination.replace(ANGLE_DESTINATION_SPECIAL, "\\$&")}>`
+        : destination.replace(DESTINATION_SPECIAL, "\\$&");
     return `[${label}](${target})`;
 }
