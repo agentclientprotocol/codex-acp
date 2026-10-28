@@ -195,7 +195,15 @@ function internalErrorText(err: unknown): string | null {
  */
 export function isAccountReadUnavailableError(err: unknown): boolean {
     const text = internalErrorText(err);
-    return text !== null && ACCOUNT_READ_UNAVAILABLE_MESSAGES.has(text);
+    return text !== null && isWorkspaceRoutingUnavailableMessage(text);
+}
+
+/**
+ * True for the whole text of a routing discovery that got no answer from the ChatGPT backend. A turn of a ChatGPT
+ * login runs the same discovery before each model request, and fails with this text as its error.
+ */
+export function isWorkspaceRoutingUnavailableMessage(text: string): boolean {
+    return ACCOUNT_READ_UNAVAILABLE_MESSAGES.has(text);
 }
 
 /**

@@ -50,6 +50,21 @@ describe("service error messages", () => {
         });
     });
 
+    describe("an unreachable ChatGPT backend", () => {
+        it.each(["failed", "timed out"])("explains workspace routing discovery that %s", async outcome => {
+            await expect(readableServiceErrorMessage(`workspace routing discovery ${outcome}`))
+                .toMatchFileSnapshot(`data/service-error-workspace-routing-${outcome.replace(" ", "-")}.txt`);
+        });
+
+        it.each([
+            "workspace routing discovery unauthorized (401)",
+            "selected workspace missing from routing discovery",
+            "workspace routing discovery failed: details",
+        ])("keeps other routing errors verbatim: %s", text => {
+            expect(readableServiceErrorMessage(text)).toBe(text);
+        });
+    });
+
     it.each([
         "Plain error text", "", "{not json}", "null", "[]", '"json string"',
         JSON.stringify({error: {message}}),

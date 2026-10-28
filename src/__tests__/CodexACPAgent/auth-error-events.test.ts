@@ -170,6 +170,20 @@ describe("CodexEventHandler - auth error events", () => {
     });
 
     it.each([
+        {name: "legacy error text", capabilities: undefined},
+        {name: "typed failure", capabilities: typedFailureCapabilities},
+    ])("explains an unreachable ChatGPT backend as a connection failure in the $name", async ({capabilities}) => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "workspace-routing-session", account: {type: "chatgpt", email: "user@example.com", planType: "plus"},
+        }), {
+            message: "workspace routing discovery failed", codexErrorInfo: "other", additionalDetails: null, misalignment: null,
+        }, false, capabilities);
+        await expect(JSON.stringify({result, updates}, null, 2)).toMatchFileSnapshot(
+            `data/workspace-routing-failed-v1-${capabilities ? "typed-failure" : "legacy"}.json`,
+        );
+    });
+
+    it.each([
         "Plain error", "", "{invalid JSON}",
         JSON.stringify({type: "error", status: 400, error: {type: "custom_error", message: "custom text"}}),
         JSON.stringify({type: "error", status: 400, error: {type: "invalid_request_error", message: ""}}),

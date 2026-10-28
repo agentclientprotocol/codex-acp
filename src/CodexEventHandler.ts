@@ -47,6 +47,7 @@ import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
 import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
 import {WebSearchReporter} from "./tool-calls/reporters/WebSearchReporter";
 import {CodexPlanStream} from "./CodexPlanStream";
+import {isWorkspaceRoutingUnavailableMessage} from "./CodexThreadErrors";
 import {
     createMessagePhaseMeta,
     createAgentTextMessageChunk,
@@ -330,7 +331,7 @@ export class CodexEventHandler {
             return;
         }
         const failure = this.recordSessionFailure(
-            this.sessionFailureKind(notification.params.error.codexErrorInfo),
+            this.sessionFailureKind(notification.params.error),
             notification.params.turnId,
             "error",
             notification.params.error.message,
@@ -1064,7 +1065,7 @@ export class CodexEventHandler {
                 const failure = params.willRetry
                     ? this.recordRetryWarning(params)
                     : this.recordSessionFailure(
-                        this.sessionFailureKind(params.error.codexErrorInfo),
+                        this.sessionFailureKind(params.error),
                         params.turnId,
                         "error",
                         params.error.message,
@@ -1105,7 +1106,7 @@ export class CodexEventHandler {
     }
 
     private recordTypedSessionFailure(params: ErrorNotification): void {
-        const kind = this.sessionFailureKind(params.error.codexErrorInfo);
+        const kind = this.sessionFailureKind(params.error);
         this.recordSessionFailure(kind, params.turnId, "error", params.error.message);
     }
 
@@ -1166,7 +1167,7 @@ export class CodexEventHandler {
     }
 
     private recordRetryWarning(params: ErrorNotification, attributeToTurn = true): SessionFailure {
-        const kind = this.sessionFailureKind(params.error.codexErrorInfo);
+        const kind = this.sessionFailureKind(params.error);
         return this.recordSessionFailure(
             kind,
             params.turnId,
@@ -1227,8 +1228,9 @@ export class CodexEventHandler {
         };
     }
 
-    private sessionFailureKind(error: CodexErrorInfo | null): CodexFailureKind {
+    private sessionFailureKind({message, codexErrorInfo: error}: ErrorNotification["error"]): CodexFailureKind {
         if (this.isAuthenticationRequiredError(error)) return "auth_required";
+        if (isWorkspaceRoutingUnavailableMessage(message)) return "transport_lost";
         if (this.getHttpStatusCode(error) === 429) return "rate_limited";
         if (typeof error === "string") {
             return Object.hasOwn(STRING_CODEX_ERROR_CATEGORIES, error)

@@ -87,6 +87,20 @@ describe("standard ACP v2 terminal failures", () => {
         expect(lastIdle(client)).toEqual({sessionUpdate: "state_update", state: "idle"});
     });
 
+    it.each([false, true])("explains an unreachable ChatGPT backend as a connection failure (%s)", async air => {
+        client = await connectSession(2, air ? {
+            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}},
+        } : {});
+        await insert(client);
+        client.emit(errorNotification("workspace routing discovery failed", "other"));
+        client.emit(turnFinished("failed"));
+        await client.promptRunFinished();
+        await settle();
+
+        await expect(dump(lastIdle(client)))
+            .toMatchFileSnapshot(`data/structured-failure-v2-workspace-routing-${air ? "air" : "plain"}.json`);
+    });
+
     it.each([false, true])("reports auth failure before insertion through both the request and idle/error (%s)", async air => {
         client = await connectSession(2, air ? {
             clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}},

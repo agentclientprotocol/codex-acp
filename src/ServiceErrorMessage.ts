@@ -1,3 +1,5 @@
+import {isWorkspaceRoutingUnavailableMessage} from "./CodexThreadErrors";
+
 const SERVICE_ERROR_TYPES = new Set([
     "invalid_request_error",
     "server_error",
@@ -18,9 +20,20 @@ const INVALID_ENCRYPTED_CONTENT_MESSAGE = "The current provider can't read this 
     + "Switch back to the previous provider or start a new thread.";
 
 /**
+ * A ChatGPT login looks up its workspace on chatgpt.com before each model request.
+ * The app-server error has no cause.
+ */
+function workspaceRoutingUnavailableMessage(text: string): string {
+    return "Codex can't reach chatgpt.com to look up your ChatGPT workspace. "
+        + "Check your network connection and any proxy, VPN, or firewall that blocks chatgpt.com, then try again. "
+        + `(${text})`;
+}
+
+/**
  * Reads the message of a known service error envelope, or adds a human-readable explanation.
  */
 export function readableServiceErrorMessage(text: string): string {
+    if (isWorkspaceRoutingUnavailableMessage(text)) return workspaceRoutingUnavailableMessage(text);
     const value = parseJson(text);
     if (value === undefined) return text;
     if (isInvalidEncryptedContentError(value)) return INVALID_ENCRYPTED_CONTENT_MESSAGE;
