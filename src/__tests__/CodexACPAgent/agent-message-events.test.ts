@@ -86,4 +86,41 @@ describe("CodexEventHandler - agent message events", () => {
             "data/agent-message-phases.json"
         );
     });
+
+    it("renders streamed Codex file citations as Markdown file links", async () => {
+        const delta = (text: string): ServerNotification => ({
+            method: "item/agentMessage/delta",
+            params: {threadId: sessionId, turnId: "turn-1", itemId: "final-message", delta: text},
+        });
+        const notifications: ServerNotification[] = [
+            delta("The minimum length is 12.\n\n:codex-file"),
+            delta("-citation{path=\"docs/policy.txt\" pur"),
+            delta("pose=\"source\"} and "),
+            delta(":codex-file-citation{path=\"/abs/notes.md:4\"}"),
+            delta(". Literal `:codex-file-citation{path=\"x\"}` stays; an unfinished one is sent at the end: :codex-fi"),
+            {
+                method: "item/completed",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    completedAtMs: 10,
+                    item: {
+                        type: "agentMessage",
+                        id: "final-message",
+                        text: "",
+                        phase: "final_answer",
+                        memoryCitation: null,
+                        delivery: null,
+                        questions: null,
+                    },
+                },
+            },
+        ];
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            "data/agent-message-file-citations.json"
+        );
+    });
 });

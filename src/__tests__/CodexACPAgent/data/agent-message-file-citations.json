@@ -1,0 +1,88 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "final-message",
+        "content": {
+          "type": "text",
+          "text": "The minimum length is 12.\n\n"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "final-message",
+        "content": {
+          "type": "text",
+          "text": "[docs/policy.txt](/test/cwd/docs/policy.txt) and "
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "final-message",
+        "content": {
+          "type": "text",
+          "text": "[/abs/notes.md:4](/abs/notes.md:4)"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "final-message",
+        "content": {
+          "type": "text",
+          "text": ". Literal `:codex-file-citation{path=\"x\"}` stays; an unfinished one is sent at the end: "
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "final-message",
+        "content": {
+          "type": "text",
+          "text": ":codex-fi"
+        },
+        "_meta": {
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "final_answer"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

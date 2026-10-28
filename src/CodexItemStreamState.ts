@@ -1,3 +1,4 @@
+import {FileCitationStream} from "./CodexFileCitations";
 import {CommandReporter} from "./tool-calls/reporters/CommandReporter";
 import {FuzzySearchReporter} from "./tool-calls/reporters/FuzzySearchReporter";
 import {GuardianReporter} from "./tool-calls/reporters/GuardianReporter";
@@ -11,4 +12,5 @@ export class CodexItemStreamState {
     readonly emittedImageViewItems = new Set<string>();
     readonly seenReasoningDeltaItemIds = new Set<string>();
     readonly agentMessagePhases = new Map<string, string | null>();
+    readonly agentMessageCitations = new Map<string, FileCitationStream>();
 }

@@ -6,6 +6,7 @@ import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {isRecord} from "./permissions/json";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
+import {renderFileCitations} from "./CodexFileCitations";
 import {type CodexAuthRequest, getCodexAuthMethods, getCodexAuthMethodsV2, isCodexAuthRequest} from "./CodexAuthMethod";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 import {createMcpServerSignIn, type McpServerSignIn} from "./mcp/McpServerSignIn";
@@ -3936,7 +3937,7 @@ export class CodexAcpServer {
                 return [{
                     sessionUpdate: "agent_message_chunk",
                     messageId: item.id,
-                    content: { type: "text", text: item.text },
+                    content: { type: "text", text: renderFileCitations(item.text, sessionState.cwd) },
                     ...(meta ? { _meta: meta } : {}),
                 }];
             }

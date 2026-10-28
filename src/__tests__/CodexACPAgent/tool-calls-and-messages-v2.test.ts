@@ -104,6 +104,32 @@ describe('tool calls and messages over ACP v2', () => {
             .toMatchFileSnapshot('data/tool-calls-and-messages-v2-message-ids.json');
     });
 
+    it('renders Codex file citations split across deltas as Markdown file links', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        await startTurn(client);
+
+        const emitDelta = (delta: string) => client.emit({
+            method: "item/agentMessage/delta",
+            params: {threadId: sessionId, turnId, itemId: "item-agent", delta},
+        });
+        emitDelta("See :codex-file-cita");
+        emitDelta("tion{path=\"src/a.ts\" purpose=\"source\"}. Unfinished: :codex-fi");
+        client.emit(itemCompleted({
+            type: "agentMessage",
+            id: "item-agent",
+            text: "",
+            phase: null,
+            memoryCitation: null,
+            delivery: null,
+            questions: null,
+        }));
+        await finishTurn(client);
+
+        await expect(dump(updatesTagged(client, "agent_message_chunk")))
+            .toMatchFileSnapshot('data/tool-calls-and-messages-v2-file-citations.json');
+    });
+
     it('sends a tool call create as a tool_call_update upsert and passes later updates through', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();

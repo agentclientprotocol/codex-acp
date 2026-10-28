@@ -40,6 +40,7 @@ import {commandUsesTerminal} from "./tool-calls/reporters/CommandReporter";
 import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
 import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
 import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
+import {FileCitationStream} from "./CodexFileCitations";
 import {CodexItemStreamState} from "./CodexItemStreamState";
 import {PLAIN_TOOL_CALL_ITEM_TYPES} from "./CodexSessionToolCalls";
 import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationReporter";
@@ -786,10 +787,29 @@ export class CodexEventHandler {
         };
     }
 
-    private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent> {
-        const phase = this.streamsFor(event.threadId).agentMessagePhases.get(event.itemId) ?? null;
+    private async createTextEvent(event: AgentMessageDeltaNotification): Promise<UpdateSessionEvent | null> {
+        const streams = this.streamsFor(event.threadId);
+        let citations = streams.agentMessageCitations.get(event.itemId);
+        if (citations === undefined) {
+            citations = new FileCitationStream(this.sessionState.cwd);
+            streams.agentMessageCitations.set(event.itemId, citations);
+        }
+        return this.createAgentMessageText(citations.push(event.delta), event.itemId, event.threadId);
+    }
+
+    /** Sends the text a file citation held back, once the message is complete. */
+    private flushAgentMessageText(itemId: string, threadId: string): UpdateSessionEvent | null {
+        const streams = this.streamsFor(threadId);
+        const rest = streams.agentMessageCitations.get(itemId)?.flush() ?? "";
+        streams.agentMessageCitations.delete(itemId);
+        return this.createAgentMessageText(rest, itemId, threadId);
+    }
+
+    private createAgentMessageText(text: string, itemId: string, threadId: string): UpdateSessionEvent | null {
+        if (text.length === 0) return null;
+        const phase = this.streamsFor(threadId).agentMessagePhases.get(itemId) ?? null;
         const meta = createMessagePhaseMeta(phase, this.sessionState.clientCapabilities.airClient);
-        return createAgentTextMessageChunk(event.delta, event.itemId, meta);
+        return createAgentTextMessageChunk(text, itemId, meta);
     }
 
     private async createConfigWarningEvent(event: ConfigWarningNotification): Promise<UpdateSessionEvent> {
@@ -949,7 +969,7 @@ export class CodexEventHandler {
                 return this.renderer.render(this.subagents.legacyCollaborationCompleted(event.item));
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item, event.threadId);
-                return null;
+                return this.flushAgentMessageText(event.item.id, event.threadId);
             case "plan":
                 return await this.createCompletedPlanEvent(event.item);
             case "exitedReviewMode":
