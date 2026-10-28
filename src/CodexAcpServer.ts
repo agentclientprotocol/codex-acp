@@ -2114,12 +2114,14 @@ export class CodexAcpServer {
     async authenticate(
         _params: acp.AuthenticateRequest,
         requestId?: acp.JsonRpcId,
+        signal?: AbortSignal,
     ): Promise<acp.AuthenticateResponse> {
         logger.log("Authenticate request received");
         const appServer = this.ensureAppServer();
         if (appServer) await appServer;
-        const elicitationRequester = this.createUrlElicitationRequester(requestId);
-        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
+        const elicitationRequester = this.createUrlElicitationRequester(requestId, signal);
+        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester, signal));
+        if (signal?.aborted) throw RequestError.requestCancelled();
         if (!isAuthenticated) {
             logger.log("Authenticate request failed");
             throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
@@ -2129,7 +2131,7 @@ export class CodexAcpServer {
         return { };
     }
 
-    private createUrlElicitationRequester(requestId?: acp.JsonRpcId): UrlElicitationRequester | undefined {
+    private createUrlElicitationRequester(requestId?: acp.JsonRpcId, signal?: AbortSignal): UrlElicitationRequester | undefined {
         if (requestId == null || !clientSupportsUrlElicitation(this.clientCapabilities)) {
             return undefined;
         }
@@ -2141,7 +2143,7 @@ export class CodexAcpServer {
                     mode: "url",
                     requestId,
                     ...request,
-                });
+                }, signal ? {cancellationSignal: signal} : undefined);
             },
             completeElicitation: async () => {
                 if (elicitationId === null) {
@@ -2167,8 +2169,9 @@ export class CodexAcpServer {
     async authenticateV2(
         params: acpV2.LoginAuthRequest,
         requestId?: acpV2.JsonRpcId,
+        signal?: AbortSignal,
     ): Promise<acpV2.LoginAuthResponse> {
-        return await this.authenticate(params, requestId);
+        return await this.authenticate(params, requestId, signal);
     }
 
     /** v2 `auth/logout`: same params as v1 `logout`, only the method name changed. */

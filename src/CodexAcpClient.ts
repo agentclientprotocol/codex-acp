@@ -16,6 +16,7 @@ import type {
 } from "./CodexAppServerClient";
 import type {McpServerStartupWaitOptions, McpStartupResult} from "./mcp/McpStartupTracker";
 import open from "open";
+import {AccountLogin} from "./AccountLogin";
 import type {Disposable} from "vscode-jsonrpc";
 import type {
     ClientInfo,
@@ -33,7 +34,6 @@ import {sanitizeMcpServerName} from "./McpServerName";
 import {listedSessionTitle} from "./SessionTitle";
 import {type AcpMcpServer, type WithAcpMcpServers, getMcpServerName, normalizeMcpServer, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
-    AccountLoginCompletedNotification,
     AccountUpdatedNotification,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
@@ -161,7 +161,7 @@ export class CodexAcpClient {
      * routing). `authStatus` reports only the agent-owned one.
      */
     private gatewayConfigSource: GatewayConfigSource | null;
-    private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
+    private readonly accountLogin: AccountLogin;
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
     private readonly subagents: CodexSubagentSubscriptions;
@@ -171,6 +171,7 @@ export class CodexAcpClient {
 
     constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
         this.codexClient = codexClient;
+        this.accountLogin = new AccountLogin(codexClient);
         this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
         this.gatewayConfig = null;
@@ -232,7 +233,9 @@ export class CodexAcpClient {
     async authenticate(
         authRequest: acp.AuthenticateRequest,
         urlElicitationRequester?: UrlElicitationRequester,
+        signal?: AbortSignal,
     ): Promise<Boolean> {
+        if (signal?.aborted) throw RequestError.requestCancelled();
         if (!isCodexAuthRequest(authRequest)) {
             throw RequestError.invalidRequest();
         }
@@ -240,40 +243,33 @@ export class CodexAcpClient {
         this.gatewayConfigSource = null;
         switch (authRequest.methodId) {
             case "api-key":
-                return await this.authenticateWithApiKey(authRequest);
+                return await this.authenticateWithApiKey(authRequest, signal);
             case "chat-gpt":
-                return await this.authenticateWithChatGpt();
+                return await this.authenticateWithChatGpt(signal);
             case "chat-gpt-device-code":
-                return await this.authenticateWithChatGptDeviceCode(urlElicitationRequester);
+                return await this.authenticateWithChatGptDeviceCode(urlElicitationRequester, signal);
             case "gateway":
                 return this.authenticateWithGateway(authRequest);
         }
     }
 
-    private async authenticateWithApiKey(authRequest: ApiKeyAuthRequest): Promise<Boolean> {
+    private async authenticateWithApiKey(authRequest: ApiKeyAuthRequest, signal?: AbortSignal): Promise<Boolean> {
         const apiKey = authRequest._meta?.["api-key"]?.apiKey ?? this.readApiKeyFromEnv();
-        const loginCompletedPromise = this.awaitNextLoginCompleted();
-        loginCompletedPromise.catch(() => {});
-        await this.codexClient.accountLogin({
-            type: "apiKey",
-            apiKey,
-        });
-        const result = await loginCompletedPromise;
-        return result.success;
+        return await this.accountLogin.run({type: "apiKey", apiKey}, async (_, completed) => {
+            return (await completed).success;
+        }, signal);
     }
 
-    private async authenticateWithChatGpt(): Promise<Boolean> {
+    private async authenticateWithChatGpt(signal?: AbortSignal): Promise<Boolean> {
         if (await this.hasWorkingChatGptLogin()) {
+            if (signal?.aborted) throw RequestError.requestCancelled();
             return true;
         }
-        const loginCompletedPromise = this.awaitNextLoginCompleted();
-        loginCompletedPromise.catch(() => {});
-        const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
-        if (loginResponse.type == "chatgpt") {
-            await open(loginResponse.authUrl);
-        }
-        const result = await loginCompletedPromise;
-        return result.success;
+        return await this.accountLogin.run({type: "chatgpt"}, async (response, completed) => {
+            if (response.type !== "chatgpt") return false;
+            await open(response.authUrl);
+            return (await completed).success;
+        }, signal);
     }
 
     /**
@@ -301,59 +297,45 @@ export class CodexAcpClient {
         }
     }
 
-    private async authenticateWithChatGptDeviceCode(urlElicitationRequester?: UrlElicitationRequester): Promise<Boolean> {
+    private async authenticateWithChatGptDeviceCode(
+        urlElicitationRequester?: UrlElicitationRequester,
+        signal?: AbortSignal,
+    ): Promise<Boolean> {
         if (await this.hasWorkingChatGptLogin()) {
+            if (signal?.aborted) throw RequestError.requestCancelled();
             return true;
         }
         if (!urlElicitationRequester) {
             throw RequestError.invalidRequest(undefined, "Device code authentication requires URL elicitation support");
         }
-        const loginCompletedPromise = this.awaitNextLoginCompleted();
-        loginCompletedPromise.catch(() => {});
-        const loginResponse = await this.codexClient.accountLogin({type: "chatgptDeviceCode"});
-        if (loginResponse.type !== "chatgptDeviceCode") {
-            return false;
-        }
-        const elicitationResponsePromise = Promise.resolve(urlElicitationRequester.elicitUrl({
-            url: loginResponse.verificationUrl,
-            message: `Sign in to ChatGPT and enter this code: ${loginResponse.userCode}`,
-            elicitationId: loginResponse.loginId,
-        }));
-        try {
-            const first = await Promise.race([
-                loginCompletedPromise.then(result => ({
-                    type: "loginCompleted" as const,
-                    result,
-                })),
-                elicitationResponsePromise.then(response => ({
-                    type: "elicitationResponse" as const,
-                    response,
-                })),
-            ]);
-
-            if (first.type === "loginCompleted") {
-                await urlElicitationRequester.completeElicitation();
-                return first.result.success;
+        return await this.accountLogin.run({type: "chatgptDeviceCode"}, async (response, completed) => {
+            if (response.type !== "chatgptDeviceCode") return false;
+            let elicitationAnswered = false;
+            try {
+                const elicitationResponse = Promise.resolve(urlElicitationRequester.elicitUrl({
+                    url: response.verificationUrl,
+                    message: `Sign in to ChatGPT and enter this code: ${response.userCode}`,
+                    elicitationId: response.loginId,
+                }));
+                const first = await Promise.race([
+                    completed.then(result => ({type: "loginCompleted" as const, result})),
+                    elicitationResponse.then(response => ({type: "elicitationResponse" as const, response})),
+                ]);
+                if (first.type === "loginCompleted") return first.result.success;
+                if (!acp.CreateElicitationResponse.isAccept(first.response)) {
+                    elicitationAnswered = true;
+                    throw RequestError.requestCancelled(
+                        {methodId: "chat-gpt-device-code", action: first.response.action},
+                        "ChatGPT device code sign-in was cancelled",
+                    );
+                }
+                return (await completed).success;
+            } finally {
+                if (!elicitationAnswered) {
+                    await urlElicitationRequester.completeElicitation().catch(() => {});
+                }
             }
-
-            if (!acp.CreateElicitationResponse.isAccept(first.response)) {
-                await this.codexClient.accountLoginCancel({loginId: loginResponse.loginId});
-                throw RequestError.requestCancelled(
-                    {methodId: "chat-gpt-device-code", action: first.response.action},
-                    "ChatGPT device code sign-in was cancelled",
-                );
-            }
-
-            const result = await loginCompletedPromise;
-            await urlElicitationRequester.completeElicitation();
-            return result.success;
-        } catch (error) {
-            // A lost app-server ends the login: the open URL elicitation must not stay open in the client.
-            if (this.codexClient.connectionLoss.lost) {
-                await Promise.resolve(urlElicitationRequester.completeElicitation()).catch(() => {});
-            }
-            throw error;
-        }
+        }, signal);
     }
 
     private authenticateWithGateway(authRequest: GatewayAuthRequest): boolean {
@@ -1384,21 +1366,6 @@ export class CodexAcpClient {
         return withoutUnsupportedSkills(await this.codexClient.listSkills(params ?? {}));
     }
 
-    private async awaitNextLoginCompleted(): Promise<AccountLoginCompletedNotification> {
-        if (this.pendingLoginCompleted !== null) {
-            return await this.pendingLoginCompleted;
-        }
-        this.pendingLoginCompleted = this.awaitSingleNotification(
-            "account/login/completed",
-            (event: AccountLoginCompletedNotification) => event,
-        );
-        try {
-            return await this.pendingLoginCompleted;
-        } finally {
-            this.pendingLoginCompleted = null;
-        }
-    }
-
     private async awaitNextAccountUpdated(): Promise<AccountUpdatedNotification> {
         if (this.pendingAccountUpdated !== null) {
             return await this.pendingAccountUpdated;
@@ -1415,7 +1382,7 @@ export class CodexAcpClient {
     }
 
     private async awaitSingleNotification<T>(
-        method: "account/login/completed" | "account/updated",
+        method: "account/updated",
         mapEvent: (event: T) => T,
     ): Promise<T> {
         let disposable: Disposable | undefined;
