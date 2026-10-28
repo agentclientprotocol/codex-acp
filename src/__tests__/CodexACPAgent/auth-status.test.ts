@@ -217,6 +217,18 @@ describe("authStatus extension", () => {
                 .toEqual({kind: "external", label: "AWS Bedrock"});
         });
 
+        it.each([1, 2])("reports Google Cloud as external auth in ACP v%i", async (protocolVersion) => {
+            const fixture = createCodexMockTestFixture();
+            mockAccount(fixture, {type: "gcp"});
+
+            await fixture.getCodexAcpAgent().initialize({protocolVersion});
+
+            expect(await awaitAuthStatusUpdates(fixture, 1))
+                .toEqual([{kind: "external", label: "Google Cloud"}]);
+            expect(await fixture.getCodexAcpAgent().extMethod("authentication/status", {}))
+                .toEqual({type: "gateway", name: "gcp"});
+        });
+
         it("reports a logged-out agent as kind none", async () => {
             const fixture = createCodexMockTestFixture();
             mockAccount(fixture, null);

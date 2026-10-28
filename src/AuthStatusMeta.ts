@@ -180,6 +180,11 @@ export function fromAccount(account: Account | null): AuthStatus {
                 kind: "external",
                 label: "AWS Bedrock",
             };
+        case "gcp":
+            return {
+                kind: "external",
+                label: "Google Cloud",
+            };
     }
 }
 

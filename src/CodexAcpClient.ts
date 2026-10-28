@@ -415,6 +415,11 @@ export class CodexAcpClient {
                     type: "gateway",
                     name: "amazonBedrock",
                 };
+            case "gcp":
+                return {
+                    type: "gateway",
+                    name: "gcp",
+                };
         }
     }
 
