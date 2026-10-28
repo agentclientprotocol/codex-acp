@@ -33,6 +33,26 @@
             }
           }
         },
+        "dynamicTools": [
+          {
+            "type": "function",
+            "name": "set_thread_title",
+            "description": "Set the current conversation's title when the user requests a rename.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            },
+            "deferLoading": false
+          }
+        ],
         "modelProvider": null,
         "cwd": "/workspace"
       }
