@@ -16,6 +16,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Compact file changes through the negotiated [AIR diff patch extension](docs/air-extensions.md#diff-patch).
 - For AIR, one tool call shape with each fact in one field, as the [tool call contract](docs/air-extensions.md#tool-call-contract) defines. Other clients keep the earlier fields.
 - [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
+- Mid-turn input through the [_session/steering extension](docs/steering.md), with an opt-in host-owned fallback when no turn can accept it.
 - [Background terminal tasks](docs/air-extensions.md#async-tasks) in AIR, with task status and targeted stop support after capability negotiation.
 - Session-scoped long-running goals in AIR through the [goal extension](docs/air-extensions.md#goal).
 - Typed warnings and errors through the opt-in [AIR session failure extension](docs/air-extensions.md#session-failure).
@@ -62,34 +63,6 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - ChatGPT login. Set `NO_BROWSER=1` to hide this method in remote or browserless environments.
 - API key via `CODEX_API_KEY` or `OPENAI_API_KEY`.
 - A custom OpenAI-compatible gateway, when the client opts in to the gateway auth capability.
-
-## Host-owned steering fallback
-
-Clients can opt in to host-owned fallback when calling `_session/steering`:
-
-```json
-{
-  "sessionId": "session-id",
-  "prompt": [{ "type": "text", "text": "Adjust the plan" }],
-  "_meta": { "steering": { "idleBehavior": "promptRequired" } }
-}
-```
-
-When a Codex turn is running, the input is injected into that turn and the
-response is `{ "outcome": "injected" }`. If no turn can accept it, the adapter
-returns `{ "outcome": "promptRequired", "reason": "noRunningTurn" }` without
-consuming the input or starting a new prompt. This also returns while the
-original prompt is waiting for plan approval.
-
-The client keeps the input queued, answers any pending permission request, and
-waits for the original `session/prompt` response before sending the queued input
-through its normal `session/prompt` lifecycle. That request owns completion,
-usage, and failure reporting. `promptRequired` does not cancel an active prompt
-or answer its permission requests.
-
-Calls without this opt-in retain the existing `startedNewTurn` fallback.
-The initialization capability `_meta.steering.supported` advertises steering
-in general; it does not distinguish support for this newer opt-in contract.
 
 ## Runtime options
 
