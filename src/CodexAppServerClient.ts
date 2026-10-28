@@ -12,6 +12,9 @@ import type {
 } from "./app-server";
 import type {
     ActivePermissionProfile,
+    DynamicToolSpec,
+    DynamicToolCallParams,
+    DynamicToolCallResponse,
     CancelLoginAccountParams,
     CancelLoginAccountResponse,
     ConfigReadParams,
@@ -157,6 +160,8 @@ const ToolRequestUserInputRequest = new RequestType<
 
 const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
 
+const DynamicToolCallRequest = new RequestType<DynamicToolCallParams, DynamicToolCallResponse, void>('item/tool/call');
+
 /** The number of turns in one page of a full history read. */
 const HISTORY_PAGE_TURNS = 5;
 
@@ -177,6 +182,7 @@ export class CodexAppServerClient {
     readonly connection: MessageConnection;
     private approvalHandlers = new Map<string, ApprovalHandler>();
     private elicitationHandlers = new Map<string, ElicitationHandler>();
+    private dynamicToolHandler: ((params: DynamicToolCallParams) => Promise<DynamicToolCallResponse>) | undefined;
     readonly mcpStartup = new McpStartupTracker();
     readonly mcpOauthCompletions = new McpOauthCompletions();
     private readonly pendingTurnCompletionResolvers = new Map<string, Map<string, (event: TurnCompletedNotification) => void>>();
@@ -302,6 +308,22 @@ export class CodexAppServerClient {
             }
             return await handler.handleUserInput(params);
         });
+
+        this.connection.onRequest(DynamicToolCallRequest, async (params) => {
+            if (!this.isCurrentToolTurn(params.threadId, params.turnId) || !this.dynamicToolHandler) {
+                return {success: false, contentItems: [{type: "inputText", text: "The tool is unavailable for this session or turn."}]};
+            }
+            return await this.dynamicToolHandler(params);
+        });
+    }
+
+    onDynamicToolCall(handler: (params: DynamicToolCallParams) => Promise<DynamicToolCallResponse>): void {
+        this.dynamicToolHandler = handler;
+    }
+
+    isCurrentToolTurn(threadId: string, turnId: string): boolean {
+        return !this.connectionLoss.lost && !this.isStaleTurn(threadId, turnId)
+            && this.runningTurnIds.get(threadId) === turnId;
     }
 
     onApprovalRequest(threadId: string, handler: ApprovalHandler): void {
@@ -676,7 +698,7 @@ export class CodexAppServerClient {
         this.staleTurnIds.set(threadId, threadStaleTurns);
     }
 
-    async threadStart(params: ThreadStartParams): Promise<ExperimentalThreadStartResponse> {
+    async threadStart(params: ThreadStartParams & {dynamicTools?: DynamicToolSpec[]}): Promise<ExperimentalThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
@@ -1297,6 +1319,7 @@ export class CodexAppServerClient {
     }
 
     private disposeMcpWaits(): void {
+        this.dynamicToolHandler = undefined;
         this.mcpStartup.dispose();
         this.mcpOauthCompletions.dispose();
     }

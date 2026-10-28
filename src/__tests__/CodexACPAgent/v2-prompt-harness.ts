@@ -395,6 +395,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
 export function createReplacementCodexAcpClient(): {
     codexAcpClient: CodexAcpClient;
     appServer: CodexAppServerClient;
+    triggerApproval(method: string, params: unknown): Promise<unknown>;
     emit(notification: ServerNotification): void;
     turnStartParams: Array<Record<string, unknown>>;
     /** Overrides the canned `turn/start` response, e.g. to run a prompt through this replacement. */
@@ -420,6 +421,11 @@ export function createReplacementCodexAcpClient(): {
     return {
         codexAcpClient,
         appServer,
+        triggerApproval: async (method, params) => {
+            const handler = mocks.getRequestHandler(method);
+            if (!handler) throw new Error(`No handler registered for '${method}'`);
+            return await handler(params);
+        },
         emit: (notification) => mocks.getUnhandledNotificationHandler()!(notification),
         turnStartParams,
         setTurnStart: (handler) => {

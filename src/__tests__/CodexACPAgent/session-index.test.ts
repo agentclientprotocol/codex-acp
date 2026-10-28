@@ -7,6 +7,7 @@ import {createCodexMockTestFixture, createTestModel, deferred, type CodexMockTes
 import type {Thread, ThreadListParams, ThreadListResponse} from "../../app-server/v2";
 import {SESSION_LIST_CHANGES_METHOD} from "../../SessionIndex";
 import {MAX_SESSION_TITLE_LENGTH} from "../../SessionTitle";
+import {ResponseError} from "vscode-jsonrpc/node";
 
 const threadId = "01a0637c-5b99-7242-9064-04545d605fdb";
 const otherThreadId = "01a0637c-5b99-7242-9064-04545d605fdc";
@@ -1035,7 +1036,7 @@ describe("_session/rename", () => {
             turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]},
         } as never);
         const threadSetName = vi.spyOn(appServer, "threadSetName")
-            .mockRejectedValueOnce(new Error("app-server busy"))
+            .mockRejectedValueOnce(new ResponseError(-32600, "app-server busy"))
             .mockResolvedValue({});
 
         await expect(agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"})).rejects.toThrow("app-server busy");
@@ -1061,7 +1062,7 @@ describe("_session/rename", () => {
         const rename = agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"});
         turn.resolve(titleTurn);
         await titleGen.waitForIdle(1_000);
-        renameWrite.reject(new Error("app-server busy"));
+        renameWrite.reject(new ResponseError(-32600, "app-server busy"));
         await expect(rename).rejects.toThrow("app-server busy");
 
         titleGen.onTurnCompleted("Fix the build");

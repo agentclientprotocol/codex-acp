@@ -1,7 +1,7 @@
 /**
  * The AIR `sessionIndex` extension as `CodexAcpServer` serves it: the session list, `_session/rename`,
  * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`.
- * `session/set_title` shares its title writer without requiring AIR capabilities.
+ * `session/set_title` and the native rename tool share its title writer without requiring AIR capabilities.
  * See `SessionIndex.ts` and `docs/air-extensions.md`.
  */
 
@@ -43,7 +43,7 @@ import {
     type SessionRenameRequest,
 } from "./SessionIndex";
 import {deleteThread, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
-import {SessionIndexTitles} from "./SessionIndexTitles";
+import {SessionIndexTitles, SessionTitleWriteError, type SessionTitleWriteContext} from "./SessionIndexTitles";
 import {canonicalCwds, CodexWorktreeMarks, isUncPath, linkedWorktreeCwds} from "./SessionIndexWorktrees";
 import {SessionForkOrigins} from "./SessionForkOrigins";
 import {SessionListSubscriptions, type SessionListSubscriptionTimings, type ThreadEntry} from "./SessionListSubscriptions";
@@ -244,7 +244,16 @@ export class SessionIndexService {
     /** Standard title requests share persistence, normalization and automatic-title suppression with AIR. */
     async setTitle({sessionId, title}: acp.SetSessionTitleRequest): Promise<acp.SetSessionTitleResponse> {
         await this.host.ensureAppServer();
-        return {title: await this.titles.rename(sessionId, title)};
+        try {
+            return {title: await this.titles.rename(sessionId, title)};
+        } catch (err) {
+            throw err instanceof SessionTitleWriteError ? err.cause : err;
+        }
+    }
+
+    /** Internal tool write; the caller fences its live session without AIR negotiation. */
+    renameTitle(sessionId: string, title: string, context: SessionTitleWriteContext): Promise<string> {
+        return this.titles.rename(sessionId, title, context);
     }
 
     /**

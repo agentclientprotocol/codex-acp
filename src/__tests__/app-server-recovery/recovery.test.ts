@@ -50,6 +50,25 @@ function completeTurn(fixture: RecoveryFixture, sessionId: string, turnId = "tur
 stubGatewayModelListing(["gpt-test"]);
 
 describe("app-server recovery", () => {
+    it("rebinds native title calls after recovery and rejects the retired server", async () => {
+        const fixture = createRecoveryFixture();
+        const sessionId = await openSession(fixture);
+        const old = fixture.current();
+        const call = {threadId: sessionId, turnId: "rename-turn", callId: "rename", namespace: null,
+            tool: "set_thread_title", arguments: {title: "Recovered title"}};
+        const started = {method: "turn/started", params: {threadId: sessionId,
+            turn: {id: call.turnId, items: [], status: "inProgress", error: null}}};
+        await fixture.kill();
+        await fixture.agent.listSessions({});
+        await internals(fixture).ensureSessionReady(fixture.agent.getSessionState(sessionId));
+        fixture.current().rpc.notify(started);
+        await expect(fixture.current().rpc.requestHandlers.get("item/tool/call")!(call)).resolves.toMatchObject({success: true});
+        old.rpc.notify(started);
+        await expect(old.rpc.requestHandlers.get("item/tool/call")!(call)).resolves.toMatchObject({success: false});
+        expect(requestsOf(old, "thread/name/set")).toEqual([]);
+        expect(requestsOf(fixture.current(), "thread/name/set")).toEqual([{threadId: sessionId, name: "Recovered title"}]);
+    });
+
     it("starts the app-server again on the next request after an idle crash, with the same handshake", async () => {
         const fixture = createRecoveryFixture();
         await openSession(fixture);

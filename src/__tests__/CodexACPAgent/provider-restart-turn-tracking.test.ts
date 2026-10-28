@@ -72,6 +72,34 @@ describe('provider restart reinstalls the baseline turn tracker', () => {
         expectConformingV2SessionUpdates();
     });
 
+    it.each([1, 2] as const)('v%i: rebinds title calls and rejects a queued call from the old provider', async version => {
+        const client = await connectSession(version);
+        closeClient = () => client.connection.close();
+        const replacement = createReplacementCodexAcpClient();
+        vi.spyOn(client.agent as any, "restartCodexClient").mockResolvedValue(replacement.codexAcpClient);
+        client.emit(turnStarted());
+        let release!: (written: boolean) => void;
+        const automatic = client.agent.sessionIndex.titleWriter(sessionId)("Automatic", () => new Promise<boolean>(resolve => { release = resolve; }));
+        await settle();
+        const params = {threadId: sessionId, turnId: "turn-1", callId: "rename", namespace: null,
+            tool: "set_thread_title", arguments: {title: "New provider title"}};
+        const oldWrite = vi.spyOn(client.appServer, "threadSetName");
+        const queued = client.triggerApproval("item/tool/call", params);
+        await settle();
+        await client.request(version === 1 ? acp.methods.agent.providers.set : acpV2.methods.agent.providers.set, setProviderParams());
+        release(true);
+        await automatic;
+        await expect(queued).resolves.toMatchObject({success: false});
+        client.emit(turnStarted());
+        await expect(client.triggerApproval("item/tool/call", params)).resolves.toMatchObject({success: false});
+        expect(oldWrite).not.toHaveBeenCalled();
+        replacement.emit(turnStarted());
+        const write = vi.spyOn(replacement.codexAcpClient.appServerClient, "threadSetName").mockResolvedValue({});
+        await expect(replacement.triggerApproval("item/tool/call", params)).resolves.toMatchObject({success: true});
+        expect(write).toHaveBeenCalledExactlyOnceWith({threadId: sessionId, name: "New provider title"});
+        await settle();
+    });
+
     it('v2: renders a Codex-started turn after providers/set, for a session never prompted', async () => {
         const client = await connectSession(2);
         closeClient = () => client.connection.close();
