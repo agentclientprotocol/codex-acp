@@ -31,7 +31,9 @@ describe("renderFileCitations", () => {
             `\`${citation}\``,
             `\`\`\`text\n${citation}\n\`\`\`\n`,
             `\\${citation}`,
-            `:${citation}`,
+            `:::${citation}`,
+            ':codex-file-citation{path="a.txt" path="b.txt"}',
+            ':codex-file-citation{path="a\n.txt"}',
             ':codex-file-citation{purpose="source"}',
             ':codex-file-citation{path=""}',
             ':codex-file-citation{path="a.txt" broken}',
@@ -41,10 +43,27 @@ describe("renderFileCitations", () => {
         }
     });
 
-    it("matches attributes in linear time", () => {
+    it("parses the directive the way Codex does", () => {
+        expect(renderFileCitations([
+            ":codex-file-citation{path='a.txt'}",
+            ':codex-file-citation{ path = "b.txt" }',
+            '::codex-file-citation{path="c.txt"}',
+            ':codex-file-citation{purpose="source"path="d.txt"}',
+            ':codex-file-citation{path="e\\"f.txt"}',
+        ].join("\n"), cwd)).toBe([
+            "[a.txt](/repo/a.txt)",
+            "[b.txt](/repo/b.txt)",
+            "[c.txt](/repo/c.txt)",
+            "[d.txt](/repo/d.txt)",
+            '[e"f.txt](/repo/e"f.txt)',
+        ].join("\n"));
+    });
+
+    it("parses in linear time", () => {
         for (const text of [
             `:codex-file-citation{path=${"!a=".repeat(5000)}"}`,
             `:codex-file-citation{path=a${" ".repeat(5000)}!}`,
+            ':codex-file-citation{path="x '.repeat(5000),
         ]) {
             const started = performance.now();
             expect(renderFileCitations(text, cwd)).toBe(text);

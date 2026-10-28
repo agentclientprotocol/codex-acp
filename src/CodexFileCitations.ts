@@ -1,22 +1,18 @@
 /**
  * Codex models may cite files with `:codex-file-citation{path="..." purpose="..."}`. The Codex TUI
  * renders it as a file link; ACP clients only get Markdown, so the directive becomes a Markdown link.
+ *
+ * The directive parser is a direct reimplementation of Codex's own Rust parser
+ * (`codex-rs/tui/src/assistant_directives.rs`), so it accepts the same directive syntax that Codex renders.
  */
 import path from "node:path";
 
-const PREFIX = ":codex-file-citation{";
-const ATTRIBUTE_SOURCE = String.raw`([A-Za-z][\w-]*)=(?:"([^"\n]*)"|([^\s"}]+))`;
-// Attributes are separated by whitespace, so an unquoted value can only end in one place.
-// Without it the pattern backtracks exponentially on input like `a=!a=!a=`.
-const DIRECTIVE = new RegExp(String.raw`^:codex-file-citation\{\s*(?:${ATTRIBUTE_SOURCE}(?:\s+${ATTRIBUTE_SOURCE})*)?\s*\}`);
-const ATTRIBUTE = new RegExp(ATTRIBUTE_SOURCE, "g");
-// CommonMark reads a backslash before ASCII punctuation as an escape, so such a backslash is escaped too.
-const ESCAPING_BACKSLASH = String.raw`\\(?=[!-/:-@[-\`{-~])`;
-const LABEL_SPECIAL = new RegExp(String.raw`[[\]]|${ESCAPING_BACKSLASH}`, "g");
-const DESTINATION_SPECIAL = new RegExp(ESCAPING_BACKSLASH, "g");
-const ANGLE_DESTINATION_SPECIAL = new RegExp(String.raw`[<>]|${ESCAPING_BACKSLASH}`, "g");
-// An unfinished directive longer than this is passed through as plain text.
-const MAX_PENDING_LENGTH = 4096;
+const CITATION_NAME = "codex-file-citation";
+// A longer directive is not treated as a citation, which bounds both the scan and the held-back text.
+const MAX_CITATION_LENGTH = 4096;
+const ASCII_PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+type Citation = { path: string; end: number };
 
 /** Rewrites file citations in streamed agent message text, holding back a directive split across deltas. */
 export class FileCitationStream {
@@ -30,7 +26,7 @@ export class FileCitationStream {
     /**
      * Returns the text of `delta` that is safe to send now, with complete citations replaced by links.
      * Text that may still become a citation, or a backtick run that may continue, waits for the next delta.
-     * Citations inside code spans and fences, escaped with `\`, or preceded by another `:` stay as written.
+     * Citations inside code spans and fences, or escaped with `\`, stay as written.
      */
     push(delta: string): string {
         const text = this.pending + delta;
@@ -56,18 +52,18 @@ export class FileCitationStream {
                 continue;
             }
 
-            // A citation starts with `:` outside code; `\:` escapes it, and `::` is another directive.
+            // A citation starts at the first `:` of a run, outside code; `\:` escapes it.
             const before = index > 0 ? text[index - 1] : this.previous;
-            const match = char === ":" && this.codeRun === 0 && before !== ":" && before !== "\\"
-                ? matchCitation(text.slice(index))
+            const citation = char === ":" && this.codeRun === 0 && before !== ":" && before !== "\\"
+                ? parseCitation(text, index)
                 : null;
 
-            // Wait for the rest of an unfinished citation, unless it is too long to be one.
-            if (match === "partial" && text.length - index <= MAX_PENDING_LENGTH) break;
+            // Wait for the rest of an unfinished citation.
+            if (citation === "partial") break;
 
-            if (match !== null && match !== "partial") {
-                output += markdownFileLink(match.path, this.cwd);
-                index += match.length;
+            if (citation !== null) {
+                output += markdownFileLink(citation.path, this.cwd);
+                index = citation.end;
                 continue;
             }
 
@@ -91,30 +87,104 @@ export class FileCitationStream {
 
 /** Rewrites file citations in a complete agent message. */
 export function renderFileCitations(text: string, cwd: string): string {
-    if (!text.includes(PREFIX)) return text;
+    if (!text.includes(CITATION_NAME)) return text;
     const stream = new FileCitationStream(cwd);
     return stream.push(text) + stream.flush();
 }
 
 /**
- * Matches a citation at the start of `source`: its path and length, `"partial"` if the text so far
- * could still become one, or `null` if it is not a citation.
+ * Parses a citation that starts at `start`: its path and the index after it, `"partial"` if the text ends
+ * before the directive does, or `null` if it is not a citation.
+ * Paths keep backslashes literally, so Windows paths work; `\"` is read as a quote only if that is the
+ * only way to parse the directive.
+ *
+ * This reimplements `parse_assistant_directive_with_budget` from Codex's `codex-rs/tui/src/assistant_directives.rs`,
+ * including the literal-then-backslash quoting that Codex uses for citations. It differs only where this adapter
+ * needs it: it parses citations alone (no other directives or `[label]`s), reports `"partial"` for streaming,
+ * and limits a directive's length instead of sharing a scan budget across attempts.
  */
-function matchCitation(source: string): { path: string; length: number } | "partial" | null {
-    if (source.length < PREFIX.length) {
-        return PREFIX.startsWith(source) ? "partial" : null;
+function parseCitation(text: string, start: number): Citation | "partial" | null {
+    return parseCitationWith(text, start, false) ?? parseCitationWith(text, start, true);
+}
+
+/**
+ * The directive is one to three colons, the name, and `key=value` attributes in braces.
+ * A value is quoted with `"` or `'`, or unquoted up to whitespace or `}`.
+ */
+function parseCitationWith(text: string, start: number, backslashEscapesQuote: boolean): Citation | "partial" | null {
+    const limit = Math.min(text.length, start + MAX_CITATION_LENGTH);
+    // Reaching the end of the text, not the length limit, means the directive may continue in the next delta.
+    const ended = () => limit === text.length ? "partial" : null;
+    let index = start;
+
+    while (index < limit && text[index] === ":") index++;
+    if (index === limit) return ended();
+    if (index - start > 3) return null;
+
+    for (const expected of `${CITATION_NAME}{`) {
+        if (index === limit) return ended();
+        if (text[index] !== expected) return null;
+        index++;
     }
-    if (!source.startsWith(PREFIX)) return null;
-    const directive = DIRECTIVE.exec(source)?.[0];
-    if (directive === undefined) {
-        const body = source.slice(PREFIX.length);
-        return body.includes("}") || body.includes("\n") ? null : "partial";
+
+    const keys = new Set<string>();
+    let citedPath = "";
+    while (true) {
+        index = skipSpaces(text, index, limit);
+        if (index === limit) return ended();
+        if (text[index] === "}") break;
+
+        // The key, then `=` with optional spaces around it.
+        const keyStart = index;
+        while (index < limit && isNameChar(text[index]!)) index++;
+        if (index === limit) return ended();
+        const key = text.slice(keyStart, index);
+        if (key === "" || keys.has(key)) return null;
+        keys.add(key);
+
+        index = skipSpaces(text, index, limit);
+        if (index === limit) return ended();
+        if (text[index] !== "=") return null;
+        index = skipSpaces(text, index + 1, limit);
+        if (index === limit) return ended();
+
+        let value = "";
+        const quote = text[index];
+        if (quote === "\"" || quote === "'") {
+            // A quoted value ends at the matching quote and may contain spaces and braces, but no line break.
+            index++;
+            while (true) {
+                if (index === limit) return ended();
+                const char = text[index]!;
+                if (char === quote) break;
+                if (char === "\n" || char === "\r") return null;
+                if (backslashEscapesQuote && char === "\\" && text[index + 1] === quote) index++;
+                value += text[index];
+                index++;
+            }
+            index++;
+        } else {
+            const valueStart = index;
+            while (index < limit && !" \t}\n\r".includes(text[index]!)) index++;
+            if (index === limit) return ended();
+            if (index === valueStart) return null;
+            value = text.slice(valueStart, index);
+        }
+        if (key === "path") citedPath = value;
     }
-    for (const [, name, quoted, unquoted] of directive.matchAll(ATTRIBUTE)) {
-        const value = quoted ?? unquoted ?? "";
-        if (name === "path" && value.length > 0) return {path: value, length: directive.length};
-    }
-    return null;
+
+    // Only a citation with a path can become a link.
+    return citedPath === "" ? null : {path: citedPath, end: index + 1};
+}
+
+function skipSpaces(text: string, index: number, limit: number): number {
+    while (index < limit && (text[index] === " " || text[index] === "\t")) index++;
+    return index;
+}
+
+function isNameChar(char: string): boolean {
+    return (char >= "a" && char <= "z") || (char >= "A" && char <= "Z") || (char >= "0" && char <= "9")
+        || char === "_" || char === "-";
 }
 
 function markdownFileLink(citedPath: string, cwd: string): string {
@@ -122,9 +192,23 @@ function markdownFileLink(citedPath: string, cwd: string): string {
     const destination = path.isAbsolute(citedPath) || /^(?:[A-Za-z]:[\\/]|[A-Za-z][\w+.-]*:\/\/)/.test(citedPath)
         ? citedPath
         : path.join(cwd, citedPath);
-    const label = citedPath.replace(LABEL_SPECIAL, "\\$&");
-    const target = /[\s()<>]/.test(destination)
-        ? `<${destination.replace(ANGLE_DESTINATION_SPECIAL, "\\$&")}>`
-        : destination.replace(DESTINATION_SPECIAL, "\\$&");
+    const label = escapeMarkdown(citedPath, "[]");
+    const target = [...destination].some(char => " \t\n\r()<>".includes(char))
+        ? `<${escapeMarkdown(destination, "<>")}>`
+        : escapeMarkdown(destination, "");
     return `[${label}](${target})`;
+}
+
+/** Escapes the `special` characters, and a backslash that CommonMark would read as an escape. */
+function escapeMarkdown(text: string, special: string): string {
+    let escaped = "";
+    for (let index = 0; index < text.length; index++) {
+        const char = text[index]!;
+        const next = text[index + 1];
+        if (special.includes(char) || (char === "\\" && next !== undefined && ASCII_PUNCTUATION.includes(next))) {
+            escaped += "\\";
+        }
+        escaped += char;
+    }
+    return escaped;
 }
