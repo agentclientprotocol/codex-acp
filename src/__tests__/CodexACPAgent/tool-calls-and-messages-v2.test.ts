@@ -64,6 +64,7 @@ describe('tool calls and messages over ACP v2', () => {
     let closeClient: (() => void) | null = null;
 
     afterEach(() => {
+        vi.useRealTimers();
         closeClient?.();
         closeClient = null;
         vi.clearAllMocks();
@@ -145,14 +146,22 @@ describe('tool calls and messages over ACP v2', () => {
     });
 
     it('reports MCP server startup failures as tool_call_update upserts', async () => {
+        vi.useFakeTimers();
         const client = await connectSession(2, {
             mcpServers: [
                 {type: "stdio", name: "docs", command: "/usr/bin/docs-mcp"},
                 {type: "stdio", name: "slow", command: "/usr/bin/slow-mcp"},
             ],
             mcpStartup: {ready: [], failed: [{server: "docs", error: "exit code 1"}], cancelled: ["slow"]},
+            codexResponses: {
+                "mcpServerStatus/list": async () => ({
+                    data: [{name: "slow", runtimeStatus: "cancelled"}],
+                    nextCursor: null,
+                }),
+            },
         });
         closeClient = () => client.connection.close();
+        await vi.advanceTimersByTimeAsync(5_000);
 
         const startupUpdates = () => [
             ...client.setupUpdates,
