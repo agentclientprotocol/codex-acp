@@ -12,7 +12,7 @@
 ## Coding Style
 
 - Keep edits consistent with existing formatting.
-- Return `null` for "looked it up, found nothing". Use `undefined` for absent or optional values.
+- Return `null` for "looked it up, found nothing". Use `undefined` for optional parameters and `?:` properties. For state that is not set yet, follow the surrounding type (`SessionState` uses `| null`).
 - Treat an incoming `null` in an optional field like an absent value (ACP allows `_meta: null`).
 - When updating discriminated-union/event `switch` statements, do not add a trailing fallback like `return null` only to satisfy TypeScript.
 - Handle each variant with an explicit `case`; if intentionally ignored, use an explicit no-op case.
