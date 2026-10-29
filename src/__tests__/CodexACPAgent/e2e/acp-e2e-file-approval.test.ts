@@ -64,6 +64,30 @@ describeE2E("E2E workspace access mode file permission tests", () => {
     });
 });
 
+describeE2E("E2E ask-always mode file permission tests", () => {
+    let fixture: SpawnedAgentFixture;
+
+    beforeEach(async () => {
+        fixture = await createAuthenticatedFixture(AgentMode.AskAlways);
+    });
+
+    afterEach(async () => {
+        await fixture.dispose();
+    });
+
+    it("requests permission before applying a workspace file edit", async () => {
+        fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.AllowOnce));
+        const sessionId = await expectFileEditApplied(fixture, newFilePathIn(fixture.workspaceDir));
+        expect(fixture.readPermissionRequests(sessionId, "edit").length).toBeGreaterThanOrEqual(1);
+        expect(fixture.readPermissionRequests(sessionId, "execute")).toHaveLength(0);
+    });
+
+    it("does not apply a workspace file edit when permission is cancelled", async () => {
+        fixture.setPermissionResponder(() => createPermissionResponse(null));
+        await expectFileEditBlocked(fixture, newFilePathIn(fixture.workspaceDir));
+    });
+});
+
 describeE2E("E2E switching to read-only mode file permission tests", () => {
     let fixture: SpawnedAgentFixture;
 
