@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.4.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.3.0...v2.4.0) (2026-10-29)
+
+
+### Features
+
+* add batch session metadata lookup ([#669](https://github.com/agentclientprotocol/codex-acp/issues/669)) ([0539d3d](https://github.com/agentclientprotocol/codex-acp/commit/0539d3da63948f55be3a90727fc550db40c5e8bb))
+* add live standard ACP subagent sessions ([#682](https://github.com/agentclientprotocol/codex-acp/issues/682)) ([fe3ae92](https://github.com/agentclientprotocol/codex-acp/commit/fe3ae92487f991fe456541f3e9344732faeadac7))
+* replay recorded subagent conversations ([#684](https://github.com/agentclientprotocol/codex-acp/issues/684)) ([bbe14f6](https://github.com/agentclientprotocol/codex-acp/commit/bbe14f6661bb90027938374346f15cc7254708a6))
+
+
+### Bug Fixes
+
+* explain an unreachable ChatGPT backend as a connection failure ([#697](https://github.com/agentclientprotocol/codex-acp/issues/697)) ([b7ca688](https://github.com/agentclientprotocol/codex-acp/commit/b7ca6881c4b45f53a7e929d31427c4a4a3a7fe89))
+* recover recorded paths for known subagents ([#687](https://github.com/agentclientprotocol/codex-acp/issues/687)) ([6cce035](https://github.com/agentclientprotocol/codex-acp/commit/6cce03545eaaf5daef849aa9647d4ccfdc22eb41))
+* render Codex file citations as Markdown links, parsed the way Codex does ([#698](https://github.com/agentclientprotocol/codex-acp/issues/698)) ([3f6d371](https://github.com/agentclientprotocol/codex-acp/commit/3f6d371b142efc1bc7efe66de665c511d7744a6c))
+* support a host-owned idle steering fallback ([#593](https://github.com/agentclientprotocol/codex-acp/issues/593)) ([356abaf](https://github.com/agentclientprotocol/codex-acp/commit/356abaf0e7b5194489b62304011a37e5b02f1184))
+* update codex to 0.165.0 ([#692](https://github.com/agentclientprotocol/codex-acp/issues/692)) ([e0de9bb](https://github.com/agentclientprotocol/codex-acp/commit/e0de9bb4662481fa8210ce32ff246af82cebe6c3))
+
+
+### Performance Improvements
+
+* no rollout reads and no archived listing for the session list ([#689](https://github.com/agentclientprotocol/codex-acp/issues/689)) ([582e545](https://github.com/agentclientprotocol/codex-acp/commit/582e545eb1868763645ea59b1a2c106e50d5d471))
+
 ## [2.3.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.2...v2.3.0) (2026-10-26)
 
 
