@@ -234,7 +234,7 @@ export class CodexAcpClient {
         urlElicitationRequester?: UrlElicitationRequester,
     ): Promise<Boolean> {
         if (!isCodexAuthRequest(authRequest)) {
-            throw RequestError.invalidRequest();
+            throw RequestError.invalidParams();
         }
         this.gatewayConfig = null;
         this.gatewayConfigSource = null;
@@ -1137,7 +1137,7 @@ export class CodexAcpClient {
 
         const requestedServers = mcpServers.map(mcp => ({
             name: sanitizeMcpServerName(getMcpServerName(mcp)),
-            server: mcp,
+            server: normalizeMcpServer(mcp),
         }));
         let serversToConfigure = requestedServers;
         if (shouldDeduplicateMcpConflicts()) {
@@ -1161,7 +1161,7 @@ export class CodexAcpClient {
         return {
             config: {
                 ...configWithWorkspaceRoots,
-                "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, toCodexMcpServerConfig(normalizeMcpServer(mcp.server))])),
+                "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, toCodexMcpServerConfig(mcp.server)])),
             },
             skippedMcpServers,
         };

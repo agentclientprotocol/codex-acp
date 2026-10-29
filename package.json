@@ -68,7 +68,7 @@
     "vitest": "^5.0.1"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "~2.0.2",
+    "@agentclientprotocol/sdk": "~2.1.0",
     "@openai/codex": "^0.165.0",
     "cross-spawn": "^7.0.6",
     "diff": "^9.0.0",

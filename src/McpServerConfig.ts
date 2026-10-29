@@ -57,12 +57,12 @@ export function normalizeMcpServer(server: AcpMcpServer): NormalizedMcpServer {
             return {type: "http", name: http.name, url: http.url, headers: http.headers ?? []};
         }
         case "acp":
-            throw RequestError.invalidRequest("Codex doesn't support MCP ACP transport protocol");
+            throw RequestError.invalidParams(undefined, "Codex doesn't support MCP ACP transport protocol");
         case "sse":
-            throw RequestError.invalidRequest("Codex doesn't support MCP SSE transport protocol");
+            throw RequestError.invalidParams(undefined, "Codex doesn't support MCP SSE transport protocol");
         default:
             // v2 allows custom and future transport types.
-            throw RequestError.invalidRequest(`Codex doesn't support MCP '${server.type}' transport protocol`);
+            throw RequestError.invalidParams(undefined, `Codex doesn't support MCP '${server.type}' transport protocol`);
     }
 }
 

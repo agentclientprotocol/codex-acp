@@ -1,0 +1,16 @@
+[
+  {
+    "code": -32002,
+    "message": "Session missing-session not found",
+    "data": {
+      "sessionId": "missing-session"
+    }
+  },
+  {
+    "code": -32002,
+    "message": "Session missing-session not found",
+    "data": {
+      "sessionId": "missing-session"
+    }
+  }
+]

@@ -16,8 +16,8 @@ export function toV2AvailableCommands(commands: acp.AvailableCommand[]): acpV2.A
     return commands.map((command) => {
         const {input, ...withoutInput} = command;
         return input === undefined
-            ? withoutInput
-            : {...command, input: input && {...input, type: "text" as const}};
+            ? {...withoutInput, type: "command" as const}
+            : {...command, type: "command" as const, input: input && {...input, type: "text" as const}};
     });
 }
 

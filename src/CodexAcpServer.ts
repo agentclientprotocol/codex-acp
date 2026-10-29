@@ -61,6 +61,7 @@ import {
     isInsertedUserMessage,
     postInsertionFailureText,
     toV1PromptRequest,
+    assertPromptContentSupported,
     toV2Failure,
     toV2IdleState,
     type UserMessageInsertion,
@@ -2169,6 +2170,9 @@ export class CodexAcpServer {
         params: acpV2.LoginAuthRequest,
         requestId?: acpV2.JsonRpcId,
     ): Promise<acpV2.LoginAuthResponse> {
+        if (!getCodexAuthMethodsV2(this.clientCapabilities).some(method => method.methodId === params.methodId)) {
+            throw RequestError.invalidParams(undefined, `Unsupported authentication method: ${params.methodId}`);
+        }
         return await this.authenticate(params, requestId);
     }
 
@@ -2656,8 +2660,7 @@ export class CodexAcpServer {
             sessionId: _params.sessionId,
             modeId: _params.modeId
         });
-        const sessionState = this.sessions.get(_params.sessionId);
-        if (!sessionState) throw new Error(`Session ${_params.sessionId} not found`);
+        const sessionState = this.getSessionState(_params.sessionId);
 
         this.applyModeChange(sessionState, _params.modeId);
         return {};
@@ -2669,8 +2672,7 @@ export class CodexAcpServer {
             sessionId: params.sessionId,
             configId: params.configId,
         });
-        const sessionState = this.sessions.get(params.sessionId);
-        if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
+        const sessionState = this.getSessionState(params.sessionId);
 
         await this.applySessionConfigOption(sessionState, params);
 
@@ -2807,8 +2809,7 @@ export class CodexAcpServer {
             sessionId: params.sessionId,
             modelId: params.modelId
         });
-        const sessionState = this.sessions.get(params.sessionId);
-        if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
+        const sessionState = this.getSessionState(params.sessionId);
 
         const {model: requestedModelName, effort: requestedEffort} = ModelId.fromString(params.modelId);
 
@@ -2910,6 +2911,7 @@ export class CodexAcpServer {
      *     the outcome of starting a legacy fallback turn.
      */
     private async performSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse> {
+        assertPromptContentSupported(params);
         logger.log("Steering session requested", {
             sessionId: params.sessionId,
             prompt: params.prompt,
@@ -4082,7 +4084,7 @@ export class CodexAcpServer {
     getSessionState(sessionId: string): SessionState {
         const sessionState = this.sessions.get(sessionId);
         if (!sessionState) {
-            throw new Error(`Session ${sessionId} not found`);
+            throw new RequestError(-32002, `Session ${sessionId} not found`, {sessionId});
         }
         return sessionState;
     }
@@ -4672,6 +4674,7 @@ export class CodexAcpServer {
         insertion?: UserMessageInsertion,
         reservation?: TurnStartReservation,
     ): Promise<acp.PromptResponse> {
+        assertPromptContentSupported(params);
         this.assertInstructionsReady(params.sessionId);
         // Callers that need to gate additional checks (closing, canStart) atomically with the
         // turn-start slot acquire their own reservation and pass it in; otherwise this call is

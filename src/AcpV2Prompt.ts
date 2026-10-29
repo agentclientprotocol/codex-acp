@@ -53,18 +53,22 @@ export function isInsertedUserMessage(
         && event.params.item.clientId === clientUserMessageId;
 }
 
-const V1_CONTENT_BLOCK_TYPES = new Set(["text", "image", "audio", "resource_link", "resource"]);
+const SUPPORTED_PROMPT_CONTENT_TYPES = new Set(["text", "image", "resource_link", "resource"]);
+
+export function assertPromptContentSupported(params: {prompt: Array<{type: string}>}): void {
+    for (const block of params.prompt) {
+        if (!SUPPORTED_PROMPT_CONTENT_TYPES.has(block.type)) {
+            throw acp.RequestError.invalidParams(undefined, `Unsupported content block type: ${block.type}`);
+        }
+    }
+}
 
 /**
  * v2 content blocks are the v1 ones plus reserved custom/future types, which codex-acp does not
  * handle and rejects.
  */
 export function toV1PromptRequest(params: acpV2.PromptRequest): acp.PromptRequest {
-    for (const block of params.prompt) {
-        if (!V1_CONTENT_BLOCK_TYPES.has(block.type)) {
-            throw acp.RequestError.invalidParams(undefined, `Unsupported content block type: ${block.type}`);
-        }
-    }
+    assertPromptContentSupported(params);
     return params as acp.PromptRequest;
 }
 

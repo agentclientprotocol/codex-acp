@@ -270,7 +270,7 @@ describe('Session lifecycle over ACP v2', () => {
             sessionUpdate: "available_commands_update",
             availableCommands: response.availableCommands?.map(command =>
                 command.name === "$fork-skill"
-                    ? {name: "$new-fork-skill", description: "Run new-fork-skill", input: null}
+                    ? {type: "command", name: "$new-fork-skill", description: "Run new-fork-skill", input: null}
                     : command),
         });
     });
@@ -295,7 +295,7 @@ describe('Session lifecycle over ACP v2', () => {
         await vi.waitFor(() => expect(updates).toHaveLength(1));
         expect(updates[0]!.update).toMatchObject({
             sessionUpdate: "available_commands_update",
-            availableCommands: expect.arrayContaining([{name: "$recovered", description: "Run recovered", input: null}]),
+            availableCommands: expect.arrayContaining([{type: "command", name: "$recovered", description: "Run recovered", input: null}]),
         });
     });
 

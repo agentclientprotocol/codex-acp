@@ -22,8 +22,8 @@
     "sessionId": "thread-1",
     "update": {
       "sessionId": "thread-1:subagent:worker",
-      "capabilities": {
-        "cancel": {}
+      "state": {
+        "state": "running"
       },
       "sessionUpdate": "subagent_update"
     }
@@ -32,8 +32,8 @@
     "sessionId": "thread-1",
     "update": {
       "sessionId": "thread-1:subagent:worker",
-      "state": {
-        "state": "running"
+      "capabilities": {
+        "cancel": {}
       },
       "sessionUpdate": "subagent_update"
     }

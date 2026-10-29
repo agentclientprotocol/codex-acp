@@ -85,7 +85,8 @@
       {
         "name": "plan",
         "description": "Turn plan mode on.",
-        "input": null
+        "input": null,
+        "type": "command"
       },
       {
         "name": "mcp",
@@ -93,17 +94,20 @@
         "input": {
           "hint": "[reconnect]",
           "type": "text"
-        }
+        },
+        "type": "command"
       },
       {
         "name": "skills",
         "description": "List available skills.",
-        "input": null
+        "input": null,
+        "type": "command"
       },
       {
         "name": "status",
         "description": "Display session configuration and token usage.",
-        "input": null
+        "input": null,
+        "type": "command"
       },
       {
         "name": "review",
@@ -111,7 +115,8 @@
         "input": {
           "hint": "optional review instructions",
           "type": "text"
-        }
+        },
+        "type": "command"
       },
       {
         "name": "review-branch",
@@ -119,7 +124,8 @@
         "input": {
           "hint": "branch name",
           "type": "text"
-        }
+        },
+        "type": "command"
       },
       {
         "name": "review-commit",
@@ -127,12 +133,14 @@
         "input": {
           "hint": "commit sha",
           "type": "text"
-        }
+        },
+        "type": "command"
       },
       {
         "name": "compact",
         "description": "Summarize conversation to avoid hitting the context limit.",
-        "input": null
+        "input": null,
+        "type": "command"
       },
       {
         "name": "goal",
@@ -140,7 +148,8 @@
         "input": {
           "hint": "[<objective>|clear|pause|resume]",
           "type": "text"
-        }
+        },
+        "type": "command"
       },
       {
         "name": "rename",
@@ -148,12 +157,14 @@
         "input": {
           "hint": "new name",
           "type": "text"
-        }
+        },
+        "type": "command"
       },
       {
         "name": "logout",
         "description": "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
-        "input": null
+        "input": null,
+        "type": "command"
       }
     ]
   },

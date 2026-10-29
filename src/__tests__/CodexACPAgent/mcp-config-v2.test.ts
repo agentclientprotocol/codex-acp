@@ -8,13 +8,15 @@ import type {AcpMcpServer} from '../../McpServerConfig';
  * Starts a session with the given MCP servers and returns the `mcp_servers` config
  * sent to Codex `thread/start`.
  */
-async function startSessionWithMcpServers(mcpServers: Array<AcpMcpServer> | undefined) {
+async function startSessionWithMcpServers(mcpServers: Array<AcpMcpServer> | undefined, configuredNames: string[] = []) {
     const mockFixture = createCodexMockTestFixture();
     const codexAcpClient = mockFixture.getCodexAcpClient();
     const codexAppServerClient = mockFixture.getCodexAppServerClient();
 
     vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-    vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config: {}, origins: {}, layers: []} as any);
+    vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+        config: {mcp_servers: Object.fromEntries(configuredNames.map(name => [name, {}]))}, origins: {}, layers: [],
+    } as any);
     const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
         thread: {id: "thread-id"} as any,
         model: "gpt-5",
@@ -92,5 +94,11 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
 
         await expect(JSON.stringify(rejections, null, 2))
             .toMatchFileSnapshot("data/mcp-config-unsupported-transports.json");
+    });
+
+    it('rejects an unsupported transport even when its name is already configured', async () => {
+        await expect(startSessionWithMcpServers([
+            {type: "sse", name: "existing", url: "https://example.com/sse", headers: []},
+        ], ["existing"])).rejects.toMatchObject({code: -32602});
     });
 });
