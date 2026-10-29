@@ -1,0 +1,20 @@
+{
+  "result": {
+    "success": true,
+    "contentItems": [
+      {
+        "type": "inputText",
+        "text": "Session title saved as \"Native rename\"."
+      }
+    ]
+  },
+  "updates": [
+    {
+      "sessionId": "thread-1",
+      "update": {
+        "title": "Native rename",
+        "sessionUpdate": "session_info_update"
+      }
+    }
+  ]
+}

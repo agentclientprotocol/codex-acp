@@ -1,6 +1,6 @@
 /**
  * Runs the writes of each session one after another, each through its completion: the automatic title of
- * `TitleGenerator`, and for a `sessionIndex` client `_session/rename`, `_session/archive`,
+ * `TitleGenerator`, explicit title writes, and for a `sessionIndex` client `_session/archive`,
  * `_session/unarchive` and `session/delete`. Codex may apply two requests that are in flight together in
  * either order, so a write starts only after the previous one has finished.
  */

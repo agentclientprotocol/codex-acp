@@ -31,6 +31,7 @@ import {logger} from "./Logger";
 import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
 import {sanitizeMcpServerName} from "./McpServerName";
 import {listedSessionTitle} from "./SessionTitle";
+import {SESSION_TITLE_TOOL} from "./SessionTitleTool";
 import {type AcpMcpServer, type WithAcpMcpServers, getMcpServerName, normalizeMcpServer, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
     AccountLoginCompletedNotification,
@@ -862,6 +863,7 @@ export class CodexAcpClient {
         const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
         const response = await this.codexClient.threadStart({
             config: sessionConfig.config,
+            dynamicTools: [SESSION_TITLE_TOOL],
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
             ...(developerInstructions !== undefined && {developerInstructions}),

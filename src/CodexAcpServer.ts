@@ -83,6 +83,8 @@ import type {
 import type {RateLimitsMap} from "./RateLimitsMap";
 import {ModelId} from "./ModelId";
 import {normalizeSessionTitle} from "./SessionTitle";
+import {sessionTitleArgument, sessionTitleToolResult} from "./SessionTitleTool";
+import {SessionTitleWriteError} from "./SessionIndexTitles";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
 import {
     COLLABORATION_MODE_CONFIG_ID,
@@ -628,6 +630,49 @@ export class CodexAcpServer {
         this.currentAuthStatus = null;
         this.availableCommands = this.createAvailableCommands(codexAcpClient);
         this.recovery = this.createRecovery();
+        this.bindSessionTitleTool(codexAcpClient);
+    }
+
+    private setCodexClient(client: CodexAcpClient): void {
+        this.codexAcpClient = client;
+        this.bindSessionTitleTool(client);
+    }
+
+    private bindSessionTitleTool(client: CodexAcpClient): void {
+        client.appServerClient.onDynamicToolCall(async (params) => {
+            if (params.tool !== "set_thread_title" || params.namespace != null) {
+                return sessionTitleToolResult(false, "Unsupported dynamic tool.");
+            }
+            const title = sessionTitleArgument(params.arguments);
+            if (title === null) return sessionTitleToolResult(false, "Expected exactly one non-empty string property: title.");
+            const state = this.sessions.get(params.threadId);
+            const generation = this.getSessionGeneration(params.threadId);
+            const assertCurrent = () => {
+                if (!state || this.sessions.get(params.threadId) !== state
+                    || this.codexAcpClient !== client || this.sessionIsClosing(params.threadId)
+                    || this.getSessionGeneration(params.threadId) !== generation
+                    || !client.appServerClient.isCurrentToolTurn(params.threadId, params.turnId)) {
+                    throw new Error("The session or turn is no longer current.");
+                }
+            };
+            try {
+                assertCurrent();
+                const saved = await this.sessionIndex.renameTitle(params.threadId, title, {client, assertCurrent});
+                return sessionTitleToolResult(true, `Session title saved as ${JSON.stringify(saved)}.`);
+            } catch (err) {
+                if (err instanceof SessionTitleWriteError) {
+                    switch (err.outcome) {
+                        case "saved":
+                            return sessionTitleToolResult(false, `Session title saved as ${JSON.stringify(err.title)}, but the session changed or the client update failed. Do not retry the rename.`);
+                        case "uncertain":
+                            return sessionTitleToolResult(false, "The rename outcome is uncertain; it may have been saved. Automatic title writes are blocked. Check the saved title before retrying.");
+                        case "rejected":
+                            return sessionTitleToolResult(false, `Session title was not changed: ${err.message}`);
+                    }
+                }
+                return sessionTitleToolResult(false, `Session title was not changed: ${err instanceof Error ? err.message : String(err)}`);
+            }
+        });
     }
 
     private createAvailableCommands(client: CodexAcpClient): CodexCommands {
@@ -2239,7 +2284,7 @@ export class CodexAcpServer {
                 throw new Error("Cannot restart Codex app-server before ACP initialization");
             }
             await replacement.initialize(this.initializeRequest);
-            this.codexAcpClient = replacement;
+            this.setCodexClient(replacement);
             this.sessionIndex.observe(replacement);
             this.availableCommands = this.createAvailableCommands(replacement);
 
@@ -2453,7 +2498,7 @@ export class CodexAcpServer {
     private installCodexClient(client: CodexAcpClient): void {
         // A `providers/set` can have changed the routing of the old client while the restart ran.
         client.adoptRoutingFrom(this.codexAcpClient);
-        this.codexAcpClient = client;
+        this.setCodexClient(client);
         // The session index watches the thread notifications of the app-server that runs now.
         this.sessionIndex.observe(client);
         this.availableCommands = this.createAvailableCommands(client);

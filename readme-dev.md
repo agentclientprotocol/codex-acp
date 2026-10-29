@@ -65,6 +65,29 @@ Run from binaries
 }
 ```
 
+### Native conversation renaming
+
+New sessions expose the eager `set_thread_title({title: "A short title"})` dynamic tool.
+It takes exactly one non-empty string, normalizes whitespace, and applies the existing
+256-code-unit display limit without splitting surrogate pairs. The app-server supplies
+the current thread and turn; the tool cannot select another thread. It needs no AIR
+capability or MCP service. Successful calls persist through `thread/name/set` and send
+an ACP `session_info_update` for both protocol versions.
+
+Registration uses the experimental `thread/start.dynamicTools` field, verified with bundled
+Codex 0.165.0. Threads keep the tool after resume. Threads created without it do not gain it
+when loaded; start a new thread or use `/rename`.
+
+Explicit renames share the automatic-title write queue. A rejected write lets automatic
+titles continue. An uncertain or saved-but-not-delivered write keeps them blocked, and the
+tool result says so; check the saved title before retrying.
+
+Check it with:
+
+```bash
+npm run codex-test -- -p 'Call set_thread_title with title "Native rename verification". Do not use any other tool.'
+```
+
 ### Build binaries
 
 Building standalone binaries requires [bun](https://bun.com/docs/installation).
