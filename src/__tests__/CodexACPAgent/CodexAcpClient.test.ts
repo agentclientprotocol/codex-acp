@@ -3882,7 +3882,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
 
         await codexAcpAgent.authenticate({methodId: "api-key"});
 
-        expect(authenticateSpy).toHaveBeenCalledWith({methodId: "api-key"}, undefined);
+        expect(authenticateSpy).toHaveBeenCalledWith({methodId: "api-key"}, undefined, undefined);
         expect(getAccountSpy).toHaveBeenCalledTimes(4);
         expect(codexAcpAgent.getSessionState(session1.sessionId)).toMatchObject({
             account: { type: "apiKey" },
@@ -3938,7 +3938,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         };
         await codexAcpAgent.authenticate(gatewayAuthRequest);
 
-        expect(authenticateSpy).toHaveBeenCalledWith(gatewayAuthRequest, undefined);
+        expect(authenticateSpy).toHaveBeenCalledWith(gatewayAuthRequest, undefined, undefined);
         expect(getAccountSpy).toHaveBeenCalledTimes(1);
         expect(codexAcpAgent.getSessionState(session.sessionId)).toMatchObject({
             account: { type: "apiKey" },
