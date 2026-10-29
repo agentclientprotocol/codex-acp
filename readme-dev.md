@@ -14,6 +14,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `APP_SERVER_LOGS` - directory for adapter logs.
 - `CODEX_ACP_APP_SERVER_CRASH_LIMIT` - how many crashes of the Codex app-server in the crash window stop its automatic restart (default `5`).
 - `CODEX_ACP_APP_SERVER_CRASH_WINDOW_MS` - the crash window in milliseconds (default `300000`, 5 minutes).
+- `CODEX_ACP_PROMPT_SUGGESTIONS` - set to `false` to turn off the predicted follow-up prompt for AIR. It costs one extra model call per turn.
 
 ### Quick start
 

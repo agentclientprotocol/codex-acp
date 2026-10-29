@@ -28,6 +28,7 @@ It describes only this adapter.
 - [Context compaction](#context-compaction)
 - [Session fork point](#session-fork-point)
 - [Presentation hints](#presentation-hints)
+- [Predicted follow-up prompt](#predicted-follow-up-prompt)
 - [Removed keys](#removed-keys)
 
 ## Purpose and scope
@@ -1414,6 +1415,23 @@ The adapter sends these keys only to AIR:
 - A `$skill` command carries `_meta.jetbrains.air.skillPath`, the absolute path of its `SKILL.md` from `skills/list`.
   The path is an OS-native absolute path, such as `C:\repo\SKILL.md` on Windows. It is not a URI.
   AIR opens this file on a click on the skill chip.
+
+## Predicted follow-up prompt
+
+After a turn ends normally, the adapter sends AIR the prompt the user is most likely to send next:
+
+```json
+{"sessionUpdate": "session_info_update", "_meta": {"promptSuggestions": {"suggestions": [{"text": "Run the tests"}]}}}
+```
+
+- The key is `_meta.promptSuggestions` on the session info update, not under `jetbrains.air`. Only AIR gets it.
+- AIR shows the first non-blank `suggestions[].text` as gray text in an empty composer. Tab fills the composer without sending.
+- `suggestions: []` clears the prompt the client holds. The adapter sends it when a new prompt starts and when the new prediction is empty.
+  The adapter does not repeat a value it already sent.
+- Codex does not predict prompts, so the adapter asks a cheap model on an ephemeral thread, one extra call per turn.
+  The prediction arrives after the prompt response. A prompt that starts first drops it.
+- A turn that is cancelled or fails produces no prediction.
+- `CODEX_ACP_PROMPT_SUGGESTIONS=false` turns the feature off.
 
 ## Removed keys
 
