@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.5.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.4.0...v2.5.0) (2026-10-29)
+
+
+### Features
+
+* publish a predicted follow-up prompt as _meta.promptSuggestions ([#703](https://github.com/agentclientprotocol/codex-acp/issues/703)) ([87569c5](https://github.com/agentclientprotocol/codex-acp/commit/87569c5a9e095ee99acf83d0d7062c9835f2d176))
+
+
+### Bug Fixes
+
+* update ACP SDK to 2.1 and align protocol behavior ([#704](https://github.com/agentclientprotocol/codex-acp/issues/704)) ([597a037](https://github.com/agentclientprotocol/codex-acp/commit/597a03767ebd3356825284efae8746e84b1dd1bd))
+
 ## [2.4.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.3.0...v2.4.0) (2026-10-29)
 
 
