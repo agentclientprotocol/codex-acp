@@ -123,4 +123,26 @@ describe("CodexEventHandler - agent message events", () => {
             "data/agent-message-file-citations.json"
         );
     });
+
+    it("sends an agent message that arrives whole, without deltas", async () => {
+        const item = {
+            type: "agentMessage" as const,
+            id: "call-question",
+            text: "Which environment? See :codex-file-citation{path=\"docs/envs.md\"}\n- Staging\n- Production",
+            phase: "final_answer" as const,
+            memoryCitation: null,
+            delivery: "async" as const,
+            questions: [{title: "Which environment? See :codex-file-citation{path=\"docs/envs.md\"}", options: ["Staging", "Production"]}],
+        };
+        const notifications: ServerNotification[] = [
+            {method: "item/started", params: {threadId: sessionId, turnId: "turn-1", startedAtMs: 0, item}},
+            {method: "item/completed", params: {threadId: sessionId, turnId: "turn-1", completedAtMs: 0, item}},
+        ];
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+            "data/agent-message-without-deltas.json"
+        );
+    });
 });
