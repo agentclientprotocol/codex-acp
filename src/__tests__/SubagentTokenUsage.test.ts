@@ -84,6 +84,20 @@ describe("SubagentTokenUsage", () => {
         ]);
     });
 
+    it("counts a child that Codex announces only by its activity item, as Codex 0.165 does", () => {
+        const rows = prompt(new SubagentTokenUsage(ROOT), [
+            activity("a", "gpt-5.6-luna"),
+            output("a"),
+            usage("a", breakdown(16511, 0, 50)),
+            usage("a", breakdown(33057, 16000, 120), breakdown(16546, 16000, 70)),
+        ], count(50621));
+
+        expect(rows).toEqual([
+            {model: "gpt-5.6-sol", token_count: count(50621)},
+            {model: "gpt-5.6-luna", token_count: count(33057, 16000, 120)},
+        ]);
+    });
+
     it("leaves out the history of a forked child or one whose start is unknown", () => {
         const rows = prompt(new SubagentTokenUsage(ROOT), [
             threadStarted("forked", ROOT, "gpt-5.6-luna", "source"),

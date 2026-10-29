@@ -33,6 +33,9 @@ type ChildThread = {
  * It reads the notifications as the app-server sends them, before the session routes them: a client without
  * subagent sessions gets the notifications of a child attributed to the root thread. A child that is still working
  * when a prompt ends adds its later usage to the next prompt that starts model work.
+ *
+ * Codex 0.165 sends no `thread/started` for a subagent: the tracker then learns the child from its `subAgentActivity`
+ * item and its own notifications, with an unknown start, so the usage of a child counts from its first model output.
  */
 export class SubagentTokenUsage {
     private readonly threads = new Map<string, ChildThread>();
