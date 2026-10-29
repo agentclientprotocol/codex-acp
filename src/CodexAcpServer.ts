@@ -156,8 +156,8 @@ import {
 } from "./FastModeConfig";
 import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
-import {clientSupportsNotices, createSessionNotice} from "./SessionNotice";
-import {AsyncQuestionElicitations, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
+import {clientSupportsNotices} from "./SessionNotice";
+import {AsyncQuestionClient, AsyncQuestionElicitations, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
 import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
@@ -5404,33 +5404,9 @@ export class CodexAcpServer {
         const sessionId = sessionState.sessionId;
         let questions = this.asyncQuestions.get(sessionId);
         if (questions === undefined) {
-            questions = new AsyncQuestionElicitations(sessionId, this.clientCapabilities, {
-                createElicitation: (request, signal) => {
-                    const v2 = AcpV2Connection.of(this.connection);
-                    return v2 !== null
-                        ? v2.createElicitation(request, {cancellationSignal: signal}, {userAction: false})
-                        : this.connection.request(acp.methods.client.elicitation.create, request, {cancellationSignal: signal});
-                },
-                steer: async (turnId, text) => {
-                    await this.runWithProcessCheck(() => this.codexAcpClient.steerTurn({
-                        threadId: sessionId,
-                        turnId,
-                        prompt: [{type: "text", text}],
-                        clientUserMessageId: randomUUID(),
-                    }));
-                },
-                reportDroppedAnswer: async () => {
-                    if (!clientSupportsNotices(this.clientCapabilities)) return;
-                    await this.connection.notify(acp.methods.client.session.update, {
-                        sessionId,
-                        update: createSessionNotice(
-                            "warning",
-                            "Answer not sent",
-                            "Codex finished before your answer arrived. Send it as a new message if it still matters.",
-                        ),
-                    });
-                },
-            });
+            questions = new AsyncQuestionElicitations(sessionId, this.clientCapabilities, new AsyncQuestionClient(
+                sessionId, this.connection, this.clientCapabilities, () => this.codexAcpClient,
+            ));
             this.asyncQuestions.set(sessionId, questions);
         }
         return questions;

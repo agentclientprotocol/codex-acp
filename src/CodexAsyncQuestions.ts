@@ -15,11 +15,15 @@
  * `codex-rs/tui/src/async_question_reply.rs`.
  */
 import * as acp from "@agentclientprotocol/sdk/unstable";
+import {randomUUID} from "node:crypto";
+import {type AcpClientConnection, AcpV2Connection} from "./ACPSessionConnection";
 import type {ServerNotification} from "./app-server";
 import type {ThreadItem, ToolRequestUserInputQuestion} from "./app-server/v2";
 import {buildUserInputSchema, userInputAnswers, userInputAnswerText} from "./CodexElicitationHandler";
+import type {CodexAcpClient} from "./CodexAcpClient";
 import {clientSupportsFormElicitation} from "./ElicitationCapabilities";
 import {logger} from "./Logger";
+import {clientSupportsNotices, createSessionNotice} from "./SessionNotice";
 
 const TOOL_NAME = "request_user_input_async";
 const REPLY_START = "<send_user_message_question_reply>";
@@ -86,14 +90,52 @@ function isReply(value: unknown): value is AsyncQuestionReply {
         && typeof reply["answer"] === "string";
 }
 
-export type AsyncQuestionClient = {
+/** Reaches the ACP client and Codex on behalf of the async questions of one session. */
+export class AsyncQuestionClient {
+    /**
+     * @param sessionId The session that the questions belong to.
+     * @param connection The connection to the ACP client.
+     * @param clientCapabilities The capabilities that the ACP client declared.
+     * @param codexAcpClient Returns the current Codex client, which changes when the app-server restarts.
+     */
+    constructor(
+        private readonly sessionId: string,
+        private readonly connection: AcpClientConnection,
+        private readonly clientCapabilities: acp.ClientCapabilities | null,
+        private readonly codexAcpClient: () => CodexAcpClient,
+    ) {}
+
     /** Sends the elicitation without marking the session as waiting for the user. */
-    createElicitation(request: acp.CreateElicitationRequest, signal: AbortSignal): Promise<acp.CreateElicitationResponse>;
+    createElicitation(request: acp.CreateElicitationRequest, signal: AbortSignal): Promise<acp.CreateElicitationResponse> {
+        const v2 = AcpV2Connection.of(this.connection);
+        return v2 !== null
+            ? v2.createElicitation(request, {cancellationSignal: signal}, {userAction: false})
+            : this.connection.request(acp.methods.client.elicitation.create, request, {cancellationSignal: signal});
+    }
+
     /** Steers the text into the turn; rejects if that turn is no longer running. */
-    steer(turnId: string, text: string): Promise<void>;
-    /** Tells the user that an answer was not sent. */
-    reportDroppedAnswer(): Promise<void>;
-};
+    async steer(turnId: string, text: string): Promise<void> {
+        await this.codexAcpClient().steerTurn({
+            threadId: this.sessionId,
+            turnId,
+            prompt: [{type: "text", text}],
+            clientUserMessageId: randomUUID(),
+        });
+    }
+
+    /** Tells the user that an answer was not sent, if the client supports notices. */
+    async reportDroppedAnswer(): Promise<void> {
+        if (!clientSupportsNotices(this.clientCapabilities)) return;
+        await this.connection.notify(acp.methods.client.session.update, {
+            sessionId: this.sessionId,
+            update: createSessionNotice(
+                "warning",
+                "Answer not sent",
+                "Codex finished before your answer arrived. Send it as a new message if it still matters.",
+            ),
+        });
+    }
+}
 
 /** Shows the async questions of one session as elicitations, for as long as the turn that asked them runs. */
 export class AsyncQuestionElicitations {

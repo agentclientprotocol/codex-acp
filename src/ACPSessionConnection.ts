@@ -139,14 +139,22 @@ export class AcpV2Connection {
     }
 
     /**
-     * Request-scoped login elicitations and idle background elicitations never change state. Neither does one
-     * sent with `userAction: false`, which the agent keeps working through instead of waiting for.
+     * Sends `elicitation/create`. Request-scoped login elicitations and idle background elicitations never change
+     * the session state.
+     *
+     * @param request The elicitation to show.
+     * @param options Request options, such as the signal that cancels the request.
+     * @param interaction.userAction Whether the agent waits for the answer, `true` by default. While such an
+     *     elicitation is open in a running turn, the session reports `requires_action` whenever none of its items
+     *     is in progress. Pass `false` for a question the agent keeps working through, so the session state is left
+     *     as it is.
      */
     async createElicitation(
         request: acp.CreateElicitationRequest,
         options?: acp.SendRequestOptions,
-        {userAction = true}: {userAction?: boolean} = {},
+        interaction: {userAction?: boolean} = {},
     ): Promise<acp.CreateElicitationResponse> {
+        const userAction = interaction.userAction ?? true;
         const sendRequest = async () => {
             const response = await this.client.request(
                 acpV2.methods.client.elicitation.create,
