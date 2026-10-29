@@ -245,7 +245,7 @@ The adapter keeps them where they are.
 | `is_mcp_tool_call` | tool call `_meta.is_mcp_tool_call: true` | The tool call is an MCP tool call. |
 | `is_mcp_tool_approval` | `session/request_permission` request `_meta.is_mcp_tool_approval: true` | The permission request approves an MCP tool call. |
 | `steering` | `initialize` response `_meta.steering = {supported: true}` | The agent accepts `_session/steering` for a running turn; see [session steering](steering.md). |
-| `quota` | `PromptResponse._meta.quota` | Token usage of the whole turn, the same counts as `PromptResponse.usage`: `token_count` and one `model_usage` entry for the current model, or `null` and `[]` when Codex reported no usage for the prompt, as for a prompt that started no turn. |
+| `quota` | `PromptResponse._meta.quota` | Token usage of the whole turn. `token_count` is the usage of the session thread, the same counts as `PromptResponse.usage`. `model_usage` has one entry per model: the session thread under the current model, plus the subagents of the turn under their own models, so its entries can total more than `token_count`. A subagent that works on after the turn ends counts in the next turn. It is `null` and `[]` when Codex reported no usage for the prompt, as for a prompt that started no turn. |
 | `authStatus` | `initialize` response `agentCapabilities._meta.authStatus` | The agent pushes `_auth/status_update`. The object carries no payload. |
 
 ## Auth source display

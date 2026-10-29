@@ -1378,7 +1378,7 @@ const NON_MODEL_OUTPUT_ITEM_TYPES: ReadonlySet<ThreadItem["type"]> = new Set([
     "contextCompaction",
 ]);
 
-function isModelOutputItem(item: ThreadItem): boolean {
+export function isModelOutputItem(item: ThreadItem): boolean {
     return !NON_MODEL_OUTPUT_ITEM_TYPES.has(item.type);
 }
 
