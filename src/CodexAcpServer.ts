@@ -5269,9 +5269,7 @@ export class CodexAcpServer {
             sessionState.titleGen?.onTurnCompleted(promptText);
 
             // Same fire-and-forget rule: a predicted follow-up comes after the answer, never before it.
-            if (eventHandler) {
-                sessionState.promptSuggestions?.onTurnCompleted(promptText, eventHandler.getLastAgentMessageText());
-            }
+            sessionState.promptSuggestions?.onTurnCompleted(promptText, eventHandler.getLastAgentMessageText());
 
             // On v2, a prompt whose user message was never recorded (`pendingInsertion` still set)
             // never happened from the client's view, so it must not leave a title behind either.

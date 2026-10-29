@@ -3,7 +3,6 @@ import {
     connectSession,
     createTurn,
     itemCompleted,
-    sessionId,
     settle,
     titleThreadId,
     turnCompleted,
