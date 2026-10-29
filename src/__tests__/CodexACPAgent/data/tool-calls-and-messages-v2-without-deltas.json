@@ -1,0 +1,10 @@
+[
+  {
+    "messageId": "call-question",
+    "content": {
+      "text": "Which environment?\n- Staging\n- Production",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_message_chunk"
+  }
+]

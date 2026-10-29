@@ -40,7 +40,7 @@ import {commandUsesTerminal} from "./tool-calls/reporters/CommandReporter";
 import {CompactionReporter} from "./tool-calls/reporters/CompactionReporter";
 import {DynamicToolReporter} from "./tool-calls/reporters/DynamicToolReporter";
 import {FileChangeReporter} from "./tool-calls/reporters/FileChangeReporter";
-import {FileCitationStream} from "./CodexFileCitations";
+import {FileCitationStream, renderFileCitations} from "./CodexFileCitations";
 import {CodexItemStreamState} from "./CodexItemStreamState";
 import {PLAIN_TOOL_CALL_ITEM_TYPES} from "./CodexSessionToolCalls";
 import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationReporter";
@@ -804,12 +804,16 @@ export class CodexEventHandler {
         return this.createAgentMessageText(citations.push(event.delta), event.itemId, event.threadId);
     }
 
-    /** Sends the text a file citation held back, once the message is complete. */
-    private flushAgentMessageText(itemId: string, threadId: string): UpdateSessionEvent | null {
+    /**
+     * Sends the text a file citation held back, once the message is complete. A message that
+     * arrives whole, without deltas (an async question, for one), is sent in full.
+     */
+    private flushAgentMessageText(item: ThreadItem & { type: "agentMessage" }, threadId: string): UpdateSessionEvent | null {
         const streams = this.streamsFor(threadId);
-        const rest = streams.agentMessageCitations.get(itemId)?.flush() ?? "";
-        streams.agentMessageCitations.delete(itemId);
-        return this.createAgentMessageText(rest, itemId, threadId);
+        const citations = streams.agentMessageCitations.get(item.id);
+        streams.agentMessageCitations.delete(item.id);
+        const text = citations ? citations.flush() : renderFileCitations(item.text, this.sessionState.cwd);
+        return this.createAgentMessageText(text, item.id, threadId);
     }
 
     private createAgentMessageText(text: string, itemId: string, threadId: string): UpdateSessionEvent | null {
@@ -976,7 +980,7 @@ export class CodexEventHandler {
                 return this.renderer.render(this.subagents.legacyCollaborationCompleted(event.item));
             case "agentMessage":
                 this.rememberAgentMessagePhase(event.item, event.threadId);
-                return this.flushAgentMessageText(event.item.id, event.threadId);
+                return this.flushAgentMessageText(event.item, event.threadId);
             case "plan":
                 return await this.createCompletedPlanEvent(event.item);
             case "exitedReviewMode":

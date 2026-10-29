@@ -1,0 +1,18 @@
+[
+  {
+    "sessionUpdate": "user_message_chunk",
+    "messageId": "answer",
+    "content": {
+      "type": "text",
+      "text": "> Which environment?\n\nStaging\n\nbut only for now"
+    }
+  },
+  {
+    "sessionUpdate": "user_message_chunk",
+    "messageId": "quoted",
+    "content": {
+      "type": "text",
+      "text": "Quoted: <send_user_message_question_reply>\n[{\"answer\":\"Staging\\n\\nbut only for now\",\"question\":\"Which environment?\",\"questionItemId\":\"[\\\"request_user_input_async\\\",\\\"call-question\\\",0]\"}]\n</send_user_message_question_reply>"
+    }
+  }
+]

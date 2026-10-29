@@ -130,6 +130,28 @@ describe('tool calls and messages over ACP v2', () => {
             .toMatchFileSnapshot('data/tool-calls-and-messages-v2-file-citations.json');
     });
 
+    it('sends an agent message that arrives whole, without deltas', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        await startTurn(client);
+
+        const item: ThreadItem = {
+            type: "agentMessage",
+            id: "call-question",
+            text: "Which environment?\n- Staging\n- Production",
+            phase: "final_answer",
+            memoryCitation: null,
+            delivery: "async",
+            questions: [{title: "Which environment?", options: ["Staging", "Production"]}],
+        };
+        client.emit(itemStarted(item));
+        client.emit(itemCompleted(item));
+        await finishTurn(client);
+
+        await expect(dump(updatesTagged(client, "agent_message_chunk")))
+            .toMatchFileSnapshot('data/tool-calls-and-messages-v2-without-deltas.json');
+    });
+
     it('sends a tool call create as a tool_call_update upsert and passes later updates through', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
