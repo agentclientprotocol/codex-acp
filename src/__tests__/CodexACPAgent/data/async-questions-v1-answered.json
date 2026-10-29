@@ -1,0 +1,80 @@
+{
+  "elicitationRequests": [
+    {
+      "sessionId": "thread-1",
+      "requestedSchema": {
+        "type": "object",
+        "properties": {
+          "question_0": {
+            "title": "Which environment?",
+            "oneOf": [
+              {
+                "const": "Staging",
+                "title": "Staging"
+              },
+              {
+                "const": "Production",
+                "title": "Production"
+              },
+              {
+                "const": "None of the above",
+                "title": "None of the above",
+                "description": "Provide a different answer in the note field."
+              }
+            ],
+            "_meta": {
+              "codex": {
+                "isOther": true,
+                "isSecret": false
+              }
+            },
+            "type": "string"
+          },
+          "question_0_note": {
+            "title": "Additional answer or note",
+            "_meta": {
+              "codex": {
+                "questionId": "question_0",
+                "role": "user_note",
+                "isSecret": false
+              }
+            },
+            "type": "string"
+          },
+          "question_1": {
+            "title": "Anything else?",
+            "_meta": {
+              "codex": {
+                "isOther": false,
+                "isSecret": false
+              }
+            },
+            "type": "string"
+          }
+        }
+      },
+      "mode": "form",
+      "message": "Codex keeps working while you answer. An answer sent after it finishes is not delivered.",
+      "_meta": {
+        "codex": {
+          "delivery": "async"
+        }
+      }
+    }
+  ],
+  "steers": [
+    {
+      "threadId": "thread-1",
+      "expectedTurnId": "turn-1",
+      "input": [
+        {
+          "type": "text",
+          "text": "<send_user_message_question_reply>\n[{\"answer\":\"Staging\\n\\nbut only for now\",\"question\":\"Which environment?\",\"questionItemId\":\"[\\\"request_user_input_async\\\",\\\"call-question\\\",0]\"},{\"answer\":\"Use the new API\",\"question\":\"Anything else?\",\"questionItemId\":\"[\\\"request_user_input_async\\\",\\\"call-question\\\",1]\"}]\n</send_user_message_question_reply>",
+          "text_elements": []
+        }
+      ],
+      "clientUserMessageId": "<id>"
+    }
+  ],
+  "notices": []
+}

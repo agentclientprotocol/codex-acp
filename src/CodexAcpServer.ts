@@ -156,7 +156,8 @@ import {
 } from "./FastModeConfig";
 import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
-import {clientSupportsNotices} from "./SessionNotice";
+import {clientSupportsNotices, createSessionNotice} from "./SessionNotice";
+import {AsyncQuestionElicitations, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
 import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
@@ -520,6 +521,8 @@ export class CodexAcpServer {
     /** Tail of the per-session turn-start FIFO; see `acquireTurnStartReservation`. */
     private readonly turnStartQueueTail: Map<string, {promise: Promise<void>; settled: boolean}>;
     private readonly steeringQueues: Map<string, SteeringQueue>;
+    /** The async questions of each session, shown while the turn that asked them runs. */
+    private readonly asyncQuestions = new Map<string, AsyncQuestionElicitations>();
     /**
      * Steers awaiting their `userMessage` landing, keyed by the minted `clientUserMessageId`
      * passed to `turn/steer`. Used only to show a v2 live `user_message` when a steer injected
@@ -2016,6 +2019,8 @@ export class CodexAcpServer {
         } finally {
             if (this.getSessionGeneration(params.sessionId) === closeGeneration) {
                 this.sessions.delete(params.sessionId);
+                this.asyncQuestions.get(params.sessionId)?.dispose();
+                this.asyncQuestions.delete(params.sessionId);
                 if (!this.v2PromptsInFlight.has(params.sessionId)) {
                     AcpV2Connection.of(this.connection)?.forgetSession(params.sessionId);
                 }
@@ -4040,9 +4045,12 @@ export class CodexAcpServer {
 
     private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
         switch (input.type) {
-            case "text":
+            case "text": {
+                const asyncQuestionReply = renderAsyncQuestionReply(input.text);
+                if (asyncQuestionReply !== null) return [{type: "text", text: asyncQuestionReply}];
                 return desktopAttachmentHistory(input.text)
                     ?? (input.text.length > 0 ? [{ type: "text", text: input.text }] : []);
+            }
             case "image":
                 return [{
                     type: "text",
@@ -4867,6 +4875,7 @@ export class CodexAcpServer {
                     await observeInteraction(event);
                     if (!promptNotificationsActive) {
                         await promptEventHandler.handleSessionScopedNotification(event);
+                        this.asyncQuestionsFor(sessionState).handleNotification(event);
                         await this.trackCodexTurnCompletion(sessionState, event, promptEventHandler);
                         return;
                     }
@@ -4874,6 +4883,8 @@ export class CodexAcpServer {
                         && event.params.threadId === sessionState.sessionId
                         && event.params.turn.id === sessionState.currentTurnId;
                     await promptEventHandler.handleNotification(event);
+                    // After the question text is shown.
+                    this.asyncQuestionsFor(sessionState).handleNotification(event);
                     if (completesActiveTurn) {
                         // The prompt may remain open for plan approval after its turn has ended. Switch at
                         // the causal boundary so a queued late error cannot enter the completed turn's buffer.
@@ -5388,6 +5399,43 @@ export class CodexAcpServer {
         throw this.recovery.errorForGeneration(generation);
     }
 
+    /** The async questions of a session, created on first use. */
+    private asyncQuestionsFor(sessionState: SessionState): AsyncQuestionElicitations {
+        const sessionId = sessionState.sessionId;
+        let questions = this.asyncQuestions.get(sessionId);
+        if (questions === undefined) {
+            questions = new AsyncQuestionElicitations(sessionId, this.clientCapabilities, {
+                createElicitation: (request, signal) => {
+                    const v2 = AcpV2Connection.of(this.connection);
+                    return v2 !== null
+                        ? v2.createElicitation(request, {cancellationSignal: signal}, {userAction: false})
+                        : this.connection.request(acp.methods.client.elicitation.create, request, {cancellationSignal: signal});
+                },
+                steer: async (turnId, text) => {
+                    await this.runWithProcessCheck(() => this.codexAcpClient.steerTurn({
+                        threadId: sessionId,
+                        turnId,
+                        prompt: [{type: "text", text}],
+                        clientUserMessageId: randomUUID(),
+                    }));
+                },
+                reportDroppedAnswer: async () => {
+                    if (!clientSupportsNotices(this.clientCapabilities)) return;
+                    await this.connection.notify(acp.methods.client.session.update, {
+                        sessionId,
+                        update: createSessionNotice(
+                            "warning",
+                            "Answer not sent",
+                            "Codex finished before your answer arrived. Send it as a new message if it still matters.",
+                        ),
+                    });
+                },
+            });
+            this.asyncQuestions.set(sessionId, questions);
+        }
+        return questions;
+    }
+
     /**
      * Ends what a prompt showed as running when its app-server died: open tool calls of the session and of its native
      * subagent sessions, the subagent sessions themselves and compactions. Nothing will ever complete them.
@@ -5400,6 +5448,7 @@ export class CodexAcpServer {
         state: "failed" | "cancelled",
     ): Promise<void> {
         try {
+            this.asyncQuestions.get(sessionState.sessionId)?.dispose();
             await elicitations?.completeAllUrlElicitations();
             const sessionIds = new Set([sessionState.sessionId, ...sessionState.subagents.childSessionIds()]);
             await this.failUnfinishedToolCalls(sessionIds);

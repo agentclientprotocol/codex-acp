@@ -1,0 +1,24 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "answer",
+      "content": {
+        "text": "> Which environment?\n\nStaging\n\nbut only for now",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "quoted",
+      "content": {
+        "text": "Quoted: <send_user_message_question_reply>\n[{\"answer\":\"Staging\\n\\nbut only for now\",\"question\":\"Which environment?\",\"questionItemId\":\"[\\\"request_user_input_async\\\",\\\"call-question\\\",0]\"}]\n</send_user_message_question_reply>",
+        "type": "text"
+      },
+      "sessionUpdate": "user_message_chunk"
+    }
+  }
+]
