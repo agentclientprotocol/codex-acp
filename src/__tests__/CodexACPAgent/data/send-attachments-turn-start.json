@@ -1,5 +1,16 @@
 {
   "eventType": "request",
+  "method": "config/read",
+  "params": {
+    "includeLayers": false,
+    "cwd": "cwd"
+  }
+}
+{
+  "eventType": "response"
+}
+{
+  "eventType": "request",
   "method": "turn/start",
   "params": {
     "threadId": "threadId",
