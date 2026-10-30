@@ -56,6 +56,7 @@ import {
 } from "./ContentChunks";
 import {goalSessionInfoUpdate, sameThreadGoalSnapshot, toThreadGoalSnapshot} from "./ThreadGoalSnapshot";
 import {logger} from "./Logger";
+import {recordOrNull} from "./permissions/json";
 import {
     AIR_EXTENSION_VERSION,
     AIR_EXTENSION_VERSION_KEY,
@@ -372,7 +373,17 @@ export class CodexEventHandler {
     }
 
     async clearSessionFailure(): Promise<void> {
+        const failure = this.sessionState.sessionFailure;
         delete this.sessionState.sessionFailure;
+        if (!failure || this.session.protocolVersion !== 2) return;
+        await this.session.patchSessionMetadata(metadata => {
+            const jetbrains = recordOrNull(metadata[JETBRAINS_META_KEY]);
+            const air = recordOrNull(jetbrains?.[AIR_META_KEY]);
+            const published = recordOrNull(air?.[AIR_SESSION_FAILURE_KEY]);
+            if (!air || published?.["id"] !== failure.id || published?.["revision"] !== failure.revision) return null;
+            const {[AIR_SESSION_FAILURE_KEY]: _failure, ...currentAir} = air;
+            return {[JETBRAINS_META_KEY]: {...jetbrains, [AIR_META_KEY]: currentAir}};
+        });
     }
 
     async completeSuccessfulTurn(turnId: string | null): Promise<void> {
@@ -381,7 +392,7 @@ export class CodexEventHandler {
         const active = this.sessionState.sessionFailure;
         if (active?.id !== this.activeFailureIdByScope.get(turnId) || active?.severity !== "warning") return;
         this.activeFailureIdByScope.delete(turnId);
-        delete this.sessionState.sessionFailure;
+        await this.clearSessionFailure();
     }
 
     async handleFailedTurn(turn: Turn): Promise<void> {
@@ -1199,7 +1210,7 @@ export class CodexEventHandler {
         if (activeId === undefined || this.failuresById.get(activeId)?.severity !== "warning") return;
         this.activeFailureIdByScope.delete(turnId);
         if (this.sessionState.sessionFailure?.id === activeId) {
-            delete this.sessionState.sessionFailure;
+            void this.clearSessionFailure().catch(error => logger.error("Failed to clear session failure metadata", error));
         }
     }
 

@@ -1407,7 +1407,7 @@ export class CodexAcpServer {
             this.sessionIndex.titleWriter(sessionId),
         );
         sessionState.promptSuggestions = this.createPromptSuggestions(sessionState);
-        this.installSessionState(sessionState);
+        this.installSessionState(sessionState, sessionMetadata.threadStatus);
         AcpV2Connection.of(this.connection)?.restoreForegroundState(sessionId, sessionMetadata.threadStatus?.type === "active");
         this.recovery?.markLoaded(sessionState, openGeneration);
         if (settleTrackerReady) {
@@ -1593,13 +1593,24 @@ export class CodexAcpServer {
         );
     }
 
-    private installSessionState(sessionState: SessionState): void {
+    private installSessionState(sessionState: SessionState, threadStatus?: SessionMetadata["threadStatus"]): void {
         const previous = this.sessions.get(sessionState.sessionId);
         previous?.asyncTasks.clear();
         // The new state holds no suggestion, so the old one must drop its result in flight and clear what it published.
         void previous?.promptSuggestions?.clear();
         this.sessions.set(sessionState.sessionId, sessionState);
         this.clientDelivery.openSession(sessionState.sessionId);
+        const v2 = AcpV2Connection.of(this.connection);
+        if (v2) {
+            const metadata = threadStatus ? {codex: {threadStatus}} : null;
+            // Seeding is queued before new live events; metadata belongs to the active session lifetime.
+            if (previous) {
+                if (previous.sessionFailure) sessionState.sessionFailure = previous.sessionFailure;
+                void v2.refreshSessionInfo(sessionState.sessionId, metadata);
+            } else {
+                v2.resetSessionInfo(sessionState.sessionId, metadata);
+            }
+        }
     }
 
     /**
@@ -1962,10 +1973,7 @@ export class CodexAcpServer {
         // Drain live events released by setup/replay before taking the ordered snapshot.
         await this.codexAcpClient.waitForSessionNotifications(sessionId);
         const state = this.getSessionState(sessionId);
-        await new ACPSessionConnection(this.connection, sessionId).update({
-            sessionUpdate: "session_info_update",
-            title: state.sessionTitle,
-        });
+        await AcpV2Connection.of(this.connection)!.snapshotSessionInfo(sessionId, state.sessionTitle);
         await AcpV2Connection.of(this.connection)!.snapshotForegroundState(sessionId);
     }
 
@@ -3567,7 +3575,7 @@ export class CodexAcpServer {
             this.sessionIndex.titleWriter(sessionId),
         );
         sessionState.promptSuggestions = this.createPromptSuggestions(sessionState);
-        this.installSessionState(sessionState);
+        this.installSessionState(sessionState, thread.status);
         AcpV2Connection.of(this.connection)?.restoreForegroundState(sessionId, thread.status.type === "active");
         this.recovery?.markLoaded(sessionState, openGeneration);
         if (knownAccount === "pending") {
