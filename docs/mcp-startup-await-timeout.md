@@ -31,7 +31,7 @@ startup state (`ready`, `failed`, or `cancelled`) before the request completes.
 
 | Value              | Behavior                                                                                                                              |
 |--------------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| `<= 0` or ommitted | Do not wait. The request completes immediately once the session is created, before any requested MCP server reaches a terminal state. |
+| `<= 0` or omitted | Do not wait for the requested MCP servers to reach a terminal state. |
 | `> 0`              | Wait up to that many milliseconds for a terminal state. If the timeout elapses first, the request completes without waiting further.  |
 
 There is no built-in default timeout: an omitted field means do not wait
@@ -53,6 +53,9 @@ Each report is a `session/update` with a new `tool_call` in the `failed` status 
 A server that starts successfully gets no report. When a server fails because it needs authentication and the client
 supports URL elicitation, the adapter first starts the MCP OAuth sign-in. It reports the server only if the sign-in fails.
 The `session/new`, `session/resume`, and `session/load` sessions get these reports. The `session/fork` sessions do not.
+
+On ACP connections, reports and OAuth sign-in for a newly created session wait until its `session/new` response
+has been written. The optional startup wait does not wait for the sign-in.
 
 To see the live status of every MCP server, send the `/mcp` command. `/mcp reconnect` reloads the MCP configuration and
 restarts the servers that failed, stopped, or changed.

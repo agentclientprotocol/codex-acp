@@ -489,6 +489,7 @@ export class CodexAcpServer {
     private readonly connection: AcpClientConnection;
     private readonly mcpServerSignIn: McpServerSignIn;
     private readonly clientDelivery: AcpClientDelivery;
+    private setupResponseOrdering = false;
     /** ACP protocol version of the connection this agent serves, fixed by the protocol router. */
     readonly protocolVersion: 1 | 2;
     /** The v2 client handle; `null` on a v1 connection. */
@@ -623,6 +624,7 @@ export class CodexAcpServer {
             this.mcpServerSignIn,
             () => this.capabilities,
             (sessionId) => this.sessions.has(sessionId) && !this.sessionIsClosing(sessionId),
+            (sessionId, signal) => this.clientDelivery.waitForSessionSetup(sessionId, signal),
         );
         this.defaultAuthRequest = defaultAuthRequest ?? null;
         this.codexProcessState = codexProcessState ?? null;
@@ -666,9 +668,12 @@ export class CodexAcpServer {
             const state = this.sessions.get(sessionId);
             return state ? this.subagentModels(state) : null;
         };
+        const setupReady = this.clientDelivery.sessionSetupReady(sessionId);
+        const transition = this.sessions.get(sessionId)?.subagentTransition;
+        const ready = setupReady ? Promise.all([setupReady, transition]).then(() => {}) : transition;
         const router = this.usesStandardSubagents()
             ? new StandardSubagentEventRouter(sessionId, session, this.subagentAssociations, release, this.capabilities, replay,
-                this.sessions.get(sessionId)?.subagentTransition,
+                ready,
                 id => this.codexAcpClient.appServerClient.runningTurnId(id), models, {
                     read: (id, parent) => this.readSubagentConfiguration(id, parent),
                     enqueuePublication: publish => this.codexAcpClient.enqueueSessionTransition(sessionId, publish),
@@ -743,13 +748,32 @@ export class CodexAcpServer {
         return check;
     }
 
-    afterSessionSetupResponse(sessionId: string): Promise<void> {
-        const router = this.sessions.get(sessionId)?.subagents;
-        if (!(router instanceof StandardSubagentEventRouter) || this.sessionIsClosing(sessionId)) return Promise.resolve();
-        this.codexAcpClient.redispatchSessionNotifications(sessionId, router.releaseReplay(), () => router.publishReplaySnapshots());
-        return this.codexAcpClient.waitForSessionNotifications(sessionId).catch(error => {
-            logger.error("Failed to release child traffic after session setup", error);
-        });
+    /** Direct method callers have no transport response-write boundary. */
+    observeSessionSetupResponses(): () => void {
+        this.setupResponseOrdering = true;
+        return () => {
+            this.mcpSessionStartup.dispose();
+            this.clientDelivery.disposeSessionSetups();
+        };
+    }
+
+    captureSessionCreationPublication(sessionId: string): () => void {
+        return this.clientDelivery.captureSessionSetupRelease(sessionId);
+    }
+
+    captureSessionSetupPublication(sessionId: string): () => Promise<void> {
+        const session = this.sessions.get(sessionId);
+        const release = this.clientDelivery.captureSessionSetupRelease(sessionId);
+        return async () => {
+            release();
+            if (!session || this.sessions.get(sessionId) !== session || this.sessionIsClosing(sessionId)) return;
+            const router = session.subagents;
+            if (!(router instanceof StandardSubagentEventRouter)) return;
+            this.codexAcpClient.redispatchSessionNotifications(sessionId, router.releaseReplay(), () => router.publishReplaySnapshots());
+            await this.codexAcpClient.waitForSessionNotifications(sessionId).catch(error => {
+                logger.error("Failed to release child traffic after session setup", error);
+            });
+        };
     }
 
     private async interruptStandardChildren(session: SessionState): Promise<void> {
@@ -1338,6 +1362,7 @@ export class CodexAcpServer {
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, operation === "resume");
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
+        if (this.setupResponseOrdering && operation !== "resume") this.clientDelivery.beginSessionSetup(sessionId);
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,

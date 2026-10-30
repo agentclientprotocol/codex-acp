@@ -160,6 +160,9 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
      * (e.g. MCP OAuth re-auth) sends before the caller gets a chance to call `setCodexResponse`.
      */
     codexResponses?: Record<string, (params: unknown) => Promise<unknown>>,
+    beforeSetupResponseWrite?: () => Promise<void>,
+    newSessionMeta?: {mcpStartupAwaitTimeoutMs: number},
+    onAgent?: (agent: CodexAcpServer) => void,
 } = {}): Promise<PromptSession> {
     const mocks = createMockConnections();
     const transcript: TranscriptEntry[] = [];
@@ -199,11 +202,24 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     let agent: CodexAcpServer | null = null;
     const router = createAcpAgentRouter((connection) => {
         agent = new CodexAcpServer(connection, codexAcpClient, undefined, options.exitCode);
+        options.onAgent?.(agent);
         return agent;
     });
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
     const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
-    router.connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
+    const serverStream = acp.ndJsonStream(agentToClient.writable, clientToAgent.readable);
+    router.connect(options.beforeSetupResponseWrite ? {
+        readable: serverStream.readable,
+        writable: new WritableStream<acpV2.AnyMessage>({
+            async write(message) {
+                if ("result" in message && message.result !== null && typeof message.result === "object"
+                    && "sessionId" in message.result) await options.beforeSetupResponseWrite?.();
+                const writer = serverStream.writable.getWriter();
+                try { await writer.write(message); }
+                finally { writer.releaseLock(); }
+            },
+        }),
+    } : serverStream);
 
     let recordUpdates = false;
     const setupUpdates: acpV2.SessionUpdate[] = [];
@@ -252,7 +268,10 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             info: {name: "test-client", version: "1.0.0"},
             ...(options.clientCapabilities ? {capabilities: options.clientCapabilities} : {}),
         });
-        await v2Connection.agent.request(acpV2.methods.agent.session.new, {cwd, ...(options.mcpServers ? {mcpServers: options.mcpServers} : {})});
+        await v2Connection.agent.request(acpV2.methods.agent.session.new, {
+            cwd, ...(options.mcpServers ? {mcpServers: options.mcpServers} : {}),
+            ...(options.newSessionMeta ? {_meta: options.newSessionMeta} : {}),
+        });
         connection = v2Connection;
         request = (method, params, signal) => v2Connection.agent.request(
             method as typeof acpV2.methods.agent.session.prompt,
@@ -281,7 +300,10 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             protocolVersion: acp.PROTOCOL_VERSION,
             ...(options.v1ClientCapabilities ? {clientCapabilities: options.v1ClientCapabilities} : {}),
         });
-        await v1Connection.agent.request(acp.methods.agent.session.new, {cwd, mcpServers: []});
+        await v1Connection.agent.request(acp.methods.agent.session.new, {
+            cwd, mcpServers: options.mcpServers ?? [],
+            ...(options.newSessionMeta ? {_meta: options.newSessionMeta} : {}),
+        });
         connection = v1Connection;
         request = (method, params, signal) => v1Connection.agent.request(
             method as typeof acp.methods.agent.session.prompt,

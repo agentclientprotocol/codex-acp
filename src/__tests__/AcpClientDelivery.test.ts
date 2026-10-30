@@ -11,6 +11,58 @@ function createClient() {
 }
 
 describe("AcpClientDelivery", () => {
+    it.each(["elicitation/create", "session/request_permission"])("holds %s for setup without blocking other sessions", async method => {
+        const {client, request} = createClient();
+        const delivery = new AcpClientDelivery(client);
+        delivery.beginSessionSetup("new");
+        const release = delivery.captureSessionSetupRelease("new");
+        const pending = delivery.request(method, {sessionId: "new"});
+        expect(request).not.toHaveBeenCalled();
+        await delivery.request(method, {sessionId: "other"});
+        expect(request.mock.calls.map(call => call[1].sessionId)).toEqual(["other"]);
+        release();
+        await pending;
+        expect(request.mock.calls.map(call => call[1].sessionId)).toEqual(["other", "new"]);
+    });
+
+    it.each(["abort", "close", "disconnect"] as const)("drops unsent setup interactions on %s", async action => {
+        const {client, request} = createClient();
+        const delivery = new AcpClientDelivery(client);
+        const cancellation = new AbortController();
+        delivery.beginSessionSetup("s");
+        const release = delivery.captureSessionSetupRelease("s");
+        const pending = delivery.request(acp.methods.client.elicitation.create, {sessionId: "s"},
+            {cancellationSignal: cancellation.signal});
+        const cancelled = expect(pending).rejects.toMatchObject({code: -32800});
+        if (action === "abort") cancellation.abort();
+        else if (action === "close") delivery.closeSession("s");
+        else delivery.disposeSessionSetups();
+        await cancelled;
+        release();
+        expect(request).not.toHaveBeenCalled();
+
+        delivery.openSession("s");
+        delivery.beginSessionSetup("s");
+        release();
+        expect(delivery.sessionSetupReady("s")).not.toBeNull();
+        delivery.captureSessionSetupRelease("s")();
+    });
+
+    it("does not publish URL completions for interactions still waiting on setup", async () => {
+        const {client, notify, request} = createClient();
+        request.mockResolvedValue({action: "accept"});
+        const delivery = new AcpClientDelivery(client);
+        delivery.beginSessionSetup("s");
+        const pending = delivery.request(acp.methods.client.elicitation.create,
+            {sessionId: "s", mode: "url", elicitationId: "login"});
+        await delivery.notify(acp.methods.client.elicitation.complete, {elicitationId: "login"});
+        expect(notify).not.toHaveBeenCalled();
+        delivery.captureSessionSetupRelease("s")();
+        await pending;
+        await delivery.notify(acp.methods.client.elicitation.complete, {elicitationId: "login"});
+        expect(notify.mock.calls.map(call => call[1])).toEqual([{elicitationId: "login"}]);
+    });
+
     it("fences closed-session publication and requests without interpreting extension payloads", async () => {
         const {client, notify, request} = createClient();
         const delivery = new AcpClientDelivery(client);
