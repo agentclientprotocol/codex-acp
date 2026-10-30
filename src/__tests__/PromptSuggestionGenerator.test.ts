@@ -13,8 +13,9 @@ function suggestionTurn(text: string): TurnResult {
 function createGenerator(runTurn: ReturnType<typeof vi.fn>) {
     const publish = vi.fn().mockResolvedValue(undefined);
     const threadStart = vi.fn().mockResolvedValue({thread: {id: "ephemeral"}});
-    const client = {threadStart, runTurn} as unknown as CodexAppServerClient;
-    return {generator: new PromptSuggestionGenerator(client, "/test/cwd", publish), publish, threadStart, runTurn};
+    const threadUnsubscribe = vi.fn().mockResolvedValue({status: "unsubscribed"});
+    const client = {threadStart, runTurn, threadUnsubscribe} as unknown as CodexAppServerClient;
+    return {generator: new PromptSuggestionGenerator(client, "/test/cwd", publish), publish, threadStart, runTurn, threadUnsubscribe};
 }
 
 async function flush() {
@@ -29,10 +30,55 @@ describe("PromptSuggestionGenerator", () => {
         generator.onTurnCompleted("fix the bug", "Fixed it.");
         await vi.waitFor(() => expect(publish).toHaveBeenCalledWith("Run the tests"));
 
-        expect(threadStart).toHaveBeenCalledWith({cwd: "/test/cwd", ephemeral: true});
-        expect(runTurn.mock.calls[0]![0]).toMatchObject({threadId: "ephemeral", model: TITLE_MODEL});
+        expect(threadStart).toHaveBeenCalledWith({
+            cwd: "/test/cwd",
+            ephemeral: true,
+            sandbox: "read-only",
+            approvalPolicy: "never",
+            baseInstructions: expect.stringContaining("Never call tools"),
+            config: {project_doc_max_bytes: 0},
+        });
+        expect(runTurn.mock.calls[0]![0]).toMatchObject({threadId: "ephemeral", model: TITLE_MODEL, effort: "low"});
         expect(runTurn.mock.calls[0]![0].input[0].text).toContain("fix the bug");
         expect(runTurn.mock.calls[0]![0].input[0].text).toContain("Fixed it.");
+    });
+
+    /** The ephemeral thread is released after a successful turn, and a failing unsubscribe keeps the suggestion. */
+    it("unsubscribes the thread after success", async () => {
+        const {generator, publish, threadUnsubscribe} = createGenerator(vi.fn().mockResolvedValue(suggestionTurn("Go")));
+        threadUnsubscribe.mockRejectedValue(new Error("gone"));
+
+        generator.onTurnCompleted("a", "b");
+        await vi.waitFor(() => expect(threadUnsubscribe).toHaveBeenCalled());
+
+        expect(threadUnsubscribe).toHaveBeenCalledWith({threadId: "ephemeral"});
+        expect(publish).toHaveBeenCalledWith("Go");
+    });
+
+    /** The ephemeral thread is released when the turn fails, and a failing unsubscribe does not surface. */
+    it("unsubscribes the thread after a runTurn failure", async () => {
+        const {generator, publish, threadUnsubscribe} = createGenerator(vi.fn().mockRejectedValue(new Error("boom")));
+        threadUnsubscribe.mockRejectedValue(new Error("gone"));
+
+        generator.onTurnCompleted("a", "b");
+        await vi.waitFor(() => expect(threadUnsubscribe).toHaveBeenCalledWith({threadId: "ephemeral"}));
+        await flush();
+
+        expect(publish).not.toHaveBeenCalled();
+    });
+
+    /** A stale generation is dropped, and its thread is still released. */
+    it("unsubscribes the thread when the generation is stale", async () => {
+        const turn = deferred<TurnResult>();
+        const {generator, publish, runTurn, threadUnsubscribe} = createGenerator(vi.fn().mockReturnValue(turn.promise));
+
+        generator.onTurnCompleted("a", "b");
+        await vi.waitFor(() => expect(runTurn).toHaveBeenCalled());
+        generator.invalidate();
+        turn.resolve(suggestionTurn("Too late"));
+        await vi.waitFor(() => expect(threadUnsubscribe).toHaveBeenCalledWith({threadId: "ephemeral"}));
+
+        expect(publish).not.toHaveBeenCalled();
     });
 
     /** Each side of the exchange is cut to 4000 characters before it reaches the model. */
@@ -171,8 +217,9 @@ describe("PromptSuggestionGenerator", () => {
         const {generator} = createGenerator(vi.fn());
         const runTurn = vi.fn().mockResolvedValue(suggestionTurn("Go"));
         const threadStart = vi.fn().mockResolvedValue({thread: {id: "new"}});
+        const threadUnsubscribe = vi.fn().mockResolvedValue({status: "unsubscribed"});
 
-        generator.rebindAppServer({threadStart, runTurn} as unknown as CodexAppServerClient);
+        generator.rebindAppServer({threadStart, runTurn, threadUnsubscribe} as unknown as CodexAppServerClient);
         generator.onTurnCompleted("a", "b");
         await vi.waitFor(() => expect(runTurn).toHaveBeenCalled());
 

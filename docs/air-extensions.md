@@ -1429,6 +1429,7 @@ After a turn ends normally, the adapter sends AIR the prompt the user is most li
 - `suggestions: []` clears the prompt the client holds. The adapter sends it when a new prompt starts and when the new prediction is empty.
   The adapter does not repeat a value it already sent.
 - Codex does not predict prompts, so the adapter asks a cheap model on an ephemeral thread, one extra call per turn.
+  The thread is read-only, never asks for approval, uses low reasoning effort and a minimal system prompt, and is released after the call.
   The prediction arrives after the prompt response. A prompt that starts first drops it.
 - A turn that is cancelled or fails produces no prediction.
 - `CODEX_ACP_PROMPT_SUGGESTIONS=false` turns the feature off.
