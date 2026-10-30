@@ -1,4 +1,5 @@
 import type {ClientCapabilities} from "@agentclientprotocol/sdk/unstable";
+import type {ACPSessionConnection} from "./ACPSessionConnection";
 
 /**
  * Wire names for the versioned JetBrains AIR ACP extension.
@@ -47,6 +48,14 @@ export function withAirMeta(
     key: string,
     value: unknown,
 ): Record<string, unknown> {
+    return withAirMetadata(meta, {[key]: value});
+}
+
+/** Compose AIR-owned fields; this is a producer operation, not a protocol metadata merge. */
+export function withAirMetadata(
+    meta: Record<string, unknown> | null | undefined,
+    fields: Record<string, unknown>,
+): Record<string, unknown> {
     const root = asRecord(meta);
     const jetbrains = asRecord(root[JETBRAINS_META_KEY]);
     const air = asRecord(jetbrains[AIR_META_KEY]);
@@ -57,10 +66,20 @@ export function withAirMeta(
             [AIR_META_KEY]: {
                 ...air,
                 [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
-                [key]: value,
+                ...fields,
             },
         },
     };
+}
+
+/** A v2 session patch replaces the whole JetBrains value, so compose it at publication time. */
+export function publishAirSessionMetadata(session: ACPSessionConnection, key: string, value: unknown): Promise<void> {
+    if (session.protocolVersion === 2) {
+        return session.patchSessionMetadata(current => ({
+            [JETBRAINS_META_KEY]: withAirMeta(current, key, value)[JETBRAINS_META_KEY],
+        }));
+    }
+    return session.update({sessionUpdate: "session_info_update", _meta: withAirMeta(undefined, key, value)});
 }
 
 /**

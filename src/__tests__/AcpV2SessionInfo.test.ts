@@ -74,6 +74,17 @@ describe("V2 session metadata", () => {
         expect(sent.at(-1)?._meta).toEqual({ns: {version: 1, added: true}});
     });
 
+    it("preserves accompanying session info fields while composing metadata", async () => {
+        const sent: Update[] = [];
+        const info = new AcpV2SessionInfo(async update => { sent.push(update); });
+        const fields = {title: "Current", updatedAt: "2026-10-30T12:00:00Z"};
+        const pending = info.patchMetadata(() => ({current: true}), fields);
+        fields.title = "Changed after publication";
+        await pending;
+        expect(sent).toEqual([{title: "Current", updatedAt: "2026-10-30T12:00:00Z",
+            sessionUpdate: "session_info_update", _meta: {current: true}}]);
+    });
+
     it("stops queued and in-flight restoration after disposal", async () => {
         const sent: Update[] = [];
         const clearing = deferred();
