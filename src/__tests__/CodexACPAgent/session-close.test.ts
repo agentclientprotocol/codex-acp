@@ -281,7 +281,7 @@ describe("ACP session close", () => {
         await codexAcpAgent.closeSession({sessionId});
         await waitForMicrotasks();
 
-        expect(fixture.getAcpConnectionEvents([]).map(event => event.method)).toEqual(["createElicitation", "completeElicitation"]);
+        expect(fixture.getAcpConnectionEvents([]).map(event => event.method)).toEqual(["createElicitation"]);
     });
 
     it("rejects an in-flight resume that completes after close", async () => {

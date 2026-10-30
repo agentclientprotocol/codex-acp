@@ -272,15 +272,15 @@ export class SessionIndexService {
                     throw sessionNotFoundRequestError(sessionId);
                 }
             });
+            // Tell the client why it closed before ending this operation's delivery fence.
+            if (archived ? open : this.host.session(sessionId) !== undefined) {
+                await new ACPSessionConnection(this.host.connection(), sessionId).update({
+                    sessionUpdate: "session_info_update",
+                    _meta: withAirMeta(undefined, AIR_ARCHIVED_KEY, archived),
+                });
+            }
         } finally {
             if (archived) this.host.endSessionCloseFence(sessionId);
-        }
-        // An archived session was closed above: the update still goes to its client, to tell it why.
-        if (archived ? open : this.host.session(sessionId) !== undefined) {
-            await new ACPSessionConnection(this.host.connection(), sessionId).update({
-                sessionUpdate: "session_info_update",
-                _meta: withAirMeta(undefined, AIR_ARCHIVED_KEY, archived),
-            });
         }
         return {};
     }

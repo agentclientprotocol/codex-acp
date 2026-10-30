@@ -9,6 +9,7 @@ import {toV2SessionUpdates} from "./AcpV2SessionUpdate";
 import {toV1RequestPermissionResponse, toV2RequestPermissionRequest} from "./AcpV2Permissions";
 import {elicitationSessionId, toV1CreateElicitationResponse, toV2CreateElicitationRequest} from "./AcpV2Elicitation";
 import {AcpV2ForegroundState} from "./AcpV2ForegroundState";
+import {type AcpClientDelivery, clientNotificationSessionId, clientRequestSessionId} from "./AcpClientDelivery";
 
 export type AcpClientConnection = Pick<acp.AgentContext, "notify" | "request">;
 
@@ -21,9 +22,36 @@ export class AcpV2Connection {
     readonly client: AcpV2ClientConnection;
     private isTurnRunning: (sessionId: string) => boolean = () => true;
     private readonly foreground = new Map<string, AcpV2ForegroundState>();
+    private sessionDelivery: AcpClientDelivery | null = null;
+    private sendElicitationCompletion: (params: unknown) => Promise<void>;
 
-    constructor(client: AcpV2ClientConnection) {
-        this.client = client;
+    constructor(private readonly transportClient: AcpV2ClientConnection) {
+        const client = transportClient;
+        this.sendElicitationCompletion = params => client.notify(acpV2.methods.client.elicitation.complete, params as acpV2.CompleteElicitationNotification);
+        this.client = {
+            notify: (method: string, params?: unknown) => {
+                if (method === acpV2.methods.client.elicitation.complete) return this.sendElicitationCompletion(params);
+                const sessionId = clientNotificationSessionId(method, params);
+                if (sessionId !== null && this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) return Promise.resolve();
+                return client.notify(method as `_${string}`, params);
+            },
+            request: (method: string, params?: unknown, options?: acpV2.SendRequestOptions) => {
+                const sessionId = clientRequestSessionId(method, params);
+                if (sessionId !== null && this.sessionDelivery && !this.sessionDelivery.canRequestSession(sessionId)) {
+                    return Promise.reject(acp.RequestError.requestCancelled(undefined, `Session ${sessionId} is closing or closed`));
+                }
+                const send = () => client.request(method as `_${string}`, params, options);
+                return this.sessionDelivery?.withElicitationRequest(method, params, send) ?? send();
+            },
+        } as AcpV2ClientConnection;
+    }
+
+    setClientDelivery(delivery: AcpClientDelivery): void {
+        this.sessionDelivery = delivery;
+        delivery.setElicitationCompletionTransport(params => this.transportClient.notify(
+            acpV2.methods.client.elicitation.complete, params as acpV2.CompleteElicitationNotification,
+        ));
+        this.sendElicitationCompletion = params => delivery.notify(acp.methods.client.elicitation.complete, params);
     }
 
     /** Identifies foreground interactions; background requests do not affect session state. */
@@ -84,6 +112,11 @@ export class AcpV2Connection {
     }
 
     private foregroundFor(sessionId: string, running = false): AcpV2ForegroundState {
+        if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) {
+            const closed = new AcpV2ForegroundState(async () => {});
+            closed.dispose();
+            return closed;
+        }
         let foreground = this.foreground.get(sessionId);
         if (!foreground) {
             foreground = new AcpV2ForegroundState(

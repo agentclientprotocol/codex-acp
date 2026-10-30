@@ -15,6 +15,24 @@ function fixture() {
 }
 
 describe("ACP v2 aggregate foreground state", () => {
+    it("drops queued publication after disposal without retracting an in-flight write", async () => {
+        const gate = deferred();
+        const started = deferred();
+        const updates: acpV2.StateUpdate[] = [];
+        const foreground = new AcpV2ForegroundState(async state => {
+            started.resolve();
+            await gate.promise;
+            updates.push(state);
+        });
+        const running = foreground.start();
+        await started.promise;
+        const queued = foreground.snapshot();
+        foreground.dispose();
+        gate.resolve();
+        await Promise.all([running, queued]);
+        expect(updates).toEqual([{state: "running"}]);
+    });
+
     it("keeps running while another tool can progress, then tracks which waits still block", async () => {
         const {foreground, updates} = fixture();
         await foreground.start();
