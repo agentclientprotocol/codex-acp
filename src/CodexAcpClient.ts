@@ -29,7 +29,7 @@ import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
 import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
-import {listedSessionTitle} from "./SessionTitle";
+import {listedSessionTitle, normalizeSessionTitle} from "./SessionTitle";
 import {type AcpMcpServer, type WithAcpMcpServers, normalizeMcpServers, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
     AccountLoginCompletedNotification,
@@ -722,6 +722,7 @@ export class CodexAcpClient {
             // Codex sends no thread/settings/updated on a resume. The response holds the mode.
             collaborationMode: response.collaborationMode ?? this.getCollaborationMode(response.thread.id),
             threadStatus: response.thread.status,
+            sessionTitle: normalizeSessionTitle(listedSessionTitle(response.thread)),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,

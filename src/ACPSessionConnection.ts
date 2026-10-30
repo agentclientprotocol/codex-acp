@@ -141,13 +141,13 @@ export class AcpV2Connection {
         let update: acpV2.SessionUpdate;
         switch (kind) {
             case "user_message":
-                update = {sessionUpdate: "user_message", messageId, content: []};
+                update = {sessionUpdate: "user_message", messageId, content: [], _meta: null};
                 break;
             case "agent_message":
-                update = {sessionUpdate: "agent_message", messageId, content: []};
+                update = {sessionUpdate: "agent_message", messageId, content: [], _meta: null};
                 break;
             case "agent_thought":
-                update = {sessionUpdate: "agent_thought", messageId, content: []};
+                update = {sessionUpdate: "agent_thought", messageId, content: [], _meta: null};
                 break;
         }
         await this.client.notify(acpV2.methods.client.session.update, {

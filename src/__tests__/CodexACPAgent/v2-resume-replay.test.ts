@@ -261,7 +261,7 @@ const wholeMessageKindByChunk: Record<string, acpV2.SessionUpdate["sessionUpdate
 /**
  * Every replayed chunk with an id must be preceded (anywhere earlier in
  * the same session's update stream) by a whole-message update of the matching kind and id with
- * `content: []`, sent exactly once per id.
+ * `content: []` and `_meta: null`, sent exactly once per id.
  */
 function assertPrimerBeforeEveryChunk(updates: acpV2.UpdateSessionNotification[]): void {
     const primed = new Set<string>();
@@ -277,6 +277,7 @@ function assertPrimerBeforeEveryChunk(updates: acpV2.UpdateSessionNotification[]
             && (prior.update as {messageId?: string}).messageId === messageId
             && Array.isArray((prior.update as {content?: unknown[]}).content)
             && (prior.update as {content: unknown[]}).content.length === 0
+            && prior.update._meta === null
         ));
         expect(hasPrimer, `missing '${wholeKind}' primer before the first '${update.sessionUpdate}' for id ${messageId}`)
             .toBe(true);
