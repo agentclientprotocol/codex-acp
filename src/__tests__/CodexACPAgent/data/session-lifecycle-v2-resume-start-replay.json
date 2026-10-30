@@ -314,6 +314,20 @@
       "sessionId": "thread-1",
       "update": {
         "title": "Inserted via session/prompt",
+        "_meta": null,
+        "sessionUpdate": "session_info_update"
+      }
+    },
+    {
+      "sessionId": "thread-1",
+      "update": {
+        "_meta": {
+          "codex": {
+            "threadStatus": {
+              "type": "idle"
+            }
+          }
+        },
         "sessionUpdate": "session_info_update"
       }
     },

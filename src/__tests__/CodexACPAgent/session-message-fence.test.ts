@@ -76,6 +76,9 @@ describe("Post-close session delivery", () => {
                 })).rejects.toMatchObject({code: -32800});
                 if (v2) {
                     await v2.updateState(id, {state: "running"});
+                    await v2.snapshotSessionInfo(id, "Late metadata");
+                    await v2.client.notify("session/update", {sessionId: id,
+                        update: {sessionUpdate: "session_info_update", _meta: {late: true}}});
                     await v2.replaySessionUpdate(id, {sessionUpdate: "agent_message_chunk", messageId: "late-replay",
                         content: {type: "text", text: "Late replay"}}, new Set());
                     await v2.client.notify("session/update", {sessionId: id, update: {sessionUpdate: "state_update", state: "idle"}});

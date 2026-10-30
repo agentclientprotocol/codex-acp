@@ -10,6 +10,7 @@ import {toV2ReplayUpdates} from "./AcpV2Replay";
 import {toV1RequestPermissionResponse, toV2RequestPermissionRequest} from "./AcpV2Permissions";
 import {elicitationSessionId, toV1CreateElicitationResponse, toV2CreateElicitationRequest} from "./AcpV2Elicitation";
 import {AcpV2ForegroundState} from "./AcpV2ForegroundState";
+import {AcpV2SessionInfo, type SessionMetadataPatch} from "./AcpV2SessionInfo";
 import {type AcpClientDelivery, clientNotificationSessionId, clientRequestSessionId} from "./AcpClientDelivery";
 
 export type AcpClientConnection = Pick<acp.AgentContext, "notify" | "request">;
@@ -23,6 +24,7 @@ export class AcpV2Connection {
     readonly client: AcpV2ClientConnection;
     private isTurnRunning: (sessionId: string) => boolean = () => true;
     private readonly foreground = new Map<string, AcpV2ForegroundState>();
+    private readonly sessionInfo = new Map<string, AcpV2SessionInfo>();
     private sessionDelivery: AcpClientDelivery | null = null;
     private sendElicitationCompletion: (params: unknown) => Promise<void>;
 
@@ -34,6 +36,10 @@ export class AcpV2Connection {
                 if (method === acpV2.methods.client.elicitation.complete) return this.sendElicitationCompletion(params);
                 const sessionId = clientNotificationSessionId(method, params);
                 if (sessionId !== null && this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) return Promise.resolve();
+                if (sessionId !== null) {
+                    const {update, _meta} = params as acpV2.UpdateSessionNotification;
+                    if (acpV2.SessionUpdate.isSessionInfoUpdate(update)) return this.sessionInfoFor(sessionId).update(update, _meta);
+                }
                 return client.notify(method as `_${string}`, params);
             },
             request: (method: string, params?: unknown, options?: acpV2.SendRequestOptions) => {
@@ -80,9 +86,10 @@ export class AcpV2Connection {
      * Sends a session update, rendered in the v2 wire shape, through the v2 `session/update`
      * binding. One update can render to several v2 updates (or none), sent in order.
      */
-    async updateSession(sessionId: string, update: AcpSessionUpdate): Promise<void> {
+    async updateSession(sessionId: string, update: AcpSessionUpdate, metadata?: acpV2.UpdateSessionNotification["_meta"]): Promise<void> {
         for (const v2Update of toV2SessionUpdates(update)) {
-            await this.client.notify(acpV2.methods.client.session.update, {sessionId, update: v2Update});
+            await this.client.notify(acpV2.methods.client.session.update,
+                {sessionId, update: v2Update, ...(metadata !== undefined ? {_meta: metadata} : {})});
         }
     }
 
@@ -97,6 +104,24 @@ export class AcpV2Connection {
 
     snapshotForegroundState(sessionId: string): Promise<void> {
         return this.foregroundFor(sessionId).snapshot();
+    }
+
+    resetSessionInfo(sessionId: string, metadata: Record<string, unknown> | null): void {
+        this.sessionInfo.get(sessionId)?.dispose();
+        this.sessionInfo.delete(sessionId);
+        this.sessionInfoFor(sessionId, metadata);
+    }
+
+    refreshSessionInfo(sessionId: string, metadata: Record<string, unknown> | null): Promise<void> {
+        return metadata ? this.sessionInfoFor(sessionId).seedMetadata(metadata) : Promise.resolve();
+    }
+
+    snapshotSessionInfo(sessionId: string, title: string | null): Promise<void> {
+        return this.sessionInfoFor(sessionId).snapshot(title);
+    }
+
+    patchSessionMetadata(sessionId: string, change: SessionMetadataPatch): Promise<void> {
+        return this.sessionInfoFor(sessionId).patchMetadata(change);
     }
 
     startForegroundItem(sessionId: string, itemId: string): Promise<void> {
@@ -114,6 +139,26 @@ export class AcpV2Connection {
     forgetSession(sessionId: string): void {
         this.foreground.get(sessionId)?.dispose();
         this.foreground.delete(sessionId);
+        this.sessionInfo.get(sessionId)?.dispose();
+        this.sessionInfo.delete(sessionId);
+    }
+
+    private sessionInfoFor(sessionId: string, metadata: Record<string, unknown> | null = null): AcpV2SessionInfo {
+        if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) {
+            const closed = new AcpV2SessionInfo(async () => {});
+            closed.dispose();
+            return closed;
+        }
+        let info = this.sessionInfo.get(sessionId);
+        if (!info) {
+            info = new AcpV2SessionInfo((update, notificationMetadata) => {
+                if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) return Promise.resolve();
+                return this.transportClient.notify(acpV2.methods.client.session.update,
+                    {sessionId, update, ...(notificationMetadata !== undefined ? {_meta: notificationMetadata} : {})});
+            }, metadata);
+            this.sessionInfo.set(sessionId, info);
+        }
+        return info;
     }
 
     private foregroundFor(sessionId: string, running = false): AcpV2ForegroundState {
@@ -216,7 +261,7 @@ export class AcpV2Connection {
                 }
                 if (method === acp.methods.client.session.update) {
                     const notification = params as AcpSessionNotification;
-                    return this.updateSession(notification.sessionId, notification.update);
+                    return this.updateSession(notification.sessionId, notification.update, notification._meta);
                 }
                 if (method === acp.methods.client.elicitation.complete) {
                     return this.completeElicitation(params as acp.CompleteElicitationNotification);
@@ -296,6 +341,11 @@ export class ACPSessionConnection {
     }
 
     forSession(sessionId: string): ACPSessionConnection { return new ACPSessionConnection(this.connection, sessionId); }
+
+    /** Domain writers can rebuild an owned metadata value without changing v2's shallow patch semantics. */
+    patchSessionMetadata(change: SessionMetadataPatch): Promise<void> {
+        return this.v2Connection?.patchSessionMetadata(this.sessionId, change) ?? Promise.resolve();
+    }
 
     /** Replay shares live report filtering, with v2 entity initialization after conversion. */
     replayUpdate(update: UpdateSessionEvent, initialized: Set<string>): Promise<void> {
