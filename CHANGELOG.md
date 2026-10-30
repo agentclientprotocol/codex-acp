@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.6.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.5.0...v2.6.0) (2026-10-30)
+
+
+### Features
+
+* show async Codex questions as elicitations ([#707](https://github.com/agentclientprotocol/codex-acp/issues/707)) ([cc57c7e](https://github.com/agentclientprotocol/codex-acp/commit/cc57c7ec18b2b541279ab6c26820b3b4ebe507eb))
+
+
+### Bug Fixes
+
+* clear stale entity metadata during ACP v2 replay ([#716](https://github.com/agentclientprotocol/codex-acp/issues/716)) ([580d8b9](https://github.com/agentclientprotocol/codex-acp/commit/580d8b926b3350ae8a3c74d54da81df311601d85))
+* defer startup interactions until session setup is delivered ([#714](https://github.com/agentclientprotocol/codex-acp/issues/714)) ([ad993bb](https://github.com/agentclientprotocol/codex-acp/commit/ad993bb13ad9b8941a5db6c27ba94ff8b5e43ce9))
+* publish complete configuration updates for session changes ([#715](https://github.com/agentclientprotocol/codex-acp/issues/715)) ([b7ac0bf](https://github.com/agentclientprotocol/codex-acp/commit/b7ac0bfb0cfd12e675659e267cc1f73ea76fc3d5))
+* release the prompt suggestion thread and keep it minimal ([#709](https://github.com/agentclientprotocol/codex-acp/issues/709)) ([82ad58f](https://github.com/agentclientprotocol/codex-acp/commit/82ad58f17adbc04ccc9c97175e11693982ab7a92))
+* resynchronize current session metadata on ACP v2 resume ([#717](https://github.com/agentclientprotocol/codex-acp/issues/717)) ([927c480](https://github.com/agentclientprotocol/codex-acp/commit/927c4802f83c0859b439e7d641b5eb692560e5df))
+* suppress session messages after close ([#712](https://github.com/agentclientprotocol/codex-acp/issues/712)) ([85bf932](https://github.com/agentclientprotocol/codex-acp/commit/85bf932c129cd4c4cb92ed47c4e4bcae57b71b2c))
+* synchronize resumed titles and reset replayed message metadata ([#713](https://github.com/agentclientprotocol/codex-acp/issues/713)) ([ef45a6d](https://github.com/agentclientprotocol/codex-acp/commit/ef45a6d97cd81810aaebcba9533af5411dadec6f))
+* tear down session interactions and background processes on close ([#711](https://github.com/agentclientprotocol/codex-acp/issues/711)) ([1e89efa](https://github.com/agentclientprotocol/codex-acp/commit/1e89efa3b7f4b7cfa0b4b69b641ae467671715de))
+* update ACP SDK to 2.2 and align protocol behavior ([#710](https://github.com/agentclientprotocol/codex-acp/issues/710)) ([6f96fbe](https://github.com/agentclientprotocol/codex-acp/commit/6f96fbeaee722c0a273bb62104366c6b7d9688fe))
+
 ## [2.5.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.4.0...v2.5.0) (2026-10-29)
 
 
