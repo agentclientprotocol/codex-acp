@@ -74,6 +74,50 @@ describe("Session config options", () => {
         vi.unstubAllEnvs();
     });
 
+    it("uses the host-provided sandbox only when explicitly enabled", () => {
+        vi.stubEnv("CODEX_ACP_EXTERNAL_SANDBOX", "");
+        expect(AgentMode.find("read-only")?.sandboxPolicy).toMatchObject({
+            type: "readOnly",
+            networkAccess: false,
+        });
+
+        vi.stubEnv("CODEX_ACP_EXTERNAL_SANDBOX", "1");
+
+        expect(AgentMode.find("read-only")?.approvalPolicy).toBe("untrusted");
+        expect(AgentMode.find("read-only")?.sandboxPolicy).toMatchObject({
+            type: "externalSandbox",
+            networkAccess: "restricted",
+        });
+    });
+
+    it("sends the host-provided sandbox policy on read-only turns", async () => {
+        vi.stubEnv("INITIAL_AGENT_MODE", "read-only");
+        vi.stubEnv("CODEX_ACP_EXTERNAL_SANDBOX", "1");
+        const {fast} = buildModels();
+        const {fixture, codexAcpAgent, response} = await createSession("fast-model[medium]", [fast]);
+        const appServer = fixture.getCodexAppServerClient();
+        vi.spyOn(appServer, "listSkills").mockResolvedValue({data: []});
+        const turn: Turn = {
+            id: "turn-id", rootTurnId: null, items: [], itemsView: "notLoaded", status: "inProgress", error: null,
+            startedAt: null, completedAt: null, durationMs: null,
+        };
+        const turnStart = vi.spyOn(appServer, "turnStart").mockResolvedValue({turn});
+        vi.spyOn(appServer, "awaitTurnCompleted").mockResolvedValue({
+            threadId: response.sessionId,
+            turn: {...turn, status: "completed"},
+        });
+
+        await codexAcpAgent.prompt({
+            sessionId: response.sessionId,
+            prompt: [{type: "text", text: "Run pwd."}],
+        });
+
+        expect(turnStart).toHaveBeenCalledWith(expect.objectContaining({
+            approvalPolicy: "untrusted",
+            sandboxPolicy: {type: "externalSandbox", networkAccess: "restricted"},
+        }));
+    });
+
     it("exposes mode, model, reasoning_effort and fast-mode in the new session response", async () => {
         const {fast, slow} = buildModels();
         const {response} = await createSession("fast-model[medium]", [fast, slow]);
