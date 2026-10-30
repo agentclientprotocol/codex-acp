@@ -9,6 +9,7 @@ export class AcpV2ForegroundState {
     private readonly items = new Set<string>();
     private readonly actions = new Map<symbol, string | undefined>();
     private sending: Promise<void> = Promise.resolve();
+    private disposed = false;
 
     constructor(
         private readonly notify: (state: acpV2.StateUpdate) => Promise<void>,
@@ -76,6 +77,7 @@ export class AcpV2ForegroundState {
     }
 
     dispose(): void {
+        this.disposed = true;
         this.activity = "idle";
         this.items.clear();
         this.actions.clear();
@@ -109,7 +111,7 @@ export class AcpV2ForegroundState {
     }
 
     serializePublication(publish: () => Promise<void>): Promise<void> {
-        const sent = this.sending.then(publish);
+        const sent = this.sending.then(() => this.disposed ? undefined : publish());
         this.sending = sent.catch(() => {});
         return sent;
     }

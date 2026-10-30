@@ -11,6 +11,68 @@ function createClient() {
 }
 
 describe("AcpClientDelivery", () => {
+    it("fences closed-session publication and requests without interpreting extension payloads", async () => {
+        const {client, notify, request} = createClient();
+        const delivery = new AcpClientDelivery(client);
+        delivery.closeSession("closed");
+        await delivery.notify(acp.methods.client.session.update, {sessionId: "closed",
+            update: {sessionUpdate: "agent_message_chunk", content: {type: "text", text: "Late"}}});
+        await expect(delivery.request(acp.methods.client.session.requestPermission, {
+            sessionId: "closed", toolCall: {toolCallId: "late"}, options: [],
+        })).rejects.toMatchObject({code: -32800});
+        expect(notify).not.toHaveBeenCalled();
+        expect(request).not.toHaveBeenCalled();
+        await delivery.notify("_custom", {sessionId: "closed"});
+        delivery.openSession("closed");
+        await delivery.notify(acp.methods.client.session.update, {sessionId: "closed",
+            update: {sessionUpdate: "agent_message_chunk", content: {type: "text", text: "Current"}}});
+        expect(notify.mock.calls.map(call => call[0])).toEqual(["_custom", "session/update"]);
+    });
+
+    it("keeps request-scoped URL completion but drops old, duplicate, declined and unknown completions", async () => {
+        const {client, notify, request} = createClient();
+        request.mockResolvedValue({action: "accept"});
+        const delivery = new AcpClientDelivery(client);
+        const create = (elicitationId: string, scope: object) => delivery.request(acp.methods.client.elicitation.create,
+            {mode: "url", elicitationId, ...scope});
+        const complete = (elicitationId: string) => delivery.notify(acp.methods.client.elicitation.complete, {elicitationId});
+        await create("old", {sessionId: "s"});
+        await create("login", {requestId: 1});
+        let accept!: (response: unknown) => void;
+        request.mockReturnValueOnce(new Promise(resolve => { accept = resolve; }));
+        const late = create("late", {sessionId: "s"});
+        delivery.closeSession("s");
+        delivery.openSession("s");
+        accept({action: "accept"});
+        await late;
+        await complete("late");
+        await complete("old");
+        await complete("unknown");
+        await complete("login");
+        await complete("login");
+        request.mockResolvedValueOnce({action: "decline"});
+        await create("declined", {sessionId: "s"});
+        await complete("declined");
+        await create("current", {sessionId: "s"});
+        await complete("current");
+        expect(notify.mock.calls.map(call => call[1])).toEqual([{elicitationId: "login"}, {elicitationId: "current"}]);
+    });
+
+    it("reopens a child only after its new announcement is delivered", async () => {
+        const {client, notify} = createClient();
+        const delivery = new AcpClientDelivery(client);
+        delivery.closeSession("child");
+        await delivery.notify(acp.methods.client.session.update, {sessionId: "parent",
+            update: {sessionUpdate: "subagent_update", sessionId: "child"}});
+        expect(delivery.canPublishSession("child")).toBe(true);
+        expect(notify).toHaveBeenCalledOnce();
+        delivery.closeSession("parent");
+        delivery.closeSession("child");
+        await delivery.notify(acp.methods.client.session.update, {sessionId: "parent",
+            update: {sessionUpdate: "subagent_update", sessionId: "child"}});
+        expect(delivery.canPublishSession("child")).toBe(false);
+    });
+
     it("cancels only pending interactions of the closing session", async () => {
         const signals: AbortSignal[] = [];
         const release: Array<() => void> = [];

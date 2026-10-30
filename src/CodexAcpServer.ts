@@ -544,7 +544,7 @@ export class CodexAcpServer {
      * whole queue for a session by invoking every registered callback here.
      */
     private readonly queuedV2PromptCancellers = new Map<string, Set<() => void>>();
-    private readonly closingSessions: Map<string, number>;
+    private readonly closingSessions: Map<string, {count: number; closedSessions: Set<string>}>;
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
     private readonly permissionLifecycleContexts: WeakMap<SessionState, PermissionLifecycleContext>;
@@ -601,6 +601,7 @@ export class CodexAcpServer {
             this.clientDelivery = new AcpClientDelivery(connection.extensionOnlyV1View(), sessionIsClosing);
             this.connection = this.clientDelivery.asClientConnection();
             connection.registerView(this.connection);
+            connection.setClientDelivery(this.clientDelivery);
             // Foreground work includes adapter pauses between runtime turns, such as plan review.
             connection.setTurnRunningCheck((sessionId) => this.isSessionBusy(sessionId));
         } else {
@@ -1202,20 +1203,29 @@ export class CodexAcpServer {
     }
 
     private sessionIsClosing(sessionId: string): boolean {
-        return (this.closingSessions.get(sessionId) ?? 0) > 0;
+        return this.closingSessions.has(sessionId);
     }
 
     private beginSessionCloseFence(sessionId: string): void {
-        this.closingSessions.set(sessionId, (this.closingSessions.get(sessionId) ?? 0) + 1);
+        const fence = this.closingSessions.get(sessionId);
+        if (fence) fence.count++;
+        else this.closingSessions.set(sessionId, {count: 1, closedSessions: new Set()});
     }
 
     private endSessionCloseFence(sessionId: string): void {
-        const count = this.closingSessions.get(sessionId) ?? 0;
-        if (count <= 1) {
-            this.closingSessions.delete(sessionId);
-            return;
+        const fence = this.closingSessions.get(sessionId);
+        if (!fence || --fence.count > 0) return;
+        for (const closed of fence.closedSessions) this.clientDelivery.closeSession(closed);
+        this.closingSessions.delete(sessionId);
+    }
+
+    /** Nested operations such as archive may still owe their final metadata update. */
+    private finishSessionDelivery(sessionId: string, children: Iterable<string>): void {
+        const fence = this.closingSessions.get(sessionId);
+        for (const closed of [sessionId, ...children]) {
+            if (fence) fence.closedSessions.add(closed);
+            else this.clientDelivery.closeSession(closed);
         }
-        this.closingSessions.set(sessionId, count - 1);
     }
 
     private getSessionGeneration(sessionId: string): number {
@@ -1565,6 +1575,7 @@ export class CodexAcpServer {
         // The new state holds no suggestion, so the old one must drop its result in flight and clear what it published.
         void previous?.promptSuggestions?.clear();
         this.sessions.set(sessionState.sessionId, sessionState);
+        this.clientDelivery.openSession(sessionState.sessionId);
     }
 
     /**
@@ -1713,7 +1724,7 @@ export class CodexAcpServer {
      * Runtime starts report running independently of insertion. v1 has no foreground-state updates.
      */
     private async reportCodexTurnState(sessionId: string, state: acpV2.StateUpdate): Promise<void> {
-        if (this.v2PromptsInFlight.has(sessionId) && state.state === "idle") {
+        if (this.v2PromptsInFlight.has(sessionId) && state.state === "idle" && !this.sessionIsClosing(sessionId)) {
             return;
         }
         const session = new ACPSessionConnection(this.connection, sessionId);
@@ -1996,9 +2007,16 @@ export class CodexAcpServer {
 
     async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
         logger.log("Closing session...", {sessionId: params.sessionId});
-        if (!this.hasLocalSession(params.sessionId)) return {};
+        if (!this.hasLocalSession(params.sessionId)) {
+            this.finishSessionDelivery(params.sessionId, []);
+            return {};
+        }
         let closeGeneration: number | null = null;
         const sessionState = this.sessions.get(params.sessionId);
+        const childSessions = [
+            ...this.subagentAssociations.forRoot(params.sessionId).map(child => child.sessionId),
+            ...this.codexAcpClient.subagentThreadIds(params.sessionId),
+        ];
         this.beginSessionCloseFence(params.sessionId);
 
         try {
@@ -2039,9 +2057,7 @@ export class CodexAcpServer {
                 this.sessions.delete(params.sessionId);
                 this.asyncQuestions.get(params.sessionId)?.dispose();
                 this.asyncQuestions.delete(params.sessionId);
-                if (!this.v2PromptsInFlight.has(params.sessionId)) {
-                    AcpV2Connection.of(this.connection)?.forgetSession(params.sessionId);
-                }
+                AcpV2Connection.of(this.connection)?.forgetSession(params.sessionId);
                 this.mcpSessionStartup.close(params.sessionId);
                 this.codexAcpClient.appServerClient.mcpStartup.forgetThread(params.sessionId);
                 this.pendingTurnStarts.delete(params.sessionId);
@@ -2053,6 +2069,10 @@ export class CodexAcpServer {
                     sessionState.asyncTasks.clear();
                     this.availableCommands.cancelPendingSkillsPublish(sessionState);
                 }
+                this.finishSessionDelivery(params.sessionId, [
+                    ...childSessions,
+                    ...this.subagentAssociations.forRoot(params.sessionId).map(child => child.sessionId),
+                ]);
             }
             this.endSessionCloseFence(params.sessionId);
         }
@@ -4544,8 +4564,10 @@ export class CodexAcpServer {
         const messageId = randomUUID();
         const session = new ACPSessionConnection(this.connection, sessionId);
         let failure: acpV2.Error | null = null;
+        const generation = this.getSessionGeneration(sessionId);
         this.v2PromptsInFlight.add(sessionId);
         const sendState = async (state: acpV2.StateUpdate) => {
+            if (this.getSessionGeneration(sessionId) !== generation) return;
             try {
                 await session.updateState(state);
             } catch (error) {
@@ -4553,6 +4575,7 @@ export class CodexAcpServer {
             }
         };
         const startWork = async () => {
+            if (this.getSessionGeneration(sessionId) !== generation) return;
             try {
                 await AcpV2Connection.of(this.connection)?.startForegroundWork(sessionId);
             } catch (error) {
@@ -4560,6 +4583,7 @@ export class CodexAcpServer {
             }
         };
         const sendIdle = async (response: acp.PromptResponse) => {
+            if (this.getSessionGeneration(sessionId) !== generation) return;
             if (failure !== null && response.stopReason !== "cancelled") {
                 try {
                     await this.finishOutstandingToolCalls(sessionState);

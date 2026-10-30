@@ -1210,6 +1210,10 @@ describe("_session/archive and _session/unarchive", () => {
         expect(threadUnarchive).toHaveBeenCalledWith({threadId});
         expect(() => agent.getSessionState(threadId)).toThrow(`Session ${threadId} not found`);
         expect(infoUpdates()).toEqual([]);
+        // @ts-expect-error - a stale producer must not publish after the outer archive operation ended
+        await agent.connection.notify("session/update", {sessionId: threadId,
+            update: {sessionUpdate: "session_info_update", title: "Late"}});
+        expect(infoUpdates()).toEqual([]);
     });
 
     it("unarchives a session that is open here and reports its archive state to it", async () => {

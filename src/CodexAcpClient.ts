@@ -856,6 +856,8 @@ export class CodexAcpClient {
 
     isSubagentThread(threadId: string): boolean { return this.subagents.isChildThread(threadId); }
 
+    subagentThreadIds(rootSessionId: string): string[] { return this.subagents.childThreadIds(rootSessionId); }
+
     readSubagentThread(threadId: string): Promise<Thread | null> { return this.subagents.readChildThread(threadId); }
 
     async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>): Promise<SessionMetadata> {
