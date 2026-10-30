@@ -201,6 +201,13 @@
     {
       "sessionId": "thread-1",
       "update": {
+        "title": "Earlier session",
+        "sessionUpdate": "session_info_update"
+      }
+    },
+    {
+      "sessionId": "thread-1",
+      "update": {
         "state": "idle",
         "sessionUpdate": "state_update"
       }

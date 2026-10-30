@@ -47,6 +47,7 @@
     "update": {
       "messageId": "saved",
       "content": [],
+      "_meta": null,
       "sessionUpdate": "agent_message"
     }
   },

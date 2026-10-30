@@ -1367,7 +1367,7 @@ export class CodexAcpServer {
             sessionMcpServers: sessionMcpServers,
             clientCapabilities: this.capabilities,
             goalRevision: 0,
-            sessionTitle: null,
+            sessionTitle: sessionMetadata.sessionTitle ?? null,
             sessionTitleSource: operation === "resume" ? "unknown" : "unset",
             subagents: this.createSubagentRouter(sessionId),
             asyncTasks: this.createAsyncTasks(sessionId),
@@ -1924,21 +1924,24 @@ export class CodexAcpServer {
         const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
         if (replayFrom == null) {
             await this.resumeSession(request);
-            await this.snapshotForegroundState(params.sessionId);
-            return this.createSessionSetupResponseV2(this.getSessionState(params.sessionId));
+        } else {
+            if (replayFrom.type !== "start") {
+                throw RequestError.invalidParams(undefined, `Unsupported replayFrom type: ${replayFrom.type}`);
+            }
+            await this.loadSessionAndReplayHistory(request);
         }
-        if (replayFrom.type !== "start") {
-            throw RequestError.invalidParams(undefined, `Unsupported replayFrom type: ${replayFrom.type}`);
-        }
-        const {sessionId} = await this.loadSessionAndReplayHistory(request);
-        await this.snapshotForegroundState(sessionId);
-        return this.createSessionSetupResponseV2(this.getSessionState(sessionId));
+        await this.snapshotSessionStateV2(params.sessionId);
+        return this.createSessionSetupResponseV2(this.getSessionState(params.sessionId));
     }
 
-    private async snapshotForegroundState(sessionId: string): Promise<void> {
+    private async snapshotSessionStateV2(sessionId: string): Promise<void> {
         // Drain live events released by setup/replay before taking the ordered snapshot.
         await this.codexAcpClient.waitForSessionNotifications(sessionId);
-        this.getSessionState(sessionId);
+        const state = this.getSessionState(sessionId);
+        await new ACPSessionConnection(this.connection, sessionId).update({
+            sessionUpdate: "session_info_update",
+            title: state.sessionTitle,
+        });
         await AcpV2Connection.of(this.connection)!.snapshotForegroundState(sessionId);
     }
 
@@ -3615,11 +3618,8 @@ export class CodexAcpServer {
     }
 
     /**
-     * On v2, replay reconstructing a message from its beginning via chunks MUST first send a
-     * whole-message update with `content: []` for the same id, clearing any content the client
-     * already holds for it (`session-setup.mdx`). No-op for chunks with no messageId: those get
-     * a fresh random id downstream instead (`toV2SessionUpdate`), so there is nothing to key on
-     * ahead of time.
+     * Start each v2 replayed message with empty content and metadata before its chunks.
+     * Chunks without a messageId get a fresh id in toV2SessionUpdate and cannot be primed.
      */
     private async sendReplayMessageStart(
         session: ACPSessionConnection,

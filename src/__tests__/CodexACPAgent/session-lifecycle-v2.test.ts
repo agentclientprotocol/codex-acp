@@ -49,12 +49,12 @@ function createThread(overrides?: Partial<Thread>): Thread {
 }
 
 /** Canned Codex app-server responses, keyed by method. */
-function codexResponse(method: string, replayTurns: Thread["turns"] = []): unknown {
+function codexResponse(method: string, replayTurns: Thread["turns"] = [], thread?: Partial<Thread>): unknown {
     switch (method) {
         case "thread/start":
         case "thread/resume":
             return {
-                thread: createThread(),
+                thread: createThread(thread),
                 model: "gpt-5",
                 modelProvider: "openai",
                 reasoningEffort: "medium",
@@ -73,7 +73,7 @@ function codexResponse(method: string, replayTurns: Thread["turns"] = []): unkno
             // `threadReadWithHistory` reads twice for a "legacy" history-mode thread (once to
             // learn the history mode, once with `includeTurns: true`); returning the full
             // history from both is harmless since only the second response is used.
-            return {thread: createThread({turns: replayTurns})};
+            return {thread: createThread({...thread, turns: replayTurns})};
         case "model/list":
             return {data: [createTestModel({id: "gpt-5"})], nextCursor: null};
         case "skills/list":
@@ -108,6 +108,8 @@ async function connectV2Client(options?: {
     failMethod?: {method: string; error: Error};
     listSkills?: (params: SkillsListParams) => Promise<SkillsListResponse>;
     air?: boolean;
+    thread?: Partial<Thread>;
+    beforeThreadRead?: () => Promise<void>;
 }) {
     const mocks = createMockConnections();
     const codexRequests: Array<{method: string, params: unknown}> = [];
@@ -121,7 +123,8 @@ async function connectV2Client(options?: {
         if (method === "skills/list" && options?.listSkills) {
             return options.listSkills(params as SkillsListParams);
         }
-        return codexResponse(method, options?.replayTurns);
+        if (method === "thread/read") await options?.beforeThreadRead?.();
+        return codexResponse(method, options?.replayTurns, options?.thread);
     });
     const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
@@ -373,32 +376,36 @@ describe('Session lifecycle over ACP v2', () => {
         await expect(dump({response, codexRequests})).toMatchFileSnapshot('data/session-lifecycle-v2-delete.json');
     });
 
-    it('resumes a session with initial commands and a current-state snapshot', async () => {
-        const {connection, codexRequests, updates} = await connectV2Client();
-        closeClient = () => connection.close();
-
-        const response = await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd});
-        expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle"});
-        // Commands are in the response; only the current-state snapshot is notified.
-        const sessionUpdates = await waitForSessionUpdates(updates, ["state_update"]);
-
-        await expect(dump({response, codexRequests, updates: sessionUpdates}))
-            .toMatchFileSnapshot('data/session-lifecycle-v2-resume.json');
-    });
-
-    it('resumes a session with a null replayFrom the same way', async () => {
+    it.each([
+        {replayFrom: undefined, snapshot: 'data/session-lifecycle-v2-resume.json'},
+        {replayFrom: null, snapshot: 'data/session-lifecycle-v2-resume-null-replay.json'},
+    ])('resumes with current session info and state when replayFrom is $replayFrom', async ({replayFrom, snapshot}) => {
         const {connection, codexRequests, updates} = await connectV2Client();
         closeClient = () => connection.close();
 
         const response = await connection.agent.request(acpV2.methods.agent.session.resume, {
-            sessionId,
-            cwd,
-            replayFrom: null,
+            sessionId, cwd, ...(replayFrom === undefined ? {} : {replayFrom}),
         });
         expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle"});
+        // Commands are in the response; current info and foreground state are notified.
+        const sessionUpdates = await waitForSessionUpdates(updates, ["session_info_update", "state_update"]);
 
-        await expect(dump({response, codexRequests}))
-            .toMatchFileSnapshot('data/session-lifecycle-v2-resume-null-replay.json');
+        await expect(dump({response, codexRequests, updates: sessionUpdates}))
+            .toMatchFileSnapshot(snapshot);
+    });
+
+    it.each([
+        {name: "Current name", preview: "Old preview", title: "Current name"},
+        {name: null, preview: "", title: null},
+    ])('synchronizes the current title as $title rather than leaving a retained title', async ({name, preview, title}) => {
+        const {connection, updates} = await connectV2Client({thread: {name, preview}});
+        closeClient = () => connection.close();
+
+        await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd});
+        expect(updates[0]?.update).toEqual({
+            sessionUpdate: "session_info_update",
+            title,
+        });
     });
 
     it('rejects resume with an unknown replayFrom type', async () => {
@@ -486,12 +493,45 @@ describe('Session lifecycle over ACP v2', () => {
             .toMatchFileSnapshot('data/session-lifecycle-v2-resume-start-replay.json');
     });
 
+    it('snapshots a live rename after replay rather than restoring the older history title', async () => {
+        let releaseRead!: () => void;
+        let readStarted!: () => void;
+        const reading = new Promise<void>(resolve => { readStarted = resolve; });
+        const readGate = new Promise<void>(resolve => { releaseRead = resolve; });
+        const {connection, updates, emit} = await connectV2Client({
+            replayTurns,
+            thread: {name: "Before replay"},
+            beforeThreadRead: async () => { readStarted(); await readGate; },
+        });
+        closeClient = () => connection.close();
+
+        const resumed = connection.agent.request(acpV2.methods.agent.session.resume, {
+            sessionId, cwd, replayFrom: {type: "start"},
+        });
+        await reading;
+        const renamed = emit({
+            method: "thread/name/updated",
+            params: {threadId: sessionId, threadName: "Renamed during replay"},
+        });
+        releaseRead();
+        await resumed;
+        await renamed;
+
+        const info = updates.filter(({update}) => update.sessionUpdate === "session_info_update");
+        expect(info.at(-1)?.update).toEqual({
+            sessionUpdate: "session_info_update",
+            title: "Renamed during replay",
+        });
+        const lastHistoryIndex = updates.map(({update}) => update.sessionUpdate).lastIndexOf("agent_message_chunk");
+        expect(updates.indexOf(info.at(-1)!)).toBeGreaterThan(lastHistoryIndex);
+    });
+
     it('does not replay any history when replayFrom is absent', async () => {
         const {connection, updates} = await connectV2Client({replayTurns});
         closeClient = () => connection.close();
 
         await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd});
-        await waitForSessionUpdates(updates, ["state_update"]);
+        await waitForSessionUpdates(updates, ["session_info_update", "state_update"]);
 
         expect(updates.some(({update}) => update.sessionUpdate.endsWith("_message_chunk")
             || update.sessionUpdate.endsWith("_message")
