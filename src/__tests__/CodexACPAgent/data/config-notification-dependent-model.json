@@ -1,0 +1,35 @@
+[
+  {
+    "id": "mode",
+    "currentValue": "agent",
+    "values": [
+      "read-only",
+      "workspace-write",
+      "agent",
+      "agent-full-access"
+    ]
+  },
+  {
+    "id": "collaboration_mode",
+    "currentValue": "default",
+    "values": [
+      "default",
+      "plan"
+    ]
+  },
+  {
+    "id": "model",
+    "currentValue": "slow-model",
+    "values": [
+      "fast-model",
+      "slow-model"
+    ]
+  },
+  {
+    "id": "reasoning_effort",
+    "currentValue": "low",
+    "values": [
+      "low"
+    ]
+  }
+]
