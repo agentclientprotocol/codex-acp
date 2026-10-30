@@ -8,6 +8,14 @@ export const PROMPT_SUGGESTIONS_META_KEY = "promptSuggestions";
 // Each side of the exchange is cut so that a pasted log or a long answer does not cost its whole size.
 const SOURCE_MAX_CHARS = 4_000;
 
+// One short line needs no reasoning. "low" is the lowest effort `model/list` offers for TITLE_MODEL.
+const SUGGESTION_EFFORT = "low";
+
+// Replaces Codex's large default system prompt, which is about coding with tools.
+const BASE_INSTRUCTIONS =
+    "You are a text-only predictor. Never call tools or run commands. " +
+    "Answer only with the JSON object the user message asks for.";
+
 const OUTPUT_SCHEMA = {
     type: "object",
     properties: { suggestion: { type: "string" } },
@@ -84,20 +92,39 @@ export class PromptSuggestionGenerator {
     private async generateAndPublish(generation: number, userText: string, agentText: string): Promise<void> {
         if (!userText.trim() || !agentText.trim()) return;
 
-        const {thread} = await this.client.threadStart({cwd: this.cwd, ephemeral: true});
-        const result = await this.client.runTurn({
-            threadId: thread.id,
-            input: [{
-                type: "text",
-                text: `${SYSTEM_PROMPT}\n\nLast user message:\n${head(userText)}\n\nLast assistant reply:\n${head(agentText)}`,
-                text_elements: [],
-            }],
-            outputSchema: OUTPUT_SCHEMA,
-            model: TITLE_MODEL,
+        // Read-only and never-approve: a stray tool call can neither change anything nor prompt the user.
+        // `project_doc_max_bytes: 0` is meant to keep AGENTS.md out of the context.
+        // The app-server a generation starts on ends it, see `rebindAppServer`.
+        const client = this.client;
+        const {thread} = await client.threadStart({
+            cwd: this.cwd,
+            ephemeral: true,
+            sandbox: "read-only",
+            approvalPolicy: "never",
+            baseInstructions: BASE_INSTRUCTIONS,
+            config: {project_doc_max_bytes: 0},
         });
+        try {
+            const result = await client.runTurn({
+                threadId: thread.id,
+                input: [{
+                    type: "text",
+                    text: `${SYSTEM_PROMPT}\n\nLast user message:\n${head(userText)}\n\nLast assistant reply:\n${head(agentText)}`,
+                    text_elements: [],
+                }],
+                outputSchema: OUTPUT_SCHEMA,
+                model: TITLE_MODEL,
+                effort: SUGGESTION_EFFORT,
+            });
 
-        if (generation !== this.generation) return;
-        await this.publishIfChanged(extractSuggestion(result.turn));
+            if (generation !== this.generation) return;
+            await this.publishIfChanged(extractSuggestion(result.turn));
+        } finally {
+            // The ephemeral thread would otherwise stay loaded in the app-server for its lifetime.
+            await client.threadUnsubscribe({threadId: thread.id}).catch(() => {
+                // best-effort; must not replace the outcome
+            });
+        }
     }
 
     private async publishIfChanged(text: string | null): Promise<void> {
