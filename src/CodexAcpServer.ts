@@ -2735,7 +2735,11 @@ export class CodexAcpServer {
         });
         const sessionState = this.getSessionState(_params.sessionId);
 
-        this.applyModeChange(sessionState, _params.modeId);
+        await this.applySessionConfigOption(sessionState, {
+            sessionId: _params.sessionId,
+            configId: MODE_CONFIG_ID,
+            value: _params.modeId,
+        });
         return {};
     }
 
@@ -2750,7 +2754,7 @@ export class CodexAcpServer {
         await this.applySessionConfigOption(sessionState, params);
 
         return {
-            configOptions: this.createSessionConfigOptions(sessionState),
+            configOptions: this.createSessionConfigOptions(this.getSessionState(params.sessionId)),
         };
     }
 
@@ -2767,24 +2771,39 @@ export class CodexAcpServer {
     }
 
     private async applySessionConfigOption(sessionState: SessionState, params: acp.SetSessionConfigOptionRequest): Promise<void> {
-        switch (params.configId) {
-            case FAST_MODE_CONFIG_ID:
-                this.applyFastModeChange(sessionState, params);
-                break;
-            case MODE_CONFIG_ID:
-                this.applyModeChange(sessionState, this.stringConfigValue(params));
-                break;
-            case COLLABORATION_MODE_CONFIG_ID:
-                await this.applyCollaborationModeChange(sessionState, this.stringConfigValue(params));
-                break;
-            case MODEL_CONFIG_ID:
-                this.applyModelChange(sessionState, this.stringConfigValue(params));
-                break;
-            case REASONING_EFFORT_CONFIG_ID:
-                this.applyReasoningEffortChange(sessionState, this.stringConfigValue(params));
-                break;
-            default:
-                throw RequestError.invalidParams();
+        await this.updateSessionConfig(sessionState, async () => {
+            switch (params.configId) {
+                case FAST_MODE_CONFIG_ID:
+                    this.applyFastModeChange(sessionState, params);
+                    break;
+                case MODE_CONFIG_ID:
+                    this.applyModeChange(sessionState, this.stringConfigValue(params));
+                    break;
+                case COLLABORATION_MODE_CONFIG_ID:
+                    await this.applyCollaborationModeChange(sessionState, this.stringConfigValue(params));
+                    break;
+                case MODEL_CONFIG_ID:
+                    this.applyModelChange(sessionState, this.stringConfigValue(params));
+                    break;
+                case REASONING_EFFORT_CONFIG_ID:
+                    this.applyReasoningEffortChange(sessionState, this.stringConfigValue(params));
+                    break;
+                default:
+                    throw RequestError.invalidParams();
+            }
+        });
+    }
+
+    private async updateSessionConfig(sessionState: SessionState, change: () => void | Promise<void>): Promise<void> {
+        const previous = JSON.stringify(this.createSessionConfigOptions(sessionState));
+        await change();
+        const configOptions = this.createSessionConfigOptions(sessionState);
+        if (this.isSessionConfigEnabled() && this.sessions.get(sessionState.sessionId) === sessionState
+            && JSON.stringify(configOptions) !== previous) {
+            await new ACPSessionConnection(this.connection, sessionState.sessionId).update({
+                sessionUpdate: "config_option_update",
+                configOptions,
+            });
         }
     }
 
@@ -2858,20 +2877,15 @@ export class CodexAcpServer {
      * The session keeps its model when it can, the way a resumed thread keeps its own; see `createModelId`.
      */
     private async applyResumedModels(sessionState: SessionState, client: CodexAcpClient, resumed: SessionMetadata): Promise<void> {
-        const configOptions = JSON.stringify(this.createSessionConfigOptions(sessionState));
-        const {model, effort} = ModelId.fromString(sessionState.currentModelId);
-        sessionState.availableModels = resumed.models;
-        sessionState.currentModelId = client.createModelId(resumed.models, model, effort as ReasoningEffort).toString();
-        const currentModel = this.findCurrentModel(resumed.models, sessionState.currentModelId);
-        sessionState.supportedReasoningEfforts = currentModel?.supportedReasoningEfforts ?? [];
-        sessionState.supportedInputModalities = currentModel?.inputModalities ?? ["text", "image"];
-        sessionState.currentModelSupportsFast = modelSupportsFast(currentModel);
-        if (JSON.stringify(this.createSessionConfigOptions(sessionState)) !== configOptions) {
-            await new ACPSessionConnection(this.connection, sessionState.sessionId).update({
-                sessionUpdate: "config_option_update",
-                configOptions: this.createSessionConfigOptions(sessionState),
-            });
-        }
+        await this.updateSessionConfig(sessionState, () => {
+            const {model, effort} = ModelId.fromString(sessionState.currentModelId);
+            sessionState.availableModels = resumed.models;
+            sessionState.currentModelId = client.createModelId(resumed.models, model, effort as ReasoningEffort).toString();
+            const currentModel = this.findCurrentModel(resumed.models, sessionState.currentModelId);
+            sessionState.supportedReasoningEfforts = currentModel?.supportedReasoningEfforts ?? [];
+            sessionState.supportedInputModalities = currentModel?.inputModalities ?? ["text", "image"];
+            sessionState.currentModelSupportsFast = modelSupportsFast(currentModel);
+        });
     }
 
     private applyModelAndEffort(sessionState: SessionState, model: Model, effort: ReasoningEffort): void {
@@ -2908,8 +2922,10 @@ export class CodexAcpServer {
             reasoningEffort = model.defaultReasoningEffort;
         }
 
-        sessionState.availableModels = models;
-        this.applyModelAndEffort(sessionState, model, reasoningEffort);
+        await this.updateSessionConfig(sessionState, () => {
+            sessionState.availableModels = models;
+            this.applyModelAndEffort(sessionState, model, reasoningEffort);
+        });
 
         return {};
     }
@@ -5028,11 +5044,6 @@ export class CodexAcpServer {
                         configId,
                         value,
                     });
-                    const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
-                    await session.update({
-                        sessionUpdate: "config_option_update",
-                        configOptions: this.createSessionConfigOptions(sessionState),
-                    });
                 },
             });
             void commandPromise.catch((err) => {
@@ -5221,11 +5232,10 @@ export class CodexAcpServer {
                     return cancelledPromptResponse();
                 }
                 if (approved && !this.promptShouldStop(params.sessionId, activePrompt)) {
-                    await this.applyCollaborationModeChange(sessionState, DEFAULT_COLLABORATION_MODE);
-                    const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
-                    await session.update({
-                        sessionUpdate: "config_option_update",
-                        configOptions: this.createSessionConfigOptions(sessionState),
+                    await this.applySessionConfigOption(sessionState, {
+                        sessionId: sessionState.sessionId,
+                        configId: COLLABORATION_MODE_CONFIG_ID,
+                        value: DEFAULT_COLLABORATION_MODE,
                     });
 
                     const implementationRequest: acp.PromptRequest = {
