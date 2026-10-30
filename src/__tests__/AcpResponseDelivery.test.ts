@@ -1,27 +1,30 @@
 import {describe, expect, it} from "vitest";
-import type {AnyWireMessage} from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import type {AnyMessage} from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {AcpResponseDelivery} from "../AcpResponseDelivery";
 
 describe("ACP response delivery boundary", () => {
-    it("waits for a whole batch write and ignores notification IDs", async () => {
+    it("waits for response writes and ignores notifications and null IDs", async () => {
         const delivery = new AcpResponseDelivery();
         const observed: string[] = [];
         let release!: () => void;
         const held = new Promise<void>(resolve => { release = resolve; });
         const stream = delivery.observe({
             readable: new ReadableStream(),
-            writable: new WritableStream<AnyWireMessage>({write: () => held}),
+            writable: new WritableStream<AnyMessage>({write: () => held}),
         });
         delivery.afterWrite(1, () => { observed.push("first"); });
         delivery.afterWrite("two", () => { observed.push("second"); });
         const writer = stream.writable.getWriter();
-        const write = writer.write([{jsonrpc: "2.0", id: 1, result: {}}, {jsonrpc: "2.0", id: "two", error: {code: -32603, message: "Failed"}}]);
+        const write = writer.write({jsonrpc: "2.0", id: 1, result: {}});
         await Promise.resolve();
         expect(observed).toEqual([]);
         release();
         await write;
+        expect(observed).toEqual(["first"]);
+        await writer.write({jsonrpc: "2.0", id: "two", error: {code: -32603, message: "Failed"}});
         expect(observed).toEqual(["first", "second"]);
         await writer.write({jsonrpc: "2.0", method: "session/update", params: {}});
+        await writer.write({jsonrpc: "2.0", id: null, error: {code: -32600, message: "Invalid request"}});
         expect(observed).toEqual(["first", "second"]);
         await writer.close();
     });
@@ -32,7 +35,7 @@ describe("ACP response delivery boundary", () => {
         delivery.afterWrite(1, () => { released = true; });
         const stream = delivery.observe({
             readable: new ReadableStream(),
-            writable: new WritableStream<AnyWireMessage>({write: () => { throw new Error("Write failed"); }}),
+            writable: new WritableStream<AnyMessage>({write: () => { throw new Error("Write failed"); }}),
         });
         await expect(stream.writable.getWriter().write({jsonrpc: "2.0", id: 1, result: {}})).rejects.toThrow("Write failed");
         expect(released).toBe(false);

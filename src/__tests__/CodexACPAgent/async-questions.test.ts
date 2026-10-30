@@ -141,6 +141,19 @@ describe.each([1, 2] as const)('async Codex questions over ACP v%i', (protocolVe
     });
 
     if (protocolVersion === 2) {
+        it('keeps valid answers when another property contains unsupported JSON', async () => {
+            const {client, steers} = await connect(async () => ({action: "accept",
+                content: {question_0: {unexpected: true}, question_0_note: [false], question_1: "Use the new API"}}));
+            await askDuringTurn(client);
+            await vi.waitFor(() => expect(steers).toHaveLength(1));
+            await finishTurn(client);
+            const input = (steers[0] as {input: Array<{text: string}>}).input[0]!.text;
+            expect(input).toContain("Use the new API");
+            expect(input).not.toContain("unexpected");
+            expect(input).not.toContain("[object Object]");
+            expect(input).not.toContain("false");
+        });
+
         it('keeps the session running while the questions are open', async () => {
             const {client} = await connect((_, signal) => new Promise(resolve => {
                 signal.addEventListener("abort", () => resolve({action: "cancel"}));

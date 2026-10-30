@@ -5,6 +5,7 @@ import type {CodexAcpServer} from "./CodexAcpServer";
 import {type AcpClientConnection, AcpV2Connection} from "./ACPSessionConnection";
 import packageJson from "../package.json";
 import {AcpResponseDelivery} from "./AcpResponseDelivery";
+import {isAbsoluteProtocolPath} from "./PathUtils";
 import {
     GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
     SESSION_STEERING_METHOD,
@@ -91,6 +92,15 @@ function createRouter(
         if (typeof params?.sessionId === "string") codexAcpServer.assertSessionMutationAllowed(params.sessionId);
         return codexAcpServer;
     };
+    const getAgentForPaths = (params: {sessionId?: string; cwd?: string | null; additionalDirectories?: string[] | null}): CodexAcpServer => {
+        if (params.cwd != null && !isAbsoluteProtocolPath(params.cwd)) {
+            throw acp.RequestError.invalidParams(undefined, "cwd must be an absolute path");
+        }
+        if (params.additionalDirectories?.some(directory => !isAbsoluteProtocolPath(directory))) {
+            throw acp.RequestError.invalidParams(undefined, "additionalDirectories entries must be absolute paths");
+        }
+        return getAgent(params);
+    };
     type SetupState = {tail: Promise<void>; publication: Promise<void>; epoch: number; pending: number};
     const setups = new Map<string, SetupState>();
     const setup = <T>(sessionId: string, requestId: acpV2.JsonRpcId, operation: () => Promise<T>, signal: AbortSignal): Promise<T> => {
@@ -133,7 +143,7 @@ function createRouter(
                 if (!registered) finish();
             }
         });
-        // Waiting for delivery here would deadlock two setup requests in the same batch.
+        // The next setup waits for delivery, not the request handler that produces the response.
         return response;
     };
     const attachAgent = (agent: CodexAcpServer, signal: AbortSignal) => {
@@ -150,12 +160,12 @@ function createRouter(
     const v1Agent = acp.agent({name: packageJson.name})
         .onConnect((connection) => attachAgent(createAgent(connection.client), connection.signal))
         .onRequest(acp.methods.agent.initialize, (ctx) => getAgent().initialize(ctx.params))
-        .onRequest(acp.methods.agent.session.new, (ctx) => getAgent().newSession(ctx.params))
-        .onRequest(acp.methods.agent.session.load, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => getAgent(ctx.params).loadSession(ctx.params), ctx.signal))
-        .onRequest(acp.methods.agent.session.fork, (ctx) => getAgent(ctx.params).forkSession(ctx.params))
-        .onRequest(acp.methods.agent.session.list, (ctx) => getAgent().listSessions(ctx.params))
+        .onRequest(acp.methods.agent.session.new, (ctx) => getAgentForPaths(ctx.params).newSession(ctx.params))
+        .onRequest(acp.methods.agent.session.load, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => getAgentForPaths(ctx.params).loadSession(ctx.params), ctx.signal))
+        .onRequest(acp.methods.agent.session.fork, (ctx) => getAgentForPaths(ctx.params).forkSession(ctx.params))
+        .onRequest(acp.methods.agent.session.list, (ctx) => getAgentForPaths({cwd: ctx.params.cwd ?? null}).listSessions(ctx.params))
         .onRequest(acp.methods.agent.session.delete, (ctx) => getAgent(ctx.params).deleteSession(ctx.params))
-        .onRequest(acp.methods.agent.session.resume, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => getAgent(ctx.params).resumeSession(ctx.params), ctx.signal))
+        .onRequest(acp.methods.agent.session.resume, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => getAgentForPaths(ctx.params).resumeSession(ctx.params), ctx.signal))
         .onRequest(acp.methods.agent.session.close, (ctx) => getAgent(ctx.params).closeSession(ctx.params))
         .onRequest(acp.methods.agent.session.setMode, (ctx) => getAgent(ctx.params).setSessionMode(ctx.params))
         .onRequest(acp.methods.agent.session.setConfigOption, (ctx) => getAgent(ctx.params).setSessionConfigOption(ctx.params))
@@ -185,11 +195,11 @@ function createRouter(
         .onConnect((connection) => attachAgent(createAgent(new AcpV2Connection(connection.client)), connection.signal))
         .onRequest(acpV2.methods.agent.initialize, (ctx) => getAgent().initializeV2(ctx.params))
         // No `session/load`: v2 folds it into `session/resume` with `replayFrom`.
-        .onRequest(acpV2.methods.agent.session.new, (ctx) => getAgent().newSessionV2(ctx.params))
-        .onRequest(acpV2.methods.agent.session.list, (ctx) => getAgent().listSessions(ctx.params))
+        .onRequest(acpV2.methods.agent.session.new, (ctx) => getAgentForPaths(ctx.params).newSessionV2(ctx.params))
+        .onRequest(acpV2.methods.agent.session.list, (ctx) => getAgentForPaths({cwd: ctx.params.cwd ?? null}).listSessions(ctx.params))
         .onRequest(acpV2.methods.agent.session.delete, (ctx) => getAgent(ctx.params).deleteSession(ctx.params))
-        .onRequest(acpV2.methods.agent.session.resume, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => getAgent(ctx.params).resumeSessionV2(ctx.params), ctx.signal))
-        .onRequest(acpV2.methods.agent.session.fork, (ctx) => getAgent(ctx.params).forkSessionV2(ctx.params))
+        .onRequest(acpV2.methods.agent.session.resume, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => getAgentForPaths(ctx.params).resumeSessionV2(ctx.params), ctx.signal))
+        .onRequest(acpV2.methods.agent.session.fork, (ctx) => getAgentForPaths(ctx.params).forkSessionV2(ctx.params))
         .onRequest(acpV2.methods.agent.session.close, (ctx) => getAgent(ctx.params).closeSession(ctx.params))
         // No `session/set_mode`: v2 removed the modes API; modes are config options.
         .onRequest(acpV2.methods.agent.session.setConfigOption, (ctx) => getAgent(ctx.params).setSessionConfigOptionV2(ctx.params))

@@ -1,6 +1,6 @@
-import type {AnyWireMessage, JsonRpcId, WireStream} from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import type {AnyMessage, JsonRpcId, Stream} from "@agentclientprotocol/sdk/experimental/v2/unstable";
 
-/** Observe completed writes, including batches, without changing SDK framing. */
+/** Observe completed response writes without changing SDK framing. */
 export class AcpResponseDelivery {
     private readonly callbacks = new Map<JsonRpcId, () => void>();
     private disposed = false;
@@ -9,20 +9,18 @@ export class AcpResponseDelivery {
         if (!this.disposed) this.callbacks.set(requestId, callback);
     }
 
-    observe(stream: WireStream): WireStream {
+    observe(stream: Stream): Stream {
         return {
             readable: stream.readable,
-            writable: new WritableStream<AnyWireMessage>({
+            writable: new WritableStream<AnyMessage>({
                 write: async message => {
                     const writer = stream.writable.getWriter();
                     try { await writer.write(message); }
                     finally { writer.releaseLock(); }
-                    for (const entry of Array.isArray(message) ? message : [message]) {
-                        if ("method" in entry || entry.id === null) continue;
-                        const callback = this.callbacks.get(entry.id);
-                        this.callbacks.delete(entry.id);
-                        callback?.();
-                    }
+                    if ("method" in message || message.id === null) return;
+                    const callback = this.callbacks.get(message.id);
+                    this.callbacks.delete(message.id);
+                    callback?.();
                 },
                 close: async () => {
                     const writer = stream.writable.getWriter();

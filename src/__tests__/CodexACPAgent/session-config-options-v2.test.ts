@@ -153,21 +153,18 @@ describe('Session config options over ACP v2', () => {
             .toMatchFileSnapshot('data/session-config-options-v2-set.json');
     });
 
-    it('rejects a set_config_option value that does not match its type', async () => {
+    it.each([
+        {configId: MODE_CONFIG_ID, type: "boolean", value: true},
+        {configId: FAST_MODE_CONFIG_ID, type: "_custom", value: true},
+        {configId: FAST_MODE_CONFIG_ID, type: "id", value: "on"},
+        {configId: "missing", type: "id", value: "anything"},
+    ] as const)('rejects a value type that does not match the advertised option: $configId/$type', async params => {
         const {connection, sessionState} = await connectV2Client();
         closeClient = () => connection.close();
 
         await expect(connection.agent.request(acpV2.methods.agent.session.setConfigOption, {
             sessionId: sessionState.sessionId,
-            configId: MODE_CONFIG_ID,
-            type: "boolean",
-            value: true,
-        })).rejects.toMatchObject({code: -32602});
-        await expect(connection.agent.request(acpV2.methods.agent.session.setConfigOption, {
-            sessionId: sessionState.sessionId,
-            configId: FAST_MODE_CONFIG_ID,
-            type: "_custom",
-            value: true,
+            ...params,
         })).rejects.toMatchObject({code: -32602});
         expect(sessionState.agentMode).toBe(AgentMode.DEFAULT_AGENT_MODE);
         expect(sessionState.fastModeEnabled).toBe(false);

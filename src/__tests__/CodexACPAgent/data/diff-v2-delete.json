@@ -14,7 +14,7 @@
         ],
         "patch": {
           "format": "git_patch",
-          "text": "diff --git a/workspace/deleted.ts b/workspace/deleted.ts\ndeleted file mode 100644\n--- a/workspace/deleted.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-export const gone = true;\n\\ No newline at end of file\n"
+          "text": "diff --git /workspace/deleted.ts /workspace/deleted.ts\ndeleted file mode 100644\n--- /workspace/deleted.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-export const gone = true;\n\\ No newline at end of file\n"
         },
         "_meta": {
           "kind": "delete"

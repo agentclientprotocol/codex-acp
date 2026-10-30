@@ -245,7 +245,7 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         expect(configurations(h)[0]!.configOptions.map(option => option.currentValue)).toEqual(["new-attachment", "low"]);
     });
 
-    it.skipIf(version !== 2)("waits for every response in a replay batch before refreshing current options", async () => {
+    it.skipIf(version !== 2)("refreshes current options after replay without waiting for unrelated requests", async () => {
         await connect();
         readback("before", "high");
         h.emit(activity());
@@ -254,29 +254,21 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         let release!: () => void;
         const held = new Promise<void>(resolve => { release = resolve; });
         vi.spyOn(h.agent, "listSessions").mockImplementationOnce(async () => { await held; return {sessions: []}; });
-        const resume = vi.spyOn(h.agent, "resumeSessionV2");
         const start = h.wireMessages.length;
-        const pending = h.requestBatch([
-            {method: "session/resume", params: {sessionId, cwd, replayFrom: {type: "start"}}},
-            {method: "session/list", params: {}},
-        ]);
+        const pending = h.request("session/list", {});
         void pending.catch(() => {});
         try {
-            await vi.waitFor(() => expect(resume.mock.results).toHaveLength(1));
-            await resume.mock.results[0]!.value;
-            await flush(h);
-            expect(configurations(h)).toHaveLength(1);
-            expect(h.wireMessages.slice(start).some(Array.isArray)).toBe(false);
+            await load();
+            await vi.waitFor(() => expect(configurations(h)).toHaveLength(2));
         } finally { release(); }
         await pending;
-        await vi.waitFor(() => expect(configurations(h)).toHaveLength(2));
         const frames = h.wireMessages.slice(start);
-        const batch = frames.findIndex(Array.isArray);
-        const configuration = frames.findIndex(frame => !Array.isArray(frame) && "method" in frame
+        const response = frames.findIndex(frame => "result" in frame);
+        const configuration = frames.findIndex(frame => "method" in frame
             && frame.method === "session/update" && (frame.params as {sessionId: string}).sessionId === childId
             && (frame.params as {update: {sessionUpdate: string}}).update.sessionUpdate === "config_option_update");
-        expect(batch).toBeGreaterThanOrEqual(0);
-        expect(configuration).toBeGreaterThan(batch);
+        expect(response).toBeGreaterThanOrEqual(0);
+        expect(configuration).toBeGreaterThan(response);
     });
 
     it.each(["unloaded", "foreign-parent", "wrong-id"] as const)("does not confirm readback for %s", async reason => {

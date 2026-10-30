@@ -2,6 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import type {JsonObject} from "./CodexAcpClient";
+import {sanitizeMcpServerName} from "./McpServerName";
 
 /**
  * An MCP server entry from an ACP v1 or v2 session request.
@@ -31,6 +32,18 @@ export type NormalizedMcpServer =
  */
 export function getMcpServerName(server: AcpMcpServer): string {
     return typeof server.name === "string" ? server.name : "";
+}
+
+/** Validate the whole request before filtering out servers configured independently of ACP. */
+export function normalizeMcpServers(servers: AcpMcpServer[]): NormalizedMcpServer[] {
+    const names = new Set<string>();
+    return servers.map(server => {
+        const name = sanitizeMcpServerName(getMcpServerName(server));
+        // Codex keys servers by the sanitized name, so collisions must not silently overwrite one.
+        if (names.has(name)) throw RequestError.invalidParams({name: getMcpServerName(server)}, "MCP server names must be unique");
+        names.add(name);
+        return {...normalizeMcpServer(server), name};
+    });
 }
 
 /**

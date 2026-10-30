@@ -131,6 +131,22 @@ describe('elicitation/create over ACP v2', () => {
         await finishTurn();
     });
 
+    it('preserves arbitrary JSON values in accepted MCP form content', async () => {
+        const content = {value: {nested: [1, null, true]}, answer: "Valid"};
+        const client = await connectSession(2, {
+            clientCapabilities: {elicitation: {form: {}}},
+            onElicitation: async () => ({action: "accept", content}),
+        });
+        closeClient = () => client.connection.close();
+        const {finishTurn} = await startRunningPrompt(client);
+        const response = await client.triggerApproval("mcpServer/elicitation/request", {
+            threadId: sessionId, turnId, serverName: "forms", mode: "form", _meta: null, message: "Choose",
+            requestedSchema: {type: "object", properties: {value: {type: "_custom"}, answer: {type: "string"}}},
+        });
+        expect(response).toEqual({action: "accept", content, _meta: null});
+        await finishTurn();
+    });
+
     it('cancels the MCP OAuth re-auth elicitation when the client dismisses it', async () => {
         const client = await connectSession(2, {
             clientCapabilities: {elicitation: {url: {}}},

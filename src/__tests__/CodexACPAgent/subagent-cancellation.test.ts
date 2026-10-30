@@ -265,7 +265,7 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
         expect(h.turnInterruptCalls()).toEqual([]);
     });
 
-    it.skipIf(version !== 2)("waits for the entire replay response batch before granting cancellation", async () => {
+    it.skipIf(version !== 2)("grants cancellation after replay without waiting for unrelated requests", async () => {
         await connect();
         await start();
         emptyHistory();
@@ -273,23 +273,14 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
         let release!: () => void;
         const held = new Promise<void>(resolve => { release = resolve; });
         vi.spyOn(h.agent, "listSessions").mockImplementationOnce(async () => { await held; return {sessions: []}; });
-        const resume = vi.spyOn(h.agent, "resumeSessionV2");
-        const pending = h.requestBatch([
-            {method: "session/resume", params: {sessionId, cwd, replayFrom: {type: "start"}}},
-            {method: "session/list", params: {}},
-        ]);
+        const pending = h.request("session/list", {});
         void pending.catch(() => {});
         try {
-            await vi.waitFor(() => expect(resume.mock.results).toHaveLength(1));
-            await resume.mock.results[0]!.value;
+            await load();
+            await vi.waitFor(() => expect(grants()).toBe(beforeGrants + 1));
             await h.cancel(id("worker"));
-            await flush(h);
-            expect(h.turnInterruptCalls()).toEqual([]);
-            expect(grants()).toBe(beforeGrants);
+            await vi.waitFor(() => expect(h.turnInterruptCalls()).toHaveLength(1));
         } finally { release(); }
         await pending;
-        await vi.waitFor(() => expect(grants()).toBe(beforeGrants + 1));
-        await h.cancel(id("worker"));
-        await vi.waitFor(() => expect(h.turnInterruptCalls()).toHaveLength(1));
     });
 });

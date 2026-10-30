@@ -158,16 +158,16 @@ function createAcpV2Content(change: FileUpdateChange): ToolCallContent[] {
     let patch: string | null;
     switch (kind.type) {
         case "add":
-            patch = diff.length === 0 ? createEmptyFileGitPatch(path, "added") : createAddedFileGitPatch(path, diff);
+            patch = diff.length === 0 ? createEmptyFileGitPatch(path, "added", "absolute") : createAddedFileGitPatch(path, diff, "absolute");
             break;
         case "delete":
-            patch = diff.length === 0 ? createEmptyFileGitPatch(path, "deleted") : createDeletedFileGitPatch(path, diff);
+            patch = diff.length === 0 ? createEmptyFileGitPatch(path, "deleted", "absolute") : createDeletedFileGitPatch(path, diff, "absolute");
             break;
         case "update":
             // A pure rename has no hunks.
             patch = kind.move_path !== null && diff.trim().length === 0
-                ? createRenameGitPatch(oldPath, path)
-                : createUpdateGitPatch(oldPath, path, diff);
+                ? createRenameGitPatch(oldPath, path, "absolute")
+                : createUpdateGitPatch(oldPath, path, diff, "absolute");
             break;
     }
     if (patch === null) {

@@ -14,7 +14,7 @@
         ],
         "patch": {
           "format": "git_patch",
-          "text": "diff --git a/workspace/empty.ts b/workspace/empty.ts\nnew file mode 100644\n"
+          "text": "diff --git /workspace/empty.ts /workspace/empty.ts\nnew file mode 100644\n"
         },
         "_meta": {
           "kind": "add"
