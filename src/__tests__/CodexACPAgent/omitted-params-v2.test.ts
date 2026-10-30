@@ -1,7 +1,7 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import * as acp from '@agentclientprotocol/sdk/unstable';
 import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
-import type {AnyWireMessage} from '@agentclientprotocol/sdk/experimental/v2/unstable';
+import type {AnyMessage} from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
@@ -42,15 +42,13 @@ function connectRaw() {
     const writer = clientStream.writable.getWriter();
     const reader = clientStream.readable.getReader();
     return {
-        send: (message: AnyWireMessage) => writer.write(message),
-        /** Reads wire items until a response (or batch of responses) arrives, skipping notifications. */
-        nextResponse: async (): Promise<AnyWireMessage> => {
+        send: (message: AnyMessage) => writer.write(message),
+        /** Reads messages until a response arrives, skipping notifications. */
+        nextResponse: async (): Promise<AnyMessage> => {
             while (true) {
                 const {value, done} = await reader.read();
                 if (done) throw new Error("stream closed before a response arrived");
-                const isResponse = Array.isArray(value)
-                    ? value.every((item) => "id" in item && ("result" in item || "error" in item))
-                    : "id" in value && ("result" in value || "error" in value);
+                const isResponse = "id" in value && ("result" in value || "error" in value);
                 if (isResponse) return value;
             }
         },
@@ -85,7 +83,7 @@ function dump(value: unknown): string {
 }
 
 /** Keeps only the fields that stay stable across SDK/zod versions. */
-function errorShape(response: AnyWireMessage): unknown {
+function errorShape(response: AnyMessage): unknown {
     const error = (response as {error?: {code: number}}).error;
     return error ? {code: error.code} : undefined;
 }
@@ -116,25 +114,22 @@ describe('v2 requests with omitted params', () => {
         await expect(dump(response)).toMatchFileSnapshot('data/omitted-params-v2-auth-logout.json');
     });
 
-    it('accepts omitted and null params within a batch', async () => {
+    it.each([1, 2])('rejects batches without processing entries and keeps v%s usable', async version => {
         const raw = connectRaw();
-        await initializeV2(raw);
+        if (version === 1) await initializeV1(raw);
+        else await initializeV2(raw);
 
         await raw.send([
             {jsonrpc: "2.0", id: "a", method: acpV2.methods.agent.session.list},
             {jsonrpc: "2.0", id: "b", method: acpV2.methods.agent.session.list, params: {}},
             {jsonrpc: "2.0", id: "c", method: acpV2.methods.agent.session.list, params: null},
-        ] as unknown as AnyWireMessage);
+        ] as unknown as AnyMessage);
         const response = await raw.nextResponse();
 
-        expect(Array.isArray(response)).toBe(true);
-        const errors = (response as unknown as Array<{id: unknown, error?: unknown}>)
-            .map((entry) => ({id: entry.id, error: errorShape(entry as unknown as AnyWireMessage)}));
-        expect(errors).toEqual([
-            {id: "a", error: undefined},
-            {id: "b", error: undefined},
-            {id: "c", error: undefined},
-        ]);
+        expect(response).toMatchObject({id: null, error: {code: -32600}});
+        await raw.send({jsonrpc: "2.0", id: 1, method: "session/list"});
+        await expect(dump(await raw.nextResponse())).toMatchFileSnapshot('data/omitted-params-v2-session-list.json');
+        raw.close();
     });
 
     it.each([

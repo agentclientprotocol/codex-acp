@@ -101,4 +101,21 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
             {type: "sse", name: "existing", url: "https://example.com/sse", headers: []},
         ], ["existing"])).rejects.toMatchObject({code: -32602});
     });
+
+    it.each([
+        ["v1", undefined, "files"],
+        ["v2", "stdio", "files"],
+        ["sanitized collision", "stdio", "file server"],
+    ])('rejects duplicate names before configured-server filtering: %s', async (_label, type, name) => {
+        const server = {name, command: "mcp-fs", args: [], env: [], ...(type ? {type} : {})} as AcpMcpServer;
+        const duplicate = {...server, name: name.replace(/ /g, "_")} as AcpMcpServer;
+        await expect(startSessionWithMcpServers([server, duplicate], [duplicate.name as string]))
+            .rejects.toMatchObject({code: -32602, data: {name: duplicate.name}});
+    });
+
+    it('uses the last stdio environment entry with a repeated name', async () => {
+        const config = await startSessionWithMcpServers([{type: "stdio", name: "files", command: "mcp-fs",
+            env: [{name: "EXAMPLE", value: "first"}, {name: "EXAMPLE", value: "last"}]}]);
+        expect(config).toMatchObject({files: {env: {EXAMPLE: "last"}}});
+    });
 });

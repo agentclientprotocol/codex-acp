@@ -22,6 +22,15 @@ describe.each([1, 2] as const)('ACP v%s prompt content capabilities', (version) 
         }
     });
 
+    if (version === 2) it('rejects an empty prompt without starting a turn or inserting a message', async () => {
+        const session = await connectSession(version);
+        try {
+            await expect(session.sendPrompt([])).rejects.toMatchObject({code: -32602});
+            expect(session.turnStartParams).toEqual([]);
+            expect(session.transcript.filter(entry => "sessionUpdate" in entry)).toEqual([]);
+        } finally { session.connection.close(); }
+    });
+
     it('reports an unknown session with its ID', async () => {
         const session = await connectSession(version);
         try {

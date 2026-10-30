@@ -29,9 +29,8 @@ import {AgentMode} from "./AgentMode";
 import path from "node:path";
 import {logger} from "./Logger";
 import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
-import {sanitizeMcpServerName} from "./McpServerName";
 import {listedSessionTitle} from "./SessionTitle";
-import {type AcpMcpServer, type WithAcpMcpServers, getMcpServerName, normalizeMcpServer, toCodexMcpServerConfig} from "./McpServerConfig";
+import {type AcpMcpServer, type WithAcpMcpServers, normalizeMcpServers, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
     AccountLoginCompletedNotification,
     AccountUpdatedNotification,
@@ -63,7 +62,7 @@ import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
 import {createCodexCollaborationMode} from "./CollaborationModeConfig";
 import type {ModeKind} from "./app-server/ModeKind";
-import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUtils";
+import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike, isAbsoluteProtocolPath} from "./PathUtils";
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
@@ -203,6 +202,8 @@ export class CodexAcpClient {
     };
 
     async initialize(request: Pick<acp.InitializeRequest, "clientInfo">): Promise<void> {
+        // ACP can repeat initialize, but a Codex app-server connection handshakes only once.
+        if (this.isInitialized) return;
         const response = await this.codexClient.initialize({
             capabilities: {
                 experimentalApi: true,
@@ -1135,10 +1136,7 @@ export class CodexAcpClient {
             return {config: configWithWorkspaceRoots, skippedMcpServers: []};
         }
 
-        const requestedServers = mcpServers.map(mcp => ({
-            name: sanitizeMcpServerName(getMcpServerName(mcp)),
-            server: normalizeMcpServer(mcp),
-        }));
+        const requestedServers = normalizeMcpServers(mcpServers).map(server => ({name: server.name, server}));
         let serversToConfigure = requestedServers;
         if (shouldDeduplicateMcpConflicts()) {
             // Prevents Codex from deep-merging incompatible field types, such as url and stdio schemas.
@@ -1713,7 +1711,7 @@ function readAdditionalDirectories(cwd: string, additionalDirectories?: string[]
         if (directory.length === 0) {
             throw RequestError.invalidParams(undefined, "additionalDirectories entries must not be empty");
         }
-        if (!path.isAbsolute(directory)) {
+        if (!isAbsoluteProtocolPath(directory)) {
             throw RequestError.invalidParams(undefined, "additionalDirectories entries must be absolute paths");
         }
         if (!seen.has(directory)) {

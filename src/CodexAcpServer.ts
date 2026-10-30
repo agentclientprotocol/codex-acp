@@ -774,16 +774,16 @@ export class CodexAcpServer {
         _params: acp.InitializeRequest,
     ): Promise<acp.InitializeResponse> {
         logger.log("Initialize request received");
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
+        await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         this.clientInfo = _params.clientInfo ?? null;
         this.clientCapabilities = _params.clientCapabilities ?? null;
         this.initializeRequest = _params;
         this.capabilities = ClientCapabilities.from(_params.clientCapabilities);
-        const appServer = this.ensureAppServer();
-        if (appServer) await appServer;
         this.reportingConnection.reports.compareMeta = this.capabilities.airToolCallContract;
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         this.sessionIndex.configure(_params.clientCapabilities);
-        await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
         this.sessionIndex.observe(this.codexAcpClient);
         this.publishFirstAuthStatusAfterResponse();
         const sessionCapabilities: SubagentAwareSessionCapabilities = {
@@ -836,17 +836,17 @@ export class CodexAcpServer {
         logger.log("Initialize request received", {protocolVersion: params.protocolVersion});
         // Existing capability readers take the v1 shape; v2 fields they read keep their relative path.
         const clientCapabilities = toV1ClientCapabilitiesView(params.capabilities);
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
+        await this.runWithProcessCheck(() => this.codexAcpClient.initialize({clientInfo: params.info}));
         this.clientInfo = params.info;
         this.clientCapabilities = clientCapabilities;
         this.initializeRequest = {clientInfo: params.info};
         this.capabilities = ClientCapabilities.fromV2(clientCapabilities);
-        const appServer = this.ensureAppServer();
-        if (appServer) await appServer;
         this.reportingConnection.reports.compareMeta = this.capabilities.airToolCallContract;
         // Boolean config options are baseline on v2, so there is nothing to probe.
         this.booleanConfigOptionsSupported = true;
         this.sessionIndex.configure(clientCapabilities);
-        await this.runWithProcessCheck(() => this.codexAcpClient.initialize({clientInfo: params.info}));
         this.sessionIndex.observe(this.codexAcpClient);
         this.publishFirstAuthStatusAfterResponse();
         return {
@@ -2699,6 +2699,11 @@ export class CodexAcpServer {
     async setSessionConfigOptionV2(
         params: acpV2.SetSessionConfigOptionRequest,
     ): Promise<acpV2.SetSessionConfigOptionResponse> {
+        const option = this.createSessionConfigOptions(this.getSessionState(params.sessionId))
+            .find(option => option.id === params.configId);
+        if (!option || params.type !== (option.type === "boolean" ? "boolean" : "id")) {
+            throw RequestError.invalidParams();
+        }
         const response = await this.setSessionConfigOption(toV1SetSessionConfigOptionRequest(params));
         return {configOptions: toV2ConfigOptions(response.configOptions)};
     }

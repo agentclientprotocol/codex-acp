@@ -33,17 +33,23 @@ const v2ClientCapabilities: acpV2.ClientCapabilities = {
 
 function connectRouter() {
     const mocks = createMockConnections();
+    let agent: CodexAcpServer;
+    let codexClient: CodexAcpClient;
     const router = createAcpAgentRouter((connection) => {
         const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
+        codexClient = codexAcpClient;
         vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: true});
-        return new CodexAcpServer(connection, codexAcpClient);
+        agent = new CodexAcpServer(connection, codexAcpClient);
+        return agent;
     });
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
     const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
     router.connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
     return {
         mocks,
+        agent: () => agent,
+        codexClient: () => codexClient,
         clientStream: acp.ndJsonStream(clientToAgent.writable, agentToClient.readable),
     };
 }
@@ -106,6 +112,27 @@ describe('CodexACPAgent - initialize over ACP v2', () => {
         const methodIds = response.authMethods?.map((method) => method.methodId);
         expect(methodIds).not.toContain("gateway");
         expect(methodIds).not.toContain("chat-gpt-device-code");
+    });
+
+    it('repeats initialize without reinitializing Codex and retains the last success after a failed repeat', async () => {
+        const h = connectRouter();
+        const connection = acpV2.client({name: "test-client"}).connect(h.clientStream);
+        closeClient = () => connection.close();
+        const initialize = (capabilities: acpV2.ClientCapabilities) => connection.agent.request("initialize", {
+            protocolVersion: 2, info: {name: "test-client", version: "1"}, capabilities,
+        });
+        for (const capabilities of [{}, v2ClientCapabilities, {}]) {
+            const response = await initialize(capabilities);
+            expect(response.authMethods?.some(method => method.methodId === "gateway"))
+                .toBe(capabilities === v2ClientCapabilities);
+        }
+        expect(h.mocks.mockCodexConnection.sendRequest.mock.calls.filter((call: unknown[]) => call[0] === "initialize")).toHaveLength(1);
+        vi.spyOn(h.codexClient(), "initialize").mockRejectedValueOnce(acp.RequestError.internalError("Unavailable"));
+        await expect(initialize(v2ClientCapabilities)).rejects.toMatchObject({code: -32603});
+        // Failed initialization must not enable the AIR or elicitation handlers from the rejected request.
+        // @ts-expect-error - inspect the committed capability view after a failed repeat
+        expect(clientSupportsFormElicitation(h.agent().clientCapabilities)).toBe(false);
+        await expect(initialize(v2ClientCapabilities)).resolves.toHaveProperty("protocolVersion", 2);
     });
 
     it('still routes a v1 initialize to the unchanged v1 chain', async () => {
