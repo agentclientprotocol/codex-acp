@@ -8,13 +8,17 @@ type SessionUpdateParams = {sessionId: string; update: UpdateSessionEvent};
  * Sends the notifications and requests of the adapter to the ACP client.
  *
  * Every emission site of the adapter uses this connection.
- * So each tool call report goes through the same changed-fields filter,
- * whether it comes from a live event, a history replay, a permission flow or an async task.
+ * Tool reports share a changed-fields filter, and session interactions share cancellation
+ * on close, whether they belong to foreground work, background work or session startup.
  */
-export class ToolCallReportingConnection {
+export class AcpClientDelivery {
     readonly reports = new ToolCallReports();
+    private readonly sessionRequests = new Map<string, Set<AbortController>>();
 
-    constructor(private readonly client: AcpClientConnection) {}
+    constructor(
+        private readonly client: AcpClientConnection,
+        private readonly sessionIsClosing: (sessionId: string) => boolean = () => false,
+    ) {}
 
     /** Returns this connection with the signature of the SDK connection. */
     asClientConnection(): AcpClientConnection {
@@ -33,7 +37,7 @@ export class ToolCallReportingConnection {
 
     async request(method: string, params?: unknown, options?: acp.SendRequestOptions): Promise<unknown> {
         if (method !== acp.methods.client.session.requestPermission || !isPermissionRequestParams(params)) {
-            return await this.client.request(method, params, options);
+            return await this.sendRequest(method, params, options);
         }
         // The client merges the request tool call into the stored tool call, like an update.
         // A cancelled or failed request may leave the client without these fields,
@@ -41,7 +45,7 @@ export class ToolCallReportingConnection {
         this.reports.prepare(params.sessionId, {sessionUpdate: "tool_call_update", ...params.toolCall});
         let response: unknown;
         try {
-            response = await this.client.request(method, params, options);
+            response = await this.sendRequest(method, params, options);
         } catch (error) {
             this.reports.forgetOpen(params.sessionId, params.toolCall.toolCallId);
             throw error;
@@ -49,6 +53,41 @@ export class ToolCallReportingConnection {
         if (isCancelled(response)) this.reports.forgetOpen(params.sessionId, params.toolCall.toolCallId);
         return response;
     }
+
+    /** Withdraw pending UI without waiting for the client to answer the cancelled requests. */
+    cancelSessionRequests(sessionId: string): void {
+        for (const controller of this.sessionRequests.get(sessionId) ?? []) {
+            controller.abort(acp.RequestError.requestCancelled(undefined, `Session ${sessionId} is closing`));
+        }
+    }
+
+    private async sendRequest(method: string, params: unknown, options?: acp.SendRequestOptions): Promise<unknown> {
+        const sessionId = interactionSessionId(method, params);
+        if (sessionId === null) return await this.client.request(method, params, options);
+        if (this.sessionIsClosing(sessionId)) {
+            throw acp.RequestError.requestCancelled(undefined, `Session ${sessionId} is closing`);
+        }
+        const controller = new AbortController();
+        const requests = this.sessionRequests.get(sessionId) ?? new Set<AbortController>();
+        this.sessionRequests.set(sessionId, requests);
+        requests.add(controller);
+        const cancellationSignal = options?.cancellationSignal
+            ? AbortSignal.any([options.cancellationSignal, controller.signal])
+            : controller.signal;
+        try {
+            return await this.client.request(method, params, {...options, cancellationSignal});
+        } finally {
+            requests.delete(controller);
+            if (requests.size === 0) this.sessionRequests.delete(sessionId);
+        }
+    }
+}
+
+function interactionSessionId(method: string, params: unknown): string | null {
+    if (method !== acp.methods.client.elicitation.create && method !== acp.methods.client.session.requestPermission) return null;
+    if (params === null || typeof params !== "object") return null;
+    const sessionId = (params as {sessionId?: unknown}).sessionId;
+    return typeof sessionId === "string" ? sessionId : null;
 }
 
 function isCancelled(response: unknown): boolean {
