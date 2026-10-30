@@ -40,8 +40,12 @@ export class AcpV2Connection {
                 if (sessionId !== null && this.sessionDelivery && !this.sessionDelivery.canRequestSession(sessionId)) {
                     return Promise.reject(acp.RequestError.requestCancelled(undefined, `Session ${sessionId} is closing or closed`));
                 }
-                const send = () => client.request(method as `_${string}`, params, options);
-                return this.sessionDelivery?.withElicitationRequest(method, params, send) ?? send();
+                const send = () => {
+                    const request = () => client.request(method as `_${string}`, params, options);
+                    return this.sessionDelivery?.withElicitationRequest(method, params, request) ?? request();
+                };
+                const setup = sessionId === null ? null : this.sessionDelivery?.waitForSessionSetup(sessionId, options?.cancellationSignal);
+                return setup ? setup.then(send) : send();
             },
         } as AcpV2ClientConnection;
     }

@@ -15,6 +15,7 @@ export class AcpClientDelivery {
     private readonly sessionRequests = new Map<string, Set<AbortController>>();
     private readonly closedSessions = new Set<string>();
     private readonly urlElicitations = new Map<string, {sessionId: string | null}>();
+    private readonly sessionSetups = new Map<string, {ready: Promise<void>; release: () => void}>();
     private sendElicitationCompletion: (params: unknown) => Promise<void>;
 
     constructor(
@@ -38,9 +39,57 @@ export class AcpClientDelivery {
         this.closedSessions.delete(sessionId);
     }
 
+    /** A new session cannot open client UI until its setup response has been written. */
+    beginSessionSetup(sessionId: string): void {
+        if (this.sessionSetups.has(sessionId)) return;
+        let release!: () => void;
+        const ready = new Promise<void>(resolve => { release = resolve; });
+        this.sessionSetups.set(sessionId, {ready, release});
+    }
+
+    sessionSetupReady(sessionId: string): Promise<void> | null {
+        return this.sessionSetups.get(sessionId)?.ready ?? null;
+    }
+
+    captureSessionSetupRelease(sessionId: string): () => void {
+        const setup = this.sessionSetups.get(sessionId);
+        return () => {
+            if (setup && this.sessionSetups.get(sessionId) === setup) this.finishSessionSetup(sessionId);
+        };
+    }
+
+    private finishSessionSetup(sessionId: string): void {
+        const setup = this.sessionSetups.get(sessionId);
+        this.sessionSetups.delete(sessionId);
+        setup?.release();
+    }
+
+    waitForSessionSetup(sessionId: string, signal?: AbortSignal): Promise<void> | null {
+        const ready = this.sessionSetupReady(sessionId);
+        if (!ready) return null;
+        return new Promise<void>((resolve, reject) => {
+            const cancelled = () => reject(acp.RequestError.requestCancelled(undefined, `Session ${sessionId} setup was cancelled`));
+            if (signal?.aborted) { cancelled(); return; }
+            signal?.addEventListener("abort", cancelled, {once: true});
+            void ready.then(() => {
+                signal?.removeEventListener("abort", cancelled);
+                if (signal?.aborted || !this.canRequestSession(sessionId)) cancelled();
+                else resolve();
+            });
+        });
+    }
+
+    disposeSessionSetups(): void {
+        for (const sessionId of this.sessionSetups.keys()) {
+            this.closedSessions.add(sessionId);
+            this.cancelSessionRequests(sessionId);
+        }
+    }
+
     /** Final teardown updates have been sent. Nothing else may publish for this session lifetime. */
     closeSession(sessionId: string): void {
         this.closedSessions.add(sessionId);
+        this.finishSessionSetup(sessionId);
         for (const [id, scope] of this.urlElicitations) {
             if (scope.sessionId === sessionId) this.urlElicitations.delete(id);
         }
@@ -103,13 +152,14 @@ export class AcpClientDelivery {
         for (const controller of this.sessionRequests.get(sessionId) ?? []) {
             controller.abort(acp.RequestError.requestCancelled(undefined, `Session ${sessionId} is closing`));
         }
+        this.finishSessionSetup(sessionId);
     }
 
     private sendRequest(method: string, params: unknown, options?: acp.SendRequestOptions): Promise<unknown> {
         const sessionId = clientRequestSessionId(method, params);
-        return this.withElicitationRequest(method, params, () => sessionId === null
-            ? this.client.request(method, params, options)
-            : this.sendSessionRequest(sessionId, method, params, options));
+        return sessionId === null
+            ? this.withElicitationRequest(method, params, () => this.client.request(method, params, options))
+            : this.sendSessionRequest(sessionId, method, params, options);
     }
 
     /** Direct v2 requests and the shared v1-shaped path keep the same URL scope. */
@@ -145,7 +195,10 @@ export class AcpClientDelivery {
             ? AbortSignal.any([options.cancellationSignal, controller.signal])
             : controller.signal;
         try {
-            return await this.client.request(method, params, {...options, cancellationSignal});
+            const setup = this.waitForSessionSetup(sessionId, cancellationSignal);
+            if (setup) await setup;
+            return await this.withElicitationRequest(method, params,
+                () => this.client.request(method, params, {...options, cancellationSignal}));
         } finally {
             requests.delete(controller);
             if (requests.size === 0) this.sessionRequests.delete(sessionId);

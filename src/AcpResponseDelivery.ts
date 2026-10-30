@@ -2,10 +2,10 @@ import type {AnyMessage, JsonRpcId, Stream} from "@agentclientprotocol/sdk/exper
 
 /** Observe completed response writes without changing SDK framing. */
 export class AcpResponseDelivery {
-    private readonly callbacks = new Map<JsonRpcId, () => void>();
+    private readonly callbacks = new Map<JsonRpcId, (successful: boolean) => void>();
     private disposed = false;
 
-    afterWrite(requestId: JsonRpcId, callback: () => void): void {
+    afterWrite(requestId: JsonRpcId, callback: (successful: boolean) => void): void {
         if (!this.disposed) this.callbacks.set(requestId, callback);
     }
 
@@ -20,7 +20,7 @@ export class AcpResponseDelivery {
                     if ("method" in message || message.id === null) return;
                     const callback = this.callbacks.get(message.id);
                     this.callbacks.delete(message.id);
-                    callback?.();
+                    callback?.("result" in message);
                 },
                 close: async () => {
                     const writer = stream.writable.getWriter();
