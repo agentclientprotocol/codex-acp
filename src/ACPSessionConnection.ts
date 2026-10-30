@@ -6,6 +6,7 @@ import {
     asSdkSessionNotification,
 } from "./AcpSessionExtensions";
 import {toV2SessionUpdates} from "./AcpV2SessionUpdate";
+import {toV2ReplayUpdates} from "./AcpV2Replay";
 import {toV1RequestPermissionResponse, toV2RequestPermissionRequest} from "./AcpV2Permissions";
 import {elicitationSessionId, toV1CreateElicitationResponse, toV2CreateElicitationRequest} from "./AcpV2Elicitation";
 import {AcpV2ForegroundState} from "./AcpV2ForegroundState";
@@ -135,29 +136,17 @@ export class AcpV2Connection {
         return foreground;
     }
 
-    /**
-     * Sends the whole-message update (`content: []`) that must precede the first replayed chunk
-     * for a given id, clearing any content a reconnecting client already holds for it. Only
-     * `user_message`, `agent_message` and `agent_thought` exist as whole-message updates; there
-     * is no v1 shape for them, so this bypasses `toV2SessionUpdates` entirely.
-     */
-    async startReplayMessage(sessionId: string, kind: ReplayMessageKind, messageId: string): Promise<void> {
-        let update: acpV2.SessionUpdate;
-        switch (kind) {
-            case "user_message":
-                update = {sessionUpdate: "user_message", messageId, content: [], _meta: null};
-                break;
-            case "agent_message":
-                update = {sessionUpdate: "agent_message", messageId, content: [], _meta: null};
-                break;
-            case "agent_thought":
-                update = {sessionUpdate: "agent_thought", messageId, content: [], _meta: null};
-                break;
-        }
-        await this.client.notify(acpV2.methods.client.session.update, {
-            sessionId,
-            update,
-        });
+    async replaySessionUpdate(sessionId: string, update: AcpSessionUpdate, initialized: Set<string>): Promise<void> {
+        const send = async (params: {sessionId: string; update: AcpSessionUpdate}) => {
+            for (const rendered of toV2SessionUpdates(params.update)) {
+                for (const replayed of toV2ReplayUpdates(rendered, initialized)) {
+                    await this.client.notify(acpV2.methods.client.session.update, {sessionId: params.sessionId, update: replayed});
+                }
+            }
+        };
+        const params = {sessionId, update};
+        if (this.sessionDelivery) await this.sessionDelivery.withSessionUpdate(params, send);
+        else await send(params);
     }
 
     /** Sends permission requests without mistaking one pending request for a blocked session. */
@@ -308,12 +297,11 @@ export class ACPSessionConnection {
 
     forSession(sessionId: string): ACPSessionConnection { return new ACPSessionConnection(this.connection, sessionId); }
 
-    /** `startReplayMessage`, which only exists on v2 and so needs no v1 shape. */
-    async startReplayMessage(kind: ReplayMessageKind, messageId: string): Promise<void> {
-        if (!this.v2Connection) {
-            throw acp.RequestError.internalError(undefined, `'${kind}' does not exist in ACP v1`);
-        }
-        await this.v2Connection.startReplayMessage(this.sessionId, kind, messageId);
+    /** Replay shares live report filtering, with v2 entity initialization after conversion. */
+    replayUpdate(update: UpdateSessionEvent, initialized: Set<string>): Promise<void> {
+        return this.v2Connection
+            ? this.v2Connection.replaySessionUpdate(this.sessionId, update, initialized)
+            : this.update(update);
     }
 
     /** On v2, the view renders the update in the v2 shape (`extensionOnlyV1View`). */
@@ -326,6 +314,3 @@ export class ACPSessionConnection {
 }
 
 export type UpdateSessionEvent = AcpSessionUpdate;
-
-/** The v2 whole-message update kinds that a replayed chunk stream can restart. */
-export type ReplayMessageKind = "user_message" | "agent_message" | "agent_thought";

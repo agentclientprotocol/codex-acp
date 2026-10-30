@@ -271,6 +271,7 @@
         "terminalId": "item-cmd-1",
         "command": "ls",
         "cwd": "/workspace",
+        "_meta": null,
         "sessionUpdate": "terminal_update"
       }
     },
@@ -291,6 +292,7 @@
           "command": "ls",
           "cwd": "/workspace"
         },
+        "_meta": null,
         "sessionUpdate": "tool_call_update"
       }
     },

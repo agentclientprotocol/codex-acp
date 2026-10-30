@@ -76,7 +76,8 @@ describe("Post-close session delivery", () => {
                 })).rejects.toMatchObject({code: -32800});
                 if (v2) {
                     await v2.updateState(id, {state: "running"});
-                    await v2.startReplayMessage(id, "agent_message", "late-replay");
+                    await v2.replaySessionUpdate(id, {sessionUpdate: "agent_message_chunk", messageId: "late-replay",
+                        content: {type: "text", text: "Late replay"}}, new Set());
                     await v2.client.notify("session/update", {sessionId: id, update: {sessionUpdate: "state_update", state: "idle"}});
                     await expect(v2.createElicitation({sessionId: id, mode: "url",
                         message: "Late", url: "https://example.com/late", elicitationId: `late-${id}`})).rejects.toMatchObject({code: -32800});

@@ -9,6 +9,7 @@ import {AIR_NATIVE_SUBAGENT_SESSIONS_KEY} from '../../AirExtension';
 import type {Thread} from '../../app-server/v2';
 import {createCodexMockTestFixture, createTestModel} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
+import {commandExecutionItem, createTurn} from './v2-prompt-harness';
 import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 const sessionId = "thread-1";
@@ -320,6 +321,44 @@ describe('ACP v2 resume replay: review-mode ids, reviewer-prompt hiding, primers
         ));
         await expect(dump(messages)).toMatchFileSnapshot('data/v2-resume-replay-review-and-hide.json');
         assertPrimerBeforeEveryChunk(updates);
+    });
+
+    it.each([
+        {native: false, paginated: false},
+        {native: false, paginated: true},
+        {native: true, paginated: false},
+        {native: true, paginated: true},
+    ])('resynchronizes entity metadata on every replay (AIR: $native, paginated: $paginated)', async ({native, paginated}) => {
+        const replayTurns: Thread["turns"] = [{
+            ...createTurn("completed"),
+            itemsView: "full",
+            items: [
+                {...commandExecutionItem("command", "completed"), aggregatedOutput: "Recorded output"},
+                {type: "mcpToolCall", id: "mcp", server: "docs", tool: "lookup", status: "completed",
+                    arguments: {}, appContext: null, mcpAppUi: null, pluginId: null, readOnlyHint: null,
+                    result: null, error: null, durationMs: null},
+                {type: "contextCompaction", id: "compaction"},
+            ],
+        }];
+        const {connection, updates} = await connectV2Client({
+            replayTurns, paginated,
+            capabilities: {
+                ...(native ? {_meta: {jetbrains: {air: {version: 1, capabilities: [AIR_NATIVE_SUBAGENT_SESSIONS_KEY]}}}} : {}),
+            },
+        });
+        closeClient = () => connection.close();
+        for (let replay = 0; replay < 2; replay++) {
+            const start = updates.length;
+            await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd, replayFrom: {type: "start"}});
+            const current = updates.slice(start).map(({update}) => update);
+            const metadata = (match: (update: acpV2.SessionUpdate) => boolean) =>
+                current.filter(match).map(update => update._meta).filter(meta => meta !== undefined);
+            expect(metadata(update => acpV2.SessionUpdate.isTerminalUpdate(update) && update.terminalId === "command")).toEqual([null]);
+            expect(metadata(update => acpV2.SessionUpdate.isToolCallUpdate(update) && update.toolCallId === "command")).toEqual([null]);
+            expect(metadata(update => acpV2.SessionUpdate.isToolCallUpdate(update) && update.toolCallId === "mcp"))
+                .toEqual([null, {is_mcp_tool_call: true}]);
+            expect(metadata(update => acpV2.SessionUpdate.isCompactionUpdate(update) && update.compactionId === "compaction")).toEqual([null]);
+        }
     });
 
     it('hides the reviewer prompt the same way when the history arrives one item per page', async () => {
