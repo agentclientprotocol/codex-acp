@@ -84,8 +84,16 @@ function combine(a: TokenCount, b: TokenCount, op: (x: number, y: number) => num
     return result;
 }
 
-function sameCount(a: TokenCount, b: TokenCount): boolean {
+export function sameTokenCount(a: TokenCount, b: TokenCount): boolean {
     return TOKEN_COUNT_FIELDS.every(field => a[field] === b[field]);
+}
+
+export function addTokenCounts(a: TokenCount, b: TokenCount): TokenCount {
+    return combine(a, b, (x, y) => x + y);
+}
+
+export function subtractTokenCounts(a: TokenCount, b: TokenCount): TokenCount {
+    return combine(a, b, (x, y) => x - y);
 }
 
 /**
@@ -124,7 +132,7 @@ export class PromptTokenUsage {
 
     observe(total: TokenCount, last: TokenCount): void {
         const previous = this.previousTotal;
-        if (previous !== null && sameCount(total, previous)) return;
+        if (previous !== null && sameTokenCount(total, previous)) return;
         if (previous === null && !this.modelOutputSeen) {
             this.startTotal = total;
             this.previousTotal = total;
