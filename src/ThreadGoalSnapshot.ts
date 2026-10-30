@@ -1,5 +1,5 @@
-import type {UpdateSessionEvent} from "./ACPSessionConnection";
-import {AIR_GOAL_KEY, withAirMeta} from "./AirExtension";
+import type {ACPSessionConnection, UpdateSessionEvent} from "./ACPSessionConnection";
+import {AIR_GOAL_KEY, publishAirSessionMetadata, withAirMeta} from "./AirExtension";
 import {GOAL_CONTROL_METHOD, type GoalSnapshot, type GoalStatus} from "./GoalExtension";
 import type {ThreadGoal} from "./app-server/v2";
 
@@ -54,4 +54,8 @@ export function goalSessionInfoUpdate(goal: ThreadGoalSnapshot | null, airClient
         sessionUpdate: "session_info_update",
         _meta: withAirMeta(undefined, AIR_GOAL_KEY, goal),
     };
+}
+
+export function publishGoalSessionInfo(session: ACPSessionConnection, goal: ThreadGoalSnapshot | null, airClient: boolean): Promise<void> {
+    return airClient ? publishAirSessionMetadata(session, AIR_GOAL_KEY, goal) : Promise.resolve();
 }

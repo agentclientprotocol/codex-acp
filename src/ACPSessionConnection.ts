@@ -10,7 +10,7 @@ import {toV2ReplayUpdates} from "./AcpV2Replay";
 import {toV1RequestPermissionResponse, toV2RequestPermissionRequest} from "./AcpV2Permissions";
 import {elicitationSessionId, toV1CreateElicitationResponse, toV2CreateElicitationRequest} from "./AcpV2Elicitation";
 import {AcpV2ForegroundState} from "./AcpV2ForegroundState";
-import {AcpV2SessionInfo, type SessionMetadataPatch} from "./AcpV2SessionInfo";
+import {AcpV2SessionInfo, type SessionInfoFields, type SessionMetadataPatch} from "./AcpV2SessionInfo";
 import {type AcpClientDelivery, clientNotificationSessionId, clientRequestSessionId} from "./AcpClientDelivery";
 
 export type AcpClientConnection = Pick<acp.AgentContext, "notify" | "request">;
@@ -120,8 +120,8 @@ export class AcpV2Connection {
         return this.sessionInfoFor(sessionId).snapshot(title);
     }
 
-    patchSessionMetadata(sessionId: string, change: SessionMetadataPatch): Promise<void> {
-        return this.sessionInfoFor(sessionId).patchMetadata(change);
+    patchSessionMetadata(sessionId: string, change: SessionMetadataPatch, fields: SessionInfoFields = {}): Promise<void> {
+        return this.sessionInfoFor(sessionId).patchMetadata(change, fields);
     }
 
     startForegroundItem(sessionId: string, itemId: string): Promise<void> {
@@ -137,10 +137,14 @@ export class AcpV2Connection {
     }
 
     forgetSession(sessionId: string): void {
-        this.foreground.get(sessionId)?.dispose();
-        this.foreground.delete(sessionId);
+        this.forgetForegroundState(sessionId);
         this.sessionInfo.get(sessionId)?.dispose();
         this.sessionInfo.delete(sessionId);
+    }
+
+    forgetForegroundState(sessionId: string): void {
+        this.foreground.get(sessionId)?.dispose();
+        this.foreground.delete(sessionId);
     }
 
     private sessionInfoFor(sessionId: string, metadata: Record<string, unknown> | null = null): AcpV2SessionInfo {
@@ -343,8 +347,8 @@ export class ACPSessionConnection {
     forSession(sessionId: string): ACPSessionConnection { return new ACPSessionConnection(this.connection, sessionId); }
 
     /** Domain writers can rebuild an owned metadata value without changing v2's shallow patch semantics. */
-    patchSessionMetadata(change: SessionMetadataPatch): Promise<void> {
-        return this.v2Connection?.patchSessionMetadata(this.sessionId, change) ?? Promise.resolve();
+    patchSessionMetadata(change: SessionMetadataPatch, fields: SessionInfoFields = {}): Promise<void> {
+        return this.v2Connection?.patchSessionMetadata(this.sessionId, change, fields) ?? Promise.resolve();
     }
 
     /** Replay shares live report filtering, with v2 entity initialization after conversion. */

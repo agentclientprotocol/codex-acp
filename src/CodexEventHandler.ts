@@ -63,6 +63,7 @@ import {
     AIR_META_KEY,
     AIR_SESSION_FAILURE_KEY,
     JETBRAINS_META_KEY,
+    withAirMetadata,
 } from "./AirExtension";
 import type {SubagentEventRouter} from "./subagents/SubagentEventRouter";
 import {StandardSubagentEventRouter} from "./subagents/StandardSubagentEventRouter";
@@ -335,7 +336,7 @@ export class CodexEventHandler {
         await this.finishCompactionsForNotification(notification);
         if (this.isAuthenticationRequiredError(notification.params.error.codexErrorInfo)) return;
         if (notification.params.willRetry) {
-            await this.session.update(this.createSessionFailureUpdate(this.recordRetryWarning(notification.params, false)));
+            await this.publishUpdate(this.createSessionFailureUpdate(this.recordRetryWarning(notification.params, false)));
             return;
         }
         const failure = this.recordSessionFailure(
@@ -346,7 +347,7 @@ export class CodexEventHandler {
             undefined,
             false,
         );
-        await this.session.update(this.createSessionFailureUpdate(failure));
+        await this.publishUpdate(this.createSessionFailureUpdate(failure));
     }
 
     async flushPendingErrors(): Promise<void> {
@@ -357,7 +358,7 @@ export class CodexEventHandler {
         for (const error of errors) {
             const update = await this.createErrorEvent(error);
             if (update) {
-                await this.session.update(update);
+                await this.publishUpdate(update);
             }
         }
     }
@@ -484,7 +485,7 @@ export class CodexEventHandler {
         if (ignoredBySubagents) return;
         if (updateEvent === undefined) updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
-            await this.session.update(updateEvent, this.subagents.notificationSessionId(notification));
+            await this.publishUpdate(updateEvent, this.subagents.notificationSessionId(notification));
         }
     }
 
@@ -794,6 +795,22 @@ export class CodexEventHandler {
             case "autoApprovalReview/strictReviewRequired":
                 return null;
         }
+    }
+
+    /** These fact builders produce partial owned namespaces, unlike raw metadata patches. */
+    private publishUpdate(update: UpdateSessionEvent, sessionId = this.sessionState.sessionId): Promise<void> {
+        if (this.session.protocolVersion !== 2 || update.sessionUpdate !== "session_info_update" || update._meta == null) {
+            return this.session.update(update, sessionId);
+        }
+        const {_meta, sessionUpdate: _tag, ...fields} = update;
+        return this.session.forSession(sessionId).patchSessionMetadata(current => {
+            const metadata = {..._meta};
+            const codex = recordOrNull(_meta["codex"]);
+            if (codex) metadata["codex"] = {...recordOrNull(current["codex"]), ...codex};
+            const air = recordOrNull(recordOrNull(_meta[JETBRAINS_META_KEY])?.[AIR_META_KEY]);
+            if (air) metadata[JETBRAINS_META_KEY] = withAirMetadata(current, air)[JETBRAINS_META_KEY];
+            return metadata;
+        }, fields);
     }
 
     private createCodexSessionInfoUpdate(codexMetadata: Record<string, unknown>): UpdateSessionEvent {
