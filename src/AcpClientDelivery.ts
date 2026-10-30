@@ -103,17 +103,14 @@ export class AcpClientDelivery {
         return this.canPublishSession(sessionId) && !this.sessionIsClosing(sessionId);
     }
 
-    async notify(method: string, params?: unknown): Promise<void> {
+    notify(method: string, params?: unknown): Promise<void> {
         if (method === acp.methods.client.session.update && isSessionUpdateParams(params)) {
-            if (!this.canPublishSession(params.sessionId)) return;
-            const update = this.reports.prepare(params.sessionId, params.update);
-            if (update === null) return;
-            await this.client.notify(method, {...params, update});
-            // A fresh announcement reopens a child view after its parent is resumed.
-            if (update.sessionUpdate === "subagent_update") this.openSession(update.sessionId);
-            if (update.sessionUpdate === "subagent_spawned") this.openSession(update.subagentSessionId);
-            return;
+            return this.withSessionUpdate(params, prepared => this.client.notify(method, prepared));
         }
+        return this.sendNotification(method, params);
+    }
+
+    private async sendNotification(method: string, params?: unknown): Promise<void> {
         if (method === acp.methods.client.elicitation.complete) {
             const id = (params as {elicitationId?: unknown} | null)?.elicitationId;
             if (typeof id !== "string" || !this.urlElicitations.has(id)) return;
@@ -122,6 +119,16 @@ export class AcpClientDelivery {
             return;
         }
         await this.client.notify(method, params);
+    }
+
+    async withSessionUpdate(params: SessionUpdateParams, send: (params: SessionUpdateParams) => Promise<void>): Promise<void> {
+        if (!this.canPublishSession(params.sessionId)) return;
+        const update = this.reports.prepare(params.sessionId, params.update);
+        if (update === null) return;
+        await send({...params, update});
+        // A fresh announcement reopens a child view after its parent is resumed.
+        if (update.sessionUpdate === "subagent_update") this.openSession(update.sessionId);
+        if (update.sessionUpdate === "subagent_spawned") this.openSession(update.subagentSessionId);
     }
 
     async request(method: string, params?: unknown, options?: acp.SendRequestOptions): Promise<unknown> {

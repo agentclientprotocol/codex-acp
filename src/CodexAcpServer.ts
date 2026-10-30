@@ -49,7 +49,6 @@ import {
     ACPSessionConnection,
     type AcpV2ClientConnection,
     AcpV2Connection,
-    type ReplayMessageKind,
     type UpdateSessionEvent,
 } from "./ACPSessionConnection";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
@@ -3644,40 +3643,15 @@ export class CodexAcpServer {
             );
             return;
         }
-        const startedReplayMessages = new Set<string>();
+        const replayedEntities = new Set<string>();
         for await (const items of itemPages) {
             for (const item of items) {
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
                 for (const update of await this.createHistoryUpdates(item, sessionState)) {
-                    if (this.protocolVersion === 2) {
-                        await this.sendReplayMessageStart(session, update, startedReplayMessages);
-                    }
-                    await session.update(update);
+                    await session.replayUpdate(update, replayedEntities);
                 }
             }
         }
-    }
-
-    /**
-     * Start each v2 replayed message with empty content and metadata before its chunks.
-     * Chunks without a messageId get a fresh id in toV2SessionUpdate and cannot be primed.
-     */
-    private async sendReplayMessageStart(
-        session: ACPSessionConnection,
-        update: UpdateSessionEvent,
-        started: Set<string>,
-    ): Promise<void> {
-        const kind = replayMessageStartKind(update.sessionUpdate);
-        const messageId = kind ? (update as {messageId?: string | null}).messageId : null;
-        if (!kind || !messageId) {
-            return;
-        }
-        const key = `${kind}:${messageId}`;
-        if (started.has(key)) {
-            return;
-        }
-        started.add(key);
-        await session.startReplayMessage(kind, messageId);
     }
 
     private async streamNativeThreadHistory(
@@ -3694,8 +3668,7 @@ export class CodexAcpServer {
         // the resolved model that the activity items name for the child, so an older record gets no model option.
         const reportModel = (childSessionId: string, model: string | undefined) =>
             reportSubagentModel(session, childSessionId, this.subagentModels(sessionState), model);
-        // v2 only (this path also serves v1's native replay, unchanged there).
-        const startedReplayMessages = new Set<string>();
+        const replayedEntities = new Set<string>();
         for await (const items of itemPages) {
             for (const item of items) {
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
@@ -3803,10 +3776,7 @@ export class CodexAcpServer {
                 // The activity items above replay the lifecycle of a spawn. A control call is a tool call, as in the live session.
                 if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") continue;
                 for (const update of await this.createHistoryUpdates(item, sessionState)) {
-                    if (this.protocolVersion === 2) {
-                        await this.sendReplayMessageStart(session, update, startedReplayMessages);
-                    }
-                    await session.update(update);
+                    await session.replayUpdate(update, replayedEntities);
                 }
             }
         }
@@ -3828,7 +3798,7 @@ export class CodexAcpServer {
         const router = state.subagents;
         if (!(router instanceof StandardSubagentEventRouter)) return;
         const session = new ACPSessionConnection(this.connection, sessionId);
-        const started = new Set<string>();
+        const replayedEntities = new Set<string>();
         const replayChild = async (childThreadId: string, childId: string | null) => {
             if (childId === null || replayed.has(childThreadId)) return;
             if (ancestry.has(childThreadId)) { gaps.add(childThreadId); return; }
@@ -3896,8 +3866,7 @@ export class CodexAcpServer {
                     if (!isOpen()) throw new SessionClosedDuringLoadError();
                 }
                 for (const update of await this.createHistoryUpdates(item, state)) {
-                    if (this.protocolVersion === 2) await this.sendReplayMessageStart(session, update, started);
-                    await session.update(update);
+                    await session.replayUpdate(update, replayedEntities);
                 }
             }
         }
@@ -3911,8 +3880,7 @@ export class CodexAcpServer {
         if (threadId === state.sessionId && gaps.size > 0) {
             const update = {sessionUpdate: "agent_thought_chunk" as const, messageId: `${sessionId}:subagent-history-gap`,
                 content: {type: "text" as const, text: "Some recorded child history is unavailable or incomplete."}};
-            if (this.protocolVersion === 2) await this.sendReplayMessageStart(session, update, started);
-            await session.update(update);
+            await session.replayUpdate(update, replayedEntities);
         }
     }
 
@@ -5778,20 +5746,6 @@ function supportsPartialHistory(item: ThreadItem): boolean {
 
 function isUuidV7(id: string): boolean {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-}
-
-/** The whole-message kind a replayed chunk update restarts, or `null` if it isn't a chunk. */
-function replayMessageStartKind(sessionUpdate: UpdateSessionEvent["sessionUpdate"]): ReplayMessageKind | null {
-    switch (sessionUpdate) {
-        case "user_message_chunk":
-            return "user_message";
-        case "agent_message_chunk":
-            return "agent_message";
-        case "agent_thought_chunk":
-            return "agent_thought";
-        default:
-            return null;
-    }
 }
 
 /** A close of the session stopped the read of its history during `session/load`. */
