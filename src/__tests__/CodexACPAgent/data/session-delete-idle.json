@@ -1,5 +1,18 @@
 {
   "eventType": "request",
+  "method": "thread/backgroundTerminals/list",
+  "params": {
+    "threadId": "session-id",
+    "cursor": null
+  }
+}
+{
+  "eventType": "response",
+  "data": [],
+  "nextCursor": null
+}
+{
+  "eventType": "request",
   "method": "thread/unsubscribe",
   "params": {
     "threadId": "session-id"

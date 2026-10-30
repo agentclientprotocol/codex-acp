@@ -678,7 +678,7 @@ export class CodexAcpServer {
     }
 
     private async readSubagentConfiguration(threadId: string, parentThreadId: string): Promise<ObservedSubagentConfiguration | null> {
-        const {thread} = await this.codexAcpClient.appServerClient.threadRead({threadId});
+        const thread = await this.codexAcpClient.readSubagentThread(threadId);
         if (!thread || thread.id !== threadId || thread.parentThreadId !== parentThreadId || thread.status.type === "notLoaded") return null;
         return {model: thread.model, effort: thread.reasoningEffort};
     }
@@ -1996,7 +1996,8 @@ export class CodexAcpServer {
 
     async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
         logger.log("Closing session...", {sessionId: params.sessionId});
-        const closeGeneration = this.bumpSessionGeneration(params.sessionId);
+        if (!this.hasLocalSession(params.sessionId)) return {};
+        let closeGeneration: number | null = null;
         const sessionState = this.sessions.get(params.sessionId);
         this.beginSessionCloseFence(params.sessionId);
 
@@ -2009,8 +2010,6 @@ export class CodexAcpServer {
             this.cancelQueuedV2Prompts(params.sessionId);
             if (sessionState) {
                 await this.interruptSessionTurn(sessionState, "Close", true);
-                if (sessionState.subagents instanceof StandardSubagentEventRouter) await sessionState.subagents.finishOutstanding("disconnected");
-                sessionState.asyncTasks.clear();
                 sessionState.promptSuggestions?.invalidate();
             } else {
                 logger.log("Close request received for unknown local session", {sessionId: params.sessionId});
@@ -2028,10 +2027,15 @@ export class CodexAcpServer {
                 // The thread is not loaded in a running app-server: nothing to close there, and no restart for it.
                 logger.log("Session closed without an app-server call: its app-server is gone", {sessionId: params.sessionId});
             }
+            closeGeneration = this.bumpSessionGeneration(params.sessionId);
+            if (sessionState) {
+                if (sessionState.subagents instanceof StandardSubagentEventRouter) await sessionState.subagents.finishOutstanding("disconnected");
+                await sessionState.asyncTasks.finishAll("stopped");
+            }
             await this.reportCodexTurnState(params.sessionId, {state: "idle", stopReason: "cancelled"});
             logger.log("Session closed", {sessionId: params.sessionId});
         } finally {
-            if (this.getSessionGeneration(params.sessionId) === closeGeneration) {
+            if (closeGeneration !== null && this.getSessionGeneration(params.sessionId) === closeGeneration) {
                 this.sessions.delete(params.sessionId);
                 this.asyncQuestions.get(params.sessionId)?.dispose();
                 this.asyncQuestions.delete(params.sessionId);
@@ -2046,6 +2050,7 @@ export class CodexAcpServer {
                 this.queuedV2PromptCancellers.delete(params.sessionId);
                 this.steeringQueues.delete(params.sessionId);
                 if (sessionState) {
+                    sessionState.asyncTasks.clear();
                     this.availableCommands.cancelPendingSkillsPublish(sessionState);
                 }
             }

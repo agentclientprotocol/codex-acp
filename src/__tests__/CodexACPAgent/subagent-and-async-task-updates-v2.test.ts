@@ -3,7 +3,7 @@ import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {ACPSessionConnection, AcpV2Connection} from '../../ACPSessionConnection';
 import {CodexSubagentEventRouter} from '../../subagents/CodexSubagentEventRouter';
 import {CodexBackgroundTerminalTasks} from '../../async-tasks/CodexBackgroundTerminalTasks';
-import type {CodexAppServerClient} from '../../CodexAppServerClient';
+import {CodexAppServerClient} from '../../CodexAppServerClient';
 import type {ThreadBackgroundTerminalsListResponse} from '../../async-tasks/BackgroundTerminalApi';
 import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
@@ -175,7 +175,8 @@ describe('subagent and async task updates on ACP v2', () => {
     function createAsyncTasks(enabled: boolean) {
         const {session, updates} = v2Session("root");
         const list = vi.fn<() => Promise<ThreadBackgroundTerminalsListResponse>>();
-        const appServer = {threadBackgroundTerminalsList: list} as unknown as CodexAppServerClient;
+        const appServer = {threadBackgroundTerminalsList: list,
+            backgroundTerminalPages: CodexAppServerClient.prototype.backgroundTerminalPages} as unknown as CodexAppServerClient;
         const tasks = new CodexBackgroundTerminalTasks(enabled, "root", appServer, session);
         return {tasks, list, updates};
     }
