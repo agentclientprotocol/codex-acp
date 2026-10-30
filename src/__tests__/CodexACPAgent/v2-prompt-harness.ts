@@ -86,7 +86,10 @@ export function codexResponse(method: string): unknown {
         case "thread/goal/get":
             return {goal: null};
         case "thread/list":
+        case "thread/backgroundTerminals/list":
             return {data: [], nextCursor: null};
+        case "thread/read":
+            return {thread: createThread()};
         default:
             return {};
     }

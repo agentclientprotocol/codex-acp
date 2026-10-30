@@ -82,6 +82,8 @@ function codexResponse(method: string, replayTurns: Thread["turns"] = []): unkno
             return {config: {}, origins: {}, layers: []};
         case "thread/list":
             return {data: [createThread()], nextCursor: null};
+        case "thread/backgroundTerminals/list":
+            return {data: [], nextCursor: null};
         case "thread/goal/get":
             return {goal: null};
         default:

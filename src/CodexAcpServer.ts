@@ -109,7 +109,7 @@ import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {settledWithin} from "./StdUtils";
 import type {ToolCallReports} from "./ToolCallReports";
-import {ToolCallReportingConnection} from "./ToolCallReportingConnection";
+import {AcpClientDelivery} from "./AcpClientDelivery";
 import {type AcpMcpServer, getMcpServerName, type WithAcpMcpServers} from "./McpServerConfig";
 import {
     AUTH_STATUS_META_KEY,
@@ -488,7 +488,7 @@ export class CodexAcpServer {
     private codexAcpClient: CodexAcpClient;
     private readonly connection: AcpClientConnection;
     private readonly mcpServerSignIn: McpServerSignIn;
-    private readonly reportingConnection: ToolCallReportingConnection;
+    private readonly clientDelivery: AcpClientDelivery;
     /** ACP protocol version of the connection this agent serves, fixed by the protocol router. */
     readonly protocolVersion: 1 | 2;
     /** The v2 client handle; `null` on a v1 connection. */
@@ -594,19 +594,20 @@ export class CodexAcpServer {
         this.sessionGenerations = new Map();
         this.sessionOpenGenerations = new Map();
         this.permissionLifecycleContexts = new WeakMap();
+        const sessionIsClosing = (id: string) => this.sessionIsClosing(this.subagentAssociations.get(id)?.rootSessionId ?? id);
         if (connection instanceof AcpV2Connection) {
             this.protocolVersion = 2;
             this.v2Connection = connection.client;
-            this.reportingConnection = new ToolCallReportingConnection(connection.extensionOnlyV1View());
-            this.connection = this.reportingConnection.asClientConnection();
+            this.clientDelivery = new AcpClientDelivery(connection.extensionOnlyV1View(), sessionIsClosing);
+            this.connection = this.clientDelivery.asClientConnection();
             connection.registerView(this.connection);
             // Foreground work includes adapter pauses between runtime turns, such as plan review.
             connection.setTurnRunningCheck((sessionId) => this.isSessionBusy(sessionId));
         } else {
             this.protocolVersion = 1;
             this.v2Connection = null;
-            this.reportingConnection = new ToolCallReportingConnection(connection);
-            this.connection = this.reportingConnection.asClientConnection();
+            this.clientDelivery = new AcpClientDelivery(connection, sessionIsClosing);
+            this.connection = this.clientDelivery.asClientConnection();
         }
         this.codexAcpClient = codexAcpClient;
         this.mcpServerSignIn = createMcpServerSignIn(
@@ -659,7 +660,7 @@ export class CodexAcpServer {
         const existing = this.sessions.get(sessionId)?.subagents;
         if (this.usesStandardSubagents() && existing instanceof StandardSubagentEventRouter && !existing.isRetired()) return existing;
         const session = new ACPSessionConnection(this.connection, sessionId);
-        const release = (id: string) => this.reportingConnection.reports.releaseOpen(id);
+        const release = (id: string) => this.clientDelivery.reports.releaseOpen(id);
         const models = () => {
             const state = this.sessions.get(sessionId);
             return state ? this.subagentModels(state) : null;
@@ -677,7 +678,7 @@ export class CodexAcpServer {
     }
 
     private async readSubagentConfiguration(threadId: string, parentThreadId: string): Promise<ObservedSubagentConfiguration | null> {
-        const {thread} = await this.codexAcpClient.appServerClient.threadRead({threadId});
+        const thread = await this.codexAcpClient.readSubagentThread(threadId);
         if (!thread || thread.id !== threadId || thread.parentThreadId !== parentThreadId || thread.status.type === "notLoaded") return null;
         return {model: thread.model, effort: thread.reasoningEffort};
     }
@@ -781,7 +782,7 @@ export class CodexAcpServer {
         this.clientCapabilities = _params.clientCapabilities ?? null;
         this.initializeRequest = _params;
         this.capabilities = ClientCapabilities.from(_params.clientCapabilities);
-        this.reportingConnection.reports.compareMeta = this.capabilities.airToolCallContract;
+        this.clientDelivery.reports.compareMeta = this.capabilities.airToolCallContract;
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         this.sessionIndex.configure(_params.clientCapabilities);
         this.sessionIndex.observe(this.codexAcpClient);
@@ -843,7 +844,7 @@ export class CodexAcpServer {
         this.clientCapabilities = clientCapabilities;
         this.initializeRequest = {clientInfo: params.info};
         this.capabilities = ClientCapabilities.fromV2(clientCapabilities);
-        this.reportingConnection.reports.compareMeta = this.capabilities.airToolCallContract;
+        this.clientDelivery.reports.compareMeta = this.capabilities.airToolCallContract;
         // Boolean config options are baseline on v2, so there is nothing to probe.
         this.booleanConfigOptionsSupported = true;
         this.sessionIndex.configure(clientCapabilities);
@@ -1361,7 +1362,7 @@ export class CodexAcpServer {
             subagents: this.createSubagentRouter(sessionId),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
-            toolCallReports: this.reportingConnection.reports,
+            toolCallReports: this.clientDelivery.reports,
             openToolCalls: new CodexSessionToolCalls(),
         };
         sessionState.titleGen = new TitleGenerator(
@@ -1995,17 +1996,20 @@ export class CodexAcpServer {
 
     async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
         logger.log("Closing session...", {sessionId: params.sessionId});
-        const closeGeneration = this.bumpSessionGeneration(params.sessionId);
+        if (!this.hasLocalSession(params.sessionId)) return {};
+        let closeGeneration: number | null = null;
         const sessionState = this.sessions.get(params.sessionId);
         this.beginSessionCloseFence(params.sessionId);
 
         try {
+            this.clientDelivery.cancelSessionRequests(params.sessionId);
+            for (const child of this.subagentAssociations.forRoot(params.sessionId)) {
+                this.clientDelivery.cancelSessionRequests(child.sessionId);
+            }
             // Same as `session/cancel`: drop every v2 prompt still queued for this session first.
             this.cancelQueuedV2Prompts(params.sessionId);
             if (sessionState) {
                 await this.interruptSessionTurn(sessionState, "Close", true);
-                if (sessionState.subagents instanceof StandardSubagentEventRouter) await sessionState.subagents.finishOutstanding("disconnected");
-                sessionState.asyncTasks.clear();
                 sessionState.promptSuggestions?.invalidate();
             } else {
                 logger.log("Close request received for unknown local session", {sessionId: params.sessionId});
@@ -2023,10 +2027,15 @@ export class CodexAcpServer {
                 // The thread is not loaded in a running app-server: nothing to close there, and no restart for it.
                 logger.log("Session closed without an app-server call: its app-server is gone", {sessionId: params.sessionId});
             }
+            closeGeneration = this.bumpSessionGeneration(params.sessionId);
+            if (sessionState) {
+                if (sessionState.subagents instanceof StandardSubagentEventRouter) await sessionState.subagents.finishOutstanding("disconnected");
+                await sessionState.asyncTasks.finishAll("stopped");
+            }
             await this.reportCodexTurnState(params.sessionId, {state: "idle", stopReason: "cancelled"});
             logger.log("Session closed", {sessionId: params.sessionId});
         } finally {
-            if (this.getSessionGeneration(params.sessionId) === closeGeneration) {
+            if (closeGeneration !== null && this.getSessionGeneration(params.sessionId) === closeGeneration) {
                 this.sessions.delete(params.sessionId);
                 this.asyncQuestions.get(params.sessionId)?.dispose();
                 this.asyncQuestions.delete(params.sessionId);
@@ -2041,6 +2050,7 @@ export class CodexAcpServer {
                 this.queuedV2PromptCancellers.delete(params.sessionId);
                 this.steeringQueues.delete(params.sessionId);
                 if (sessionState) {
+                    sessionState.asyncTasks.clear();
                     this.availableCommands.cancelPendingSkillsPublish(sessionState);
                 }
             }
@@ -3483,7 +3493,7 @@ export class CodexAcpServer {
             subagents: this.createSubagentRouter(sessionId, true),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
-            toolCallReports: this.reportingConnection.reports,
+            toolCallReports: this.clientDelivery.reports,
             openToolCalls: new CodexSessionToolCalls(),
         };
         sessionState.titleGen = new TitleGenerator(
@@ -5480,7 +5490,7 @@ export class CodexAcpServer {
 
     private async failUnfinishedToolCalls(sessionIds: Iterable<string>): Promise<void> {
         for (const sessionId of sessionIds) {
-            for (const toolCallId of this.reportingConnection.reports.unfinished(sessionId)) {
+            for (const toolCallId of this.clientDelivery.reports.unfinished(sessionId)) {
                 await this.connection.notify(acp.methods.client.session.update, {
                     sessionId,
                     update: {sessionUpdate: "tool_call_update", toolCallId, status: "failed"},

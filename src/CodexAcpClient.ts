@@ -70,6 +70,8 @@ import {
     isMissingRolloutError,
     isThreadNotMaterializedError,
     isThreadActiveWriterError,
+    isThreadNotFoundError,
+    isThreadNotLoadedError,
     isUnknownThreadError,
     threadActiveWriterRequestError,
 } from "./CodexThreadErrors";
@@ -854,6 +856,8 @@ export class CodexAcpClient {
 
     isSubagentThread(threadId: string): boolean { return this.subagents.isChildThread(threadId); }
 
+    readSubagentThread(threadId: string): Promise<Thread | null> { return this.subagents.readChildThread(threadId); }
+
     async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>): Promise<SessionMetadata> {
         const instructions = await this.resolveSessionInstructions(request, undefined, true);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
@@ -974,11 +978,35 @@ export class CodexAcpClient {
     }
 
     async closeSession(sessionId: string): Promise<void> {
+        const children = this.subagents.verifiedChildThreadIds(sessionId);
+        // Unsubscribe only detaches. Codex can keep the runtime and its processes alive until a later unload.
+        for (const threadId of [...children, sessionId]) {
+            await this.stopBackgroundTerminals(threadId);
+        }
+        await this.codexClient.threadUnsubscribe({threadId: sessionId});
+        this.codexClient.clearThreadHandlers(sessionId);
+        this.subagents.clear(sessionId);
+    }
+
+    private async stopBackgroundTerminals(threadId: string): Promise<void> {
         try {
-            await this.codexClient.threadUnsubscribe({threadId: sessionId});
-        } finally {
-            this.codexClient.clearThreadHandlers(sessionId);
-            this.subagents.clear(sessionId);
+            // Read all pages before removing processes so cleanup cannot disturb pagination.
+            const terminals = [];
+            for await (const page of this.codexClient.backgroundTerminalPages(threadId)) terminals.push(...page);
+            for (const terminal of terminals) {
+                const result = await this.codexClient.threadBackgroundTerminalsTerminate({threadId, processId: terminal.processId});
+                if (!result.terminated) {
+                    // False can mean either "already gone" or a failed stop. Verify which before closing.
+                    for await (const page of this.codexClient.backgroundTerminalPages(threadId)) {
+                        if (page.some(current => current.processId === terminal.processId)) {
+                            throw new Error(`Codex could not stop background terminal ${terminal.processId}`);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            // An already-unloaded runtime has no processes left to stop.
+            if (!isThreadNotFoundError(error) && !isThreadNotLoadedError(error)) throw error;
         }
     }
 
