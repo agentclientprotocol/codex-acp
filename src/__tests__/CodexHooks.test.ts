@@ -1,7 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import type {CodexAppServerClient} from "../CodexAppServerClient";
-import {prepareCodexHookConfig} from "../CodexHookConfig";
 import {listCodexHooks, trustCodexHooks} from "../CodexHookTrust";
+import {prepareCodexStartupConfig} from "../CodexStartupConfig";
 import type {HooksListResponse} from "../app-server/v2/HooksListResponse";
 
 const cwd = "/work/project";
@@ -88,7 +88,7 @@ describe("Codex hook configuration", () => {
         const hooks = {
             PostToolUse: [{matcher: "Bash", hooks: [{type: "command", command: "echo ready"}]}],
         };
-        const prepared = prepareCodexHookConfig({model: "gpt-5", hooks});
+        const prepared = prepareCodexStartupConfig({model: "gpt-5", hooks});
 
         expect(prepared.sessionConfig).toEqual({model: "gpt-5"});
         expect(prepared.appServerStartupArgs.slice(0, 2)).toEqual(["app-server", "-c"]);
@@ -96,7 +96,7 @@ describe("Codex hook configuration", () => {
     });
 
     it("keeps the existing path when config has no hooks", () => {
-        expect(prepareCodexHookConfig({model: "gpt-5"})).toEqual({
+        expect(prepareCodexStartupConfig({model: "gpt-5"})).toEqual({
             sessionConfig: {model: "gpt-5"},
             appServerStartupArgs: ["app-server"],
         });
