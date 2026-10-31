@@ -29,10 +29,13 @@ npm run codex-test -- -p "Your prompt here"
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| `--prompt` | `-p` | Prompt to send to Codex (required) | - |
+| `--prompt` | `-p` | Prompt to send to Codex (unless listing models) | - |
 | `--cwd` | `-c` | Working directory for the session | Current dir |
 | `--output` | `-o` | Output format: `all`, `codex`, `acp`, `summary` | `all` |
 | `--json` | - | Output events as JSON | false |
+| `--list-models` | - | Read live model IDs and efforts without a turn | false |
+| `--model` | `-m` | Exact advertised `id[effort]` | Codex default |
+| `--mcp-servers` | - | JSON file containing ACP MCP server entries | none |
 | `--help` | `-h` | Show help message | - |
 
 ### Examples
@@ -72,3 +75,5 @@ The script outputs events in real-time as they arrive:
    - Event type frequency
 
 4. **PromptResponse**: Full response object including `_meta.quota.token_count`
+
+The harness honors `CODEX_PATH` and `CODEX_CONFIG`. Run `--list-models` before choosing a model; never guess model IDs. Client permission requests are cancelled and fail the probe. JSON mode emits JSON lines; use `npm run --silent` to suppress npm banners. The harness is included in `npm run typecheck`.

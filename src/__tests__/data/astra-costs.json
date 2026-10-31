@@ -1,0 +1,64 @@
+{
+  "pricing": {
+    "gpt-6-astra": {
+      "standard": {
+        "shortContext": {
+          "input": 10,
+          "cachedInput": 1,
+          "output": 50
+        },
+        "longContext": {
+          "input": 20,
+          "cachedInput": 2,
+          "output": 75
+        }
+      },
+      "fast": {
+        "shortContext": {
+          "input": 20,
+          "cachedInput": 2,
+          "output": 100
+        },
+        "longContext": {
+          "input": 40,
+          "cachedInput": 4,
+          "output": 150
+        }
+      }
+    }
+  },
+  "costs": [
+    {
+      "fast": false,
+      "contextTokens": 272000,
+      "cost": {
+        "amount": 2.32,
+        "currency": "USD"
+      }
+    },
+    {
+      "fast": false,
+      "contextTokens": 272001,
+      "cost": {
+        "amount": 4.39002,
+        "currency": "USD"
+      }
+    },
+    {
+      "fast": true,
+      "contextTokens": 272000,
+      "cost": {
+        "amount": 4.64,
+        "currency": "USD"
+      }
+    },
+    {
+      "fast": true,
+      "contextTokens": 272001,
+      "cost": {
+        "amount": 8.78004,
+        "currency": "USD"
+      }
+    }
+  ]
+}

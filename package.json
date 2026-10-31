@@ -42,8 +42,8 @@
     "test:integration": "vitest run --no-file-parallelism --hookTimeout=30000 src/__tests__/integration",
     "test:e2e": "npm run build && RUN_E2E_TESTS=true vitest run --no-file-parallelism --retry=2 src/__tests__/CodexACPAgent/e2e",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p examples/tsconfig.json",
-    "codex-test": "tsx .agents/skills/run-codex/scripts/run-codex-test.ts"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p examples/tsconfig.json && tsc --noEmit -p .agents/skills/run-codex/tsconfig.json",
+    "codex-test": "node --import tsx .agents/skills/run-codex/scripts/run-codex-test.ts"
   },
   "homepage": "https://github.com/agentclientprotocol/codex-acp#readme",
   "bugs": {
