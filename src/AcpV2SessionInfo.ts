@@ -4,6 +4,7 @@ import {isRecord} from "./permissions/json";
 type Update = acp.SessionInfoUpdate & {sessionUpdate: "session_info_update"};
 type NotificationMetadata = acp.UpdateSessionNotification["_meta"];
 export type SessionMetadataPatch = (current: Readonly<Record<string, unknown>>) => Record<string, unknown> | null;
+export type SessionInfoFields = Omit<acp.SessionInfoUpdate, "_meta">;
 
 /** Owns current session metadata and orders live patches against resume resynchronization. */
 export class AcpV2SessionInfo {
@@ -28,12 +29,13 @@ export class AcpV2SessionInfo {
         });
     }
 
-    patchMetadata(change: SessionMetadataPatch): Promise<void> {
+    patchMetadata(change: SessionMetadataPatch, fields: SessionInfoFields = {}): Promise<void> {
+        const copy: SessionInfoFields = JSON.parse(JSON.stringify(fields));
         return this.enqueue(async () => {
             const current = JSON.parse(JSON.stringify(Object.fromEntries(this.metadata))) as Record<string, unknown>;
             const patch = change(current);
             if (patch === null) return;
-            const update: Update = JSON.parse(JSON.stringify({sessionUpdate: "session_info_update", _meta: patch}));
+            const update: Update = JSON.parse(JSON.stringify({...copy, sessionUpdate: "session_info_update", _meta: patch}));
             this.applyMetadata(update._meta);
             await this.publish(update);
         });

@@ -8,7 +8,7 @@ import path from "node:path";
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
-import {clientSupportsAirCapability, withAirMeta} from "./AirExtension";
+import {clientSupportsAirCapability, publishAirSessionMetadata} from "./AirExtension";
 import type {ServerNotification} from "./app-server";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {SessionState} from "./CodexAcpServer";
@@ -274,10 +274,7 @@ export class SessionIndexService {
             });
             // Tell the client why it closed before ending this operation's delivery fence.
             if (archived ? open : this.host.session(sessionId) !== undefined) {
-                await new ACPSessionConnection(this.host.connection(), sessionId).update({
-                    sessionUpdate: "session_info_update",
-                    _meta: withAirMeta(undefined, AIR_ARCHIVED_KEY, archived),
-                });
+                await publishAirSessionMetadata(new ACPSessionConnection(this.host.connection(), sessionId), AIR_ARCHIVED_KEY, archived);
             }
         } finally {
             if (archived) this.host.endSessionCloseFence(sessionId);

@@ -165,7 +165,7 @@ import {
     createUserMessageChunk,
 } from "./ContentChunks";
 import {
-    goalSessionInfoUpdate,
+    publishGoalSessionInfo,
     sameThreadGoalSnapshot,
     type ThreadGoalSnapshot,
     toThreadGoalSnapshot,
@@ -217,6 +217,7 @@ import {
     AIR_SESSION_FAILURE_KEY,
     clientSupportsAirCapability,
     JETBRAINS_META_KEY,
+    publishAirSessionMetadata,
 } from "./AirExtension";
 import {SessionIndexService} from "./SessionIndexService";
 import type {SessionIndexTitleState} from "./SessionIndexTitles";
@@ -1238,7 +1239,7 @@ export class CodexAcpServer {
     private endSessionCloseFence(sessionId: string): void {
         const fence = this.closingSessions.get(sessionId);
         if (!fence || --fence.count > 0) return;
-        for (const closed of fence.closedSessions) this.clientDelivery.closeSession(closed);
+        for (const closed of fence.closedSessions) this.sealSessionDelivery(closed);
         this.closingSessions.delete(sessionId);
     }
 
@@ -1247,8 +1248,13 @@ export class CodexAcpServer {
         const fence = this.closingSessions.get(sessionId);
         for (const closed of [sessionId, ...children]) {
             if (fence) fence.closedSessions.add(closed);
-            else this.clientDelivery.closeSession(closed);
+            else this.sealSessionDelivery(closed);
         }
+    }
+
+    private sealSessionDelivery(sessionId: string): void {
+        this.clientDelivery.closeSession(sessionId);
+        AcpV2Connection.of(this.connection)?.forgetSession(sessionId);
     }
 
     private getSessionGeneration(sessionId: string): number {
@@ -2092,7 +2098,7 @@ export class CodexAcpServer {
                 this.sessions.delete(params.sessionId);
                 this.asyncQuestions.get(params.sessionId)?.dispose();
                 this.asyncQuestions.delete(params.sessionId);
-                AcpV2Connection.of(this.connection)?.forgetSession(params.sessionId);
+                AcpV2Connection.of(this.connection)?.forgetForegroundState(params.sessionId);
                 this.mcpSessionStartup.close(params.sessionId);
                 this.codexAcpClient.appServerClient.mcpStartup.forgetThread(params.sessionId);
                 this.pendingTurnStarts.delete(params.sessionId);
@@ -3399,9 +3405,8 @@ export class CodexAcpServer {
             return;
         }
         sessionState.currentGoal = snapshot;
-        const update = goalSessionInfoUpdate(snapshot, sessionState.clientCapabilities.airClient);
-        if (update === null) return;
-        await new ACPSessionConnection(this.connection, sessionState.sessionId).update(update);
+        await publishGoalSessionInfo(new ACPSessionConnection(this.connection, sessionState.sessionId),
+            snapshot, sessionState.clientCapabilities.airClient);
     }
 
     /** The models of a root session, for the configuration of its native subagent sessions. */
@@ -3982,17 +3987,7 @@ export class CodexAcpServer {
         }
         try {
             const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
-            await session.update({
-                sessionUpdate: "session_info_update",
-                _meta: {
-                    [JETBRAINS_META_KEY]: {
-                        [AIR_META_KEY]: {
-                            [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
-                            [AIR_AGENT_FILE_CHANGE_REPORT_KEY]: report,
-                        },
-                    },
-                },
-            });
+            await publishAirSessionMetadata(session, AIR_AGENT_FILE_CHANGE_REPORT_KEY, report);
         } catch (error) {
             logger.error("Failed to publish agent file-change report", error);
         }
@@ -4751,7 +4746,7 @@ export class CodexAcpServer {
             ).finally(() => {
                 signal?.removeEventListener("abort", dropPendingRequest);
                 reservation.release();
-                if (!this.sessions.has(sessionId)) AcpV2Connection.of(this.connection)?.forgetSession(sessionId);
+                if (!this.sessions.has(sessionId)) AcpV2Connection.of(this.connection)?.forgetForegroundState(sessionId);
             });
         });
     }
