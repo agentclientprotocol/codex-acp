@@ -1488,7 +1488,7 @@ export class CodexAcpClient {
             "appServer",
             "unknown",
         ];
-        const requestedCwd = request.cwd?.trim() ?? null;
+        const requestedCwd = request.cwd ?? null;
         const filterByCwd = (thread: Thread): boolean => {
             if (!requestedCwd) return true;
             if (isAbsolutePathLike(requestedCwd)) {

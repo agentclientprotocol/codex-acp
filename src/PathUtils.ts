@@ -6,7 +6,7 @@ export function isAbsoluteProtocolPath(value: string): boolean {
 }
 
 export function isAbsolutePathLike(value: string): boolean {
-    return isAbsoluteProtocolPath(value.trim());
+    return isAbsoluteProtocolPath(value);
 }
 
 export function arePathsEqual(left: string, right: string): boolean {
@@ -23,19 +23,18 @@ export function arePathBasenamesEqual(left: string, right: string): boolean {
 }
 
 export function normalizePathForComparison(value: string): string {
-    const trimmed = value.trim();
-    if (trimmed.length === 0) {
+    if (value.length === 0) {
         return "";
     }
 
-    if (isWindowsAbsolutePath(trimmed)) {
-        const normalized = path.win32.normalize(trimmed).replace(/\\/g, "/");
+    if (isWindowsAbsolutePath(value)) {
+        const normalized = path.win32.normalize(value).replace(/\\/g, "/");
         return trimTrailingPathSeparators(normalized).toLowerCase();
     }
 
-    const pathForComparison = path.isAbsolute(trimmed)
-        ? trimmed
-        : trimmed.replace(/\\/g, "/");
+    const pathForComparison = path.isAbsolute(value)
+        ? value
+        : value.replace(/\\/g, "/");
     const normalized = path.posix.normalize(pathForComparison);
     return trimTrailingPathSeparators(normalized);
 }

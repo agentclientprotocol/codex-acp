@@ -30,6 +30,12 @@ describe("PathUtils", () => {
         expect(arePathsEqual("/repo/project", "/repo/Project")).toBe(false);
     });
 
+    it.each(["/repo/project ", "/repo/project\t", "/repo/ project"])("preserves filename whitespace: %j", value => {
+        expect(normalizePathForComparison(value)).toBe(value);
+        expect(arePathsEqual(value, "/repo/project")).toBe(false);
+        expect(arePathBasenamesEqual(value, "project")).toBe(false);
+    });
+
     it("detects Windows absolute paths on any host platform", () => {
         expect(isAbsolutePathLike("D:/workspace/sample-project")).toBe(true);
         expect(isAbsolutePathLike("D:\\workspace\\sample-project")).toBe(true);

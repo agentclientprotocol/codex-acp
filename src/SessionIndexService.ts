@@ -159,7 +159,7 @@ export class SessionIndexService {
      */
     async list(params: acp.ListSessionsRequest): Promise<SessionPage> {
         const options = readSessionIndexListOptions(params._meta);
-        const cwd = params.cwd?.trim() || null;
+        const cwd = params.cwd ?? null;
         return await this.readRows(cwd, options, params.cursor ?? null);
     }
 
