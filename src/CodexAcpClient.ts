@@ -22,7 +22,6 @@ import type {
     ReasoningEffort,
     ServerNotification
 } from "./app-server";
-import type {ServiceTier} from "./app-server/ServiceTier";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
@@ -724,7 +723,7 @@ export class CodexAcpClient {
             threadStatus: response.thread.status,
             sessionTitle: normalizeSessionTitle(listedSessionTitle(response.thread)),
             modelProvider: response.modelProvider,
-            currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            currentServiceTier: response.serviceTier ?? null,
             additionalDirectories,
             skippedMcpServers: sessionConfig.skippedMcpServers,
             ...(instructions ? {instructions} : {}),
@@ -804,7 +803,7 @@ export class CodexAcpClient {
             // Codex sends no thread/settings/updated on a resume. The response holds the mode.
             collaborationMode: response.collaborationMode ?? this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
-            currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            currentServiceTier: response.serviceTier ?? null,
             thread,
             history,
             additionalDirectories,
@@ -886,7 +885,7 @@ export class CodexAcpClient {
             models: codexModels,
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
-            currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            currentServiceTier: response.serviceTier ?? null,
             additionalDirectories,
             skippedMcpServers: sessionConfig.skippedMcpServers,
             ...(instructions ? {instructions} : {}),
@@ -1362,7 +1361,7 @@ export class CodexAcpClient {
         request: acp.PromptRequest,
         agentMode: AgentMode,
         modelId: ModelId,
-        serviceTier: ServiceTier | null,
+        serviceTier: string | null,
         disableSummary: boolean,
         cwd: string,
         additionalDirectories: string[],

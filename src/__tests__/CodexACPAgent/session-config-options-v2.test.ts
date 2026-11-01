@@ -179,4 +179,15 @@ describe('Session config options over ACP v2', () => {
             modeId: AgentMode.ReadOnly.id,
         })).rejects.toMatchObject({code: -32601});
     });
+    it('selects Ultrafast through the v2 id option', async () => {
+        const {connection, sessionState} = await connectV2Client();
+        closeClient = () => connection.close();
+        sessionState.availableModels[0]!.additionalSpeedTiers.push("ultrafast");
+        const response = await connection.agent.request(acpV2.methods.agent.session.setConfigOption, {
+            sessionId: sessionState.sessionId, configId: FAST_MODE_CONFIG_ID, type: "id", value: "ultrafast",
+        });
+        expect(sessionState.fastModeEnabled).toBe("ultrafast");
+        await expect(dump(response)).toMatchFileSnapshot('data/session-config-options-v2-ultrafast.json');
+    });
+
 });
