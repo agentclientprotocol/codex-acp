@@ -5,6 +5,8 @@
       "sessionId": "thread-1:subagent:coordinator",
       "title": "Coordinator",
       "capabilities": {},
+      "cwd": null,
+      "additionalDirectories": null,
       "sessionUpdate": "subagent_update"
     }
   },
@@ -14,6 +16,8 @@
       "sessionId": "thread-1:subagent:worker",
       "title": "Worker",
       "capabilities": {},
+      "cwd": null,
+      "additionalDirectories": null,
       "sessionUpdate": "subagent_update"
     }
   },

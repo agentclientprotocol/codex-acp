@@ -23,6 +23,7 @@ import {SubagentAssociations, type SubagentAssociation} from "./SubagentAssociat
 import type {SubagentEventRouter} from "./SubagentEventRouter";
 import {runSubagentInteraction} from "./SubagentInteraction";
 import {logger} from "../Logger";
+import {isAbsoluteProtocolPath} from "../PathUtils";
 
 type Child = SubagentAssociation & {
     path?: string;
@@ -50,6 +51,8 @@ type Pending = {
 type Configuration = {
     model?: ChildModel;
     effort?: {value: ReasoningEffort | null; source: ChildModel["source"]};
+    cwd?: {value: string; source: ChildModel["source"]};
+    publishedCwd?: string;
     published?: string;
 };
 
@@ -104,7 +107,8 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         if (notification.method === "thread/settings/updated" && !this.appliedSettings.has(notification.params)) {
             this.appliedSettings.add(notification.params);
             const settings = notification.params.threadSettings;
-            await this.observeConfiguration(threadId, {model: settings.model, effort: settings.effort}, "settings");
+            await this.observeConfiguration(threadId, {model: settings.model, effort: settings.effort,
+                ...(this.children.has(threadId) ? {cwd: settings.cwd} : {})}, "settings");
         }
         if (this.deferLive) { this.deferredLive.push(notification); return false; }
         const child = this.children.get(threadId);
@@ -332,6 +336,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         const parent = [...this.children.values()].find(candidate => candidate.sessionId === child.parentSessionId);
         if (parent) await this.ensureAnnounced(parent);
         await this.session.update({sessionUpdate: "subagent_update", sessionId: child.sessionId, capabilities: {},
+            cwd: null, additionalDirectories: null,
             ...(child.title !== undefined ? {title: child.title} : {}),
             ...(child.description !== undefined ? {description: child.description} : {})}, child.parentSessionId);
         this.announced.add(child.threadId);
@@ -383,10 +388,14 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
 
     private async observeConfiguration(threadId: string, observed: ObservedSubagentConfiguration, source: ChildModel["source"]): Promise<void> {
         const previous = this.configurations.get(threadId);
-        if (this.retired || (!previous && !observed.model && observed.effort === null && source !== "settings")) return;
+        const cwd = observed.cwd !== undefined && isAbsoluteProtocolPath(observed.cwd) ? observed.cwd : null;
+        if (this.retired || (!previous && !observed.model && observed.effort === null && cwd === null && source !== "settings")) return;
         this.configurationRequests.delete(threadId);
         const next: Configuration = {...previous};
         if (observed.model) next.model = preferredModel(previous?.model, {model: observed.model, source});
+        if (cwd !== null && (!previous?.cwd || MODEL_SOURCE_RANK[source] >= MODEL_SOURCE_RANK[previous.cwd.source])) {
+            next.cwd = {value: cwd, source};
+        }
         const changedModel = next.model?.model !== previous?.model?.model;
         // A new model cannot retain the old model's effort; null removes an unset or unavailable effort.
         if (changedModel || !previous?.effort || MODEL_SOURCE_RANK[source] >= MODEL_SOURCE_RANK[previous.effort.source]) {
@@ -404,6 +413,11 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         await this.ensureAnnounced(child);
         const configuration = this.configurations.get(child.threadId);
         if (!configuration || this.retired) return;
+        if (configuration.cwd && configuration.cwd.value !== configuration.publishedCwd) {
+            await this.session.update({sessionUpdate: "subagent_update", sessionId: child.sessionId,
+                cwd: configuration.cwd.value}, child.parentSessionId);
+            configuration.publishedCwd = configuration.cwd.value;
+        }
         const options = subagentConfigurationOptions(this.rootModels(), {
             model: configuration.model?.model ?? null, effort: configuration.effort?.value ?? null,
         });

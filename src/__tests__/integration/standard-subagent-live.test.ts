@@ -106,8 +106,12 @@ describeIntegration("integration: live standard subagents", () => {
             const cancelGranted = (entries: typeof updates) => entries.some(entry =>
                 entry.update.sessionUpdate === "subagent_update" && entry.update.sessionId === childId
                 && entry.update.capabilities?.cancel != null);
+            const directoryReported = (entries: typeof updates) => entries.some(entry =>
+                entry.sessionId === sessionId && entry.update.sessionUpdate === "subagent_update"
+                && entry.update.sessionId === childId && entry.update.cwd === cwd);
             await vi.waitFor(() => expect(updates.some(entry => state(entry)?.state === "running")).toBe(true));
             await vi.waitFor(() => expect(updates.some(configuration)).toBe(true));
+            await vi.waitFor(() => expect(directoryReported(updates)).toBe(true));
             await vi.waitFor(() => expect(cancelGranted(updates)).toBe(true));
             expect(childEffort).toBeDefined();
             await vi.waitFor(() => expect(effortReported(updates)).toBe(true));
@@ -120,6 +124,7 @@ describeIntegration("integration: live standard subagents", () => {
             await vi.waitFor(() => expect(updates.slice(before).some(entry => state(entry)?.state === "running")).toBe(true));
             await vi.waitFor(() => expect(updates.slice(before).some(configuration)).toBe(true));
             await vi.waitFor(() => expect(effortReported(updates.slice(before))).toBe(true));
+            await vi.waitFor(() => expect(directoryReported(updates.slice(before))).toBe(true));
             await vi.waitFor(() => expect(cancelGranted(updates.slice(before))).toBe(true));
             if (ending === "complete") {
                 const fork = await request("session/fork", {sessionId, cwd, mcpServers: []});
