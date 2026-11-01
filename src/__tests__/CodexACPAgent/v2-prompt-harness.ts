@@ -160,6 +160,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
      * (e.g. MCP OAuth re-auth) sends before the caller gets a chance to call `setCodexResponse`.
      */
     codexResponses?: Record<string, (params: unknown) => Promise<unknown>>,
+    beforeInitializeResponseWrite?: () => Promise<void>,
     beforeSetupResponseWrite?: () => Promise<void>,
     newSessionMeta?: {mcpStartupAwaitTimeoutMs: number},
     onAgent?: (agent: CodexAcpServer) => void,
@@ -207,11 +208,18 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     });
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
     const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
-    const serverStream = acp.ndJsonStream(agentToClient.writable, clientToAgent.readable);
-    router.connect(options.beforeSetupResponseWrite ? {
+    const disconnected = new AbortController();
+    const rawServerStream = acp.ndJsonStream(agentToClient.writable, clientToAgent.readable);
+    const serverStream = {
+        ...rawServerStream,
+        readable: rawServerStream.readable.pipeThrough(new TransformStream<acp.AnyMessage, acp.AnyMessage>(), {signal: disconnected.signal}),
+    };
+    router.connect(options.beforeSetupResponseWrite || options.beforeInitializeResponseWrite ? {
         readable: serverStream.readable,
         writable: new WritableStream<acpV2.AnyMessage>({
             async write(message) {
+                if ("result" in message && message.result !== null && typeof message.result === "object"
+                    && "protocolVersion" in message.result) await options.beforeInitializeResponseWrite?.();
                 if ("result" in message && message.result !== null && typeof message.result === "object"
                     && "sessionId" in message.result) await options.beforeSetupResponseWrite?.();
                 const writer = serverStream.writable.getWriter();
@@ -321,7 +329,9 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
 
     const emit = (notification: ServerNotification) => {
         transcript.push({codexNotification: notification.method});
-        mocks.getUnhandledNotificationHandler()!(notification);
+        const handler = mocks.notificationHandlers.get(notification.method);
+        if (handler) handler(notification.params);
+        else mocks.getUnhandledNotificationHandler()!(notification);
     };
 
     const sendPrompt = (prompt: acpV2.ContentBlock[], signal?: AbortSignal) => {
@@ -340,7 +350,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     };
 
     return {
-        connection,
+        connection: {close: () => { connection.close(); disconnected.abort(); }},
         wireMessages,
         scopedUpdates,
         transcript,

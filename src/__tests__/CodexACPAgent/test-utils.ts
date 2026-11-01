@@ -27,6 +27,9 @@ export function createMockConnections(): MockConnections {
         }),
         onNotification: vi.fn((method: string, handler: Function) => {
             notificationHandlers.set(method, handler);
+            return {dispose: () => {
+                if (notificationHandlers.get(method) === handler) notificationHandlers.delete(method);
+            }};
         }),
         onRequest: vi.fn((type: {method: string}, handler: Function) => {
             requestHandlers.set(type.method, handler);

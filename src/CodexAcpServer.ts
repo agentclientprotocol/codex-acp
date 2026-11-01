@@ -109,6 +109,7 @@ import {logger} from "./Logger";
 import {settledWithin} from "./StdUtils";
 import type {ToolCallReports} from "./ToolCallReports";
 import {AcpClientDelivery} from "./AcpClientDelivery";
+import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
 import {type AcpMcpServer, getMcpServerName, type WithAcpMcpServers} from "./McpServerConfig";
 import {
     AUTH_STATUS_META_KEY,
@@ -490,6 +491,7 @@ export class CodexAcpServer {
     private readonly mcpServerSignIn: McpServerSignIn;
     private readonly clientDelivery: AcpClientDelivery;
     private setupResponseOrdering = false;
+    private initializeResponseDelivery: "direct" | "pending" | "written" = "direct";
     /** ACP protocol version of the connection this agent serves, fixed by the protocol router. */
     readonly protocolVersion: 1 | 2;
     /** The v2 client handle; `null` on a v1 connection. */
@@ -2200,42 +2202,54 @@ export class CodexAcpServer {
     async authenticate(
         _params: acp.AuthenticateRequest,
         requestId?: acp.JsonRpcId,
+        signal?: AbortSignal,
     ): Promise<acp.AuthenticateResponse> {
         logger.log("Authenticate request received");
+        throwIfRequestCancelled(signal);
         const appServer = this.ensureAppServer();
-        if (appServer) await appServer;
-        const elicitationRequester = this.createUrlElicitationRequester(requestId);
-        const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester));
-        if (!isAuthenticated) {
-            logger.log("Authenticate request failed");
-            throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
+        if (appServer) await withRequestCancellation(appServer, signal);
+        const elicitationRequester = this.createUrlElicitationRequester(requestId, signal);
+        try {
+            const isAuthenticated = await this.runWithProcessCheck(() => this.codexAcpClient.authenticate(_params, elicitationRequester, signal));
+            throwIfRequestCancelled(signal);
+            if (!isAuthenticated) {
+                logger.log("Authenticate request failed");
+                throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
+            }
+            await withRequestCancellation(this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params)), signal);
+            logger.log("Authenticate request completed");
+            return { };
+        } finally {
+            await elicitationRequester?.completeElicitation().catch(() => {});
         }
-        await this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params));
-        logger.log("Authenticate request completed");
-        return { };
     }
 
-    private createUrlElicitationRequester(requestId?: acp.JsonRpcId): UrlElicitationRequester | undefined {
+    private createUrlElicitationRequester(requestId?: acp.JsonRpcId, signal?: AbortSignal): UrlElicitationRequester | undefined {
         if (requestId == null || !clientSupportsUrlElicitation(this.clientCapabilities)) {
             return undefined;
         }
+        const lifetime = new AbortController();
+        const cancellationSignal = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal;
         let elicitationId: string | null = null;
         return {
-            elicitUrl: (request) => {
+            elicitUrl: async (request) => {
                 elicitationId = request.elicitationId;
-                return this.connection.request(acp.methods.client.elicitation.create, {
+                const response = await this.connection.request(acp.methods.client.elicitation.create, {
                     mode: "url",
                     requestId,
                     ...request,
-                });
+                }, {cancellationSignal});
+                if (!acp.CreateElicitationResponse.isAccept(response)) elicitationId = null;
+                return response;
             },
             completeElicitation: async () => {
                 if (elicitationId === null) {
                     return;
                 }
-                await this.connection.notify(acp.methods.client.elicitation.complete, {
-                    elicitationId,
-                });
+                const completedId = elicitationId;
+                elicitationId = null;
+                lifetime.abort();
+                await this.connection.notify(acp.methods.client.elicitation.complete, {elicitationId: completedId});
             },
         };
     }
@@ -2253,11 +2267,12 @@ export class CodexAcpServer {
     async authenticateV2(
         params: acpV2.LoginAuthRequest,
         requestId?: acpV2.JsonRpcId,
+        signal?: AbortSignal,
     ): Promise<acpV2.LoginAuthResponse> {
         if (!getCodexAuthMethodsV2(this.clientCapabilities).some(method => method.methodId === params.methodId)) {
             throw RequestError.invalidParams(undefined, `Unsupported authentication method: ${params.methodId}`);
         }
-        return await this.authenticate(params, requestId);
+        return await this.authenticate(params, requestId, signal);
     }
 
     /** v2 `auth/logout`: same params as v1 `logout`, only the method name changed. */
@@ -2589,16 +2604,25 @@ export class CodexAcpServer {
      * Schedules the connection's first `_auth/status_update`: one account read,
      * pushed whatever it says, including `none`.
      *
-     * The push must not overtake the `initialize` response. The JSON-RPC layer
-     * writes that response in the microtask that resolves {@link initialize}, so
-     * the read starts from a check-phase callback, which always runs after it.
-     * `initialize` itself never waits for the read.
+     * Routed connections publish at the response-write boundary. Direct callers
+     * have no transport boundary, so they retain the asynchronous fallback.
      *
      * "Unconditional" costs nothing extra here: nothing has been pushed yet on
      * this connection, so {@link setAuthStatus} cannot suppress this one.
      */
     private publishFirstAuthStatusAfterResponse(): void {
-        setImmediate(() => void this.publishAuthStatusRead());
+        if (this.initializeResponseDelivery === "direct") {
+            setImmediate(() => void this.publishAuthStatusRead());
+        }
+    }
+
+    observeInitializeResponse(): void {
+        this.initializeResponseDelivery = "pending";
+    }
+
+    afterInitializeResponse(): void {
+        this.initializeResponseDelivery = "written";
+        void this.publishAuthStatusRead();
     }
 
     /**
@@ -2694,6 +2718,7 @@ export class CodexAcpServer {
      */
     private async applyAccountUpdated(notification: AccountUpdatedNotification): Promise<void> {
         this.lastReadAccount = accountFromUpdated(notification, this.lastReadAccount);
+        if (this.initializeResponseDelivery === "pending") return;
         try {
             if (this.codexAcpClient.getAuthGatewayProviderName() !== null) {
                 return;
@@ -2727,6 +2752,7 @@ export class CodexAcpServer {
      */
     private async setAuthStatus(next: AuthStatus): Promise<void> {
         this.authStatusVersion += 1;
+        if (this.initializeResponseDelivery === "pending") return;
         if (sameAuthStatus(this.currentAuthStatus, next)) {
             return;
         }
