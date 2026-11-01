@@ -407,7 +407,7 @@ describe("/mcp command", () => {
         expect(messageText(mockFixture)).toBe('Command "/mcp" accepts no arguments, or `reconnect`.');
     });
 
-    it("accepts the subcommand in any case, as the command name", async () => {
+    it("accepts the subcommand in any case", async () => {
         const {mockFixture} = setupPromptTestSession({sessionId});
         mockStatusPages(mockFixture, {data: [server({name: "fs"})], nextCursor: null});
         const reload = vi.spyOn(mockFixture.getCodexAppServerClient(), "mcpServerReload").mockImplementation(async () => {
@@ -415,7 +415,7 @@ describe("/mcp command", () => {
             return {};
         });
 
-        await runMcp(mockFixture, "/MCP RECONNECT");
+        await runMcp(mockFixture, "/mcp RECONNECT");
 
         expect(reload).toHaveBeenCalledTimes(1);
         expect(messageText(mockFixture)).toContain("**Connected**\n- `fs`: 0 tools");

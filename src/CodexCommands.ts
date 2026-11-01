@@ -203,6 +203,7 @@ export class CodexCommands {
 
         for (const entry of skillsEntries) {
             for (const skill of entry.skills) {
+                if (!skill.name || /\s/.test(skill.name)) continue;
                 const name = `$${skill.name}`;
                 if (commands.has(name)) continue;
                 const description = skill.shortDescription ?? skill.description ?? skill.name;
@@ -299,20 +300,20 @@ export class CodexCommands {
     }
 
     private parseCommand(prompt: acp.ContentBlock[]): ParsedSlashCommand | null {
-        const firstBlock = prompt[0];
+        const firstBlock = prompt.find(block => block.type === "text");
         if (!firstBlock || firstBlock.type != "text") return null;
 
-        const text = firstBlock.text.trim();
+        const text = firstBlock.text;
         if (!text.startsWith("/")) return null;
 
-        const commandText = text.slice(1).trim();
+        const commandText = text.slice(1);
         if (commandText.length === 0) return null;
 
         const [name] = commandText.split(/\s+/);
         if (!name) return null;
 
         return {
-            name: name.toLowerCase(),
+            name,
             rest: commandText.slice(name.length).trim(),
         };
     }
