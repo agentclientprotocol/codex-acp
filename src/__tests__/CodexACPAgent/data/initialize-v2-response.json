@@ -44,12 +44,18 @@
       "methodId": "chat-gpt",
       "name": "ChatGPT",
       "description": "Use ChatGPT to authenticate",
+      "_meta": {
+        "replaceLogin": true
+      },
       "type": "agent"
     },
     {
       "methodId": "chat-gpt-device-code",
       "name": "ChatGPT (device code)",
       "description": "Sign in to ChatGPT by opening a verification page and entering a one-time code",
+      "_meta": {
+        "replaceLogin": true
+      },
       "type": "agent"
     },
     {
