@@ -73,6 +73,7 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - `CODEX_CONFIG` - JSON object merged into the Codex session config.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
+- `CODEX_ACP_EXTERNAL_SANDBOX=1` - opt in when the ACP host, rather than Codex, enforces the command sandbox. This uses Codex's `externalSandbox` policy in read-only mode; do not set it unless the host sandbox is active.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, or `agent-full-access`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.

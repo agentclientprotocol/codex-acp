@@ -3,6 +3,7 @@ import type {SessionConfigOption, SessionMode, SessionModeState} from "@agentcli
 import {AIR_KIND_KEY, airOnlyMeta} from "./AirExtension";
 
 export const MODE_CONFIG_ID = "mode";
+const EXTERNAL_SANDBOX_ENV = "CODEX_ACP_EXTERNAL_SANDBOX";
 
 type AgentModeKind = "plan" | "auto_review" | "standard" | "full_access";
 
@@ -46,6 +47,19 @@ export class AgentMode {
         {
             type: "readOnly",
             networkAccess: false,
+        },
+        "read-only",
+    );
+    static readonly ExternalSandboxReadOnly = new AgentMode(
+        "read-only",
+        "Read-only",
+        "Requires approval to edit files and access the internet. The ACP host provides the sandbox.",
+        "standard",
+        "untrusted",
+        "user",
+        {
+            type: "externalSandbox",
+            networkAccess: "restricted",
         },
         "read-only",
     );
@@ -133,7 +147,10 @@ export class AgentMode {
     }
 
     static all(): AgentMode[] {
-        return [AgentMode.ReadOnly, AgentMode.WorkspaceWrite, AgentMode.Agent, AgentMode.AgentFullAccess];
+        const readOnlyMode = process.env[EXTERNAL_SANDBOX_ENV] === "1"
+            ? AgentMode.ExternalSandboxReadOnly
+            : AgentMode.ReadOnly;
+        return [readOnlyMode, AgentMode.WorkspaceWrite, AgentMode.Agent, AgentMode.AgentFullAccess];
     }
 
     static find(modeId: string): AgentMode | null {
