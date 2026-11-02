@@ -4374,12 +4374,14 @@ export class CodexAcpServer {
         turn: { threadId: string, turnId: string },
         requestName: "Cancel" | "Close",
     ): Promise<void> {
+        const activePrompt = this.activePrompts.get(sessionState.sessionId);
         this.codexAcpClient.markTurnStale({
             threadId: turn.threadId,
             turnId: turn.turnId,
         });
         try {
             await this.interruptStandardChildren(sessionState);
+            if (this.activePrompts.get(sessionState.sessionId) !== activePrompt) return;
             await this.requestTurnInterrupt(sessionState, turn.threadId, turn.turnId, requestName);
         } finally {
             this.codexAcpClient.resolveTurnInterrupted({
@@ -4395,6 +4397,7 @@ export class CodexAcpServer {
      * interrupt", and once it registers a later turn under a different id, "expected active turn
      * id <completionTurnId> but found <Y>". Both are retried, with the id recomputed on every
      * attempt so a `turn/started` that arrives between retries is picked up.
+     * Retries belong to that prompt, not to a newer prompt that starts while a reply is pending.
      */
     private async requestTurnInterrupt(
         sessionState: SessionState,
@@ -4407,7 +4410,12 @@ export class CodexAcpServer {
             logger.log(`${requestName} - turnInterrupt skipped: the app-server of the turn is gone`, {sessionId: threadId});
             return;
         }
-        let turnId = codexRunningTurnId(sessionState, completionTurnId);
+        const activePrompt = this.activePrompts.get(sessionState.sessionId);
+        const ownsRegisteredTurn = activePrompt?.currentTurn?.threadId === threadId
+            && activePrompt.currentTurn.turnId === completionTurnId;
+        const stillOwnsPrompt = () => ownsRegisteredTurn && activePrompt !== undefined
+            && this.activePrompts.get(sessionState.sessionId) === activePrompt;
+        let turnId = ownsRegisteredTurn ? codexRunningTurnId(sessionState, completionTurnId) : completionTurnId;
         for (let attempt = 0; ; attempt++) {
             try {
                 await this.runWithProcessCheck(() => this.codexAcpClient.turnInterrupt({
@@ -4420,12 +4428,11 @@ export class CodexAcpServer {
                 });
                 return;
             } catch (err) {
-                const promptStillActive = this.activePrompts.has(threadId);
                 const mismatch = parseExpectedActiveTurnMismatch(err);
                 const isMismatch = mismatch !== null
                     && mismatch.expected === sessionState.currentTurnId
                     && mismatch.found !== "";
-                const retryable = promptStillActive
+                const retryable = stillOwnsPrompt()
                     && (isNoActiveTurnError(err) || isMismatch)
                     && attempt < NO_ACTIVE_TURN_RETRY_DELAYS_MS.length;
                 if (!retryable) {
@@ -4438,6 +4445,7 @@ export class CodexAcpServer {
                 // to completion and answer `end_turn`, which ACP forbids after a
                 // `session/cancel`.
                 await new Promise(resolve => setTimeout(resolve, NO_ACTIVE_TURN_RETRY_DELAYS_MS[attempt]!));
+                if (!stillOwnsPrompt()) return;
                 // Recompute after the wait: a `turn/started` may have landed in the meantime, and
                 // `interruptTurnId` always wins once it is set. Otherwise fall back to the id Codex
                 // just reported as active, or to the id we started with.
@@ -4470,9 +4478,11 @@ export class CodexAcpServer {
         requestName: "Cancel" | "Close",
         resolveInterruptedTurn: boolean,
     ): Promise<void> {
+        const activePrompt = this.activePrompts.get(sessionState.sessionId);
         await this.interruptStandardChildren(sessionState);
+        if (this.activePrompts.get(sessionState.sessionId) !== activePrompt) return;
         const turnId = await this.getInterruptibleTurnId(sessionState, requestName);
-        if (!turnId) {
+        if (!turnId || this.activePrompts.get(sessionState.sessionId) !== activePrompt) {
             return;
         }
 
