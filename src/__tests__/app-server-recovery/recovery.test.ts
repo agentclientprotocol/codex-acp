@@ -517,6 +517,43 @@ describe("app-server recovery", () => {
         await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
     });
 
+    it("keeps a session without messages when providers/set repeats the applied routing", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture);
+        const provider = {providerId: "openai", apiType: "openai" as const, baseUrl: "https://gateway.example/v1", headers: {"X-Key": "k"}};
+        await fixture.agent.setProvider(provider);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: []});
+
+        await fixture.agent.setProvider({...provider, headers: {...provider.headers}});
+
+        expect(fixture.servers).toHaveLength(1);
+        const {prompt} = await startTurn(fixture, sessionId);
+        completeTurn(fixture, sessionId);
+        await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
+        await fixture.agent.setProvider({...provider, headers: {"X-Key": "rotated"}});
+        expect(fixture.servers).toHaveLength(2);
+    });
+
+    it("answers a repeated providers/set only after the provider update in flight for it", async () => {
+        const fixture = createRecoveryFixture();
+        const sessionId = await openSession(fixture);
+        fixture.answers.set("thread/resume", () => undefined);
+        const provider = {providerId: "openai", apiType: "openai" as const, baseUrl: "https://gateway.example/v1"};
+        const first = fixture.agent.setProvider(provider);
+        await vi.waitFor(() => expect(fixture.servers.length === 2 && fixture.current().rpc.hasPending("thread/resume")).toBe(true));
+
+        let repeatedDone = false;
+        const repeated = fixture.agent.setProvider(provider).then(() => {
+            repeatedDone = true;
+        });
+        await new Promise(resolve => setTimeout(resolve, 10));
+        expect(repeatedDone).toBe(false);
+
+        fixture.current().rpc.resolve("thread/resume", resumed(sessionId));
+        await Promise.all([first, repeated]);
+        expect(fixture.servers).toHaveLength(2);
+    });
+
     it("keeps the provider routing of the agent across a crash restart", async () => {
         const fixture = createRecoveryFixture();
         await initialize(fixture);

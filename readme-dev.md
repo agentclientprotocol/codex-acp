@@ -141,6 +141,9 @@ The adapter restarts the Codex app-server when it dies (for example, killed for 
 - Codex writes a thread to disk only with its first message, so a session without messages cannot be resumed in a new
   app-server, after a crash or a provider restart. Its next use fails with "had no messages yet and was lost"; the
   client starts a new session. A provider restart still completes for the agent and the other sessions.
+  A `providers/set` with the routing (base URL, API type, headers) that the last `providers/set` applied does not
+  restart the app-server: it waits for a provider update in flight and succeeds. After a failed provider update it
+  restarts again.
 - After `CODEX_ACP_APP_SERVER_CRASH_LIMIT` crashes in the crash window the adapter stops restarting it and says so,
   with the stderr of the last crash.
   A session that the app-server died opening twice in 30 minutes is not opened again for the rest of that time, so
