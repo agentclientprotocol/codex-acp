@@ -24,6 +24,11 @@ function configurations(h: PromptSession) {
     return h.scopedUpdates.flatMap(entry => entry.sessionId === childId && entry.update.sessionUpdate === "config_option_update"
         ? [entry.update as {sessionUpdate: "config_option_update"; configOptions: Option[]}] : []);
 }
+function directories(h: PromptSession) {
+    return h.scopedUpdates.flatMap(entry => entry.update.sessionUpdate === "subagent_update"
+        && entry.update.sessionId === childId && "cwd" in entry.update
+        ? [{parent: entry.sessionId, ...(entry.update as {cwd: string | null; additionalDirectories?: string[] | null})}] : []);
+}
 async function flush(h: PromptSession) { await h.waitForNotifications(); await h.request("session/list", {}); }
 
 describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version => {
@@ -34,12 +39,13 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
     });
     async function connect() { h = await connectSession(version, {v1ClientCapabilities: {subagents: {}}}); }
     function readback(model: string | null, effort: ReasoningEffort | null, options: {
-        parent?: string | null; unloaded?: boolean; id?: string;
+        parent?: string | null; unloaded?: boolean; id?: string; cwd?: string;
     } = {}) {
         h.setCodexResponse("thread/read", async params => {
             const id = (params as {threadId: string}).threadId;
             return {thread: {...createThread(), id: id === worker ? options.id ?? id : id,
                 parentThreadId: id === worker ? options.parent === undefined ? sessionId : options.parent : null,
+                cwd: id === worker ? options.cwd ?? cwd : cwd,
                 model: id === worker ? model : null, reasoningEffort: id === worker ? effort : null,
                 status: id === worker && options.unloaded ? {type: "notLoaded"} : {type: "idle"}, turns: []}};
         });
@@ -48,6 +54,60 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         sessionId, cwd, mcpServers: [], ...(version === 2 ? {replayFrom: {type: "start"}} : {}),
     });
     const optionIds = () => configurations(h).at(-1)?.configOptions.map(option => option.configId ?? option.id);
+
+    it("reports a verified worktree directory without copying the parent's additional roots", async () => {
+        await connect();
+        h.agent.getSessionState(sessionId).additionalDirectories = ["/parent-extra"];
+        readback(null, null, {cwd: "/worktrees/worker"});
+        h.emit(activity());
+        await vi.waitFor(() => expect(directories(h).at(-1)?.cwd).toBe("/worktrees/worker"));
+        expect(directories(h)).toEqual([{parent: sessionId, sessionUpdate: "subagent_update",
+            sessionId: childId, cwd: "/worktrees/worker"}]);
+        expect(h.scopedUpdates.every(entry => !("additionalDirectories" in entry.update))).toBe(true);
+        expect(configurations(h)).toEqual([]);
+    });
+
+    it.each(["relative", "C:relative", ""])("does not report a non-absolute native directory: %j", async nativeCwd => {
+        await connect();
+        readback(null, null, {cwd: nativeCwd});
+        h.emit(activity());
+        await flush(h);
+        expect(directories(h)).toEqual([]);
+    });
+
+    it("reports current placement after replay without first asserting parent inheritance", async () => {
+        await connect();
+        readback(null, null, {cwd: "/worktrees/before"});
+        h.emit(activity());
+        await vi.waitFor(() => expect(directories(h).at(-1)?.cwd).toBe("/worktrees/before"));
+        const start = directories(h).length;
+        readback(null, null, {cwd: "/worktrees/after"});
+        await load();
+        await vi.waitFor(() => expect(directories(h).at(-1)?.cwd).toBe("/worktrees/after"));
+        expect(directories(h).slice(start).map(update => update.cwd)).toEqual(["/worktrees/after"]);
+    });
+
+    it("does not clear a retained directory when replay cannot verify current placement", async () => {
+        await connect();
+        readback(null, null, {cwd: "/worktrees/worker"});
+        h.emit(activity());
+        await vi.waitFor(() => expect(directories(h).at(-1)?.cwd).toBe("/worktrees/worker"));
+        const start = directories(h).length;
+        readback(null, null, {unloaded: true});
+        await load();
+        await flush(h);
+        expect(directories(h).slice(start)).toEqual([]);
+    });
+
+    it("publishes a nested child's directory on its immediate parent", async () => {
+        await connect();
+        readback(null, null, {parent: "coordinator", cwd: "/worktrees/nested"});
+        h.emit(activity(null, null, "/root/coordinator/worker"));
+        h.emit(itemStarted({type: "subAgentActivity", id: "coordinator", kind: "started", agentThreadId: "coordinator",
+            agentPath: "/root/coordinator", model: null, reasoningEffort: null}));
+        await vi.waitFor(() => expect(directories(h).at(-1)?.cwd).toBe("/worktrees/nested"));
+        expect(directories(h).at(-1)?.parent).toBe(`${sessionId}:subagent:coordinator`);
+    });
 
     it("publishes complete singleton snapshots from child observations, clears unset effort, and grants no controls", async () => {
         await connect();
@@ -176,7 +236,8 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         h.setCodexResponse("thread/read", async () => {
             await held;
             returned = true;
-            return {thread: {...createThread(), id: worker, parentThreadId: sessionId, model: "late-old-model", reasoningEffort: "high"}};
+            return {thread: {...createThread(), id: worker, parentThreadId: sessionId, model: "late-old-model",
+                reasoningEffort: "high", cwd: "/late-old-cwd"}};
         });
         try {
             h.emit(activity());
@@ -184,13 +245,16 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
             h.emit(onWorker(agentMessageDelta("Not blocked", "child-turn", "flowing")));
             await vi.waitFor(() => expect(h.scopedUpdates.some(entry => entry.sessionId === childId
                 && entry.update.sessionUpdate === "agent_message_chunk" && entry.update.messageId === "flowing")).toBe(true));
-            h.emit({method: "thread/settings/updated", params: {threadId: worker, threadSettings: settings("newer", "low")}});
+            h.emit({method: "thread/settings/updated", params: {threadId: worker,
+                threadSettings: {...settings("newer", "low"), cwd: "/current-cwd"}}});
             await vi.waitFor(() => expect(configurations(h)).toHaveLength(1));
         } finally { release(); }
         await vi.waitFor(() => expect(returned).toBe(true));
         await flush(h);
         expect(configurations(h)).toHaveLength(1);
         expect(configurations(h)[0]!.configOptions.map(option => option.currentValue)).toEqual(["newer", "low"]);
+        expect(directories(h).at(-1)?.cwd).toBe("/current-cwd");
+        expect(directories(h).some(update => update.cwd === "/late-old-cwd")).toBe(false);
     });
 
     it.each(["unload", "close"] as const)("drops a pending read after %s", async ending => {
@@ -215,6 +279,7 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         await vi.waitFor(() => expect(returned).toBe(true));
         await flush(h);
         expect(configurations(h)).toEqual([]);
+        expect(directories(h)).toEqual([]);
     });
 
     it("does not apply an earlier attachment's readback after a later resume confirms new values", async () => {
@@ -278,6 +343,7 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         h.emit(activity());
         await flush(h);
         expect(configurations(h)).toEqual([]);
+        expect(directories(h)).toEqual([]);
     });
 
     it("keeps replayed configuration historical and ignores foreign runtime starts", async () => {

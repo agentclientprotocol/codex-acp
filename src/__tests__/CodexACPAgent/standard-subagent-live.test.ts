@@ -65,7 +65,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         entry.sessionId.includes(":subagent:") || entry.update.sessionUpdate === "subagent_update");
     async function snapshot(name: string) {
         await flush(h);
-        await expect(JSON.stringify(childUpdates(), null, 2)).toMatchFileSnapshot(`data/live-core-v${version}-${name}.json`);
+        await expect(JSON.stringify(childUpdates(), null, 2) + "\n").toMatchFileSnapshot(`data/live-core-v${version}-${name}.json`);
     }
     const approval = (itemId: string, turnId = "child-turn") => h.triggerApproval("item/commandExecution/requestApproval", {
         threadId: worker, turnId, itemId, command: "echo hello", cwd, commandActions: [],

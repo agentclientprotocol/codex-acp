@@ -3,7 +3,7 @@ import type {ReasoningEffort} from "../app-server";
 import {createReasoningEffortConfigOption, createSubagentModelConfigOption} from "../ModelConfigOption";
 import type {SubagentModels} from "./CodexSubagentEventRouter";
 
-export type ObservedSubagentConfiguration = {model: string | null; effort: ReasoningEffort | null};
+export type ObservedSubagentConfiguration = {model: string | null; effort: ReasoningEffort | null; cwd?: string};
 
 /** Complete reported snapshots contain only observed child values and singleton choices. */
 export function subagentConfigurationOptions(

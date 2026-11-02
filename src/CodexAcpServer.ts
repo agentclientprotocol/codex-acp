@@ -686,7 +686,7 @@ export class CodexAcpServer {
     private async readSubagentConfiguration(threadId: string, parentThreadId: string): Promise<ObservedSubagentConfiguration | null> {
         const thread = await this.codexAcpClient.readSubagentThread(threadId);
         if (!thread || thread.id !== threadId || thread.parentThreadId !== parentThreadId || thread.status.type === "notLoaded") return null;
-        return {model: thread.model, effort: thread.reasoningEffort};
+        return {model: thread.model, effort: thread.reasoningEffort, cwd: thread.cwd};
     }
 
     private getSubagentInteractionHandlers(router: StandardSubagentEventRouter, rootSessionId: string): SubagentInteractionHandlers {
