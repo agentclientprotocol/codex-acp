@@ -166,6 +166,8 @@ to v2; it reuses the runtime environment variables above.
 
 Both ACP versions advertise `systemPrompt: {}`: text-only `append` mode. Override and non-text
 content are rejected with `-32602` before a session is created or a fork is made.
+An empty `content` array is also rejected before any lifecycle change; it does not clear
+existing client or AIR instructions.
 Text blocks are joined with a blank line and appended to the existing developer-instruction
 baseline: AIR `customInstructions` when supplied, otherwise configured Codex developer instructions.
 Codex's base instructions and workspace context remain intact. Requests without `systemPrompt`

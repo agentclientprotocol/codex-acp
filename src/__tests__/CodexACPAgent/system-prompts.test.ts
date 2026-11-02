@@ -117,6 +117,7 @@ describe.each([1, 2] as const)("client system prompts over ACP v%s", (version) =
         {mode: "override", content: [{type: "text", text: "x"}]},
         {mode: "_custom", content: [{type: "text", text: "x"}]},
         {mode: "append", content: [{type: "image", data: "", mimeType: "image/png"}]},
+        {mode: "append", content: []},
     ])("rejects unsupported system prompts before any lifecycle operation", async (systemPrompt) => {
         const {calls} = await connect();
         for (const method of ["session/new", "session/resume", "session/fork", ...(version === 1 ? ["session/load"] : [])]) {
@@ -156,13 +157,15 @@ describe.each([1, 2] as const)("client system prompts over ACP v%s", (version) =
         expect(client.agent.getSessionState(sessionId).instructions).toBeUndefined();
     });
 
-    it("clears the client addition with empty content without clearing AIR instructions", async () => {
+    it("rejects an empty prompt without clearing existing client or AIR instructions", async () => {
         const {calls} = await connect();
         await client.request("session/new", {cwd, mcpServers: [], systemPrompt: prompt("Old"), ...air});
         calls.length = 0;
-        await client.request("session/resume", {sessionId, cwd, mcpServers: [], systemPrompt: {mode: "append", content: []}});
-        expect(calls.at(-1)?.params.developerInstructions).toBe("AIR instructions");
-        expect(client.agent.getSessionState(sessionId).instructions?.text).toBe("");
+        await expect(client.request("session/resume", {sessionId, cwd, mcpServers: [], systemPrompt: {mode: "append", content: []}}))
+            .rejects.toMatchObject({code: -32602});
+        expect(calls).toEqual([]);
+        expect(client.agent.getSessionState(sessionId).instructions?.text).toBe("Old");
+        expect(client.agent.getSessionState(sessionId).instructions?.airInstructions).toBe("AIR instructions");
     });
 
     it("checks materialization rather than trusting a planned rollout path", async () => {

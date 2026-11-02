@@ -204,8 +204,10 @@ export class AcpClientDelivery {
         try {
             const setup = this.waitForSessionSetup(sessionId, cancellationSignal);
             if (setup) await setup;
+            // Permission cancellation is a denial. Async elicitations still inspect late answers.
             return await this.withElicitationRequest(method, params,
-                () => this.client.request(method, params, {...options, cancellationSignal}));
+                () => this.client.request(method, params, {...options, cancellationSignal,
+                    stopWaitingOnCancel: method === acp.methods.client.session.requestPermission || options?.stopWaitingOnCancel === true}));
         } finally {
             requests.delete(controller);
             if (requests.size === 0) this.sessionRequests.delete(sessionId);

@@ -15,6 +15,9 @@ export function clientSystemPromptText(value: unknown): string | undefined {
         || !("content" in value) || !Array.isArray(value.content)) {
         throw RequestError.invalidParams(undefined, "systemPrompt requires append mode and text content");
     }
+    if (value.content.length === 0) {
+        throw RequestError.invalidParams(undefined, "systemPrompt content must not be empty");
+    }
     const blocks: string[] = [];
     for (const block of value.content) {
         if (block === null || typeof block !== "object" || block.type !== "text" || typeof block.text !== "string") {
