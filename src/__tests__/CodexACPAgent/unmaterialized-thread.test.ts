@@ -57,6 +57,62 @@ function createFixture() {
 }
 
 describe("sessions Codex has not materialized on disk", () => {
+    it.each(["loadSession", "resumeSession"] as const)(
+        "preserves the default profile through %s before the first prompt", async method => {
+            const {fixture, appServer} = createFixture();
+            appServer.configRead = vi.fn().mockResolvedValue({config: {default_permissions: "dev"}});
+            appServer.listPermissionProfiles = vi.fn().mockResolvedValue({
+                data: [{id: "dev", description: null, allowed: true}], nextCursor: null,
+            });
+            appServer.threadStart = vi.fn().mockResolvedValue({
+                thread: createLiveThread(), model: "model-id", modelProvider: "openai",
+                reasoningEffort: "medium", serviceTier: null,
+                activePermissionProfile: {id: "dev", extends: ":workspace"},
+            });
+            appServer.threadResume = vi.fn().mockRejectedValue(NO_ROLLOUT(threadId));
+            appServer.threadRead = vi.fn().mockResolvedValue({thread: createLiveThread()});
+            const turn = {id: "first-turn", items: [], status: "completed", error: null};
+            const turnStart = vi.spyOn(appServer, "turnStart").mockResolvedValue({turn} as any);
+            appServer.awaitTurnCompleted = vi.fn().mockResolvedValue({threadId, turn});
+            const agent = fixture.getCodexAcpAgent();
+
+            const initial = await agent.newSession({cwd: "/test/cwd", mcpServers: []});
+            const reopened = await agent[method]({sessionId: threadId, cwd: "/test/cwd", mcpServers: []});
+            await agent.prompt({sessionId: threadId, prompt: [{type: "text", text: "Hello"}]});
+
+            const params = turnStart.mock.calls[0]![0];
+            await expect(JSON.stringify({
+                initialMode: initial.modes?.currentModeId,
+                reopenedMode: reopened.modes?.currentModeId,
+                nextTurn: {
+                    permissions: params.permissions,
+                    runtimeWorkspaceRoots: params.runtimeWorkspaceRoots,
+                    approvalPolicy: params.approvalPolicy,
+                    approvalsReviewer: params.approvalsReviewer,
+                    sandboxPolicy: params.sandboxPolicy,
+                },
+            }, null, 2) + "\n").toMatchFileSnapshot("data/unmaterialized-permission-profile.json");
+        },
+    );
+
+    it.each(["loadSession", "resumeSession"] as const)(
+        "keeps a saved null profile when %s succeeds", async method => {
+            const {fixture, appServer} = createFixture();
+            appServer.configRead = vi.fn().mockResolvedValue({config: {default_permissions: "dev"}});
+            appServer.listPermissionProfiles = vi.fn().mockResolvedValue({
+                data: [{id: "dev", description: null, allowed: true}], nextCursor: null,
+            });
+            appServer.threadResume = vi.fn().mockResolvedValue({
+                thread: createLiveThread(), model: "model-id", modelProvider: "openai",
+                reasoningEffort: "medium", serviceTier: null, activePermissionProfile: null,
+            });
+
+            const response = await fixture.getCodexAcpAgent()[method]({sessionId: threadId, cwd: "/test/cwd", mcpServers: []});
+
+            expect(response.modes?.currentModeId).toBe("agent");
+        },
+    );
+
     it("resumes from the live thread when thread/resume finds no rollout", async () => {
         const {fixture, appServer} = createFixture();
         appServer.threadResume = vi.fn().mockRejectedValue(NO_ROLLOUT(threadId));

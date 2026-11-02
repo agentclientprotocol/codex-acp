@@ -611,32 +611,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         });
     });
 
-    it.each((["newSession", "loadSession", "resumeSession", "forkSession"] as const).flatMap(method => [
-        {
-            method, configCase: "absent approval defaults",
-            config: {},
-            lastTurn: {approvalPolicy: "on-request", approvalsReviewer: "auto_review"},
-            expected: {approvalPolicy: "on-request", approvalsReviewer: "user"},
-        },
-        {
-            method, configCase: "null approval defaults",
-            config: {approval_policy: null, approvals_reviewer: null},
-            lastTurn: {approvalPolicy: "never", approvalsReviewer: "user"},
-            expected: {approvalPolicy: "on-request", approvalsReviewer: "user"},
-        },
-        {
-            method, configCase: "configured user approvals",
-            config: {approval_policy: "on-request", approvals_reviewer: "user"},
-            lastTurn: {approvalPolicy: "never", approvalsReviewer: "auto_review"},
-            expected: {approvalPolicy: "on-request", approvalsReviewer: "user"},
-        },
-        {
-            method, configCase: "configured automatic approvals",
-            config: {approval_policy: "never", approvals_reviewer: "auto_review"},
-            lastTurn: {approvalPolicy: "on-request", approvalsReviewer: "user"},
-            expected: {approvalPolicy: "never", approvalsReviewer: "auto_review"},
-        },
-    ]))('restores a custom profile via $method using $configCase', async ({method, config, lastTurn, expected}) => {
+    function createPermissionProfileFixture(config: Record<string, unknown>) {
         vi.stubEnv("INITIAL_AGENT_MODE", undefined);
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
@@ -663,7 +638,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             reasoningEffort: "medium",
             serviceTier: null,
             activePermissionProfile: {id: "team-default", extends: ":workspace"},
-            ...lastTurn,
+            approvalPolicy: "on-request",
+            approvalsReviewer: "user",
         };
         vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue(threadResponse as any);
         vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue(threadResponse as any);
@@ -672,6 +648,16 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
             data: [createTestModel({id: "gpt-5"})],
             nextCursor: null,
+        });
+        return {codexAcpAgent, listPermissionProfilesSpy, configReadSpy};
+    }
+
+    it.each([
+        "newSession", "loadSession", "resumeSession", "forkSession",
+    ] as const)('restores a custom profile via %s with configured approvals', async method => {
+        const {codexAcpAgent, listPermissionProfilesSpy, configReadSpy} = createPermissionProfileFixture({
+            approval_policy: "never",
+            approvals_reviewer: "auto_review",
         });
 
         const session = await codexAcpAgent[method]({cwd: "/workspace", mcpServers: [], sessionId: "thread-id"});
@@ -684,8 +670,27 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             .toBe("permission-profile:team-default");
         expect(codexAcpAgent.getSessionState("thread-id").agentMode).toMatchObject({
             permissionProfileId: "team-default",
-            ...expected,
+            approvalPolicy: "never",
+            approvalsReviewer: "auto_review",
         });
+    });
+
+    it.each([
+        {
+            configCase: "absent approval defaults", config: {},
+            expected: {approvalPolicy: "on-request", approvalsReviewer: "user"},
+        },
+        {
+            configCase: "configured automatic approvals",
+            config: {approval_policy: "never", approvals_reviewer: "auto_review"},
+            expected: {approvalPolicy: "never", approvalsReviewer: "auto_review"},
+        },
+    ])('uses $configCase for custom profile modes', async ({config, expected}) => {
+        const {codexAcpAgent} = createPermissionProfileFixture(config);
+
+        await codexAcpAgent.newSession({cwd: "/workspace", mcpServers: []});
+
+        expect(codexAcpAgent.getSessionState("thread-id").agentMode).toMatchObject(expected);
     });
 
     it('applies ACP additional directories to resumed and loaded sessions explicitly', async () => {

@@ -690,6 +690,7 @@ export class CodexAcpClient {
                 modelProvider: response.thread.modelProvider,
                 reasoningEffort: response.thread.reasoningEffort,
                 serviceTier: null,
+                // thread/read omits permissions; callers restore the config default before the first prompt.
                 activePermissionProfileId: null,
                 // An unmaterialized thread has no persisted history to hydrate:
                 // `thread/turns/list` rejects it outright ("not materialized
@@ -710,7 +711,7 @@ export class CodexAcpClient {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
-        const {config, skippedMcpServers, ...permissionProfileMetadata} =
+        const {config, skippedMcpServers, defaultPermissionProfileId, ...permissionProfileMetadata} =
             await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
         const response = await this.resumeThreadWithInstructions({
             excludeTurns: true,
@@ -736,7 +737,7 @@ export class CodexAcpClient {
             additionalDirectories,
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
-            activePermissionProfileId: response.activePermissionProfileId,
+            activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
             ...permissionProfileMetadata,
         }
     }
@@ -773,7 +774,7 @@ export class CodexAcpClient {
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
-        const {config, skippedMcpServers, ...permissionProfileMetadata} =
+        const {config, skippedMcpServers, defaultPermissionProfileId, ...permissionProfileMetadata} =
             await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
         const response = await this.resumeThreadWithInstructions({
             excludeTurns: true,
@@ -821,7 +822,7 @@ export class CodexAcpClient {
             additionalDirectories,
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
-            activePermissionProfileId: response.activePermissionProfileId,
+            activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
             ...permissionProfileMetadata,
         };
     }
@@ -880,7 +881,7 @@ export class CodexAcpClient {
         const developerInstructions = instructions?.developerInstructions;
         await this.refreshSkills(request.cwd, additionalDirectories);
 
-        const {config, skippedMcpServers, ...permissionProfileMetadata} =
+        const {config, skippedMcpServers, defaultPermissionProfileId: _defaultPermissionProfileId, ...permissionProfileMetadata} =
             await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
         const response = await this.codexClient.threadStart({
             config,
@@ -1181,9 +1182,11 @@ export class CodexAcpClient {
         const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
         const permissionProfiles = await this.fetchPermissionProfiles(projectPath);
         const effectiveConfig = await this.codexClient.configRead({includeLayers: true, cwd: projectPath});
+        const defaultPermissionProfileId = effectiveConfig?.config?.["default_permissions"];
         // Thread responses retain per-turn overrides; profile modes use the configured approval defaults.
         const permissionProfileMetadata = {
             permissionProfiles,
+            defaultPermissionProfileId: typeof defaultPermissionProfileId === "string" ? defaultPermissionProfileId : null,
             ...(effectiveConfig?.config?.approval_policy != null && {approvalPolicy: effectiveConfig.config.approval_policy}),
             ...(effectiveConfig?.config?.approvals_reviewer != null && {approvalsReviewer: effectiveConfig.config.approvals_reviewer}),
         };
@@ -1621,6 +1624,7 @@ export type JsonObject = { [key in string]?: JsonValue }
 export type SessionConfig = {
     config: JsonObject,
     skippedMcpServers: string[],
+    defaultPermissionProfileId?: string | null,
     approvalPolicy?: AskForApproval,
     approvalsReviewer?: ApprovalsReviewer,
     permissionProfiles?: PermissionProfileSummary[],
