@@ -163,6 +163,7 @@ function createRouter(
     };
     const attachAgent = (agent: CodexAcpServer, signal: AbortSignal) => {
         codexAcpServer = agent;
+        agent.observeInitializeResponse();
         const stopSetupPublication = agent.observeSessionSetupResponses();
         signal.addEventListener("abort", () => {
             setups.clear();
@@ -174,9 +175,16 @@ function createRouter(
         });
     };
 
+    const initialize = async <T>(requestId: acp.JsonRpcId, operation: () => Promise<T>): Promise<T> => {
+        const agent = getAgent();
+        const result = await operation();
+        responses.afterWrite(requestId, successful => { if (successful) agent.afterInitializeResponse(); });
+        return result;
+    };
+
     const v1Agent = acp.agent({name: packageJson.name})
         .onConnect((connection) => attachAgent(createAgent(connection.client), connection.signal))
-        .onRequest(acp.methods.agent.initialize, (ctx) => getAgent().initialize(ctx.params))
+        .onRequest(acp.methods.agent.initialize, (ctx) => initialize(ctx.requestId, () => getAgent().initialize(ctx.params)))
         .onRequest(acp.methods.agent.session.new, (ctx) => createdSetup(ctx.requestId, () => getAgentForPaths(ctx.params).newSession(ctx.params)))
         .onRequest(acp.methods.agent.session.load, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => getAgentForPaths(ctx.params).loadSession(ctx.params), ctx.signal))
         .onRequest(acp.methods.agent.session.fork, (ctx) => createdSetup(ctx.requestId, () => getAgentForPaths(ctx.params).forkSession(ctx.params)))
@@ -186,7 +194,7 @@ function createRouter(
         .onRequest(acp.methods.agent.session.close, (ctx) => getAgent(ctx.params).closeSession(ctx.params))
         .onRequest(acp.methods.agent.session.setMode, (ctx) => getAgent(ctx.params).setSessionMode(ctx.params))
         .onRequest(acp.methods.agent.session.setConfigOption, (ctx) => getAgent(ctx.params).setSessionConfigOption(ctx.params))
-        .onRequest(acp.methods.agent.authenticate, (ctx) => getAgent().authenticate(ctx.params, ctx.requestId))
+        .onRequest(acp.methods.agent.authenticate, (ctx) => getAgent().authenticate(ctx.params, ctx.requestId, ctx.signal))
         .onRequest(acp.methods.agent.logout, (ctx) => getAgent().logout(ctx.params))
         .onRequest(acp.methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params))
         .onRequest(acp.methods.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params))
@@ -210,7 +218,7 @@ function createRouter(
 
     const v2Agent = acpV2.agent({name: packageJson.name})
         .onConnect((connection) => attachAgent(createAgent(new AcpV2Connection(connection.client)), connection.signal))
-        .onRequest(acpV2.methods.agent.initialize, (ctx) => getAgent().initializeV2(ctx.params))
+        .onRequest(acpV2.methods.agent.initialize, (ctx) => initialize(ctx.requestId, () => getAgent().initializeV2(ctx.params)))
         // No `session/load`: v2 folds it into `session/resume` with `replayFrom`.
         .onRequest(acpV2.methods.agent.session.new, (ctx) => createdSetup(ctx.requestId, () => getAgentForPaths(ctx.params).newSessionV2(ctx.params)))
         .onRequest(acpV2.methods.agent.session.list, (ctx) => getAgentForPaths({cwd: ctx.params.cwd ?? null}).listSessions(ctx.params))
@@ -221,7 +229,7 @@ function createRouter(
         // No `session/set_mode`: v2 removed the modes API; modes are config options.
         .onRequest(acpV2.methods.agent.session.setConfigOption, (ctx) => getAgent(ctx.params).setSessionConfigOptionV2(ctx.params))
         // The v1-only `authentication/status|logout` extensions are not registered on v2.
-        .onRequest(acpV2.methods.agent.auth.login, (ctx) => getAgent().authenticateV2(ctx.params, ctx.requestId))
+        .onRequest(acpV2.methods.agent.auth.login, (ctx) => getAgent().authenticateV2(ctx.params, ctx.requestId, ctx.signal))
         .onRequest(acpV2.methods.agent.auth.logout, (ctx) => getAgent().logoutV2(ctx.params))
         .onRequest(acpV2.methods.agent.session.prompt, (ctx) => getAgent(ctx.params).promptV2(ctx.params, ctx.signal))
         .onNotification(acpV2.methods.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params))

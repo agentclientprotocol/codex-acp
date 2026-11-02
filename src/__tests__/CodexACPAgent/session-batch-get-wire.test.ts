@@ -21,6 +21,8 @@ async function connect(version: 1 | 2, capabilities: string[]) {
     const appServer = new CodexAppServerClient(mocks.mockCodexConnection);
     const client = new CodexAcpClient(appServer);
     vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
+    vi.spyOn(client, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
+    vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
     const router = createAcpAgentRouter(connection => new CodexAcpServer(connection, client));
     const incoming = new TransformStream<Uint8Array, Uint8Array>();
     const outgoing = new TransformStream<Uint8Array, Uint8Array>();
