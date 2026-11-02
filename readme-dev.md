@@ -16,6 +16,17 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `CODEX_ACP_APP_SERVER_CRASH_WINDOW_MS` - the crash window in milliseconds (default `300000`, 5 minutes).
 - `CODEX_ACP_PROMPT_SUGGESTIONS` - set to `false` to turn off the predicted follow-up prompt for AIR. It costs one extra model call per turn.
 
+### Workspace-write networking
+
+For `agent` and `workspace-write` modes, enable networking with the existing Codex setting:
+
+```toml
+[sandbox_workspace_write]
+network_access = true
+```
+
+The adapter reads Codex's effective configuration for the session working directory on each workspace-write turn. An explicit boolean `sandbox_workspace_write.network_access` in `CODEX_CONFIG` takes precedence over the file configuration. If neither source sets it, the mode keeps its existing default. Other sandbox types, writable roots, temporary-directory flags, and approval policies are unchanged.
+
 ### Quick start
 
 #### Develop on Windows?
