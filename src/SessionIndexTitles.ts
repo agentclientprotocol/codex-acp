@@ -1,6 +1,6 @@
 /**
- * The titles of the AIR `sessionIndex` extension: `_session/rename`, and how it and the automatic title of
- * `TitleGenerator` keep out of each other's way. See `docs/air-extensions.md`.
+ * Client-set session titles and how they and the automatic title of `TitleGenerator`
+ * keep out of each other's way. Shared by `session/set_title` and AIR's `_session/rename`.
  */
 
 import {RequestError} from "@agentclientprotocol/sdk/unstable";
@@ -59,7 +59,7 @@ export class SessionIndexTitles {
      * that has not been written yet is skipped, and one that Codex is writing now completes before this write
      * starts. Automatic titles stop for good only once the rename succeeded.
      */
-    async rename(sessionId: string, requestedTitle: string): Promise<void> {
+    async rename(sessionId: string, requestedTitle: string): Promise<string> {
         const title = normalizeSessionTitle(requestedTitle);
         if (title === null) {
             throw RequestError.invalidParams({sessionId}, "title must be a non-empty string");
@@ -116,12 +116,13 @@ export class SessionIndexTitles {
                 title,
             });
         }
+        return title;
     }
 
     /**
      * Writes an automatic title in the write queue of the session, unless `_session/rename` has set or is
      * setting the title. The check runs when the write gets its turn, whatever `SessionState` the generator
-     * belongs to. Only a `sessionIndex` client renames this way, so nothing changes for other clients.
+     * belongs to. Both standard and AIR title requests suppress automatic title writes.
      */
     writeAutomaticTitle(sessionId: string, title: string, write: () => Promise<boolean>): Promise<boolean> {
         return this.writes.run(sessionId, async () => {
