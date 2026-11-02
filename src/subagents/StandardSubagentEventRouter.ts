@@ -336,7 +336,6 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         const parent = [...this.children.values()].find(candidate => candidate.sessionId === child.parentSessionId);
         if (parent) await this.ensureAnnounced(parent);
         await this.session.update({sessionUpdate: "subagent_update", sessionId: child.sessionId, capabilities: {},
-            cwd: null, additionalDirectories: null,
             ...(child.title !== undefined ? {title: child.title} : {}),
             ...(child.description !== undefined ? {description: child.description} : {})}, child.parentSessionId);
         this.announced.add(child.threadId);

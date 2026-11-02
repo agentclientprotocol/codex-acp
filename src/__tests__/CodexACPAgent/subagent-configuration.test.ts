@@ -61,8 +61,9 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         readback(null, null, {cwd: "/worktrees/worker"});
         h.emit(activity());
         await vi.waitFor(() => expect(directories(h).at(-1)?.cwd).toBe("/worktrees/worker"));
-        expect(directories(h)[0]).toMatchObject({parent: sessionId, cwd: null, additionalDirectories: null});
-        expect(directories(h).every(update => update.additionalDirectories == null)).toBe(true);
+        expect(directories(h)).toEqual([{parent: sessionId, sessionUpdate: "subagent_update",
+            sessionId: childId, cwd: "/worktrees/worker"}]);
+        expect(h.scopedUpdates.every(entry => !("additionalDirectories" in entry.update))).toBe(true);
         expect(configurations(h)).toEqual([]);
     });
 
@@ -71,10 +72,10 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         readback(null, null, {cwd: nativeCwd});
         h.emit(activity());
         await flush(h);
-        expect(directories(h).map(update => update.cwd)).toEqual([null]);
+        expect(directories(h)).toEqual([]);
     });
 
-    it("resets inherited directories and restores current placement after replay", async () => {
+    it("reports current placement after replay without first asserting parent inheritance", async () => {
         await connect();
         readback(null, null, {cwd: "/worktrees/before"});
         h.emit(activity());
@@ -83,7 +84,19 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         readback(null, null, {cwd: "/worktrees/after"});
         await load();
         await vi.waitFor(() => expect(directories(h).at(-1)?.cwd).toBe("/worktrees/after"));
-        expect(directories(h).slice(start).map(update => update.cwd)).toEqual([null, "/worktrees/after"]);
+        expect(directories(h).slice(start).map(update => update.cwd)).toEqual(["/worktrees/after"]);
+    });
+
+    it("does not clear a retained directory when replay cannot verify current placement", async () => {
+        await connect();
+        readback(null, null, {cwd: "/worktrees/worker"});
+        h.emit(activity());
+        await vi.waitFor(() => expect(directories(h).at(-1)?.cwd).toBe("/worktrees/worker"));
+        const start = directories(h).length;
+        readback(null, null, {unloaded: true});
+        await load();
+        await flush(h);
+        expect(directories(h).slice(start)).toEqual([]);
     });
 
     it("publishes a nested child's directory on its immediate parent", async () => {
@@ -266,7 +279,7 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         await vi.waitFor(() => expect(returned).toBe(true));
         await flush(h);
         expect(configurations(h)).toEqual([]);
-        expect(directories(h).every(update => update.cwd === null)).toBe(true);
+        expect(directories(h)).toEqual([]);
     });
 
     it("does not apply an earlier attachment's readback after a later resume confirms new values", async () => {
@@ -330,7 +343,7 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         h.emit(activity());
         await flush(h);
         expect(configurations(h)).toEqual([]);
-        expect(directories(h).every(update => update.cwd === null)).toBe(true);
+        expect(directories(h)).toEqual([]);
     });
 
     it("keeps replayed configuration historical and ignores foreign runtime starts", async () => {

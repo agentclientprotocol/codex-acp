@@ -27,9 +27,9 @@ Subagents require bilateral capability negotiation during `initialize`.
 
 On standard subagent connections, directory information is part of `subagent_update` on the immediate parent. This applies to both ACP versions. It does not change AIR's legacy subagent events.
 
-Each announcement resets `cwd` and `additionalDirectories` to `null`, which restores inheritance from the immediate parent. This also removes directory overrides a client retained before replay. A verified loaded-child read then reports its absolute `cwd`, including a worktree directory. Known child settings changes update that value. Readback does not block child output, and a superseded read cannot replace newer settings.
+A verified loaded-child read reports its absolute `cwd`, including a worktree directory. Known child settings changes update that value. Announcements do not reset directory fields while readback is pending. Omission preserves a retained override; `null` would explicitly restore inheritance from the immediate parent, not report an unknown directory. Readback does not block child output, and a superseded read cannot replace newer settings.
 
-The adapter verifies the child's ID, parent, and loaded state before accepting readback. It does not report relative paths or infer directories from provider IDs. Codex does not expose an authoritative ACP additional-directory list for children, so the adapter leaves that field inherited. It does not copy parent roots or treat writable sandbox paths as workspace roots. `[]` would mean explicitly no additional directories, not unknown directories.
+The adapter verifies the child's ID, parent, and loaded state before accepting readback. It does not report relative paths or infer directories from provider IDs. Codex does not expose an authoritative ACP additional-directory list for children, so the adapter omits that field. It does not copy parent roots or treat writable sandbox paths as workspace roots. `[]` would mean explicitly no additional directories, not unknown directories.
 
 ## Legacy fallback
 
