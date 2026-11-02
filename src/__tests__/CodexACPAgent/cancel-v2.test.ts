@@ -395,8 +395,7 @@ describe('session/cancel and session/close over ACP v2', () => {
         await client.cancel();
         await vi.waitFor(() => expect(capturedSignal!.aborted).toBe(true));
 
-        // A conforming client answers `cancelled` once it has seen `session/cancel`.
-        permission.resolve({outcome: {outcome: "cancelled"}});
+        // Cancellation stops the wait even if the client never answers the withdrawn request.
         expect(await approvalPromise).toEqual({decision: "cancel"});
 
         client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
@@ -405,6 +404,9 @@ describe('session/cancel and session/close over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
+        // A late approval cannot resume the cancelled work.
+        permission.resolve({outcome: {outcome: "selected", optionId: "accept"}});
+        await settle();
         // Withdrawing the interaction does not resume cancelled foreground work.
         const transcript = client.transcript.slice(start);
         expect(stateUpdates(transcript)).toEqual([
@@ -446,8 +448,8 @@ describe('session/cancel and session/close over ACP v2', () => {
         await client.cancel();
         await vi.waitFor(() => expect(capturedSignal!.aborted).toBe(true));
 
-        permission.resolve({outcome: {outcome: "cancelled"}});
         await client.promptRunFinished(1);
+        permission.resolve({outcome: {outcome: "selected", optionId: "accept"}});
         await settle();
 
         // No implementation turn is started once the review is cancelled.

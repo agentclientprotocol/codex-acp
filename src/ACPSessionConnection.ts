@@ -207,7 +207,7 @@ export class AcpV2Connection {
             const response = await this.client.request(
                 acpV2.methods.client.session.requestPermission,
                 toV2RequestPermissionRequest(request),
-                options,
+                {...options, stopWaitingOnCancel: true},
             );
             return toV1RequestPermissionResponse(response);
         }, options?.cancellationSignal);
