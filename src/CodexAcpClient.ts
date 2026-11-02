@@ -28,6 +28,7 @@ import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
+import {isDeepStrictEqual} from "node:util";
 import {logger} from "./Logger";
 import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
 import {listedSessionTitle, normalizeSessionTitle} from "./SessionTitle";
@@ -471,11 +472,10 @@ export class CodexAcpClient {
         }
         // Reuse needs the very same headers, so a rotated token lists again, and a failed listing then fails that
         // `providers/set`. Deliberate: AIR keeps its proxy key for the IDE's lifetime and does not rotate it.
-        const previous = this.gatewayConfigSource === "acpProviders" ? this.gatewayConfig : null;
+        const previousListing = this.hasProviderRouting(gatewayConfig) ? this.gatewayConfig?.listedModels ?? null : null;
         try {
-            gatewayConfig.listedModels = previous?.listedModels && sameGatewayRouting(previous, gatewayConfig)
-                ? previous.listedModels
-                : await listGatewayModels(gatewayConfig.config.base_url, gatewayConfig.config.http_headers);
+            gatewayConfig.listedModels = previousListing
+                ?? await listGatewayModels(gatewayConfig.config.base_url, gatewayConfig.config.http_headers);
         } catch (error) {
             if (error instanceof GatewayListingError) {
                 throw RequestError.internalError(
@@ -486,6 +486,13 @@ export class CodexAcpClient {
             throw error;
         }
         return gatewayConfig;
+    }
+
+    /** Whether `providers/set` already applied the provider config of `gatewayConfig`. */
+    hasProviderRouting(gatewayConfig: GatewayConfig): boolean {
+        return this.gatewayConfigSource === "acpProviders"
+            && this.gatewayConfig !== null
+            && sameProviderConfig(this.gatewayConfig, gatewayConfig);
     }
 
     /** `providers/set`: replaces the routing with a configuration from {@link prepareProvider}. */
@@ -1614,6 +1621,10 @@ type WireApi = "responses";
 
 type GatewayConfigSource = "authentication" | "acpProviders";
 
+/**
+ * Everything that the gateway routing gives Codex. A setting that `providers/set` changes belongs here: an unchanged
+ * configuration, compared by {@link sameProviderConfig}, does not restart the app-server.
+ */
 export interface GatewayConfig {
     modelProvider: string;
     config: {
@@ -1665,13 +1676,12 @@ function buildGatewayConfig(params: GatewayRoutingParams): GatewayConfig {
     };
 }
 
-function sameGatewayRouting(left: GatewayConfig, right: GatewayConfig): boolean {
-    const leftHeaders = Object.entries(left.config.http_headers);
-    const rightHeaders = right.config.http_headers;
-    return left.config.base_url === right.config.base_url
-        && left.config.wire_api === right.config.wire_api
-        && leftHeaders.length === Object.keys(rightHeaders).length
-        && leftHeaders.every(([name, value]) => rightHeaders[name] === value);
+/**
+ * Whether Codex gets the same provider config from both, compared by value with keys in any order.
+ * The model listing is a result of the config, not a part of it.
+ */
+function sameProviderConfig(left: GatewayConfig, right: GatewayConfig): boolean {
+    return left.modelProvider === right.modelProvider && isDeepStrictEqual(left.config, right.config);
 }
 
 function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[] | undefined {

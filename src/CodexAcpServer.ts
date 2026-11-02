@@ -556,6 +556,8 @@ export class CodexAcpServer {
     private readonly recovery: AppServerRecovery<SessionState> | null;
     private initializeRequest: Pick<acp.InitializeRequest, "clientInfo"> | null = null;
     private providerUpdate: Promise<void> | null = null;
+    /** The last provider update failed, so the app-server may not run the routing of the agent. */
+    private providerUpdateFailed = false;
     /**
      * Numbers `providers/set` and `providers/disable` requests in arrival order. A listing finishing after a newer
      * request was applied is dropped; a newer request that failed drops nothing.
@@ -2294,6 +2296,13 @@ export class CodexAcpServer {
             return { };
         }
         this.appliedProviderRequest = request;
+        if (this.codexAcpClient.hasProviderRouting(gatewayConfig) && !this.providerUpdateFailed) {
+            // The same routing again needs no restart. A restart would lose every session that Codex has not
+            // persisted yet (no model turn). An update in flight that applies this routing still has to finish.
+            logger.log("providers/set unchanged: the app-server is not restarted");
+            await this.waitForProviderUpdate();
+            return { };
+        }
         this.codexAcpClient.setProvider(gatewayConfig);
         // The restarted app-server takes the listing too and does not list the models again.
         await this.enqueueProviderUpdate((client) => client.setProvider(gatewayConfig));
@@ -2429,6 +2438,11 @@ export class CodexAcpServer {
             }
         });
         this.providerUpdate = update;
+        update.then(() => {
+            this.providerUpdateFailed = false;
+        }, () => {
+            this.providerUpdateFailed = true;
+        });
         this.recovery?.settleReplacement(update);
         try {
             await update;
