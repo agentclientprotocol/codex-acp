@@ -961,7 +961,7 @@ describe("_session/rename", () => {
 
     it("writes an explicit title after an automatic title that Codex is still writing", async () => {
         vi.useFakeTimers();
-        const {fixture, agent, appServer} = await createAgent("plain");
+        const {fixture, agent, appServer} = await createAgent("sessionIndex");
         await openLocalSession(fixture, threadId);
         vi.spyOn(appServer, "threadStart").mockResolvedValue({thread: {id: "ephemeral"}} as never);
         vi.spyOn(appServer, "runTurn").mockResolvedValue({
@@ -980,7 +980,7 @@ describe("_session/rename", () => {
         await vi.advanceTimersByTimeAsync(0);
         expect(started).toEqual(["Automatic"]);
 
-        const rename = agent.sessionIndex.setTitle({sessionId: threadId, title: "Explicit"});
+        const rename = agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"});
         // Longer than any wait for the automatic title: only its completion lets the rename go.
         await vi.advanceTimersByTimeAsync(30_000);
         expect(started).toEqual(["Automatic"]);
@@ -992,7 +992,7 @@ describe("_session/rename", () => {
     });
 
     it("skips an automatic title that is generated after an explicit rename", async () => {
-        const {fixture, agent, appServer} = await createAgent("plain");
+        const {fixture, agent, appServer} = await createAgent("sessionIndex");
         await openLocalSession(fixture, threadId);
         const turn = deferred<unknown>();
         vi.spyOn(appServer, "threadStart").mockResolvedValue({thread: {id: "ephemeral"}} as never);
@@ -1001,7 +1001,7 @@ describe("_session/rename", () => {
         const titleGen = agent.getSessionState(threadId).titleGen!;
         titleGen.onTurnCompleted("Fix the build");
 
-        await agent.sessionIndex.setTitle({sessionId: threadId, title: "Explicit"});
+        await agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"});
         turn.resolve({turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}});
         await titleGen.waitForIdle(1_000);
 

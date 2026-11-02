@@ -1,8 +1,7 @@
 /**
  * The AIR `sessionIndex` extension as `CodexAcpServer` serves it: the session list, `_session/rename`,
- * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`.
- * `session/set_title` shares its title writer without requiring AIR capabilities.
- * See `SessionIndex.ts` and `docs/air-extensions.md`.
+ * `_session/archive`, `_session/unarchive`, `session/delete` and `_session/list/subscribe`. Nothing here runs
+ * for a client that does not declare `sessionIndex`. See `SessionIndex.ts` and `docs/air-extensions.md`.
  */
 
 import path from "node:path";
@@ -237,14 +236,9 @@ export class SessionIndexService {
     /** `_session/rename`. */
     async rename({sessionId, title}: SessionRenameRequest): Promise<Record<string, never>> {
         this.require(SESSION_RENAME_METHOD);
-        await this.setTitle({sessionId, title});
-        return {};
-    }
-
-    /** Standard title requests share persistence, normalization and automatic-title suppression with AIR. */
-    async setTitle({sessionId, title}: acp.SetSessionTitleRequest): Promise<acp.SetSessionTitleResponse> {
         await this.host.ensureAppServer();
-        return {title: await this.titles.rename(sessionId, title)};
+        await this.titles.rename(sessionId, title);
+        return {};
     }
 
     /**
