@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from "vitest";
-import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
+import {createCodexMockTestFixture, createTestModel, mockPromptTurn} from "../acp-test-utils";
 import type {Thread} from "../../app-server/v2";
 
 // Codex materializes a thread's rollout file on the thread's first user
@@ -136,6 +136,50 @@ describe("sessions Codex has not materialized on disk", () => {
 
         await expect(fixture.getCodexAcpAgent().deleteSession({sessionId: threadId}))
             .rejects.toThrow("disk is full");
+    });
+});
+
+describe.each(["resume", "load"] as const)("service tier after session/%s", (operation) => {
+    it.each([
+        {initialTier: "ultrafast", reportedTier: undefined, expectedTier: "ultrafast"},
+        {initialTier: "flex", reportedTier: undefined, expectedTier: "flex"},
+        {initialTier: null, reportedTier: undefined, expectedTier: null},
+        {initialTier: "ultrafast", reportedTier: null, expectedTier: null},
+        {initialTier: "ultrafast", reportedTier: "flex", expectedTier: "flex"},
+    ])("uses $expectedTier when Codex reports $reportedTier after $initialTier", async ({initialTier, reportedTier, expectedTier}) => {
+        const {fixture, appServer} = createFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const response = {
+            thread: createLiveThread(),
+            model: "model-id",
+            modelProvider: "openai",
+            reasoningEffort: "medium",
+            serviceTier: initialTier,
+        };
+        appServer.threadStart = vi.fn().mockImplementation(async (params: {ephemeral?: boolean | null}) => ({
+            ...response,
+            thread: {...response.thread, id: params.ephemeral ? "title-session" : threadId},
+        }));
+        await agent.newSession({cwd: "/test/cwd", mcpServers: []});
+        if (reportedTier === undefined) {
+            appServer.threadResume = vi.fn().mockRejectedValue(NO_ROLLOUT(threadId));
+            appServer.threadRead = vi.fn().mockResolvedValue({thread: createLiveThread()});
+        } else {
+            appServer.threadResume = vi.fn().mockResolvedValue({...response, serviceTier: reportedTier});
+        }
+        const turnStart = mockPromptTurn(fixture, threadId);
+        const request = {sessionId: threadId, cwd: "/test/cwd", mcpServers: []};
+        if (operation === "resume") {
+            await agent.resumeSession(request);
+        } else {
+            await agent.loadSession(request);
+        }
+        await agent.prompt({sessionId: threadId, prompt: [{type: "text", text: "First prompt"}]});
+
+        expect(turnStart).toHaveBeenCalledWith(expect.objectContaining({
+            threadId,
+            serviceTier: expectedTier,
+        }));
     });
 });
 

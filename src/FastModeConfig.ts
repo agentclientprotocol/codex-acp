@@ -1,6 +1,5 @@
 import type {SessionConfigOption} from "@agentclientprotocol/sdk/unstable";
 import type * as acp from "@agentclientprotocol/sdk/unstable";
-import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model} from "./app-server/v2";
 
 export const FAST_MODE_CONFIG_ID = "fast-mode";
@@ -14,8 +13,14 @@ export function modelSupportsFast(model: Model | undefined): boolean {
     return model?.additionalSpeedTiers?.includes("fast") ?? false;
 }
 
-export function resolveFastServiceTier(fastModeEnabled: boolean, currentModelSupportsFast: boolean): ServiceTier | null {
-    return fastModeEnabled && currentModelSupportsFast ? "fast" : null;
+export function isFastServiceTier(serviceTier: string | null): boolean {
+    // Codex reports Fast as "priority"; older versions use the "fast" alias.
+    return serviceTier === "fast" || serviceTier === "priority";
+}
+
+export function resolveServiceTier(serviceTier: string | null, currentModelSupportsFast: boolean): string | null {
+    // The Fast toggle must not discard other tiers selected in Codex config, such as Ultrafast.
+    return isFastServiceTier(serviceTier) && !currentModelSupportsFast ? null : serviceTier;
 }
 
 export function clientSupportsBooleanConfigOptions(clientCapabilities?: acp.ClientCapabilities | null): boolean {

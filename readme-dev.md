@@ -16,6 +16,11 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `CODEX_ACP_APP_SERVER_CRASH_WINDOW_MS` - the crash window in milliseconds (default `300000`, 5 minutes).
 - `CODEX_ACP_PROMPT_SUGGESTIONS` - set to `false` to turn off the predicted follow-up prompt for AIR. It costs one extra model call per turn.
 
+The adapter preserves the service tier returned by Codex for new, resumed, loaded, and forked sessions,
+including tiers configured in `config.toml` or `CODEX_CONFIG` such as `{"service_tier":"ultrafast"}`.
+Model and account eligibility still apply. Explicitly changing the ACP Fast mode control overrides that
+tier: On selects Fast, and Off clears it. Merely displaying Fast as Off does not clear another configured tier.
+
 ### Quick start
 
 #### Develop on Windows?
