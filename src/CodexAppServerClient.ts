@@ -10,6 +10,7 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
+    ActivePermissionProfile,
     CancelLoginAccountParams,
     CancelLoginAccountResponse,
     ConfigReadParams,
@@ -34,6 +35,8 @@ import type {
     McpServerStatusUpdatedNotification,
     ModelListParams,
     ModelListResponse,
+    PermissionProfileListParams,
+    PermissionProfileListResponse,
     ReviewStartParams,
     ReviewStartResponse,
     SkillsExtraRootsSetParams,
@@ -321,11 +324,11 @@ export class CodexAppServerClient {
         return response;
     }
 
-    async turnStart(params: TurnStartParams): Promise<TurnStartResponse> {
+    async turnStart(params: ExperimentalTurnStartParams): Promise<TurnStartResponse> {
         return await this.sendRequest({ method: "turn/start", params: params });
     }
 
-    async runTurn(params: TurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
+    async runTurn(params: ExperimentalTurnStartParams, onTurnStarted?: (turnId: string) => void): Promise<TurnCompletedNotification> {
         const capturedCompletions: Array<TurnCompletedNotification> = [];
         const releaseCapture = this.captureTurnCompletions(params.threadId, (event) => {
             capturedCompletions.push(event);
@@ -672,7 +675,7 @@ export class CodexAppServerClient {
         this.staleTurnIds.set(threadId, threadStaleTurns);
     }
 
-    async threadStart(params: ThreadStartParams): Promise<ThreadStartResponse> {
+    async threadStart(params: ThreadStartParams): Promise<ExperimentalThreadStartResponse> {
         return await this.sendRequest({ method: "thread/start", params: params });
     }
 
@@ -680,11 +683,11 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/name/set", params });
     }
 
-    async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
+    async threadResume(params: ThreadResumeParams): Promise<ExperimentalThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
     }
 
-    async threadFork(params: ThreadForkParams): Promise<ThreadForkResponse> {
+    async threadFork(params: ThreadForkParams): Promise<ExperimentalThreadForkResponse> {
         return await this.sendRequest({ method: "thread/fork", params: params });
     }
 
@@ -982,6 +985,10 @@ export class CodexAppServerClient {
 
     async listModels(params: ModelListParams): Promise<ModelListResponse> {
         return await this.sendRequest({ method: "model/list", params });
+    }
+
+    async listPermissionProfiles(params: PermissionProfileListParams): Promise<PermissionProfileListResponse> {
+        return await this.sendRequest({ method: "permissionProfile/list", params });
     }
 
     async skillsExtraRootsSet(params: SkillsExtraRootsSetParams): Promise<void> {
@@ -1386,6 +1393,20 @@ export interface ExperimentalThreadSettingsUpdateParams {
         };
     };
 }
+
+// These fields are generated with `generate-ts --experimental`; `npm run generate-types` uses the stable schema.
+type ExperimentalThreadPermissions = {
+    activePermissionProfile?: ActivePermissionProfile | null;
+};
+
+export type ExperimentalThreadStartResponse = ThreadStartResponse & ExperimentalThreadPermissions;
+export type ExperimentalThreadResumeResponse = ThreadResumeResponse & ExperimentalThreadPermissions;
+export type ExperimentalThreadForkResponse = ThreadForkResponse & ExperimentalThreadPermissions;
+
+export type ExperimentalTurnStartParams = TurnStartParams & {
+    permissions?: string | null;
+    runtimeWorkspaceRoots?: string[] | null;
+};
 
 function isMcpServerStatusUpdatedNotification(notification: ServerNotification): notification is {
     method: "mcpServer/startupStatus/updated";

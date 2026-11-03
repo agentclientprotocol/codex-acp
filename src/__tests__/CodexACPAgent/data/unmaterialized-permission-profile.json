@@ -1,0 +1,12 @@
+{
+  "initialMode": "permission-profile:dev",
+  "reopenedMode": "permission-profile:dev",
+  "nextTurn": {
+    "permissions": "dev",
+    "runtimeWorkspaceRoots": [
+      "/test/cwd"
+    ],
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "user"
+  }
+}
