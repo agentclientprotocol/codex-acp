@@ -4,11 +4,11 @@ import {startCodexConnection} from "./CodexJsonRpcConnection";
 import {CodexAcpServer, type CodexProcessState} from "./CodexAcpServer";
 import {createJsonStream} from "./StdUtils";
 import {isCodexAuthRequest} from "./CodexAuthMethod";
-import {CodexAcpClient} from "./CodexAcpClient";
+import {providerStartupConfig, CodexAcpClient} from "./CodexAcpClient";
 import {CodexAppServerClient} from "./CodexAppServerClient";
 import packageJson from "../package.json";
 import {logger} from "./Logger";
-import {CodexAppServerSupervisor} from "./app-server-recovery/CodexAppServerSupervisor";
+import {appServerStartup, CodexAppServerSupervisor} from "./app-server-recovery/CodexAppServerSupervisor";
 import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
 import {prepareCodexHookConfig} from "./CodexHookConfig";
@@ -60,12 +60,17 @@ function startAcpServer() {
         defaultAuthRequest: defaultAuthRequest ?? null,
     });
 
+    const startupState = {
+        appServerStartupArgs: hookConfig.appServerStartupArgs,
+        providerStartupConfig: providerStartupConfig(modelProvider ?? null, hookConfig.sessionConfig ?? {}, null),
+    };
+    const startup = appServerStartup(startupState);
     const codexProcessState: CodexProcessState = {
         // The supervisor disposes the connection itself, after the last output of the process was read.
-        connection: startCodexConnection(codexPath, undefined, hookConfig.appServerStartupArgs, {disposeOnExit: false}),
+        connection: startCodexConnection(codexPath, {...process.env, ...startup.env}, startup.args, {disposeOnExit: false}),
         codexPath,
         config: hookConfig.sessionConfig,
-        appServerStartupArgs: hookConfig.appServerStartupArgs,
+        ...startupState,
         modelProvider,
         stderr: "",
     };

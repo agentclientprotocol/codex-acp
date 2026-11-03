@@ -1,5 +1,6 @@
 import type {CodexConnection} from "../CodexJsonRpcConnection";
 import {startCodexConnection} from "../CodexJsonRpcConnection";
+import {type ProviderStartupConfig, NO_PROVIDER_STARTUP_CONFIG} from "../CodexConfigOverride";
 import {logger} from "../Logger";
 import {type AppServerExit, describeExit, likelyOutOfMemory} from "./AppServerExit";
 
@@ -9,7 +10,18 @@ export interface SupervisedProcessState {
     codexPath: string | undefined;
     /** The arguments the app-server starts with, such as the hook trust override; `app-server` alone when unset. */
     appServerStartupArgs?: string[];
+    /** The provider routing that the next app-server starts with; none when unset. */
+    providerStartupConfig?: ProviderStartupConfig;
     stderr: string;
+}
+
+/** The arguments and the added environment that an app-server of `state` starts with. */
+export function appServerStartup(state: Pick<SupervisedProcessState, "appServerStartupArgs" | "providerStartupConfig">): {
+    args: string[];
+    env: Record<string, string>;
+} {
+    const providerStartupConfig = state.providerStartupConfig ?? NO_PROVIDER_STARTUP_CONFIG;
+    return {args: [...(state.appServerStartupArgs ?? ["app-server"]), ...providerStartupConfig.args], env: providerStartupConfig.env};
 }
 
 /** One Codex app-server child and its connection. */
@@ -17,6 +29,8 @@ export interface SupervisedChild {
     readonly generation: number;
     readonly connection: CodexConnection;
     readonly startedAt: number;
+    /** The provider routing the child started with. */
+    readonly providerStartupConfig: ProviderStartupConfig;
     /** Set once the child is gone and its connection is disposed. */
     exit: AppServerExit | null;
     /**
@@ -85,9 +99,13 @@ export class CodexAppServerSupervisor {
 
     constructor(
         private readonly state: SupervisedProcessState,
-        private readonly spawnConnection: (codexPath: string | undefined, appServerStartupArgs?: string[]) => CodexConnection =
-            (codexPath, appServerStartupArgs) =>
-                startCodexConnection(codexPath, undefined, appServerStartupArgs, {disposeOnExit: false}),
+        private readonly spawnConnection: (
+            codexPath: string | undefined,
+            appServerStartupArgs: string[],
+            env: Record<string, string>,
+        ) => CodexConnection =
+            (codexPath, appServerStartupArgs, env) =>
+                startCodexConnection(codexPath, {...process.env, ...env}, appServerStartupArgs, {disposeOnExit: false}),
         timings: Partial<SupervisorTimings> = {},
         private readonly now: () => number = Date.now,
     ) {
@@ -151,7 +169,8 @@ export class CodexAppServerSupervisor {
         if (this.isShuttingDown) throw new Error("The agent is shutting down");
         if (this.child.exit === null) throw new Error("The Codex app-server is still running or draining");
         this.state.stderr = "";
-        const connection = this.spawnConnection(this.state.codexPath, this.state.appServerStartupArgs);
+        const {args, env} = appServerStartup(this.state);
+        const connection = this.spawnConnection(this.state.codexPath, args, env);
         this.state.connection = connection;
         this.child = this.watch(connection);
         logger.log("[APP-SERVER START]", {generation: this.child.generation, pid: connection.process.pid ?? null});
@@ -190,6 +209,7 @@ export class CodexAppServerSupervisor {
             generation,
             connection,
             startedAt: this.now(),
+            providerStartupConfig: this.state.providerStartupConfig ?? NO_PROVIDER_STARTUP_CONFIG,
             exit: null,
             dead: false,
             intentional: false,
