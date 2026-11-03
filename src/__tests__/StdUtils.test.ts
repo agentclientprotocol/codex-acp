@@ -1,6 +1,7 @@
 import {PassThrough, Writable} from "node:stream";
 import {describe, expect, it, vi} from "vitest";
-import {createJsonStream, createJSONRPCReader, createLineWriter, settledWithin} from "../StdUtils";
+import type {Message} from "vscode-jsonrpc/node";
+import {createJSONRPCReader, createJSONRPCWriter, createJsonStream, createLineWriter, settledWithin} from "../StdUtils";
 
 function read(chunks: Buffer[]): Promise<unknown[]> {
     const stream = new PassThrough();
@@ -128,6 +129,47 @@ describe("createLineWriter", () => {
         await new Promise(resolve => setImmediate(resolve));
 
         expect(await settled(writeLine("late\n"))).toBe("rejected: The output stream ended");
+    });
+});
+
+describe("createJSONRPCWriter", () => {
+    it("writes each message as one NDJSON line without the jsonrpc field", async () => {
+        const output = new PassThrough();
+        const chunks: Buffer[] = [];
+        output.on("data", (chunk: Buffer) => chunks.push(chunk));
+        const writer = createJSONRPCWriter(output);
+
+        await writer.write({jsonrpc: "2.0", id: 1, method: "turn/start"} as Message);
+        await writer.write({jsonrpc: "2.0", method: "thread/started"} as Message);
+
+        expect(Buffer.concat(chunks).toString()).toBe(
+            '{"id":1,"method":"turn/start"}\n{"method":"thread/started"}\n',
+        );
+    });
+
+    it("waits out the stream's backpressure instead of dropping the message", async () => {
+        const {writable, written, release} = slowWritable(16);
+        const writer = createJSONRPCWriter(writable);
+        const message = {id: 1, method: "m", params: {text: "x".repeat(1024)}};
+
+        const write = writer.write({jsonrpc: "2.0", ...message} as Message);
+        expect(await settled(write)).toBe("pending");
+
+        release();
+        expect(await settled(write)).toBe("resolved");
+        expect(written).toEqual([JSON.stringify(message) + "\n"]);
+    });
+
+    it("fails the write when the stream has failed instead of swallowing it", async () => {
+        const {writable, release} = slowWritable(16);
+        const writer = createJSONRPCWriter(writable);
+        const waiting = writer.write({jsonrpc: "2.0", id: 1, method: "m", params: {text: "x".repeat(1024)}} as Message);
+
+        release(Object.assign(new Error("write EPIPE"), {code: "EPIPE"}));
+
+        expect(await settled(waiting)).toBe("rejected: write EPIPE");
+        expect(await settled(writer.write({jsonrpc: "2.0", id: 2, method: "m"} as Message)))
+            .toBe("rejected: write EPIPE");
     });
 });
 

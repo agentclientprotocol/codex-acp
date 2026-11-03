@@ -169,6 +169,16 @@ const HISTORY_PAGE_ITEMS = 100;
 const HISTORY_PAGE_TIMEOUT_MS = 60_000;
 
 /**
+ * The longest wait for one app-server JSON-RPC request. The app-server of a wedged process never
+ * answers, and without a deadline the adapter waits forever, together with the ACP request behind
+ * it. `CODEX_RPC_TIMEOUT_MS` overrides both this and {@link TURN_INTERRUPT_TIMEOUT_MS}.
+ */
+const RPC_TIMEOUT_MS = 60_000;
+
+/** `turn/interrupt` backs a user cancel, so it gives up sooner than the general deadline. */
+const TURN_INTERRUPT_TIMEOUT_MS = 15_000;
+
+/**
  * A type-safe client over the Codex App Server's JSON-RPC API.
  * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
  */
@@ -696,7 +706,8 @@ export class CodexAppServerClient {
     }
 
     async threadSettingsUpdate(params: ExperimentalThreadSettingsUpdateParams): Promise<void> {
-        await this.connection.sendRequest("thread/settings/update", params);
+        await withRpcTimeout(
+            this.connection.sendRequest("thread/settings/update", params), "thread/settings/update");
     }
 
     async threadList(params: ThreadListParams): Promise<ThreadListResponse> {
@@ -1321,10 +1332,11 @@ export class CodexAppServerClient {
         try {
             if (loadedThreadId === null) {
                 if (request.params) {
-                    result = await this.connection.sendRequest<R>(request.method, request.params)
+                    result = await withRpcTimeout(
+                        this.connection.sendRequest<R>(request.method, request.params), request.method);
                 }
                 else {
-                    result = await this.connection.sendRequest<R>(request.method);
+                    result = await withRpcTimeout(this.connection.sendRequest<R>(request.method), request.method);
                 }
             } else {
                 result = await this.threadLoadGate(loadedThreadId, () => this.sendThreadLoad<R>(loadedThreadId, request));
@@ -1341,7 +1353,8 @@ export class CodexAppServerClient {
     private async sendThreadLoad<R>(threadId: string, request: CodexRequest): Promise<R> {
         this.threadLoads.set(threadId, (this.threadLoads.get(threadId) ?? 0) + 1);
         try {
-            return await this.connection.sendRequest<R>(request.method, (request as {params?: unknown}).params);
+            return await withRpcTimeout(
+                this.connection.sendRequest<R>(request.method, (request as {params?: unknown}).params), request.method);
         } finally {
             const count = (this.threadLoads.get(threadId) ?? 1) - 1;
             if (count > 0) this.threadLoads.set(threadId, count);
@@ -1531,6 +1544,32 @@ async function withHistoryTimeout<T>(page: Promise<T>, method: string, threadId:
     });
     try {
         return await Promise.race([page, timeout]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/** The request deadline of `method`: the env override, or the method's default wait. */
+function rpcTimeoutMs(method: string, env: NodeJS.ProcessEnv = process.env): number {
+    const override = Number(env["CODEX_RPC_TIMEOUT_MS"]);
+    if (Number.isFinite(override) && override > 0) {
+        return override;
+    }
+    return method === "turn/interrupt" ? TURN_INTERRUPT_TIMEOUT_MS : RPC_TIMEOUT_MS;
+}
+
+/** The request's result, or an error when Codex stays silent past the deadline of `method`. */
+async function withRpcTimeout<T>(request: T | Promise<T>, method: string): Promise<T> {
+    const ms = rpcTimeoutMs(method);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(
+            `Codex did not answer ${method} within ${Math.round(ms / 1000)} s`,
+        )), ms);
+    });
+    try {
+        // `Promise.resolve` also settles a plain value, which a test double may return.
+        return await Promise.race([Promise.resolve(request), timeout]);
     } finally {
         clearTimeout(timer);
     }
