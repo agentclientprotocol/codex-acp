@@ -109,3 +109,5 @@ See [AIR extensions](docs/air-extensions.md#async-tasks) for the capability, lif
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.
+
+See [session speed selection](docs/speed-options.md) for Standard, Fast, and model-advertised Ultrafast controls.

@@ -154,6 +154,11 @@ import {
     FAST_MODE_ON,
     modelSupportsFast,
     resolveFastServiceTier,
+    fastModeFromServiceTier,
+    normalizeFastMode,
+    modelSupportsUltrafast,
+    ULTRAFAST_MODE,
+    type FastModeSelection,
 } from "./FastModeConfig";
 import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
@@ -278,7 +283,7 @@ export interface SessionState extends SessionIndexTitleState {
     cwd: string;
     additionalDirectories: string[];
     mcpServers?: Array<AcpMcpServer>;
-    fastModeEnabled: boolean;
+    fastModeEnabled: FastModeSelection;
     currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
     /** The capability choices of the client for tool call and plan reports. */
@@ -1398,7 +1403,7 @@ export class CodexAcpServer {
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             mcpServers: requestedMcpServers,
-            fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
+            fastModeEnabled: normalizeFastMode(fastModeFromServiceTier(sessionMetadata.currentServiceTier), currentModel),
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             clientCapabilities: this.capabilities,
@@ -2864,6 +2869,12 @@ export class CodexAcpServer {
 
     private applyFastModeChange(sessionState: SessionState, params: acp.SetSessionConfigOptionRequest): void {
         const value = params.value;
+        if (value === ULTRAFAST_MODE) {
+            const model = this.findCurrentModel(sessionState.availableModels, sessionState.currentModelId);
+            if (!modelSupportsUltrafast(model)) throw RequestError.invalidParams();
+            sessionState.fastModeEnabled = ULTRAFAST_MODE;
+            return;
+        }
         if (typeof value === "boolean") {
             sessionState.fastModeEnabled = value;
             return;
@@ -2940,6 +2951,7 @@ export class CodexAcpServer {
             sessionState.supportedReasoningEfforts = currentModel?.supportedReasoningEfforts ?? [];
             sessionState.supportedInputModalities = currentModel?.inputModalities ?? ["text", "image"];
             sessionState.currentModelSupportsFast = modelSupportsFast(currentModel);
+            sessionState.fastModeEnabled = normalizeFastMode(sessionState.fastModeEnabled, currentModel);
         });
     }
 
@@ -2948,6 +2960,7 @@ export class CodexAcpServer {
         sessionState.supportedReasoningEfforts = model.supportedReasoningEfforts;
         sessionState.supportedInputModalities = model.inputModalities;
         sessionState.currentModelSupportsFast = modelSupportsFast(model);
+        sessionState.fastModeEnabled = normalizeFastMode(sessionState.fastModeEnabled, model);
     }
 
     async unstable_setSessionModel(params: LegacySetSessionModelRequest): Promise<LegacySetSessionModelResponse> {
@@ -3315,10 +3328,11 @@ export class CodexAcpServer {
                 ),
             );
         }
-      if (sessionState.currentModelSupportsFast) {
+      if (sessionState.currentModelSupportsFast || modelSupportsUltrafast(currentModel)) {
         configOptions.push(createFastModeConfigOption(
           sessionState.fastModeEnabled,
           this.booleanConfigOptionsSupported,
+          currentModel,
         ));
       }
         return configOptions;
@@ -3601,7 +3615,7 @@ export class CodexAcpServer {
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             mcpServers: requestedMcpServers,
-            fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
+            fastModeEnabled: normalizeFastMode(fastModeFromServiceTier(sessionMetadata.currentServiceTier), currentModel),
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             clientCapabilities: this.capabilities,

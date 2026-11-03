@@ -124,7 +124,7 @@
     {
       "configId": "fast-mode",
       "name": "Fast mode",
-      "description": "1.5x speed, increased usage",
+      "description": "Faster responses, increased usage",
       "category": "model_config",
       "type": "boolean",
       "currentValue": false

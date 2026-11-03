@@ -24,16 +24,17 @@ describe("Fast mode session config", () => {
     };
 
     async function createSession(
-        currentServiceTier: "fast" | "flex" | null = null,
+        currentServiceTier: string | null = null,
         clientInfo: acp.Implementation | null = null,
         clientCapabilities?: acp.ClientCapabilities,
+        tiers = ["fast"],
     ) {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
         const fastModel = createTestModel({
             id: "fast-model",
-            additionalSpeedTiers: ["fast"],
+            additionalSpeedTiers: tiers,
         });
         const slowModel = createTestModel({id: "slow-model"});
 
@@ -286,4 +287,30 @@ describe("Fast mode session config", () => {
             serviceTier: null,
         }));
     });
+    it.each([undefined, booleanConfigCapabilities])("offers Ultrafast as a select even for boolean clients", async capabilities => {
+        const {response, codexAcpAgent, fixture} = await createSession(null, null, capabilities, ["fast", "ultrafast"]);
+        const option = response.configOptions?.find(option => option.id === FAST_MODE_CONFIG_ID);
+        expect(option).toMatchObject({name: "Speed", type: "select", currentValue: "off", options: [
+            {value: "off", name: "Standard"}, {value: "on", name: "Fast"}, {value: "ultrafast", name: "Ultrafast"},
+        ]});
+        const turnStartSpy = mockPromptTurn(fixture, "session-id");
+        await codexAcpAgent.setSessionConfigOption({sessionId: "session-id", configId: FAST_MODE_CONFIG_ID, value: "ultrafast"});
+        await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "test"}]});
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({serviceTier: "ultrafast"}));
+    });
+
+    it("preserves an initial Ultrafast tier and clears it on an unsupported model", async () => {
+        const {response, codexAcpAgent, codexAcpClient, fixture} = await createSession("ultrafast", null, undefined, ["ultrafast"]);
+        expect(response.configOptions).toContainEqual(expect.objectContaining({id: FAST_MODE_CONFIG_ID, currentValue: "ultrafast"}));
+        const fastOnly = createTestModel({id: "fast-only", additionalSpeedTiers: ["fast"]});
+        vi.spyOn(codexAcpClient, "fetchAvailableModels").mockResolvedValue([fastOnly]);
+        codexAcpAgent.getSessionState("session-id").availableModels.push(fastOnly);
+        const result = await codexAcpAgent.setSessionConfigOption({sessionId: "session-id", configId: MODEL_CONFIG_ID, value: "fast-only"});
+        expect(result.configOptions).toContainEqual(expect.objectContaining({id: FAST_MODE_CONFIG_ID, currentValue: "on"}));
+        await expect(codexAcpAgent.setSessionConfigOption({sessionId: "session-id", configId: FAST_MODE_CONFIG_ID, value: "ultrafast"})).rejects.toThrow();
+        const turnStartSpy = mockPromptTurn(fixture, "session-id");
+        await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "test"}]});
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({serviceTier: "fast"}));
+    });
+
 });
