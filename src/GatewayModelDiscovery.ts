@@ -87,9 +87,15 @@ function readModelIds(body: unknown): string[] | null {
     return ids.length === data.length ? ids : null;
 }
 
-/** Lower case, without a date suffix: `GPT-5-2025-08-07` and `gpt-5-20250807` are both `gpt-5`. */
+/**
+ * Lower case, without a vendor prefix or a date suffix: `GPT-5-2025-08-07`, `gpt-5-20250807` and `openai/gpt-5`
+ * are all `gpt-5`. Aggregators such as OpenRouter list models as `vendor/model`.
+ */
 function normalizeModelId(id: string): string {
-    return id.toLowerCase().replace(/-(\d{8}|\d{4}-\d{2}-\d{2})$/, "");
+    return id
+        .toLowerCase()
+        .replace(/^.*\//, "") // remove vendor prefix
+        .replace(/-(\d{8}|\d{4}-\d{2}-\d{2})$/, "");  // remove date suffix
 }
 
 /** Whether the gateway lists the Codex model, by its `model` or its `id`. */
