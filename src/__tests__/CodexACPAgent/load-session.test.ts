@@ -750,7 +750,7 @@ describe("CodexACPAgent - loadSession", () => {
                             path: "/test/project/input.png",
                         },
                         {
-                            type: "imageGeneration",
+                            type: "imageGeneration", generationId: null,
                             id: "item-image-generation-1",
                             status: "completed",
                             revisedPrompt: "A tiny blue square",

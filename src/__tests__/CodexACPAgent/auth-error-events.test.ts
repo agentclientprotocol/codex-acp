@@ -174,7 +174,7 @@ describe("CodexEventHandler - auth error events", () => {
         {name: "typed failure", capabilities: typedFailureCapabilities},
     ])("explains an unreachable ChatGPT backend as a connection failure in the $name", async ({capabilities}) => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
-            sessionId: "workspace-routing-session", account: {type: "chatgpt", email: "user@example.com", planType: "plus"},
+            sessionId: "workspace-routing-session", account: {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null},
         }), {
             message: "workspace routing discovery failed", codexErrorInfo: "other", additionalDetails: null, misalignment: null,
         }, false, capabilities);
