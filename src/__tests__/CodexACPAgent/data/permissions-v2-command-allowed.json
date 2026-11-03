@@ -12,11 +12,11 @@
       "subject": {
         "toolCall": {
           "toolCallId": "cmd-item-1",
-          "title": "Run command",
+          "title": "printf '%s\\n' 'codex-acp approval display test'",
           "kind": "execute",
           "status": "pending",
           "rawInput": {
-            "command": "ls -la",
+            "command": "/private/var/run/current-system/sw/bin/zsh -lc \"printf '%s\\\\n' 'codex-acp approval display test'\"",
             "cwd": "/workspace"
           }
         },

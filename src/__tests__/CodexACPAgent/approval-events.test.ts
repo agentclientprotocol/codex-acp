@@ -183,7 +183,7 @@ describe("Approval Events", () => {
             expect(permissionRequest().toolCall).toEqual({
                 toolCallId: "command-item",
                 title: "npm test",
-                rawInput: {command: "npm test", cwd: "/workspace"},
+                rawInput: {command: "/bin/zsh -c npm test", cwd: "/workspace"},
             });
             await finish(prompt);
         });
@@ -211,7 +211,7 @@ describe("Approval Events", () => {
                     kind: "execute",
                     status: "pending",
                     title: "Run command with file reads",
-                    rawInput: {command: "npm test", cwd: "/workspace"},
+                    rawInput: {command: "/bin/zsh -c npm test", cwd: "/workspace"},
                     locations: [{path: "/workspace/src/a.ts"}, {path: "/workspace/src"}],
                 },
                 options: [
@@ -502,7 +502,7 @@ describe("Approval Events", () => {
             )).toEqual({decision: "acceptForSession"});
             expect(permissionRequest()).toMatchObject({
                 toolCall: {
-                    rawInput: {command: "npm test", cwd: "/workspace", additionalPermissions},
+                    rawInput: {command: "/bin/zsh -c npm test", cwd: "/workspace", additionalPermissions},
                     locations: [{path: "/outside/read"}],
                     content: [{type: "content", content: {type: "text", text: "Enable network access"}}],
                 },

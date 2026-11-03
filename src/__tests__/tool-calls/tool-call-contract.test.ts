@@ -15,6 +15,7 @@ import {McpStartupReporter} from "../../tool-calls/reporters/McpStartupReporter"
 import {McpToolReporter} from "../../tool-calls/reporters/McpToolReporter";
 import {SubagentActivityReporter} from "../../tool-calls/reporters/SubagentActivityReporter";
 import {WebSearchReporter} from "../../tool-calls/reporters/WebSearchReporter";
+import type {CommandExecutionRequestApprovalParams} from "../../app-server/v2";
 
 const AIR = ClientCapabilities.from({
     _meta: {
@@ -166,6 +167,22 @@ describe("ACP tool call contract", () => {
             expect(new AcpToolCallRenderer(capabilities).renderPermissionToolCall(facts))
                 .toEqual({toolCallId: "mcp-1", kind: "execute", status: "pending"});
         }
+    });
+
+    it.each<{name: string; params: Partial<CommandExecutionRequestApprovalParams>}>([
+        {name: "shell", params: {command: String.raw`/private/var/run/current-system/sw/bin/zsh -lc "printf '%s\\n' 'codex-acp approval display test'"`}},
+        {name: "parsed", params: {command: "cat a.txt | head -n 5", commandActions: [...read.commandActions]}},
+        {name: "multiline", params: {command: "printf 'first\\n'\nprintf 'second\\n'"}},
+        {name: "missing", params: {commandActions: [...read.commandActions]}},
+        {name: "null", params: {command: null, commandActions: null}},
+        {name: "network", params: {command: "curl https://example.com", networkApprovalContext: {host: "example.com", protocol: "https"}}},
+    ])("renders a standalone $name command approval", async ({name, params}) => {
+        const renderer = new AcpToolCallRenderer(ZED);
+        const approval = renderer.renderPermissionToolCall(CommandReporter.permission({
+            kind: "command", threadId: "s", turnId: "t", itemId: "cmd", startedAtMs: 0,
+            environmentId: "local", cwd: "/w", ...params,
+        }, false));
+        await expect(JSON.stringify(approval, null, 2)).toMatchFileSnapshot(`data/command-approval-${name}.json`);
     });
 
     it("sends trimmed MCP progress text to a client that is not AIR, and none to AIR", () => {

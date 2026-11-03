@@ -1,13 +1,13 @@
 [
   {
     "terminalId": "item-shell",
-    "command": "npm test",
+    "command": "printf '%s\\n' 'codex-acp approval display test'",
     "cwd": "/workspace",
     "sessionUpdate": "terminal_update"
   },
   {
     "toolCallId": "item-shell",
-    "title": "npm test",
+    "title": "printf '%s\\n' 'codex-acp approval display test'",
     "kind": "execute",
     "status": "in_progress",
     "content": [
@@ -17,7 +17,7 @@
       }
     ],
     "rawInput": {
-      "command": "/bin/zsh -lc 'npm test'",
+      "command": "/private/var/run/current-system/sw/bin/zsh -lc \"printf '%s\\\\n' 'codex-acp approval display test'\"",
       "cwd": "/workspace"
     },
     "sessionUpdate": "tool_call_update"

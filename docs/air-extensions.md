@@ -359,7 +359,7 @@ The other clients get the same fields as before the AIR extensions.
 | Turn plan (`turn/plan/updated`) | standard `plan` with entries | The same. |
 | `contextCompaction` | `compaction_update` when the client declares `session.compaction`. Otherwise a synthetic tool call with `_meta.jetbrains.air.contextCompaction`. | The same, without `_meta`. |
 | `agentMessage` | `agent_message_chunk` with `_meta.jetbrains.air.phase` when Codex reports a phase. | No `_meta`. |
-| Command, file change, or sandbox permission request | See [Tool call of the request](#tool-call-of-the-request). | `kind`, `status: pending`, and a generic title such as `Run command` or `Edit files`, also for a started tool call. No `_meta`. |
+| Command, file change, or sandbox permission request | See [Tool call of the request](#tool-call-of-the-request). | `kind`, `status: pending`, and a title, also for a started tool call. Command approvals show the command; other requests use a generic title or a network title. No `_meta`. |
 | `imageView`, fuzzy search, MCP startup | standard shape. A fuzzy search that finds no file sends `locations: []`. | The same. |
 
 ## Diff patch
@@ -530,7 +530,7 @@ The adapter does not copy action payloads into the metadata.
 The `toolCall` is an ACP `ToolCallUpdate`. The client merges it into the stored tool call.
 
 - The request always carries `toolCallId`, `title`, and `rawInput`.
-- `rawInput` holds the structured command, working directory, URL, or permission profile.
+- `rawInput` holds the structured command, working directory, URL, or permission profile. The command retains its shell wrapper.
 - `locations` holds the affected paths when Codex supplies them.
 - `content` holds details that do not fit a location, such as a network host, a filesystem glob, or a special Codex scope.
 - When the client already has the command or file-change tool call, the request omits `status` and `kind`.
@@ -542,7 +542,10 @@ The `toolCall` is an ACP `ToolCallUpdate`. The client merges it into the stored 
   A client without `rawInputRendering` also gets it as text in `content`.
 
 A client that is not AIR gets the request tool call of the adapter before the AIR extensions.
-It always carries `kind` and `status: pending`, and a generic title such as `Run command`, `Edit files`, or a network title.
+It always carries `kind` and `status: pending`. A command approval uses the command without its shell wrapper as the title,
+so Zed keeps the command visible when it merges the request into a started tool call, or when no start was reported.
+When Codex supplies no command, the title describes the parsed action or falls back to `Run command`.
+File changes and network approvals keep their generic or network titles.
 Its `locations` hold every path of the Codex command actions.
 
 Command approvals use `kind: execute`. File changes use `kind: edit`.

@@ -91,7 +91,9 @@ describe('session/request_permission over ACP v2', () => {
         const {finishTurn} = await startRunningPrompt(client);
         const start = client.transcript.length;
 
-        const response = await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams());
+        const response = await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams({
+            command: String.raw`/private/var/run/current-system/sw/bin/zsh -lc "printf '%s\\n' 'codex-acp approval display test'"`,
+        }));
 
         expect(response).toEqual({decision: "accept"});
         const transcript = client.transcript.slice(start);

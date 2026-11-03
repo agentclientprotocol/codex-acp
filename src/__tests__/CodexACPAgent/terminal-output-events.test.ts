@@ -60,6 +60,21 @@ describe('CodexEventHandler - terminal output events', () => {
         { command: 'npm install', expected: 'npm install' },
         { command: "/bin/bash -lc './tests.cmd -Darg=value'", expected: './tests.cmd -Darg=value' },
         { command: "/bin/zsh -c 'echo hello'", expected: 'echo hello' },
+        {
+            command: String.raw`/private/var/run/current-system/sw/bin/zsh -lc "printf '%s\\n' 'codex-acp approval display test'"`,
+            expected: String.raw`printf '%s\n' 'codex-acp approval display test'`,
+        },
+        { command: "/run/current-system/sw/bin/sh -c 'npm test'", expected: 'npm test' },
+        { command: '/usr/local/bin/bash -lc "npm test"', expected: 'npm test' },
+        {
+            command: String.raw`/nix/store/example-bash/bin/bash -lc "printf '%s\\n' \"\$HOME\""`,
+            expected: String.raw`printf '%s\n' "$HOME"`,
+        },
+        { command: String.raw`zsh -c "printf 'line\n'"`, expected: String.raw`printf 'line\n'` },
+        { command: "'printf' '%s\\n' 'hello'", expected: "'printf' '%s\\n' 'hello'" },
+        { command: '/usr/local/bin/my-zsh -lc "npm test"', expected: '/usr/local/bin/my-zsh -lc "npm test"' },
+        { command: 'zsh --version', expected: 'zsh --version' },
+        { command: 'bash -x -c "npm test"', expected: 'bash -x -c "npm test"' },
     ])('should strip shell prefix from "$command"', async ({ command, expected }) => {
         const commandStartNotification: ServerNotification = {
             method: 'item/started',
