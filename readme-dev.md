@@ -305,7 +305,7 @@ JSON-RPC batches. Parent setup operations serialize without waiting on each othe
 
 `providers/set` lists the models of the gateway (`GET {baseUrl}/models`, with the headers Codex sends to it)
 before it responds. The models reported to the client are then only the Codex models whose `model` or `id` the
-gateway lists, matched without case and date suffix. A session whose thread model the gateway does not list uses
+gateway lists, matched without case, vendor prefix (`openai/gpt-5.4`, as OpenRouter lists it) and date suffix. A session whose thread model the gateway does not list uses
 the default of these models; a thread model that the gateway lists but Codex does not know is kept. A gateway that
 lists none of the Codex models leaves no model option at all, and the session keeps the thread's model as current.
 Sessions already open get the models of the new routing when the provider restart resumes them, after
