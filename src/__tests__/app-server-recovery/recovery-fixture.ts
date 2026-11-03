@@ -59,6 +59,8 @@ export interface RecoveryFixture {
     /** Every app-server, the initial one first. */
     servers: FakeAppServer[];
     current(): FakeAppServer;
+    /** The arguments and the added environment of every app-server that the supervisor started. */
+    launches: Array<{args: string[], env: Record<string, string>}>;
     acp: {notify: ReturnType<typeof vi.fn>, request: ReturnType<typeof vi.fn>};
     updates(): Array<{sessionId: string, update: Record<string, unknown>}>;
     /** Per-method answers of every app-server (also of later ones); return undefined to leave a request pending. */
@@ -80,6 +82,7 @@ export function createRecoveryFixture(options: {air?: boolean, env?: Record<stri
         return server;
     };
     const initial = makeServer();
+    const launches: RecoveryFixture["launches"] = [];
     const state: CodexProcessState = {
         connection: initial.connection,
         codexPath: undefined,
@@ -90,7 +93,10 @@ export function createRecoveryFixture(options: {air?: boolean, env?: Record<stri
     };
     state.supervisor = new CodexAppServerSupervisor(
         state,
-        () => makeServer().connection,
+        (_codexPath, args, env) => {
+            launches.push({args, env});
+            return makeServer().connection;
+        },
         {closeGraceMs: 5, drainMs: 1, terminateAfterMs: 5, abandonAfterMs: 5, wedgedAfterMs: 50},
     );
     const acpConnection = {
@@ -123,6 +129,7 @@ export function createRecoveryFixture(options: {air?: boolean, env?: Record<stri
         supervisor: state.supervisor,
         servers,
         current: () => servers.at(-1)!,
+        launches,
         acp: acpConnection,
         updates: () => acpConnection.notify.mock.calls
             .filter(call => (call as unknown[])[0] === acp.methods.client.session.update)

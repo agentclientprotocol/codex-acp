@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {describe, expect, it, vi} from "vitest";
 import {startCodexConnection} from "../../CodexJsonRpcConnection";
-import {CodexAppServerSupervisor} from "../../app-server-recovery/CodexAppServerSupervisor";
+import {CodexAppServerSupervisor, type SupervisedProcessState} from "../../app-server-recovery/CodexAppServerSupervisor";
 import {describeExit} from "../../app-server-recovery/AppServerExit";
 import {fakeAppServer, fakeSpawner} from "./fake-app-server";
 
@@ -158,16 +158,22 @@ process.stdout.write(out, () => process.exit(1));
         expect(supervisor.isAlive(1)).toBe(false);
     });
 
-    it("starts a new child with the startup arguments of the first one", async () => {
+    it("starts a new child with the startup arguments of the first one and the provider startup config of the state", async () => {
         const initial = fakeAppServer();
         const startupArgs = ["app-server", "-c", "hooks={}"];
-        const state = {connection: initial.connection, codexPath: "/bin/codex", appServerStartupArgs: startupArgs, stderr: ""};
+        const state: SupervisedProcessState = {connection: initial.connection, codexPath: "/bin/codex", appServerStartupArgs: startupArgs, stderr: ""};
         const spawner = fakeSpawner();
         const supervisor = new CodexAppServerSupervisor(state, spawner.spawn, FAST);
+        expect(supervisor.current.providerStartupConfig).toEqual({args: [], env: {}});
         initial.child.die(null, "SIGKILL");
         await supervisor.current.exited;
-        supervisor.spawn();
-        expect(spawner.spawn).toHaveBeenCalledWith("/bin/codex", startupArgs);
+        const providerStartupConfig = {args: ["-c", "model_provider=\"custom-gateway\""], env: {CODEX_ACP_PROVIDER_HEADER_0: "k"}};
+        state.providerStartupConfig = providerStartupConfig;
+
+        const child = supervisor.spawn();
+
+        expect(spawner.spawn).toHaveBeenCalledWith("/bin/codex", [...startupArgs, ...providerStartupConfig.args], providerStartupConfig.env);
+        expect(child.providerStartupConfig).toEqual(providerStartupConfig);
     });
 
     it("does not spawn after shutdown, and does not spawn over a running child", async () => {

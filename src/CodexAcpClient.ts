@@ -92,6 +92,7 @@ import {
     narrowToListedModels,
 } from "./GatewayModelDiscovery";
 import {findSupportedEffort} from "./ModelConfigOption";
+import {type ProviderStartupConfig, configOverride, NO_PROVIDER_STARTUP_CONFIG} from "./CodexConfigOverride";
 import {disableUnsupportedSkills, withoutUnsupportedSkills} from "./UnsupportedSkills";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 /** A null turn marks unavailable outcome metadata, not a failed turn. */
@@ -1233,6 +1234,11 @@ export class CodexAcpClient {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
     }
 
+    /** The provider routing that the app-server of this client must start with, see {@link providerStartupConfig}. */
+    providerStartupConfig(): ProviderStartupConfig {
+        return providerStartupConfig(this.modelProvider, this.config, this.gatewayConfig);
+    }
+
     private async getResumeModelProvider(): Promise<string> {
         // Prefer an explicit/gateway provider, then the provider persisted in Codex config.
         // Keep OpenAI as the final fallback for ChatGPT-authenticated sessions without a configured provider.
@@ -1853,6 +1859,43 @@ function mergeGatewayConfig(config: JsonObject, gatewayConfig: GatewayConfig | n
     } else {
         return config;
     }
+}
+
+/**
+ * The provider that threads get (the gateway, the launch option, or `model_provider` of the session config) as
+ * app-server overrides. Codex accepts input only for threads of the provider that its app-server started with, and the
+ * `-c` overrides set it for that process alone, without a write to the user's `config.toml`. Header values go in
+ * environment variables, through `env_http_headers`, so that a gateway key is not in the process arguments.
+ */
+export function providerStartupConfig(
+    modelProvider: string | null,
+    config: JsonObject,
+    gatewayConfig: GatewayConfig | null,
+): ProviderStartupConfig {
+    const configuredProvider = typeof config["model_provider"] === "string" ? config["model_provider"] : null;
+    const effectiveProvider = gatewayConfig?.modelProvider ?? modelProvider ?? configuredProvider;
+    if (effectiveProvider === null) return NO_PROVIDER_STARTUP_CONFIG;
+
+    const args = configOverride("model_provider", effectiveProvider);
+    const providers = mergeGatewayConfig(config, gatewayConfig)["model_providers"];
+    const providerDefinition = isJsonObject(providers) ? providers[effectiveProvider] : undefined;
+    // Without a definition here, the provider is a built-in one or comes from the user's Codex config.
+    if (!isJsonObject(providerDefinition)) return {args, env: {}};
+
+    const {http_headers: headers, ...provider} = providerDefinition;
+    const env: Record<string, string> = {};
+    const envHeaders: JsonObject = isJsonObject(provider["env_http_headers"]) ? {...provider["env_http_headers"]} : {};
+    if (isJsonObject(headers)) {
+        for (const [name, value] of Object.entries(headers)) {
+            if (typeof value !== "string") continue;
+            const variable = `CODEX_ACP_PROVIDER_HEADER_${Object.keys(env).length}`;
+            env[variable] = value;
+            envHeaders[name] = variable;
+        }
+    }
+    if (Object.keys(envHeaders).length > 0) provider["env_http_headers"] = envHeaders;
+
+    return {args: [...args, ...configOverride(`model_providers.${effectiveProvider}`, provider)], env};
 }
 
 async function* noItems<T>(): AsyncGenerator<T[]> {}

@@ -9,6 +9,8 @@ import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {renderFileCitations} from "./CodexFileCitations";
 import {type CodexAuthRequest, getCodexAuthMethods, getCodexAuthMethodsV2, isCodexAuthRequest} from "./CodexAuthMethod";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
+import type {ProviderStartupConfig} from "./CodexConfigOverride";
+import {isDeepStrictEqual} from "node:util";
 import {createMcpServerSignIn, type McpServerSignIn} from "./mcp/McpServerSignIn";
 import {getRequestedMcpServerNames, McpSessionStartup, parseMcpStartupAwaitTimeoutMs} from "./mcp/McpSessionStartup";
 import {
@@ -479,6 +481,8 @@ export interface CodexProcessState {
     codexPath: string | undefined;
     config: JsonObject | undefined;
     appServerStartupArgs: string[];
+    /** The provider routing of the next app-server; see `CodexAcpClient.providerStartupConfig`. */
+    providerStartupConfig?: ProviderStartupConfig;
     modelProvider: string | undefined;
     stderr: string;
     stderrProcess?: CodexConnection["process"];
@@ -2233,6 +2237,10 @@ export class CodexAcpServer {
                 logger.log("Authenticate request failed");
                 throw RequestError.authRequired({methodId: _params.methodId}, "Sign-in did not complete");
             }
+            if (this.providerStartupConfigChanged()) {
+                // The `gateway` method sets the provider, and every other method clears it.
+                await withRequestCancellation(this.enqueueProviderUpdate(() => {}), signal);
+            }
             await withRequestCancellation(this.refreshAuthState(this.getAuthProviderForAuthenticateRequest(_params)), signal);
             logger.log("Authenticate request completed");
             return { };
@@ -2337,7 +2345,7 @@ export class CodexAcpServer {
     private async enqueueProviderUpdate(apply: (client: CodexAcpClient) => void): Promise<void> {
         const previous = this.providerUpdate?.catch(() => undefined) ?? Promise.resolve();
         const update = previous.then(async () => {
-            if (this.sessions.size === 0) {
+            if (this.sessions.size === 0 && !this.providerStartupConfigChanged()) {
                 return;
             }
 
@@ -2485,10 +2493,21 @@ export class CodexAcpServer {
     }
 
     private async restartCodexClient(): Promise<CodexAcpClient> {
-        if (this.recovery === null) {
+        if (this.recovery === null || this.codexProcessState === null) {
             throw new Error("Codex process state is unavailable");
         }
+        this.codexProcessState.providerStartupConfig = this.codexAcpClient.providerStartupConfig();
         return await this.recovery.beginReplacement();
+    }
+
+    /**
+     * Whether the app-server runs with other provider routing than the agent has now. Codex 0.166 refuses input for a
+     * thread whose provider is not the one that its app-server started with, so the app-server has to restart.
+     */
+    private providerStartupConfigChanged(): boolean {
+        const supervisor = this.codexProcessState?.supervisor;
+        return supervisor !== undefined
+            && !isDeepStrictEqual(supervisor.current.providerStartupConfig, this.codexAcpClient.providerStartupConfig());
     }
 
     /**
