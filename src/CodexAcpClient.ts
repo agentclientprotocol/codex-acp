@@ -38,6 +38,7 @@ import type {
     ApprovalsReviewer,
     AskForApproval,
     ConfigReadResponse,
+    CyberAccessProgram,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
     ListMcpServerStatusParams,
@@ -103,7 +104,7 @@ export type RecordedSubagentEntry = {item: ThreadItem; completed: boolean; turnI
  * actually had a rollout for the thread. See {@link CodexAcpClient.resumeThread}.
  */
 type ResumedThread = {
-    thread: Thread;
+    thread: Thread & {daybreakEnabled?: boolean | null};
     model: string | null;
     modelProvider: string;
     reasoningEffort: ReasoningEffort | null;
@@ -716,6 +717,7 @@ export class CodexAcpClient {
             sessionTitle: normalizeSessionTitle(listedSessionTitle(response.thread)),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            ...(response.thread.daybreakEnabled != null ? {daybreakEnabled: response.thread.daybreakEnabled} : {}),
             additionalDirectories,
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
@@ -799,6 +801,7 @@ export class CodexAcpClient {
             collaborationMode: response.collaborationMode ?? this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            ...(response.thread.daybreakEnabled != null ? {daybreakEnabled: response.thread.daybreakEnabled} : {}),
             thread,
             history,
             additionalDirectories,
@@ -884,6 +887,7 @@ export class CodexAcpClient {
             collaborationMode: this.getCollaborationMode(response.thread.id),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
+            ...(response.thread.daybreakEnabled != null ? {daybreakEnabled: response.thread.daybreakEnabled} : {}),
             additionalDirectories,
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
@@ -1394,6 +1398,7 @@ export class CodexAcpClient {
         onTurnStarted?: (turnId: string) => void,
         shouldCancel?: () => boolean,
         clientUserMessageId?: string,
+        cyberAccessProgram?: CyberAccessProgram,
     ): Promise<TurnCompletedNotification | null> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
@@ -1417,8 +1422,13 @@ export class CodexAcpClient {
             effort: effort,
             model: modelId.model,
             serviceTier: serviceTier,
+            ...(cyberAccessProgram !== undefined ? {cyberAccessProgram} : {}),
             ...(clientUserMessageId !== undefined ? {clientUserMessageId} : {}),
         }, onTurnStarted);
+    }
+
+    async setDaybreakEnabled(sessionId: string, enabled: boolean): Promise<void> {
+        await this.codexClient.threadSetDaybreakEnabled(sessionId, enabled);
     }
 
     async setCollaborationMode(sessionId: string, mode: ModeKind, currentModelId: string): Promise<void> {

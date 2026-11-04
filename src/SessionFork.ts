@@ -69,6 +69,7 @@ export async function forkSession(
         collaborationMode: dependencies.getCollaborationMode(response.thread.id),
         modelProvider: response.modelProvider,
         currentServiceTier: response.serviceTier as ServiceTier ?? null,
+        ...(response.thread.daybreakEnabled != null ? {daybreakEnabled: response.thread.daybreakEnabled} : {}),
         additionalDirectories,
         skippedMcpServers,
         activePermissionProfileId: response.activePermissionProfile?.id ?? null,
