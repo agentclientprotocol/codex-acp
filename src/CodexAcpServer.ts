@@ -1383,6 +1383,7 @@ export class CodexAcpServer {
             sessionMetadata.permissionProfiles,
             sessionMetadata.approvalPolicy,
             sessionMetadata.approvalsReviewer,
+            sessionMetadata.resolvedPermissions,
         );
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -1393,6 +1394,7 @@ export class CodexAcpServer {
             agentMode: AgentMode.getInitialAgentMode(
                 availableAgentModes,
                 sessionMetadata.activePermissionProfileId,
+                sessionMetadata.resolvedPermissions,
             ),
             availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,
@@ -3616,6 +3618,7 @@ export class CodexAcpServer {
             sessionMetadata.permissionProfiles,
             sessionMetadata.approvalPolicy,
             sessionMetadata.approvalsReviewer,
+            sessionMetadata.resolvedPermissions,
         );
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -3626,6 +3629,7 @@ export class CodexAcpServer {
             agentMode: AgentMode.getInitialAgentMode(
                 availableAgentModes,
                 sessionMetadata.activePermissionProfileId,
+                sessionMetadata.resolvedPermissions,
             ),
             availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,

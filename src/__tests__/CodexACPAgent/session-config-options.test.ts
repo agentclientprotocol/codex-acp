@@ -2,6 +2,7 @@ import {afterEach, describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import {AgentMode, MODE_CONFIG_ID} from "../../AgentMode";
+import type {SessionMetadata} from "../../SessionMetadata";
 import {
     MODEL_CONFIG_ID,
     REASONING_EFFORT_CONFIG_ID,
@@ -47,6 +48,7 @@ async function createSession(
         activePermissionProfileId?: string | null;
         approvalPolicy?: "on-request" | "never";
         approvalsReviewer?: "user" | "auto_review";
+        resolvedPermissions?: SessionMetadata["resolvedPermissions"];
     } = {},
 ) {
     const {
@@ -56,6 +58,7 @@ async function createSession(
         activePermissionProfileId = null,
         approvalPolicy = "on-request",
         approvalsReviewer = "user",
+        resolvedPermissions,
     } = options;
     const fixture = createCodexMockTestFixture();
     const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -73,6 +76,7 @@ async function createSession(
         approvalPolicy,
         approvalsReviewer,
         permissionProfiles,
+        ...(resolvedPermissions ? {resolvedPermissions} : {}),
     });
 
     if (clientCapabilities) {
@@ -90,6 +94,17 @@ async function createSession(
 describe("Session config options", () => {
     afterEach(() => {
         vi.unstubAllEnvs();
+    });
+
+    it("advertises the resolved Codex permissions as the initial mode", async () => {
+        vi.stubEnv("INITIAL_AGENT_MODE", undefined);
+        const {fast} = buildModels();
+        const {response, codexAcpAgent} = await createSession("fast-model[medium]", [fast], {
+            resolvedPermissions: {sandbox: {type: "dangerFullAccess"}, approvalPolicy: "never", approvalsReviewer: "user"},
+        });
+        expect(response.modes?.currentModeId).toBe("agent-full-access");
+        expect(response.configOptions?.find(option => option.id === MODE_CONFIG_ID)?.currentValue).toBe("agent-full-access");
+        expect(codexAcpAgent.getSessionState("session-id").agentMode.sandboxPolicy).toEqual({type: "dangerFullAccess"});
     });
 
     it("exposes mode, model, reasoning_effort and fast-mode in the new session response", async () => {

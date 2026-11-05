@@ -5,6 +5,7 @@ import type {
     AskForApproval,
     Model,
     PermissionProfileSummary,
+    SandboxPolicy,
     Thread,
     ThreadItemEntry,
     ThreadStatus,
@@ -27,6 +28,7 @@ export type SessionMetadata = {
     approvalPolicy?: AskForApproval,
     approvalsReviewer?: ApprovalsReviewer,
     permissionProfiles?: PermissionProfileSummary[],
+    resolvedPermissions?: {sandbox: SandboxPolicy, approvalPolicy: AskForApproval, approvalsReviewer: ApprovalsReviewer},
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {
