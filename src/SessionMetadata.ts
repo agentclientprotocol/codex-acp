@@ -29,6 +29,7 @@ export type SessionMetadata = {
     approvalsReviewer?: ApprovalsReviewer,
     permissionProfiles?: PermissionProfileSummary[],
     resolvedPermissions?: {sandbox: SandboxPolicy, approvalPolicy: AskForApproval, approvalsReviewer: ApprovalsReviewer},
+    unmaterialized?: boolean,
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {

@@ -651,7 +651,8 @@ export class CodexAcpClient {
                 reasoningEffort: response.reasoningEffort,
                 serviceTier: response.serviceTier,
                 activePermissionProfileId: response.activePermissionProfile?.id ?? null,
-                resolvedPermissions: {sandbox: response.sandbox, approvalPolicy: response.approvalPolicy, approvalsReviewer: response.approvalsReviewer},
+                ...(response.sandbox && response.approvalPolicy && response.approvalsReviewer
+                    ? {resolvedPermissions: {sandbox: response.sandbox, approvalPolicy: response.approvalPolicy, approvalsReviewer: response.approvalsReviewer}} : {}),
                 itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
                 materialized: true,
                 collaborationMode: response.collaborationMode?.mode ?? null,
@@ -723,6 +724,7 @@ export class CodexAcpClient {
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
             ...(response.resolvedPermissions ? {resolvedPermissions: response.resolvedPermissions} : {}),
+            unmaterialized: !response.materialized,
             ...permissionProfileMetadata,
         }
     }
@@ -809,6 +811,7 @@ export class CodexAcpClient {
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
             ...(response.resolvedPermissions ? {resolvedPermissions: response.resolvedPermissions} : {}),
+            unmaterialized: !response.materialized,
             ...permissionProfileMetadata,
         };
     }
@@ -892,7 +895,8 @@ export class CodexAcpClient {
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.activePermissionProfile?.id ?? null,
-            resolvedPermissions: {sandbox: response.sandbox, approvalPolicy: response.approvalPolicy, approvalsReviewer: response.approvalsReviewer},
+            ...(response.sandbox && response.approvalPolicy && response.approvalsReviewer
+                ? {resolvedPermissions: {sandbox: response.sandbox, approvalPolicy: response.approvalPolicy, approvalsReviewer: response.approvalsReviewer}} : {}),
             ...permissionProfileMetadata,
         };
     }
