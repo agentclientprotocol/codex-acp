@@ -245,8 +245,29 @@ The adapter keeps them where they are.
 | `is_mcp_tool_call` | tool call `_meta.is_mcp_tool_call: true` | The tool call is an MCP tool call. |
 | `is_mcp_tool_approval` | `session/request_permission` request `_meta.is_mcp_tool_approval: true` | The permission request approves an MCP tool call. |
 | `steering` | `initialize` response `_meta.steering = {supported: true}` | The agent accepts `_session/steering` for a running turn; see [session steering](steering.md). |
-| `quota` | `PromptResponse._meta.quota` | Token usage of the whole turn. `token_count` is the usage of the session thread, the same counts as `PromptResponse.usage`. `model_usage` has one entry per model: the session thread under the current model, plus the subagents of the turn under their own models, so its entries can total more than `token_count`. A subagent that works on after the turn ends counts in the next turn. It is `null` and `[]` when Codex reported no usage for the prompt, as for a prompt that started no turn. |
+| `quota` | `PromptResponse._meta.quota` (v1); the turn-ending idle `state_update`'s `_meta.quota` (v2) | Root-thread `token_count` and per-model `model_usage` including subagents. See [token usage](#token-usage) for coverage and aggregation rules. |
 | `authStatus` | `initialize` response `agentCapabilities._meta.authStatus` | The agent pushes `_auth/status_update`. The object carries no payload. |
+
+## Token usage
+
+`quota.token_count` is the session thread's usage, with the same counts as standard `usage`.
+`quota.model_usage` groups that usage and the usage of the session's subagents, including their
+children, by model. Its rows can therefore total more than `token_count`.
+
+The extension is included in the v1 `PromptResponse._meta.quota` and in `_meta.quota` on the v2
+idle `state_update` that ends the turn. It includes subagents whether or not the client receives
+subagent sessions. Clients must not add usage reported on child sessions to `model_usage`, because
+that would count the children twice. Standard `usage` remains root-thread only.
+
+The adapter computes `model_usage` from thread notifications. The aggregate is a lower bound:
+Guardian review threads and title generation are not counted, and a child's first request can be
+missed if no model output item streams before its usage update. A child that switches models is
+attributed to its latest reported model; a child with no reported model uses the root model.
+
+A child that continues after a prompt ends contributes its later usage to the next prompt that
+starts model work. `token_count` is `null` when the root thread reported no usage; `model_usage`
+can still contain child rows, for example when the root prompt was cancelled before reporting
+usage. A missing root count therefore does not imply an empty `model_usage`.
 
 ## Auth source display
 

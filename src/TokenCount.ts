@@ -96,6 +96,32 @@ export function subtractTokenCounts(a: TokenCount, b: TokenCount): TokenCount {
     return combine(a, b, (x, y) => x - y);
 }
 
+/** Recognizes new requests, repeated totals and inherited history for one thread. */
+export class ThreadTokenUsage {
+    private modelOutputSeen = false;
+    /** The request usage accepted so far, excluding repeated totals and inherited history. */
+    summedLast: TokenCount = ZERO_TOKEN_COUNT;
+    totalWentBack = false;
+
+    constructor(private previousTotal: TokenCount | null) {}
+
+    observeModelOutput(): void {
+        this.modelOutputSeen = true;
+    }
+
+    observe(total: TokenCount, last: TokenCount): "repeat" | "history" | "counted" {
+        const previous = this.previousTotal;
+        if (previous !== null && sameTokenCount(total, previous)) return "repeat";
+        this.previousTotal = total;
+        if (previous === null && !this.modelOutputSeen) return "history";
+        if (previous !== null && TOKEN_COUNT_FIELDS.some(field => total[field] < previous[field])) {
+            this.totalWentBack = true;
+        }
+        this.summedLast = addTokenCounts(this.summedLast, last);
+        return "counted";
+    }
+}
+
 /**
  * Accumulates the token usage of one prompt from Codex's `thread/tokenUsage/updated` notifications.
  *
@@ -113,37 +139,26 @@ export function subtractTokenCounts(a: TokenCount, b: TokenCount): TokenCount {
  */
 export class PromptTokenUsage {
     private startTotal: TokenCount | null;
-    private previousTotal: TokenCount | null;
     private latestTotal: TokenCount | null = null;
-    private summedLast: TokenCount | null = null;
-    private totalWentBack = false;
-    private modelOutputSeen = false;
+    private readonly threadUsage: ThreadTokenUsage;
 
     /** @param startTotal the thread total when the prompt started, or null when it is unknown. */
     constructor(startTotal: TokenCount | null) {
         this.startTotal = startTotal;
-        this.previousTotal = startTotal;
+        this.threadUsage = new ThreadTokenUsage(startTotal);
     }
 
     /** Records that the model produced output in this prompt, so a later update is one of its requests. */
     observeModelOutput(): void {
-        this.modelOutputSeen = true;
+        this.threadUsage.observeModelOutput();
     }
 
     observe(total: TokenCount, last: TokenCount): void {
-        const previous = this.previousTotal;
-        if (previous !== null && sameTokenCount(total, previous)) return;
-        if (previous === null && !this.modelOutputSeen) {
+        const result = this.threadUsage.observe(total, last);
+        if (result === "history") {
             this.startTotal = total;
-            this.previousTotal = total;
-            return;
         }
-        if (previous !== null && TOKEN_COUNT_FIELDS.some(field => total[field] < previous[field])) {
-            this.totalWentBack = true;
-        }
-        this.summedLast = this.summedLast === null ? {...last} : combine(this.summedLast, last, (x, y) => x + y);
-        this.previousTotal = total;
-        this.latestTotal = total;
+        if (result === "counted") this.latestTotal = total;
     }
 
     /** The usage of the prompt so far, or null when Codex reported none. */
@@ -151,9 +166,9 @@ export class PromptTokenUsage {
         const start = this.startTotal;
         const latest = this.latestTotal;
         if (latest === null) return null;
-        if (start !== null && !this.totalWentBack) {
+        if (start !== null && !this.threadUsage.totalWentBack) {
             return combine(latest, start, (x, y) => x - y);
         }
-        return this.summedLast;
+        return this.threadUsage.summedLast;
     }
 }

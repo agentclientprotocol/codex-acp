@@ -775,26 +775,9 @@ describe('Token Usage Events', () => {
                 });
             }
 
-            for (const nativeSubagentSessions of [false, true]) {
-                it(`adds the usage of a subagent for its model ${nativeSubagentSessions ? 'with' : 'without'} subagent sessions`, async () => {
-                    const response = await promptWithChild(nativeSubagentSessions, [
-                        childSpawnedWithModel,
-                        reasoningStarted(sessionId),
-                        parentUsage,
-                        reasoningStarted(childThreadId, 'child-reasoning-id'),
-                        childUsage,
-                        childCompleted,
-                    ]);
-
-                    await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
-                        'data/token-usage-subagent-model-usage.json'
-                    );
-                });
-            }
-
-            it('counts a subagent of the session model in the row of that model', async () => {
-                const response = await promptWithChild(false, [
-                    childSpawned,
+            it.each([false, true])('adds the usage of a subagent for its model (native subagent sessions: %s)', async (nativeSubagentSessions) => {
+                const response = await promptWithChild(nativeSubagentSessions, [
+                    childSpawnedWithModel,
                     reasoningStarted(sessionId),
                     parentUsage,
                     reasoningStarted(childThreadId, 'child-reasoning-id'),
@@ -802,18 +785,9 @@ describe('Token Usage Events', () => {
                     childCompleted,
                 ]);
 
-                expect(response.usage?.totalTokens).toBe(1000);
-                expect((response._meta as {quota: {model_usage: unknown}}).quota.model_usage).toEqual([{
-                    model: 'gpt-5.6-sol',
-                    token_count: {
-                        totalTokens: 51000,
-                        inputTokens: 9800,
-                        cachedInputTokens: 40000,
-                        cacheWriteInputTokens: 0,
-                        outputTokens: 1200,
-                        reasoningOutputTokens: 0,
-                    },
-                }]);
+                await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
+                    'data/token-usage-subagent-model-usage.json'
+                );
             });
         });
 

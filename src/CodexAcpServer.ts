@@ -766,13 +766,9 @@ export class CodexAcpServer {
     }
 
     /** Sees each notification of the session and its child threads as the app-server sent it. */
-    private observeSessionEvent(sessionId: string, event: ServerNotification): void {
-        this.sessions.get(sessionId)?.subagentTokenUsage.observe(event);
-        this.observeSubagentWorkEnd(sessionId, event);
-    }
-
-    private observeSubagentWorkEnd(sessionId: string, event: ServerNotification): void {
-        const router = this.sessions.get(sessionId)?.subagents;
+    private observeSessionEvent(session: SessionState | undefined, event: ServerNotification): void {
+        session?.subagentTokenUsage.observe(event);
+        const router = session?.subagents;
         if (router instanceof StandardSubagentEventRouter) router.observeWorkEnd(event);
     }
 
@@ -1633,7 +1629,7 @@ export class CodexAcpServer {
                 const state = await ready;
                 return state?.subagents.withUserAction?.(childId, itemId, request, turnId) ?? request();
             },
-            event => this.observeSessionEvent(sessionId, event),
+            event => this.observeSessionEvent(this.sessions.get(sessionId), event),
         );
     }
 
@@ -4929,10 +4925,7 @@ export class CodexAcpServer {
                 observeInteraction,
                 childThreadId => promptEventHandler.waitForNativeSubagentSession(childThreadId),
                 (childId, itemId, request, turnId) => sessionState.subagents.withUserAction?.(childId, itemId, request, turnId) ?? request(),
-                event => {
-                    sessionState.subagentTokenUsage.observe(event);
-                    this.observeSubagentWorkEnd(params.sessionId, event);
-                });
+                event => this.observeSessionEvent(sessionState, event));
 
             if (activePrompt.signal.aborted) {
                 return cancelledPromptResponse();

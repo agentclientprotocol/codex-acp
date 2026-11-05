@@ -7,6 +7,7 @@ import {
     addTokenCounts,
     sameTokenCount,
     subtractTokenCounts,
+    ThreadTokenUsage,
     toTokenCount,
     type TokenCount,
     ZERO_TOKEN_COUNT,
@@ -14,14 +15,10 @@ import {
 
 type ChildThread = {
     model?: ChildModel;
-    /** The last total of the thread, or null when the total it started from is not known. */
-    previousTotal: TokenCount | null;
-    modelOutputSeen: boolean;
-    /** The sum of the model requests of the thread. */
-    used: TokenCount;
-    /** The part of `used` that a prompt reported. */
+    usage: ThreadTokenUsage;
+    /** The request usage that a prompt reported. */
     reported: TokenCount;
-    /** The part of `used` that the prompts before the current one reported. */
+    /** The request usage that the prompts before the current one reported. */
     reportedBeforePrompt: TokenCount;
 };
 
@@ -70,7 +67,7 @@ export class SubagentTokenUsage {
                     child.model = preferredModel(child.model, {model: item.model, source: "activity"});
                 }
                 if (notification.method === "item/started" && threadId !== this.rootThreadId && isModelOutputItem(item)) {
-                    this.child(threadId, null).modelOutputSeen = true;
+                    this.child(threadId, null).usage.observeModelOutput();
                 }
                 return;
             }
@@ -78,15 +75,10 @@ export class SubagentTokenUsage {
                 const threadId = notification.params.threadId;
                 if (threadId === this.rootThreadId) return;
                 const child = this.child(threadId, null);
-                const total = toTokenCount(notification.params.tokenUsage.total);
-                const previous = child.previousTotal;
-                // Codex sends the current usage again when a model request starts; it is not a new request.
-                if (previous !== null && sameTokenCount(total, previous)) return;
-                child.previousTotal = total;
-                // Before any output, an update of a thread with an unknown start carries its history, as in
-                // PromptTokenUsage.
-                if (previous === null && !child.modelOutputSeen) return;
-                child.used = addTokenCounts(child.used, toTokenCount(notification.params.tokenUsage.last));
+                child.usage.observe(
+                    toTokenCount(notification.params.tokenUsage.total),
+                    toTokenCount(notification.params.tokenUsage.last),
+                );
                 return;
             }
         }
@@ -101,13 +93,15 @@ export class SubagentTokenUsage {
      * The `model_usage` rows of the current prompt: the usage of the root thread, then the usage of the children by
      * model, with the same model in one row. The child usage counts as reported. A child whose model Codex did not
      * report is counted for the root model, which a spawn that names no model inherits.
+     * Unlike a single prompt's total difference, child request sums span parent prompts: a later reset
+     * of a child's total must not revise usage that a previous prompt already reported.
      */
     reportModelUsage(rootModel: string, rootUsage: TokenCount | null): ModelTokenCount[] {
         const byModel = new Map<string, TokenCount>();
         if (rootUsage !== null) byModel.set(rootModel, rootUsage);
         for (const thread of this.threads.values()) {
-            const usage = subtractTokenCounts(thread.used, thread.reportedBeforePrompt);
-            thread.reported = thread.used;
+            const usage = subtractTokenCounts(thread.usage.summedLast, thread.reportedBeforePrompt);
+            thread.reported = thread.usage.summedLast;
             if (sameTokenCount(usage, ZERO_TOKEN_COUNT)) continue;
             const model = thread.model?.model ?? rootModel;
             const current = byModel.get(model);
@@ -120,9 +114,7 @@ export class SubagentTokenUsage {
         let child = this.threads.get(threadId);
         if (child === undefined) {
             child = {
-                previousTotal: startTotal,
-                modelOutputSeen: false,
-                used: ZERO_TOKEN_COUNT,
+                usage: new ThreadTokenUsage(startTotal),
                 reported: ZERO_TOKEN_COUNT,
                 reportedBeforePrompt: ZERO_TOKEN_COUNT,
             };

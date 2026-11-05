@@ -67,6 +67,16 @@ describe("SubagentTokenUsage", () => {
         expect(prompt(new SubagentTokenUsage(ROOT), [])).toEqual([]);
     });
 
+    it("merges the root and a child using the same model into one row", () => {
+        const rows = prompt(new SubagentTokenUsage(ROOT), [
+            threadStarted("a", ROOT, "gpt-5.6-sol"),
+            output("a"),
+            usage("a", breakdown(50000, 40000, 1000)),
+        ], count(1000, 0, 200));
+
+        expect(rows).toEqual([{model: "gpt-5.6-sol", token_count: count(51000, 40000, 1200)}]);
+    });
+
     it("sums the requests of each child and does not count a repeated total again", () => {
         const rows = prompt(new SubagentTokenUsage(ROOT), [
             threadStarted("a", ROOT, "gpt-5.6-luna"),
@@ -135,6 +145,23 @@ describe("SubagentTokenUsage", () => {
 
         expect(tracker.reportModelUsage("gpt-5.6-sol", null)).toEqual([{model: "gpt-5.6-sol", token_count: count(500)}]);
         expect(tracker.reportModelUsage("gpt-5.6-sol", null)).toEqual([{model: "gpt-5.6-sol", token_count: count(500)}]);
+    });
+
+    it("keeps previously reported request usage unchanged when a child's total resets", () => {
+        const tracker = new SubagentTokenUsage(ROOT);
+        // Child request sums stay stable even when totals and received request usage differ.
+        expect(prompt(tracker, [
+            threadStarted("a", ROOT, "gpt-5.6-luna"),
+            usage("a", breakdown(1000), breakdown(600)),
+        ])).toEqual([{model: "gpt-5.6-luna", token_count: count(600)}]);
+
+        tracker.observe(usage("a", breakdown(200), breakdown(200)));
+        tracker.observe(usage("a", breakdown(200), breakdown(200)));
+        expect(prompt(tracker, [usage("a", breakdown(500), breakdown(300))]))
+            .toEqual([{model: "gpt-5.6-luna", token_count: count(500)}]);
+        expect(tracker.reportModelUsage("gpt-5.6-sol", null))
+            .toEqual([{model: "gpt-5.6-luna", token_count: count(500)}]);
+        expect(prompt(tracker, [])).toEqual([]);
     });
 
     it("counts the children of its children, and no thread of another session", () => {
