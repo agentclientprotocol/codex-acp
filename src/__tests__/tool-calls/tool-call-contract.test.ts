@@ -15,7 +15,7 @@ import {McpStartupReporter} from "../../tool-calls/reporters/McpStartupReporter"
 import {McpToolReporter} from "../../tool-calls/reporters/McpToolReporter";
 import {SubagentActivityReporter} from "../../tool-calls/reporters/SubagentActivityReporter";
 import {WebSearchReporter} from "../../tool-calls/reporters/WebSearchReporter";
-import type {CommandExecutionRequestApprovalParams} from "../../app-server/v2";
+import type {CommandAction, CommandExecutionRequestApprovalParams} from "../../app-server/v2";
 
 const AIR = ClientCapabilities.from({
     _meta: {
@@ -183,6 +183,20 @@ describe("ACP tool call contract", () => {
             environmentId: "local", cwd: "/w", ...params,
         }, false));
         await expect(JSON.stringify(approval, null, 2)).toMatchFileSnapshot(`data/command-approval-${name}.json`);
+    });
+
+    it.each<CommandAction>([
+        {type: "read", command: "cat a.txt", name: "a.txt", path: "/w/a.txt"},
+        {type: "search", command: "rg needle /w", query: "needle", path: "/w"},
+        {type: "listFiles", command: "ls /w", path: "/w"},
+    ])("keeps the started $type title in a command approval", async action => {
+        const renderer = new AcpToolCallRenderer(ZED);
+        const approval = renderer.renderPermissionToolCall(CommandReporter.permission({
+            kind: "command", threadId: "s", turnId: "t", itemId: "cmd", startedAtMs: 0,
+            environmentId: "local", cwd: "/w", command: action.command, commandActions: [action],
+        }, true));
+        await expect(JSON.stringify(approval, null, 2))
+            .toMatchFileSnapshot(`data/command-approval-started-${action.type}.json`);
     });
 
     it("sends trimmed MCP progress text to a client that is not AIR, and none to AIR", () => {

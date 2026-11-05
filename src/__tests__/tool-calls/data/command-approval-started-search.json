@@ -1,0 +1,15 @@
+{
+  "toolCallId": "cmd",
+  "title": "Search for 'needle' in /w",
+  "rawInput": {
+    "command": "rg needle /w",
+    "cwd": "/w"
+  },
+  "kind": "execute",
+  "status": "pending",
+  "locations": [
+    {
+      "path": "/w"
+    }
+  ]
+}

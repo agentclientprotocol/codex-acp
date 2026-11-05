@@ -59,7 +59,8 @@ Only these differences are allowed:
   After a cancelled or failed permission request, the next update carries every field again.
   ACP defines no merge for `_meta` keys, so the `_meta` of each report keeps every key that the adapter sent before.
 - Bug fixes: a unique MCP startup tool call id, the result of a dynamic tool in `content`,
-  no output after a tool call ended, and a terminal status for a replayed image generation.
+  no output after a tool call ended, a terminal status for a replayed image generation,
+  and the command as the title of a command approval.
 - Feature changes for every client: the `/mcp` command has a new description and an input hint.
 - The client gets no AIR-only key.
   That is no `_meta.jetbrains.air` key and none of the earlier keys in [Removed keys](#removed-keys).
@@ -359,7 +360,7 @@ The other clients get the same fields as before the AIR extensions.
 | Turn plan (`turn/plan/updated`) | standard `plan` with entries | The same. |
 | `contextCompaction` | `compaction_update` when the client declares `session.compaction`. Otherwise a synthetic tool call with `_meta.jetbrains.air.contextCompaction`. | The same, without `_meta`. |
 | `agentMessage` | `agent_message_chunk` with `_meta.jetbrains.air.phase` when Codex reports a phase. | No `_meta`. |
-| Command, file change, or sandbox permission request | See [Tool call of the request](#tool-call-of-the-request). | `kind`, `status: pending`, and a title, also for a started tool call. Command approvals show the command; other requests use a generic title or a network title. No `_meta`. |
+| Command, file change, or sandbox permission request | See [Tool call of the request](#tool-call-of-the-request). | `kind`, `status: pending`, and a title, also for a started tool call. Command approvals keep the started title or show the command; other requests use a generic title or a network title. No `_meta`. |
 | `imageView`, fuzzy search, MCP startup | standard shape. A fuzzy search that finds no file sends `locations: []`. | The same. |
 
 ## Diff patch
@@ -530,7 +531,7 @@ The adapter does not copy action payloads into the metadata.
 The `toolCall` is an ACP `ToolCallUpdate`. The client merges it into the stored tool call.
 
 - The request always carries `toolCallId`, `title`, and `rawInput`.
-- `rawInput` holds the structured command, working directory, URL, or permission profile. The command retains its shell wrapper.
+- `rawInput` holds the structured command, working directory, URL, or permission profile.
 - `locations` holds the affected paths when Codex supplies them.
 - `content` holds details that do not fit a location, such as a network host, a filesystem glob, or a special Codex scope.
 - When the client already has the command or file-change tool call, the request omits `status` and `kind`.
@@ -542,8 +543,8 @@ The `toolCall` is an ACP `ToolCallUpdate`. The client merges it into the stored 
   A client without `rawInputRendering` also gets it as text in `content`.
 
 A client that is not AIR gets the request tool call of the adapter before the AIR extensions.
-It always carries `kind` and `status: pending`. A command approval uses the command without its shell wrapper as the title,
-so Zed keeps the command visible when it merges the request into a started tool call, or when no start was reported.
+It always carries `kind` and `status: pending`. A started command keeps its title, including a parsed read, search, or list title.
+An approval without a start uses the command without its shell wrapper as the title, so Zed keeps the command visible.
 When Codex supplies no command, the title describes the parsed action or falls back to `Run command`.
 File changes and network approvals keep their generic or network titles.
 Its `locations` hold every path of the Codex command actions.

@@ -111,7 +111,7 @@ export class CommandReporter {
             ? `${network.protocol}://${network.host}`
             : undefined;
         const input = {
-            ...(params.command ? {command: params.command} : {}),
+            ...(params.command ? {command: stripShellPrefix(params.command)} : {}),
             ...(params.cwd ? {cwd: params.cwd} : {}),
             ...(networkUrl ? {url: networkUrl} : {}),
             ...(params.additionalPermissions ? {additionalPermissions: params.additionalPermissions} : {}),
@@ -143,7 +143,7 @@ export class CommandReporter {
                 // Zed uses the title as the command label, including when merging an approval into a started call.
                 title: network
                     ? `${network.protocol} network access to ${network.host}`
-                    : input.command === undefined ? permissionTitle(actions) : stripShellPrefix(input.command),
+                    : started ? startedCommandTitle(params, actions) : input.command ?? permissionTitle(actions),
                 locations: [...new Set([
                     ...actionPaths(actions),
                     ...permissionProfilePaths(params.additionalPermissions),

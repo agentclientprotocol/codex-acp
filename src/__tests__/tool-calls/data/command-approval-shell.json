@@ -4,7 +4,7 @@
   "status": "pending",
   "title": "printf '%s\\n' 'codex-acp approval display test'",
   "rawInput": {
-    "command": "/private/var/run/current-system/sw/bin/zsh -lc \"printf '%s\\\\n' 'codex-acp approval display test'\"",
+    "command": "printf '%s\\n' 'codex-acp approval display test'",
     "cwd": "/w"
   }
 }
