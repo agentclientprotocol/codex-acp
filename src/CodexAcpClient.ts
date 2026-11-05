@@ -93,7 +93,6 @@ import {
 } from "./GatewayModelDiscovery";
 import {findSupportedEffort} from "./ModelConfigOption";
 import {type ProviderStartupConfig, configOverride, NO_PROVIDER_STARTUP_CONFIG} from "./CodexConfigOverride";
-import {disableUnsupportedSkills, withoutUnsupportedSkills} from "./UnsupportedSkills";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 /** A null turn marks unavailable outcome metadata, not a failed turn. */
 export type RecordedSubagentEntry = {item: ThreadItem; completed: boolean; turnId?: string} | {turn: Turn | null};
@@ -1156,7 +1155,7 @@ export class CodexAcpClient {
             baseUrl: activeProvider.baseUrl,
         });
         const mergedConfig = {
-            ...disableUnsupportedSkills(forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig))),
+            ...forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig)),
             projects: Object.fromEntries(sessionRoots.map(root => [root, {
                 trust_level: "trusted",
             }])),
@@ -1441,7 +1440,7 @@ export class CodexAcpClient {
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {
-        return withoutUnsupportedSkills(await this.codexClient.listSkills(params ?? {}));
+        return await this.codexClient.listSkills(params ?? {});
     }
 
     private async awaitNextAccountUpdated(): Promise<AccountUpdatedNotification> {

@@ -286,7 +286,7 @@ describe('Session lifecycle over ACP v2', () => {
             .toMatchFileSnapshot(`data/initial-commands-v2-${air ? "air" : "standard"}.json`);
     });
 
-    it('does not offer the Visualize skill, whose output ACP clients cannot render', async () => {
+    it('offers the Visualize skill in session commands', async () => {
         const listed = skills("deploy");
         listed.data[0]!.skills.push({
             ...listed.data[0]!.skills[0]!,
@@ -300,7 +300,7 @@ describe('Session lifecycle over ACP v2', () => {
 
         const commands = response.availableCommands?.map(command => command.name);
         expect(commands).toContain("$deploy");
-        expect(commands).not.toContain("$visualize:visualize");
+        expect(commands).toContain("$visualize:visualize");
     });
 
     it('loads commands for the fork cwd and publishes only subsequent changes', async () => {

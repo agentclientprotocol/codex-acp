@@ -2118,7 +2118,7 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(airSkill?._meta).toEqual({jetbrains: {air: {version: 1, skillPath: "/workspace/.agents/skills/build/SKILL.md"}}});
     });
 
-    it('does not offer the Visualize skill, whose output ACP clients cannot render', async () => {
+    it('offers the Visualize skill in commands and the skills list', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpAgent = mockFixture.getCodexAcpAgent();
         const skill = (name: string, pluginId: string | null) => ({
@@ -2149,9 +2149,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         const commands = events.find(update => update.sessionUpdate === "available_commands_update")
             ?.availableCommands.map((command: acp.AvailableCommand) => command.name);
         expect(commands).toContain("$build");
-        expect(commands).not.toContain("$visualize:visualize");
+        expect(commands).toContain("$visualize:visualize");
         const skillsList = events.find(update => update.sessionUpdate === "agent_message_chunk")?.content.text;
-        expect(skillsList).toBe("Available skills:\n- build: build");
+        expect(skillsList).toBe("Available skills:\n- visualize:visualize: visualize:visualize\n- build: build");
     });
 
     it('publishes the commands again after a turn only when the skills changed', async () => {
