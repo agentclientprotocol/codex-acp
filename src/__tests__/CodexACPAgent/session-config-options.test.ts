@@ -612,3 +612,27 @@ describe("Session config options", () => {
         })).rejects.toThrow();
     });
 });
+
+
+describe("external sandbox session configuration", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("advertises the host mode and forwards its policy on every turn", async () => {
+        vi.stubEnv("CODEX_ACP_EXTERNAL_SANDBOX", "true");
+        const {fast} = buildModels();
+        const {fixture, codexAcpAgent, response} = await createSession("fast-model[medium]", [fast]);
+        expect(response.modes?.availableModes.map(mode => mode.id)).toContain("external-sandbox");
+        await codexAcpAgent.setSessionConfigOption({sessionId: response.sessionId, configId: MODE_CONFIG_ID, value: "external-sandbox"});
+        const client = fixture.getCodexAppServerClient();
+        vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
+        const start = vi.spyOn(client, "turnStart").mockResolvedValue({turn: {id: "turn-id", items: [], status: "inProgress", error: null}} as any);
+        vi.spyOn(client, "awaitTurnCompleted").mockResolvedValue({threadId: response.sessionId, turn: {id: "turn-id", items: [], status: "completed", error: null}} as any);
+        for (const text of ["List files", "List files again"]) {
+            await codexAcpAgent.prompt({sessionId: response.sessionId, prompt: [{type: "text", text}]});
+        }
+        expect(start).toHaveBeenCalledTimes(2);
+        for (const [params] of start.mock.calls) {
+            expect(params).toMatchObject({approvalPolicy: "untrusted", approvalsReviewer: "user", sandboxPolicy: {type: "externalSandbox", networkAccess: "enabled"}});
+        }
+    });
+});
