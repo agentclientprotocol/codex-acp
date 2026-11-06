@@ -104,6 +104,8 @@ import {
 } from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
 import {PromptTokenUsage, toPromptUsage, ZERO_TOKEN_COUNT} from "./TokenCount";
+import {statSync} from "node:fs";
+import {isAbsoluteProtocolPath} from "./PathUtils";
 import {CodexCommands} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
@@ -385,6 +387,34 @@ function stopReasonForUnownedTurn(status: TurnStatus): acp.StopReason {
             // turn/completed never reports an in-progress turn.
             return "end_turn";
     }
+}
+
+/** The `_meta.cwd` per-turn working directory override on `session/prompt`. */
+function readMetaTurnCwd(meta?: Record<string, unknown> | null): string | undefined {
+    const rawCwd = meta?.["cwd"];
+    // The ACP type allows `_meta: null`; treat it and a null `cwd` like an absent override.
+    if (rawCwd === undefined || rawCwd === null) {
+        return undefined;
+    }
+    if (typeof rawCwd !== "string" || rawCwd.trim().length === 0) {
+        throw RequestError.invalidParams(undefined, "_meta.cwd must be a non-empty string");
+    }
+    const turnCwd = rawCwd.trim();
+    if (!isAbsoluteProtocolPath(turnCwd)) {
+        throw RequestError.invalidParams(undefined, "_meta.cwd must be an absolute path");
+    }
+    // Unlike `session/new`, a prompt must not fail after it was queued or inserted, so the
+    // directory is checked here instead of being left to Codex's turn-start error.
+    let stats;
+    try {
+        stats = statSync(turnCwd);
+    } catch {
+        throw RequestError.invalidParams(undefined, `_meta.cwd is not an existing directory: ${turnCwd}`);
+    }
+    if (!stats.isDirectory()) {
+        throw RequestError.invalidParams(undefined, `_meta.cwd is not a directory: ${turnCwd}`);
+    }
+    return turnCwd;
 }
 
 /**
@@ -4857,6 +4887,9 @@ export class CodexAcpServer {
         reservation?: TurnStartReservation,
     ): Promise<acp.PromptResponse> {
         assertPromptContentSupported(params);
+        // Validated before the turn-start slot is taken, so a bad `_meta.cwd` rejects the prompt
+        // without touching the session.
+        const turnCwd = readMetaTurnCwd(params._meta);
         this.assertInstructionsReady(params.sessionId);
         // Callers that need to gate additional checks (closing, canStart) atomically with the
         // turn-start slot acquire their own reservation and pass it in; otherwise this call is
@@ -4867,7 +4900,7 @@ export class CodexAcpServer {
             await activeReservation.wait;
         }
         try {
-            return await this.promptAfterReservation(params, signal, onTurnStarted, insertion);
+            return await this.promptAfterReservation(params, signal, onTurnStarted, insertion, turnCwd);
         } finally {
             if (ownsReservation) {
                 activeReservation.release();
@@ -4880,6 +4913,7 @@ export class CodexAcpServer {
         signal?: AbortSignal,
         onTurnStarted?: () => void,
         insertion?: UserMessageInsertion,
+        turnCwd?: string,
     ): Promise<acp.PromptResponse> {
         if (this.providerUpdate !== null) {
             await this.waitForProviderUpdate();
@@ -4889,6 +4923,9 @@ export class CodexAcpServer {
             prompt: params.prompt,
         });
         const sessionState = this.getSessionState(params.sessionId);
+        // The directory this prompt's turn runs in: the per-turn `_meta.cwd` override, or the
+        // session's cwd. Codex adopts it for subsequent turns too, so the session state follows.
+        const turnWorkingDirectory = turnCwd ?? sessionState.cwd;
         // Awaited only when a clear is sent, so a prompt with no held suggestion starts in the same tick.
         const clearing = sessionState.promptSuggestions?.clear();
         if (clearing) await clearing;
@@ -4897,7 +4934,7 @@ export class CodexAcpServer {
             : null;
         const agentFileChangeWorkspace = agentFileChangeReportRequest === null
             ? null
-            : captureAgentFileChangeWorkspace(sessionState.cwd, sessionState.additionalDirectories);
+            : captureAgentFileChangeWorkspace(turnWorkingDirectory, sessionState.additionalDirectories);
         let agentFileChangeReportTurnId: string | null = null;
         let agentFileChangeReportUnavailableReason: AgentFileChangeReportUnavailableReason = "providerError";
         let promptWasCancelled = false;
@@ -5207,9 +5244,12 @@ export class CodexAcpServer {
                     modelId,
                     serviceTier,
                     disableSummary,
-                    sessionState.cwd,
+                    turnWorkingDirectory,
                     sessionState.additionalDirectories,
                     (turnId) => {
+                        // The turn/start request carried the turn working directory, so Codex runs
+                        // this turn and subsequent turns there; follow it once the turn is real.
+                        sessionState.cwd = turnWorkingDirectory;
                         const turn = {threadId: params.sessionId, turnId};
                         activePrompt.currentTurn = turn;
                         insertion?.onTurnStarted?.(turn);
