@@ -114,6 +114,41 @@ describe("ACP session close", () => {
         });
     });
 
+    it("does not wait for delayed turn start before cancelling", async () => {
+        const {fixture, codexAcpAgent} = await createSession();
+        const turnStart = deferred<TurnStartResponse>();
+        const turnStartCalled = deferred<void>();
+
+        vi.spyOn(fixture.getCodexAppServerClient(), "turnStart").mockImplementation(async () => {
+            turnStartCalled.resolve();
+            return await turnStart.promise;
+        });
+
+        const promptPromise = codexAcpAgent.prompt({
+            sessionId,
+            prompt: [{type: "text", text: "long running prompt"}],
+        });
+        await turnStartCalled.promise;
+
+        await expect(codexAcpAgent.cancel({sessionId})).resolves.toBeUndefined();
+
+        turnStart.resolve(createTurnStartResponse("turn-id"));
+        await vi.waitFor(() => {
+            const lateRequestMethods = fixture.getCodexConnectionEvents([])
+                .flatMap(event => event.eventType === "request" ? [event.method] : []);
+            expect(lateRequestMethods).toContain("turn/interrupt");
+        });
+
+        fixture.sendServerNotification({
+            method: "turn/completed",
+            params: {
+                threadId: sessionId,
+                turn: {...createCompletedTurn("turn-id"), status: "interrupted"},
+            },
+        });
+        await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
+    });
+
     it("does not start a turn after close while prompt startup is still setting the skill roots", async () => {
         const {fixture, codexAcpAgent} = await createSession();
         // New skill roots make the prompt set them before the turn starts.

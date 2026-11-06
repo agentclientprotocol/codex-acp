@@ -4562,6 +4562,15 @@ export class CodexAcpServer {
         return activePrompt.signal.aborted || this.activePrompts.get(sessionId) !== activePrompt || this.sessionIsClosing(sessionId);
     }
 
+    /**
+     * A turn that starts now is interrupted at once: the prompt was stopped another way, or the
+     * client cancelled it with a plain `session/cancel`, which does not abort `signal` (a
+     * completed turn keeps its own outcome, so this does not fold into {@link promptShouldStop}).
+     */
+    private turnStartShouldInterrupt(sessionId: string, activePrompt: ActivePrompt): boolean {
+        return this.promptShouldStop(sessionId, activePrompt) || activePrompt.clientCancelled;
+    }
+
     private async interruptSessionTurn(
         sessionState: SessionState,
         requestName: "Cancel" | "Close",
@@ -4611,16 +4620,12 @@ export class CodexAcpServer {
             return null;
         }
 
-        if (requestName === "Close") {
-            pendingTurnStart.resolve(null);
-            return null;
-        }
-
-        const turnId = await pendingTurnStart.promise;
-        if (!turnId) {
-            logger.log(`${requestName} request rejected: no current turn`, {sessionId: sessionState.sessionId});
-        }
-        return turnId;
+        // `turn/start` of a wedged app-server never answers, and waiting for it here wedges the
+        // cancel or close with it. Release the waiters instead; a turn that still starts after
+        // this is interrupted by the turn-start callback (`interruptLateStartedTurn`).
+        pendingTurnStart.resolve(null);
+        logger.log(`${requestName} request released: the turn has not started`, {sessionId: sessionState.sessionId});
+        return null;
     }
 
     /**
@@ -5095,7 +5100,7 @@ export class CodexAcpServer {
                     const turn = {threadId, turnId};
                     activePrompt.currentTurn = turn;
                     insertion?.onTurnStarted?.(turn);
-                    if (this.promptShouldStop(params.sessionId, activePrompt)) {
+                    if (this.turnStartShouldInterrupt(params.sessionId, activePrompt)) {
                         this.interruptLateStartedTurn(sessionState, turn);
                         return;
                     }
@@ -5214,7 +5219,7 @@ export class CodexAcpServer {
                         const turn = {threadId: params.sessionId, turnId};
                         activePrompt.currentTurn = turn;
                         insertion?.onTurnStarted?.(turn);
-                        if (this.promptShouldStop(params.sessionId, activePrompt)) {
+                        if (this.turnStartShouldInterrupt(params.sessionId, activePrompt)) {
                             this.interruptLateStartedTurn(sessionState, turn);
                             return;
                         }
@@ -5333,7 +5338,7 @@ export class CodexAcpServer {
                             (turnId) => {
                                 const turn = {threadId: params.sessionId, turnId};
                                 activePrompt.currentTurn = turn;
-                                if (this.promptShouldStop(params.sessionId, activePrompt)) {
+                                if (this.turnStartShouldInterrupt(params.sessionId, activePrompt)) {
                                     this.interruptLateStartedTurn(sessionState, turn);
                                     return;
                                 }
@@ -5758,8 +5763,8 @@ export class CodexAcpServer {
         }
 
         // Abort outbound permission/elicitation requests synchronously, before awaiting the turn
-        // interrupt below (which can itself wait on a pending turn start). Mark cancelRequested so
-        // the plan-review branch can detect this cancellation even though it doesn't abort `signal`.
+        // interrupt below. Mark cancelRequested so the plan-review branch can detect this
+        // cancellation even though it doesn't abort `signal`.
         const activePrompt = this.activePrompts.get(params.sessionId);
         if (activePrompt) {
             activePrompt.cancelRequested = true;

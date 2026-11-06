@@ -7,17 +7,17 @@ import {logger} from "./Logger";
 
 //TODO ask to include proper jsonrpc field and remove
 export function createJSONRPCWriter(writable: Writable): MessageWriter {
+    const writeLine = createLineWriter(writable);
     return {
         async write(msg: Message) {
-            try {
-                if (msg && typeof msg === 'object') {
-                    // remove jsonrpc for the server
-                    msg = {...msg};
-                    delete (msg as any).jsonrpc;
-                }
-                writable.write(JSON.stringify(msg) + '\n');
-            } catch {/* ignore */
+            if (msg && typeof msg === 'object') {
+                // remove jsonrpc for the server
+                msg = {...msg};
+                delete (msg as any).jsonrpc;
             }
+            // Waits out the stream's backpressure and rejects on failure, so a wedged or closed
+            // app-server stdin fails the JSON-RPC send instead of silently dropping the message.
+            await writeLine(JSON.stringify(msg) + '\n');
         },
 
         end() {
