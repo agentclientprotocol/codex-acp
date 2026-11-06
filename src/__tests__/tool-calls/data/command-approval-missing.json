@@ -1,0 +1,14 @@
+{
+  "toolCallId": "cmd",
+  "kind": "execute",
+  "status": "pending",
+  "title": "Read file",
+  "rawInput": {
+    "cwd": "/w"
+  },
+  "locations": [
+    {
+      "path": "/w/a.txt"
+    }
+  ]
+}

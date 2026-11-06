@@ -12,7 +12,7 @@
       "subject": {
         "toolCall": {
           "toolCallId": "cmd-item-1",
-          "title": "Run command",
+          "title": "ls -la",
           "kind": "execute",
           "status": "pending",
           "rawInput": {

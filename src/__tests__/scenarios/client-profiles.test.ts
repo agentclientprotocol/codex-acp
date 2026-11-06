@@ -292,13 +292,13 @@ describe("clients that are not AIR", () => {
                 }]);
         });
 
-        it(`${profile}: gets the pre-contract permission request of a started command`, () => {
+        it(`${profile}: keeps the command visible when requesting permission for a started command`, () => {
             expect(permissionRequests(profile, "command-approval")[0]).toEqual(expect.objectContaining({
                 toolCall: {
                     toolCallId: "cmd-a",
                     kind: "execute",
                     status: "pending",
-                    title: "Run command",
+                    title: "npm install",
                     rawInput: {command: "npm install", cwd: "/workspace"},
                 },
             }));

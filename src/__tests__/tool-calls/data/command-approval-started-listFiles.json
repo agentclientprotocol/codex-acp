@@ -1,0 +1,15 @@
+{
+  "toolCallId": "cmd",
+  "title": "List files in '/w'",
+  "rawInput": {
+    "command": "ls /w",
+    "cwd": "/w"
+  },
+  "kind": "execute",
+  "status": "pending",
+  "locations": [
+    {
+      "path": "/w"
+    }
+  ]
+}
