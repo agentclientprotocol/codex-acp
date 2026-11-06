@@ -334,6 +334,49 @@ describe('session/prompt over ACP v2', () => {
         await expect(dump(idle)).toMatchFileSnapshot('data/prompt-v2-idle-usage-and-quota.json');
     });
 
+    it('adds the usage of a subagent to the quota of the idle that ends a turn', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        const childThreadId = "child-thread-1";
+        const usage = (threadId: string, totalTokens: number, cachedInputTokens: number, outputTokens: number): ServerNotification => {
+            const breakdown = {
+                totalTokens,
+                inputTokens: totalTokens - outputTokens,
+                cachedInputTokens,
+                cacheWriteInputTokens: 0,
+                outputTokens,
+                reasoningOutputTokens: 0,
+            };
+            return {
+                method: "thread/tokenUsage/updated",
+                params: {threadId, turnId, tokenUsage: {total: breakdown, last: breakdown, modelContextWindow: 200000}},
+            };
+        };
+
+        await insertPrompt(client, 0);
+        client.emit(itemStarted({
+            type: "subAgentActivity",
+            model: "gpt-5.6-luna",
+            reasoningEffort: null,
+            id: "activity-1",
+            kind: "started",
+            agentThreadId: childThreadId,
+            agentPath: "/root/worker",
+        }));
+        client.emit(usage(sessionId, 1200, 400, 200));
+        client.emit({
+            method: "item/started",
+            params: {threadId: childThreadId, turnId, startedAtMs: 0, item: {type: "reasoning", id: "child-reasoning", summary: [], content: []}},
+        });
+        client.emit(usage(childThreadId, 30000, 25000, 500));
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        await settle();
+
+        const idle = sessionUpdates(client.transcript).at(-1);
+        await expect(dump(idle)).toMatchFileSnapshot('data/prompt-v2-idle-subagent-quota.json');
+    });
+
     it('ends observed foreground work if the runtime dies before acknowledging turn/start', async () => {
         let exitCode: number | null = null;
         const client = await connectSession(2, {exitCode: () => exitCode});

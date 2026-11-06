@@ -104,6 +104,7 @@ import {
 } from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
 import {PromptTokenUsage, toPromptUsage, ZERO_TOKEN_COUNT} from "./TokenCount";
+import {SubagentTokenUsage} from "./SubagentTokenUsage";
 import {CodexCommands} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
 import type {QuotaMeta} from "./QuotaMeta";
@@ -271,6 +272,8 @@ export interface SessionState extends SessionIndexTitleState {
     totalTokenUsage: TokenCount | null;
     /** The token usage of the current or last prompt, which its PromptResponse reports. */
     promptTokenUsage: PromptTokenUsage | null;
+    /** The token usage of the subagent threads, which `_meta.quota.model_usage` of a prompt adds. */
+    subagentTokenUsage: SubagentTokenUsage;
     /** Whether the thread may have token usage from before this session, as a loaded, resumed or forked thread. */
     threadHasHistory: boolean;
     modelContextWindow: number | null;
@@ -800,8 +803,10 @@ export class CodexAcpServer {
         }));
     }
 
-    private observeSubagentWorkEnd(sessionId: string, event: ServerNotification): void {
-        const router = this.sessions.get(sessionId)?.subagents;
+    /** Sees each notification of the session and its child threads as the app-server sent it. */
+    private observeSessionEvent(session: SessionState | undefined, event: ServerNotification): void {
+        session?.subagentTokenUsage.observe(event);
+        const router = session?.subagents;
         if (router instanceof StandardSubagentEventRouter) router.observeWorkEnd(event);
     }
 
@@ -1402,6 +1407,7 @@ export class CodexAcpServer {
             lastTokenUsage: null,
             totalTokenUsage: null,
             promptTokenUsage: null,
+            subagentTokenUsage: new SubagentTokenUsage(sessionId),
             threadHasHistory: operation !== "new",
             ...(sessionMetadata.instructions ? {instructions: sessionMetadata.instructions} : {}),
             modelContextWindow: null,
@@ -1702,7 +1708,7 @@ export class CodexAcpServer {
                 const state = await ready;
                 return state?.subagents.withUserAction?.(childId, itemId, request, turnId) ?? request();
             },
-            event => this.observeSubagentWorkEnd(sessionId, event),
+            event => this.observeSessionEvent(this.sessions.get(sessionId), event),
         );
     }
 
@@ -3635,6 +3641,7 @@ export class CodexAcpServer {
             lastTokenUsage: null,
             totalTokenUsage: null,
             promptTokenUsage: null,
+            subagentTokenUsage: new SubagentTokenUsage(sessionId),
             threadHasHistory: true,
             ...(sessionMetadata.instructions ? {instructions: sessionMetadata.instructions} : {}),
             modelContextWindow: null,
@@ -5079,7 +5086,7 @@ export class CodexAcpServer {
                 observeInteraction,
                 childThreadId => promptEventHandler.waitForNativeSubagentSession(childThreadId),
                 (childId, itemId, request, turnId) => sessionState.subagents.withUserAction?.(childId, itemId, request, turnId) ?? request(),
-                event => this.observeSubagentWorkEnd(params.sessionId, event));
+                event => this.observeSessionEvent(sessionState, event));
 
             if (activePrompt.signal.aborted) {
                 return cancelledPromptResponse();
@@ -5669,17 +5676,21 @@ export class CodexAcpServer {
         };
     }
 
-    /** `_meta.quota`: the usage of the whole prompt, the same counts as {@link buildPromptUsage}. */
+    /**
+     * `_meta.quota`: `token_count` is the usage of the root thread, the same counts as {@link buildPromptUsage}.
+     * `model_usage` adds the usage of the subagents by model, so its rows can total more than `token_count`.
+     */
     private buildQuotaMeta(sessionState: SessionState): { quota: QuotaMeta } {
         const promptTokenUsage = sessionState.promptTokenUsage?.usage() ?? null;
 
         // Remove the "[reasoning-level]" suffix from currentModelId if present
         const modelName = sessionState.currentModelId.replace(/\[.*?]$/, '');
 
-        // FIXME: currently all tokens are reported for the current model
-        const modelUsage = (promptTokenUsage != null)
-            ? [{ model: modelName, token_count: promptTokenUsage }]
-            : [];
+        // FIXME: the tokens of the root thread are reported for its current model.
+        // A prompt that started no model work keeps the subagent usage for the next prompt.
+        const modelUsage = sessionState.promptTokenUsage === null
+            ? []
+            : sessionState.subagentTokenUsage.reportModelUsage(modelName, promptTokenUsage);
 
         return {
             quota: {
@@ -5695,6 +5706,7 @@ export class CodexAcpServer {
         const startTotal = sessionState.totalTokenUsage
             ?? (sessionState.threadHasHistory ? null : ZERO_TOKEN_COUNT);
         sessionState.promptTokenUsage = new PromptTokenUsage(startTotal);
+        sessionState.subagentTokenUsage.beginPrompt();
     }
 
     private buildPromptUsage(sessionState: SessionState): acp.Usage | null {
