@@ -13,6 +13,7 @@
               "text_elements": []
             }
           ],
+          "cwd": "/workspace",
           "approvalPolicy": "on-request",
           "approvalsReviewer": "auto_review",
           "sandboxPolicy": {
@@ -102,6 +103,7 @@
               "text_elements": []
             }
           ],
+          "cwd": "/workspace",
           "approvalPolicy": "on-request",
           "approvalsReviewer": "auto_review",
           "sandboxPolicy": {

@@ -1405,6 +1405,9 @@ export class CodexAcpClient {
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
+            // Re-pin the thread working directory like the other overrides below; it applies to
+            // this turn and subsequent turns, so Codex follows the session's cwd.
+            cwd: cwd,
             approvalPolicy: agentMode.approvalPolicy,
             approvalsReviewer: agentMode.approvalsReviewer,
             ...(permissionProfileId
