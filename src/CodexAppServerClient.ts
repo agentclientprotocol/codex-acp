@@ -787,11 +787,16 @@ export class CodexAppServerClient {
         if (response.thread.historyMode === "legacy") {
             return await this.threadRead({threadId, includeTurns: true});
         }
+        return {...response, thread: {...response.thread, turns: await this.threadPaginatedTurns(threadId)}};
+    }
+
+    /** The full turns of a paginated thread, oldest first. */
+    async threadPaginatedTurns(threadId: string): Promise<Turn[]> {
         const turns: Turn[] = [];
         for await (const page of this.threadHistoryPages(threadId)) {
             turns.push(...page);
         }
-        return {...response, thread: {...response.thread, turns}};
+        return turns;
     }
 
     /**

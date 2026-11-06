@@ -70,7 +70,7 @@ import type {ModeKind} from "./app-server/ModeKind";
 import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike, isAbsoluteProtocolPath} from "./PathUtils";
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
-import {rewindSession as runRewindSession, type SessionRewindRequest} from "./SessionRewind";
+import {rewindSession as runRewindSession, type SessionRewindRequest, type SessionRewindResponse} from "./SessionRewind";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 import {runAccountLogin} from "./CodexAccountLogin";
 import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
@@ -748,7 +748,7 @@ export class CodexAcpClient {
         }, instructions);
     }
 
-    async rewindSession(request: SessionRewindRequest): Promise<{rewound: boolean}> {
+    async rewindSession(request: SessionRewindRequest): Promise<SessionRewindResponse> {
         const response = await runRewindSession(request, this.codexClient);
         await this.waitForSessionNotifications(request.sessionId);
         return response;

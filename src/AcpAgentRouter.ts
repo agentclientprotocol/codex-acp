@@ -213,6 +213,9 @@ function createRouter(
         .onRequest(acp.methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params))
         .onRequest(acp.methods.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params))
         .onRequest(acp.methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params))
+        // Before `session/prompt`: the SDK tries the handlers in this order, so a prompt sent right after a
+        // rewind reaches the agent after it, and waits for it.
+        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(acp.methods.agent.session.prompt, (ctx) => getAgent(ctx.params).prompt(ctx.params, ctx.signal))
         .onNotification(acp.methods.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params))
         .onRequest("authentication/status", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/status", ctx.params))
@@ -220,7 +223,6 @@ function createRouter(
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent(ctx.params).extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent(ctx.params).extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
-        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
         .onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent(ctx.params).extMethod(GOAL_CONTROL_METHOD, ctx.params))
@@ -247,6 +249,9 @@ function createRouter(
         // The v1-only `authentication/status|logout` extensions are not registered on v2.
         .onRequest(acpV2.methods.agent.auth.login, (ctx) => getAgent().authenticateV2(ctx.params, ctx.requestId, ctx.signal))
         .onRequest(acpV2.methods.agent.auth.logout, (ctx) => getAgent().logoutV2(ctx.params))
+        // Before `session/prompt`: the SDK tries the handlers in this order, so a prompt sent right after a
+        // rewind reaches the agent after it, and waits for it.
+        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(acpV2.methods.agent.session.prompt, (ctx) => getAgent(ctx.params).promptV2(ctx.params, ctx.signal))
         .onNotification(acpV2.methods.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params))
         .onRequest(acpV2.methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params))
@@ -255,7 +260,6 @@ function createRouter(
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent(ctx.params).extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent(ctx.params).extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
-        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.rename(ctx.params))
         .onRequest(SESSION_BATCH_GET_METHOD, sessionBatchGetParamsParser, (ctx) => getAgent().sessionIndex.batchGet(ctx.params))
         .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.setArchived(ctx.params, true))

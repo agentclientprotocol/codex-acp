@@ -137,7 +137,8 @@ The `initialize` response carries the agent side of the extension only when the 
           "recommendedValue",
           "rawInputRendering",
           "planContentDelta",
-          "codexHooks"
+          "codexHooks",
+          "sessionRewind"
         ]
       }
     }
@@ -180,6 +181,8 @@ Five agent capabilities come with `sessionIndex` and are listed exactly when it 
 
 The goal extension has no client capability.
 The agent advertises the `goal` object, and the client uses the control method when it wants to.
+The session rewind extension has no client capability either.
+The agent lists `sessionRewind`, and the client sends `_session/rewind` when it wants to; see [Session rewind](#session-rewind).
 
 ### Hook trust
 
@@ -1426,10 +1429,18 @@ A client sends the method only when the capability is there.
 - A history point is the ACP message id, the `sha256:` digest of the message text, and the one-based occurrence of
   that digest among messages of the same role.
   The adapter matches the id first, and the fingerprint occurrence when restored Codex history carries other ids.
+  The id is the one that history replay sends: the Codex item id on v1, and the client message id on v2.
   An id with a `:segment:<n>` suffix also matches the message without the suffix.
+- The text of a user message is its text blocks as history replay sends them, joined without a separator.
+  A file mention of a prompt is a text block such as `[@foo.txt](file:///work/foo.txt)`, so it is part of the text.
+  A `resource_link` block that replay sends for a native attachment is not.
+- The occurrence counts the user messages of the session itself.
+  A Codex subagent runs in its own thread, so its messages are not counted, as in the Claude adapter.
 - The response is `{"rewound": true}` only after Codex accepted the rewind.
 - `{"rewound": false}` means the conversation was left as it was, and the client then keeps its own transcript too.
-  The adapter answers it while a turn is running: that turn writes the history the rewind would replace.
+  The adapter answers it while a turn is running or a prompt waits to start one: that turn writes the history the
+  rewind would replace.
+- A `session/prompt` sent while a rewind runs starts its turn after the rewind, on the retained history.
 - When no message matches, the request fails with `invalidParams`.
 - A message that is a steer inside an existing turn fails with `invalidParams`:
   Codex removes whole turns, not a suffix of one.
@@ -1439,9 +1450,11 @@ A client sends the method only when the capability is there.
 
 Codex mapping:
 
-- The adapter reads the thread history and resolves `beforeMessage` to the turn it starts.
+- The adapter reads the thread metadata, refuses legacy history, then reads the turns and resolves `beforeMessage`
+  to the turn it starts.
 - Paginated history calls `thread/revert` with that turn as the exclusive boundary.
-  Legacy history has no such operation in the app-server protocol at all, which is the `invalidRequest` above.
+  Legacy history had only the deprecated `thread/rollback`, which Codex has since removed, so it gets the
+  `invalidRequest` above.
 - The Codex thread id stays the ACP session id. No `thread/fork`, no new thread, no session-list entry.
 - `thread/revert` changes the persisted conversation only. It does not revert file changes.
 
